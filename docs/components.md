@@ -61,6 +61,16 @@ endpoints.
 
 ## `relayna.fastapi`
 
+FastAPI integration helpers:
+
+- `create_relayna_lifespan`
+- `get_relayna_runtime`
+- `create_status_router`
+
+Use `create_relayna_lifespan` when you want Relayna to manage RabbitMQ, Redis,
+and the `StatusHub` background task while your service still owns app creation
+and route registration.
+
 `create_status_router` provides a small FastAPI router with:
 
 - `/events/{task_id}` for SSE

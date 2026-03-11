@@ -66,11 +66,21 @@ Use `stream.stream(task_id)` as the body for an SSE response.
 ```python
 from fastapi import FastAPI
 
-from relayna.fastapi import create_status_router
+from relayna.fastapi import create_relayna_lifespan, create_status_router, get_relayna_runtime
 
-app = FastAPI()
-app.include_router(create_status_router(sse_stream=stream))
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology_config=config,
+        redis_url="redis://localhost:6379/0",
+    )
+)
+runtime = get_relayna_runtime(app)
+app.include_router(create_status_router(sse_stream=runtime.sse_stream))
 ```
 
 If you also need stream replay history, pass a `StreamHistoryReader` instance as
-`history_reader`.
+`history_reader` or use `runtime.history_reader`.
+
+`create_relayna_lifespan()` is the preferred setup for FastAPI services. Manual
+composition is still supported when you want to manage RabbitMQ, Redis, or
+`StatusHub` yourself.
