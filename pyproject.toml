@@ -1,0 +1,29 @@
+[project]
+name = "relayna"
+version = "0.2.0"
+description = "Shared RabbitMQ/Redis infrastructure for Relayna."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aio-pika>=9.4.1",
+    "fastapi>=0.115.11",
+    "pydantic>=2.11.0",
+    "redis>=7.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.6,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
