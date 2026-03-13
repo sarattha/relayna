@@ -34,6 +34,24 @@ await client.initialize()
 await client.publish_task({"task_id": "task-123", "payload": {"kind": "demo"}})
 ```
 
+## Worker consumption
+
+```python
+from relayna.consumer import TaskConsumer, TaskContext
+from relayna.contracts import TaskEnvelope
+
+
+async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
+    await context.publish_status(status="processing", message="Task processing started.")
+
+
+consumer = TaskConsumer(rabbitmq=client, handler=handle_task)
+await consumer.run_forever()
+```
+
+By default, handler failures reject the message without requeue. Set
+`failure_action=FailureAction.REQUEUE` if you want RabbitMQ requeue behavior.
+
 ## Redis-backed status history
 
 ```python

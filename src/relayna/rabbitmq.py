@@ -166,6 +166,18 @@ class RelaynaRabbitClient:
         await queue.bind(cast(AbstractExchange, self._status_exchange), routing_key="#")
         return queue.name
 
+    async def ensure_tasks_queue(self) -> str:
+        await self._ensure_ready()
+        if self._channel is None or self._tasks_exchange is None:
+            raise RuntimeError("RabbitMQ connection is not initialized")
+        queue = await self._channel.declare_queue(
+            self._config.tasks_queue,
+            durable=True,
+            arguments=self._config.task_queue_arguments() or None,
+        )
+        await queue.bind(self._tasks_exchange, routing_key=self._config.tasks_routing_key)
+        return queue.name
+
     async def publish_task(self, task: BaseModel | Mapping[str, Any]) -> None:
         await self._ensure_ready()
         if self._tasks_exchange is None:

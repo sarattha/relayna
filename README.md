@@ -15,6 +15,7 @@ It is designed as reusable plumbing, not as a full application framework. The pa
 
 - A canonical task envelope and status event envelope
 - RabbitMQ topology declaration for task and status exchanges/queues
+- A worker consumer helper for task queue processing
 - Configurable routing strategies for per-task or sharded status routing
 - A Redis status store with event deduplication, TTL, and bounded history
 - A status hub that bridges RabbitMQ status events into Redis
@@ -163,7 +164,25 @@ await client.publish_status(
 )
 ```
 
-### 3. Store and stream statuses from Redis
+### 3. Consume tasks in a worker
+
+```python
+from relayna.consumer import TaskConsumer, TaskContext
+from relayna.contracts import TaskEnvelope
+
+
+async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
+    await context.publish_status(status="translating", message="Translation started.")
+
+
+consumer = TaskConsumer(rabbitmq=client, handler=handle_task)
+await consumer.run_forever()
+```
+
+By default, handler exceptions reject the message without requeue. Set
+`failure_action=FailureAction.REQUEUE` if your worker should retry via RabbitMQ.
+
+### 4. Store and stream statuses from Redis
 
 ```python
 from redis.asyncio import Redis
@@ -179,7 +198,7 @@ store = RedisStatusStore(
 )
 ```
 
-### 4. Bridge RabbitMQ statuses into Redis
+### 5. Bridge RabbitMQ statuses into Redis
 
 ```python
 from relayna.status_hub import StatusHub
@@ -196,7 +215,7 @@ await hub.run_forever()
 - removes sensitive meta keys such as `auth_token` by default
 - writes best-effort status history into Redis
 
-### 5. Expose SSE and history endpoints with FastAPI
+### 6. Expose SSE and history endpoints with FastAPI
 
 ```python
 from fastapi import FastAPI
@@ -326,6 +345,23 @@ The client declares:
 
 `DirectQueuePublisher` publishes JSON payloads to a queue through RabbitMQ's default exchange. Use it when you need simple queue-targeted publishing instead of exchange-based routing.
 
+## Worker consumption
+
+`TaskConsumer` provides a shared worker loop for consuming `TaskEnvelope`
+messages from the configured task queue.
+
+Default behavior:
+
+- validates each message as a `TaskEnvelope`
+- passes the task plus a `TaskContext` into your async handler
+- acknowledges successful messages
+- rejects malformed JSON and invalid envelopes without requeue
+- rejects handler failures without requeue by default
+- can optionally publish `processing`, `completed`, and `failed` lifecycle statuses
+
+`TaskContext.publish_status(...)` lets handlers publish status updates without
+repeating `task_id` and correlation-id plumbing.
+
 ## Redis status store
 
 `RedisStatusStore` is the hot-path state store used by SSE consumers.
@@ -433,6 +469,10 @@ If you need advanced composition, you can still instantiate `StatusHub`, `RedisS
   - robust RabbitMQ client
   - routing strategies
   - direct queue publisher
+- `relayna.consumer`
+  - task consumer loop
+  - task handler protocol
+  - task context and lifecycle status config
 - `relayna.status_store`
   - Redis-backed task history and pubsub store
 - `relayna.status_hub`

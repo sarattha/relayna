@@ -36,6 +36,19 @@ RabbitMQ publishing and routing helpers:
 Use `RelaynaRabbitClient` when you want the shared topology declared and
 reused across publishers and consumers.
 
+## `relayna.consumer`
+
+Worker-side task consumption helpers:
+
+- `TaskConsumer`
+- `TaskHandler`
+- `TaskContext`
+- `FailureAction`
+- `LifecycleStatusConfig`
+
+Use this module when you want a shared worker loop with consistent envelope
+validation, ack/reject behavior, and optional lifecycle status publishing.
+
 ## `relayna.status_store`
 
 `RedisStatusStore` stores task history in Redis lists and publishes realtime
