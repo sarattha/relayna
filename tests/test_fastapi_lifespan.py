@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from relayna.config import RelaynaTopologyConfig
 from relayna.fastapi import create_status_router
@@ -98,6 +99,65 @@ class FakeHub:
         await self._stopped.wait()
 
 
+class FakeSSEStatusStream:
+    instances: list["FakeSSEStatusStream"] = []
+
+    def __init__(
+        self,
+        *,
+        store: FakeStore,
+        terminal_statuses: object | None = None,
+        output_adapter: object | None = None,
+    ) -> None:
+        self.store = store
+        self.terminal_statuses = terminal_statuses
+        self.output_adapter = output_adapter
+        self.stream_calls: list[str] = []
+        FakeSSEStatusStream.instances.append(self)
+
+    async def stream(self, task_id: str):
+        self.stream_calls.append(task_id)
+        yield b"event: ready\ndata: {}\n\n"
+        yield f'event: status\ndata: {{"task_id": "{task_id}", "status": "completed"}}\n\n'.encode()
+
+
+class FakeHistoryReader:
+    instances: list["FakeHistoryReader"] = []
+
+    def __init__(
+        self,
+        *,
+        rabbitmq: FakeRabbitClient,
+        queue_arguments: dict[str, object] | None = None,
+        output_adapter: object | None = None,
+    ) -> None:
+        self.rabbitmq = rabbitmq
+        self.queue_arguments = queue_arguments
+        self.output_adapter = output_adapter
+        self.replay_calls: list[dict[str, object]] = []
+        FakeHistoryReader.instances.append(self)
+
+    async def replay(
+        self,
+        *,
+        task_id: str | None = None,
+        start_offset: str | int = "first",
+        max_seconds: float | None = None,
+        max_scan: int | None = None,
+        require_stream: bool = True,
+    ) -> list[dict[str, object]]:
+        self.replay_calls.append(
+            {
+                "task_id": task_id,
+                "start_offset": start_offset,
+                "max_seconds": max_seconds,
+                "max_scan": max_scan,
+                "require_stream": require_stream,
+            }
+        )
+        return [{"task_id": task_id or "task-123", "status": "completed"}]
+
+
 @pytest.fixture(autouse=True)
 def patch_fastapi_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeRabbitClient.instances.clear()
@@ -106,10 +166,14 @@ def patch_fastapi_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeStore.instances.clear()
     FakeStore.fail_init = False
     FakeHub.instances.clear()
+    FakeSSEStatusStream.instances.clear()
+    FakeHistoryReader.instances.clear()
     monkeypatch.setattr(relayna_fastapi, "RelaynaRabbitClient", FakeRabbitClient)
     monkeypatch.setattr(relayna_fastapi, "Redis", FakeRedis)
     monkeypatch.setattr(relayna_fastapi, "RedisStatusStore", FakeStore)
     monkeypatch.setattr(relayna_fastapi, "StatusHub", FakeHub)
+    monkeypatch.setattr(relayna_fastapi, "SSEStatusStream", FakeSSEStatusStream)
+    monkeypatch.setattr(relayna_fastapi, "StreamHistoryReader", FakeHistoryReader)
 
 
 @pytest.fixture
@@ -230,3 +294,47 @@ async def test_runtime_is_available_under_custom_state_key(topology_config: Rela
 
     assert runtime.store.prefix == "relayna"
     assert getattr(app.state, "custom_runtime") is runtime
+
+
+def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
+    topology_config: RelaynaTopologyConfig,
+) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology_config=topology_config,
+            redis_url="redis://localhost:6379/0",
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    app.include_router(create_status_router(sse_stream=runtime.sse_stream, history_reader=runtime.history_reader))
+
+    with TestClient(app) as client:
+        history_response = client.get("/history", params={"task_id": "task-123"})
+        assert history_response.status_code == 200
+        assert history_response.json() == {
+            "task_id": "task-123",
+            "count": 1,
+            "events": [{"task_id": "task-123", "status": "completed"}],
+        }
+
+        events_response = client.get("/events/task-123")
+        assert events_response.status_code == 200
+        assert "event: ready" in events_response.text
+        assert '"task_id": "task-123"' in events_response.text
+        assert getattr(app.state, "relayna") is runtime
+
+    assert runtime.hub.stop_calls == 1
+    assert runtime.rabbitmq.close_calls == 1
+    assert runtime.redis.close_calls == 1
+    assert not hasattr(app.state, "relayna")
+    assert FakeHistoryReader.instances[0].replay_calls == [
+        {
+            "task_id": "task-123",
+            "start_offset": "first",
+            "max_seconds": None,
+            "max_scan": None,
+            "require_stream": True,
+        }
+    ]
+    assert FakeSSEStatusStream.instances[0].stream_calls == ["task-123"]
