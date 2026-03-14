@@ -19,7 +19,7 @@ from aio_pika.abc import (
 from pydantic import BaseModel
 
 from .config import RelaynaTopologyConfig
-from .contracts import normalize_event_aliases
+from .contracts import ensure_status_event_id, normalize_event_aliases
 
 
 class RoutingStrategy(Protocol):
@@ -196,7 +196,10 @@ class RelaynaRabbitClient:
         await self._ensure_ready()
         if self._status_exchange is None:
             raise RuntimeError("Status exchange is not initialized")
-        event_dict = normalize_event_aliases(_to_dict(event))
+        if isinstance(event, BaseModel):
+            event_dict = _to_dict(event)
+        else:
+            event_dict = normalize_event_aliases(_to_dict(event))
         status = event_dict.get("status")
         if isinstance(status, str):
             status_value = status
@@ -207,6 +210,9 @@ class RelaynaRabbitClient:
             event_dict["status"] = status_value
         task_id = str(event_dict.get("task_id", ""))
         correlation_id = event_dict.get("correlation_id") or task_id
+        if correlation_id:
+            event_dict["correlation_id"] = str(correlation_id)
+        event_dict = ensure_status_event_id(event_dict)
         message = Message(
             _to_json_bytes(event_dict),
             content_type="application/json",
