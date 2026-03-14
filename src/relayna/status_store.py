@@ -61,3 +61,9 @@ class RedisStatusStore:
             limit = self.history_maxlen
         items = await self.redis.lrange(self.history_key(task_id), 0, max(0, limit - 1))  # type: ignore[misc]
         return [json.loads(item) for item in items]
+
+    async def get_latest(self, task_id: str) -> dict[str, Any] | None:
+        item = await self.redis.lindex(self.history_key(task_id), 0)  # type: ignore[misc]
+        if item is None:
+            return None
+        return json.loads(item)

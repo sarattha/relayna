@@ -107,3 +107,7 @@ If you also need stream replay history, pass a `StreamHistoryReader` instance as
 `create_relayna_lifespan()` is the preferred setup for FastAPI services. Manual
 composition is still supported when you want to manage RabbitMQ, Redis, or
 `StatusHub` yourself.
+
+If you pass `latest_status_store=runtime.store` into `create_status_router(...)`,
+Relayna also exposes `GET /status/{task_id}` for the latest Redis-backed status
+event. The route returns `404` when no status exists yet.

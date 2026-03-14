@@ -64,6 +64,12 @@ class FakeRedis:
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
 
+    async def lindex(self, key: str, index: int) -> str | None:
+        items = self.history.get(key, [])
+        if not items:
+            return None
+        return items[index]
+
 
 @pytest.mark.asyncio
 async def test_set_history_skips_duplicate_event_id() -> None:
@@ -94,3 +100,26 @@ async def test_set_history_hash_dedupes_when_event_id_missing() -> None:
 
     assert len(redis.history[store.history_key("task-1")]) == 1
     assert len(redis.published) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_latest_returns_newest_event() -> None:
+    redis = FakeRedis()
+    store = RedisStatusStore(redis, prefix="translation-status", ttl_seconds=60, history_maxlen=10)
+
+    await store.set_history("task-1", {"task_id": "task-1", "status": "queued", "event_id": "evt-1"})
+    await store.set_history("task-1", {"task_id": "task-1", "status": "completed", "event_id": "evt-2"})
+
+    latest = await store.get_latest("task-1")
+
+    assert latest == {"task_id": "task-1", "status": "completed", "event_id": "evt-2"}
+
+
+@pytest.mark.asyncio
+async def test_get_latest_returns_none_when_no_history_exists() -> None:
+    redis = FakeRedis()
+    store = RedisStatusStore(redis, prefix="translation-status", ttl_seconds=60, history_maxlen=10)
+
+    latest = await store.get_latest("missing-task")
+
+    assert latest is None
