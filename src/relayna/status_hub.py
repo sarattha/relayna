@@ -8,6 +8,15 @@ from typing import Any
 from aio_pika.abc import AbstractChannel, AbstractQueue
 
 from .contracts import normalize_event_aliases
+from .observability import (
+    ObservationSink,
+    StatusHubLoopError,
+    StatusHubMalformedMessage,
+    StatusHubStarted,
+    StatusHubStoredEvent,
+    StatusHubStoreWriteFailed,
+    emit_observation,
+)
 from .rabbitmq import RelaynaRabbitClient
 from .status_store import RedisStatusStore
 
@@ -23,12 +32,14 @@ class StatusHub:
         consume_arguments: dict[str, Any] | None = None,
         sanitize_meta_keys: set[str] | None = None,
         prefetch: int = 200,
+        observation_sink: ObservationSink | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._store = store
         self._consume_arguments = consume_arguments or {}
         self._sanitize_meta_keys = sanitize_meta_keys or {"auth_token"}
         self._prefetch = prefetch
+        self._observation_sink = observation_sink
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -40,6 +51,7 @@ class StatusHub:
         consume_args = dict(self._consume_arguments)
         if config.status_use_streams and "x-stream-offset" not in consume_args:
             consume_args["x-stream-offset"] = config.status_stream_initial_offset
+        await emit_observation(self._observation_sink, StatusHubStarted(queue_name=queue_name))
 
         while not self._stop.is_set():
             channel: AbstractChannel | None = None
@@ -56,6 +68,10 @@ class StatusHub:
                             payload = json.loads(message.body.decode("utf-8", errors="replace"))
                         except Exception:
                             await message.ack()
+                            await emit_observation(
+                                self._observation_sink,
+                                StatusHubMalformedMessage(reason="malformed_json"),
+                            )
                             continue
                         await message.ack()
 
@@ -72,15 +88,34 @@ class StatusHub:
                             continue
                         try:
                             await self._store.set_history(task_id, data)
-                        except Exception:
+                            await emit_observation(
+                                self._observation_sink,
+                                StatusHubStoredEvent(
+                                    task_id=task_id,
+                                    event_id=_event_id(data),
+                                    status=_status_value(data),
+                                ),
+                            )
+                        except Exception as exc:
                             # Redis writes are best effort.
+                            await emit_observation(
+                                self._observation_sink,
+                                StatusHubStoreWriteFailed(
+                                    task_id=task_id,
+                                    exception_type=type(exc).__name__,
+                                ),
+                            )
                             continue
                         
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 if self._stop.is_set():
                     return
+                await emit_observation(
+                    self._observation_sink,
+                    StatusHubLoopError(exception_type=type(exc).__name__, retry_delay_seconds=2.0),
+                )
                 await asyncio.sleep(2)
             finally:
                 if channel is not None:
@@ -88,3 +123,21 @@ class StatusHub:
                         await channel.close()
                     except Exception:
                         pass
+
+
+def _event_id(data: Mapping[str, Any]) -> str | None:
+    value = data.get("event_id")
+    if isinstance(value, str):
+        value = value.strip()
+        if value:
+            return value
+    return None
+
+
+def _status_value(data: Mapping[str, Any]) -> str | None:
+    status = data.get("status")
+    if isinstance(status, str):
+        return status
+    if status is None:
+        return None
+    return str(status)

@@ -7,6 +7,15 @@ from typing import Any
 
 import pytest
 
+from relayna.observability import (
+    SSEHistoryReplayed,
+    SSEKeepaliveSent,
+    SSELiveEventSent,
+    SSEMalformedPubsubPayload,
+    SSEResumeRequested,
+    SSEStreamEnded,
+    SSEStreamStarted,
+)
 from relayna.sse import SSEStatusStream
 
 
@@ -232,6 +241,90 @@ async def test_malformed_pubsub_payloads_are_ignored() -> None:
         ]
     )
     stream = SSEStatusStream(store=store, keepalive_interval_seconds=None)
+
+    chunks = await collect_chunks(stream.stream("task-123"), 2)
+
+    assert chunks[1].startswith("id: evt-1\n")
+
+
+@pytest.mark.asyncio
+async def test_sse_emits_observations_for_start_resume_replay_and_end() -> None:
+    store = FakeStore(
+        history=[
+            {"task_id": "task-123", "status": "processing", "event_id": "evt-2"},
+            {"task_id": "task-123", "status": "queued", "event_id": "evt-1"},
+        ]
+    )
+    observed: list[object] = []
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    stream = SSEStatusStream(store=store, keepalive_interval_seconds=0.01, observation_sink=sink)
+
+    await collect_chunks(stream.stream("task-123", last_event_id="evt-1"), 3)
+
+    assert isinstance(observed[0], SSEStreamStarted)
+    assert observed[0].resume_requested is True
+    assert isinstance(observed[1], SSEResumeRequested)
+    assert observed[1].history_match_found is True
+    assert isinstance(observed[2], SSELiveEventSent)
+    assert observed[2].source == "history"
+    assert isinstance(observed[3], SSEHistoryReplayed)
+    assert observed[3].replayed_count == 1
+    assert isinstance(observed[4], SSEStreamEnded)
+    assert observed[4].sent_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sse_emits_keepalive_observations() -> None:
+    store = FakeStore()
+    observed: list[object] = []
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    stream = SSEStatusStream(store=store, keepalive_interval_seconds=0.01, observation_sink=sink)
+
+    await collect_chunks(stream.stream("task-123"), 3)
+
+    assert any(isinstance(event, SSEKeepaliveSent) for event in observed)
+
+
+@pytest.mark.asyncio
+async def test_sse_emits_malformed_pubsub_observations() -> None:
+    store = FakeStore(
+        messages=[
+            {"type": "message", "data": "{not-json"},
+            status_message("task-123", "completed", event_id="evt-1"),
+        ]
+    )
+    observed: list[object] = []
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    stream = SSEStatusStream(store=store, keepalive_interval_seconds=0.01, observation_sink=sink)
+    iterator = stream.stream("task-123")
+
+    await asyncio.wait_for(anext(iterator), timeout=0.1)
+    await asyncio.wait_for(anext(iterator), timeout=0.1)
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(anext(iterator), timeout=0.1)
+
+    assert any(isinstance(event, SSEMalformedPubsubPayload) for event in observed)
+    live_events = [event for event in observed if isinstance(event, SSELiveEventSent)]
+    assert live_events[-1].source == "pubsub"
+
+
+@pytest.mark.asyncio
+async def test_sse_sink_failures_do_not_break_stream_delivery() -> None:
+    store = FakeStore(messages=[status_message("task-123", "completed", event_id="evt-1")])
+
+    async def sink(event: object) -> None:
+        raise RuntimeError("sink failed")
+
+    stream = SSEStatusStream(store=store, keepalive_interval_seconds=None, observation_sink=sink)
 
     chunks = await collect_chunks(stream.stream("task-123"), 2)
 

@@ -47,7 +47,8 @@ Worker-side task consumption helpers:
 - `LifecycleStatusConfig`
 
 Use this module when you want a shared worker loop with consistent envelope
-validation, ack/reject behavior, and optional lifecycle status publishing.
+validation, ack/reject behavior, optional lifecycle status publishing, and
+observability events for worker behavior.
 
 ## `relayna.status_store`
 
@@ -61,13 +62,29 @@ or a content hash.
 normalized events into `RedisStatusStore`.
 
 Use this as the bridge between RabbitMQ transport and Redis-backed clients.
+It also supports best-effort observability hooks for malformed payloads, Redis
+write failures, and stored events.
 
 ## `relayna.sse`
 
 `SSEStatusStream` combines replayed history with realtime pubsub updates for
 client-facing event streams. It also supports keepalive comments and
 `Last-Event-ID` resume. Relayna status publishers generate `event_id`
-automatically when one is not provided.
+automatically when one is not provided. You can also attach an observability
+sink to record stream starts, replay counts, keepalives, malformed pubsub
+payloads, and stream completion.
+
+## `relayna.observability`
+
+Backend-agnostic runtime observation types and helpers:
+
+- `RelaynaObservation`
+- `ObservationSink`
+- `emit_observation`
+
+Use this module when you want to send structured events from `TaskConsumer`,
+`SSEStatusStream`, or `StatusHub` into logging, metrics, tracing, or debugging
+pipelines without coupling Relayna to a specific backend.
 
 ## `relayna.history`
 
