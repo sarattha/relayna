@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
 
@@ -224,8 +224,8 @@ def create_status_router(
     router = APIRouter()
 
     @router.get(events_path)
-    async def events(task_id: str) -> StreamingResponse:
-        return sse_response(sse_stream.stream(task_id))
+    async def events(task_id: str, last_event_id: str | None = Header(default=None, alias="Last-Event-ID")) -> StreamingResponse:
+        return sse_response(sse_stream.stream(task_id, last_event_id=last_event_id))
 
     if history_reader is not None:
 

@@ -112,6 +112,7 @@ Extra fields are allowed so services can attach their own metadata.
 - `spec_version`
 
 `as_transport_dict()` emits a JSON-friendly payload and ensures `correlation_id` falls back to `task_id`.
+When `event_id` is missing, Relayna generates a deterministic one from the event payload before publishing.
 
 ### Compatibility aliases
 
@@ -373,7 +374,7 @@ Behavior:
 - optionally applies TTL to both dedupe keys and history keys
 - publishes live updates on a task-specific Redis pubsub channel
 - deduplicates events using `event_id` when available
-- falls back to a content hash when `event_id` is missing
+- still falls back to a content hash when events arrive without `event_id`
 
 History is stored newest-first internally. `SSEStatusStream` reverses that order during replay so clients receive events oldest-to-newest.
 
@@ -387,7 +388,16 @@ Default behavior:
 - replays Redis history oldest-to-newest
 - subscribes to the Redis pubsub channel for the task
 - emits each payload as an SSE `status` event
+- emits SSE comment keepalives every 15 seconds by default
 - closes automatically when a terminal status is seen
+
+Resume behavior:
+
+- the FastAPI SSE route reads the standard `Last-Event-ID` header automatically
+- replay resumes after the matching `event_id` when that id is still present in Redis history
+- if the requested id is no longer available, the stream falls back to replaying full history
+- Relayna status publishers generate `event_id` automatically when one is not provided
+- the initial `ready` event does not participate in resume ids
 
 The default terminal statuses are:
 
@@ -454,6 +464,8 @@ The history endpoint accepts:
 To keep the replay bounded, the route returns `422` unless at least one of `task_id`, `max_seconds`, or `max_scan` is supplied.
 
 `sse_response()` is also exported if you want to wire the streaming response manually.
+
+The SSE endpoint also supports resume automatically via the `Last-Event-ID` request header.
 
 If you need advanced composition, you can still instantiate `StatusHub`, `RedisStatusStore`, `SSEStatusStream`, and `StreamHistoryReader` manually and keep using `create_status_router()` on its own.
 

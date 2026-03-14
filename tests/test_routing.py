@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -43,6 +44,14 @@ class FakeTaskChannel:
         return self.queue
 
 
+class FakeStatusExchange:
+    def __init__(self) -> None:
+        self.publish_calls: list[tuple[object, str]] = []
+
+    async def publish(self, message: object, *, routing_key: str) -> None:
+        self.publish_calls.append((message, routing_key))
+
+
 @pytest.mark.asyncio
 async def test_ensure_tasks_queue_declares_and_binds_queue() -> None:
     config = RelaynaTopologyConfig(
@@ -66,3 +75,57 @@ async def test_ensure_tasks_queue_declares_and_binds_queue() -> None:
     assert queue_name == "tasks.queue"
     assert channel.declare_queue_calls == [("tasks.queue", True, None)]
     assert queue.bind_calls == [(client._tasks_exchange, "task.request")]
+
+
+@pytest.mark.asyncio
+async def test_publish_status_generates_event_id_when_missing() -> None:
+    config = RelaynaTopologyConfig(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(config)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._status_exchange = exchange
+
+    await client.publish_status({"task_id": "task-123", "status": "queued"})
+    await client.publish_status({"task_id": "task-123", "status": "queued"})
+
+    first_message, first_key = exchange.publish_calls[0]
+    second_message, second_key = exchange.publish_calls[1]
+    first_payload = json.loads(first_message.body.decode("utf-8"))
+    second_payload = json.loads(second_message.body.decode("utf-8"))
+
+    assert first_key == "task-123"
+    assert second_key == "task-123"
+    assert first_payload["correlation_id"] == "task-123"
+    assert first_payload["event_id"] == second_payload["event_id"]
+    assert len(first_payload["event_id"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_publish_status_preserves_existing_event_id() -> None:
+    config = RelaynaTopologyConfig(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(config)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._status_exchange = exchange
+
+    await client.publish_status({"task_id": "task-123", "status": "queued", "event_id": "evt-custom"})
+
+    payload = json.loads(exchange.publish_calls[0][0].body.decode("utf-8"))
+
+    assert payload["event_id"] == "evt-custom"

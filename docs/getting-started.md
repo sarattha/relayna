@@ -79,6 +79,11 @@ stream = SSEStatusStream(store=store)
 
 Use `stream.stream(task_id)` as the body for an SSE response.
 
+By default, Relayna emits SSE keepalive comments every 15 seconds and supports
+resume via the standard `Last-Event-ID` header. Relayna status publishers
+generate `event_id` automatically when missing, which makes resume work
+consistently for the normal publish paths.
+
 ## FastAPI router
 
 ```python

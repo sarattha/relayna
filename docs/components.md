@@ -65,7 +65,9 @@ Use this as the bridge between RabbitMQ transport and Redis-backed clients.
 ## `relayna.sse`
 
 `SSEStatusStream` combines replayed history with realtime pubsub updates for
-client-facing event streams.
+client-facing event streams. It also supports keepalive comments and
+`Last-Event-ID` resume. Relayna status publishers generate `event_id`
+automatically when one is not provided.
 
 ## `relayna.history`
 

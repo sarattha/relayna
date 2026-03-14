@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Mapping
@@ -40,7 +42,7 @@ class StatusEventEnvelope(BaseModel):
     def as_transport_dict(self) -> dict[str, Any]:
         data = self.model_dump(mode="json", exclude_none=True)
         data.setdefault("correlation_id", self.correlation_id or self.task_id)
-        return data
+        return ensure_status_event_id(data)
 
 
 @dataclass(slots=True)
@@ -79,3 +81,31 @@ def denormalize_document_aliases(event: Mapping[str, Any]) -> dict[str, Any]:
     if task_id:
         data["documentId"] = str(task_id)
     return data
+
+
+def ensure_status_event_id(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Ensures status events have a deterministic event_id when one is not supplied."""
+
+    data = _to_mutable_dict(event)
+    existing = data.get("event_id")
+    if isinstance(existing, str):
+        existing = existing.strip()
+        if existing:
+            data["event_id"] = existing
+            return data
+
+    canonical = dict(data)
+    canonical.pop("event_id", None)
+    digest = hashlib.sha256(
+        json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    data["event_id"] = digest
+    return data
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)

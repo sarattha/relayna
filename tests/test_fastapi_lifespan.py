@@ -112,11 +112,11 @@ class FakeSSEStatusStream:
         self.store = store
         self.terminal_statuses = terminal_statuses
         self.output_adapter = output_adapter
-        self.stream_calls: list[str] = []
+        self.stream_calls: list[dict[str, str | None]] = []
         FakeSSEStatusStream.instances.append(self)
 
-    async def stream(self, task_id: str):
-        self.stream_calls.append(task_id)
+    async def stream(self, task_id: str, *, last_event_id: str | None = None):
+        self.stream_calls.append({"task_id": task_id, "last_event_id": last_event_id})
         yield b"event: ready\ndata: {}\n\n"
         yield f'event: status\ndata: {{"task_id": "{task_id}", "status": "completed"}}\n\n'.encode()
 
@@ -318,7 +318,7 @@ def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
             "events": [{"task_id": "task-123", "status": "completed"}],
         }
 
-        events_response = client.get("/events/task-123")
+        events_response = client.get("/events/task-123", headers={"Last-Event-ID": "evt-9"})
         assert events_response.status_code == 200
         assert "event: ready" in events_response.text
         assert '"task_id": "task-123"' in events_response.text
@@ -337,4 +337,6 @@ def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
             "require_stream": True,
         }
     ]
-    assert FakeSSEStatusStream.instances[0].stream_calls == ["task-123"]
+    assert FakeSSEStatusStream.instances[0].stream_calls == [
+        {"task_id": "task-123", "last_event_id": "evt-9"}
+    ]
