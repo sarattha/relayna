@@ -84,6 +84,26 @@ resume via the standard `Last-Event-ID` header. Relayna status publishers
 generate `event_id` automatically when missing, which makes resume work
 consistently for the normal publish paths.
 
+## Observability hooks
+
+```python
+from relayna.consumer import TaskConsumer
+from relayna.observability import RelaynaObservation
+from relayna.sse import SSEStatusStream
+
+
+async def sink(event: RelaynaObservation) -> None:
+    print(event)
+
+
+stream = SSEStatusStream(store=store, observation_sink=sink)
+consumer = TaskConsumer(rabbitmq=client, handler=handle_task, observation_sink=sink)
+```
+
+Observability sinks are async-only and best-effort. Relayna suppresses sink
+errors so logging, metrics, or tracing adapters cannot break SSE delivery,
+worker consumption, or status fanout.
+
 ## FastAPI router
 
 ```python

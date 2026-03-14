@@ -9,6 +9,15 @@ import pytest
 from relayna.config import RelaynaTopologyConfig
 from relayna.consumer import FailureAction, LifecycleStatusConfig, TaskConsumer, TaskContext
 from relayna.contracts import StatusEventEnvelope
+from relayna.observability import (
+    TaskConsumerLoopError,
+    TaskConsumerStarted,
+    TaskHandlerFailed,
+    TaskLifecycleStatusPublished,
+    TaskMessageAcked,
+    TaskMessageReceived,
+    TaskMessageRejected,
+)
 
 
 class FakeMessage:
@@ -388,3 +397,125 @@ def test_fake_queue_helper_signature_supports_consumer_timeout() -> None:
 
     assert isinstance(iterator, FakeIterator)
     assert queue.iterator_calls == [{"arguments": {"x-priority": 1}, "timeout": 1.0}]
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_emits_observations_for_successful_processing() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    observed: list[object] = []
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        lifecycle_statuses=LifecycleStatusConfig(enabled=True),
+        observation_sink=sink,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert isinstance(observed[0], TaskConsumerStarted)
+    assert isinstance(observed[1], TaskMessageReceived)
+    assert isinstance(observed[2], TaskLifecycleStatusPublished)
+    assert observed[2].status == "processing"
+    assert isinstance(observed[3], TaskLifecycleStatusPublished)
+    assert observed[3].status == "completed"
+    assert isinstance(observed[4], TaskMessageAcked)
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_emits_rejected_and_failed_observations() -> None:
+    malformed = FakeMessage(b"{not-json")
+    malformed_queue = FakeQueue([malformed])
+    malformed_rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(malformed_queue)])
+    malformed_observed: list[object] = []
+
+    async def sink(event: object) -> None:
+        malformed_observed.append(event)
+
+    async def no_op_handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    malformed_consumer = TaskConsumer(
+        rabbitmq=malformed_rabbit,
+        handler=no_op_handler,
+        observation_sink=sink,
+    )
+    await run_consumer_until_message_done(malformed_consumer, malformed)
+    assert isinstance(malformed_observed[1], TaskMessageRejected)
+    assert malformed_observed[1].reason == "malformed_json"
+
+    failed = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
+    failed_queue = FakeQueue([failed])
+    failed_rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(failed_queue)])
+    failed_observed: list[object] = []
+
+    async def failing_sink(event: object) -> None:
+        failed_observed.append(event)
+
+    async def failing_handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    failed_consumer = TaskConsumer(
+        rabbitmq=failed_rabbit,
+        handler=failing_handler,
+        observation_sink=failing_sink,
+    )
+    await run_consumer_until_message_done(failed_consumer, failed)
+    assert any(isinstance(event, TaskHandlerFailed) for event in failed_observed)
+    rejected = [event for event in failed_observed if isinstance(event, TaskMessageRejected)]
+    assert rejected[-1].reason == "handler_error"
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_emits_loop_error_observation(monkeypatch: pytest.MonkeyPatch) -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[RuntimeError("temporary failure"), channel])
+    observed: list[object] = []
+    original_sleep = asyncio.sleep
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    async def fake_sleep(delay: float) -> None:
+        await original_sleep(0)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    monkeypatch.setattr("relayna.consumer.asyncio.sleep", fake_sleep)
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, idle_retry_seconds=0.25, observation_sink=sink)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    loop_errors = [event for event in observed if isinstance(event, TaskConsumerLoopError)]
+    assert loop_errors
+    assert loop_errors[0].retry_delay_seconds == 0.25
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_sink_failures_do_not_break_processing() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+
+    async def sink(event: object) -> None:
+        raise RuntimeError("sink failed")
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, observation_sink=sink)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True

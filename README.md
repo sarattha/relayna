@@ -22,6 +22,7 @@ It is designed as reusable plumbing, not as a full application framework. The pa
 - SSE helpers that replay history first, then stream live updates
 - A stream history reader for stream-backed RabbitMQ queues
 - A small FastAPI router factory for `/events/{task_id}` and `/history`
+- Backend-agnostic observability hooks for runtime loops
 
 ## Requirements
 
@@ -364,6 +365,24 @@ Default behavior:
 `TaskContext.publish_status(...)` lets handlers publish status updates without
 repeating `task_id` and correlation-id plumbing.
 
+You can also pass an async observability sink into `TaskConsumer`,
+`SSEStatusStream`, or `StatusHub`:
+
+```python
+from relayna.observability import RelaynaObservation
+from relayna.sse import SSEStatusStream
+
+
+async def sink(event: RelaynaObservation) -> None:
+    print(event)
+
+
+stream = SSEStatusStream(store=store, observation_sink=sink)
+```
+
+Observability hooks are best-effort and can be used to feed logs, metrics
+adapters, tracing, or debugging tools.
+
 ## Redis status store
 
 `RedisStatusStore` is the hot-path state store used by SSE consumers.
@@ -500,6 +519,8 @@ If you need advanced composition, you can still instantiate `StatusHub`, `RedisS
   - latest-status lookup helper
 - `relayna.status_hub`
   - RabbitMQ-to-Redis status bridge
+- `relayna.observability`
+  - structured runtime observation events and async sink helper
 - `relayna.sse`
   - SSE stream helper and document output adapter
 - `relayna.history`
