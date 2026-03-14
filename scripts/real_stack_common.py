@@ -36,7 +36,13 @@ def build_app(config: RelaynaTopologyConfig, suffix: str) -> FastAPI:
         )
     )
     runtime = get_relayna_runtime(app)
-    app.include_router(create_status_router(sse_stream=runtime.sse_stream, history_reader=runtime.history_reader))
+    app.include_router(
+        create_status_router(
+            sse_stream=runtime.sse_stream,
+            history_reader=runtime.history_reader,
+            latest_status_store=runtime.store,
+        )
+    )
     return app
 
 
@@ -85,3 +91,9 @@ def parse_sse_events(text: str) -> list[dict[str, object]]:
                 record["id"] = line[4:]
         events.append(record)
     return events
+
+
+async def fetch_latest_status(client: httpx.AsyncClient, task_id: str) -> dict[str, object]:
+    response = await client.get(f"/status/{task_id}")
+    response.raise_for_status()
+    return response.json()

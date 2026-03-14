@@ -65,7 +65,11 @@ class FakeStore:
         self.prefix = prefix
         self.ttl_seconds = ttl_seconds
         self.history_maxlen = history_maxlen
+        self.latest_by_task: dict[str, dict[str, object]] = {}
         FakeStore.instances.append(self)
+
+    async def get_latest(self, task_id: str) -> dict[str, object] | None:
+        return self.latest_by_task.get(task_id)
 
 
 class FakeHub:
@@ -307,9 +311,23 @@ def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
     )
 
     runtime = relayna_fastapi.get_relayna_runtime(app)
-    app.include_router(create_status_router(sse_stream=runtime.sse_stream, history_reader=runtime.history_reader))
+    runtime.store.latest_by_task["task-123"] = {"task_id": "task-123", "status": "completed"}
+    app.include_router(
+        create_status_router(
+            sse_stream=runtime.sse_stream,
+            history_reader=runtime.history_reader,
+            latest_status_store=runtime.store,
+        )
+    )
 
     with TestClient(app) as client:
+        status_response = client.get("/status/task-123")
+        assert status_response.status_code == 200
+        assert status_response.json() == {
+            "task_id": "task-123",
+            "event": {"task_id": "task-123", "status": "completed"},
+        }
+
         history_response = client.get("/history", params={"task_id": "task-123"})
         assert history_response.status_code == 200
         assert history_response.json() == {
@@ -340,3 +358,68 @@ def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
     assert FakeSSEStatusStream.instances[0].stream_calls == [
         {"task_id": "task-123", "last_event_id": "evt-9"}
     ]
+
+
+def test_latest_status_route_returns_404_when_event_missing(topology_config: RelaynaTopologyConfig) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology_config=topology_config,
+            redis_url="redis://localhost:6379/0",
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    app.include_router(
+        create_status_router(
+            sse_stream=runtime.sse_stream,
+            latest_status_store=runtime.store,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/status/missing-task")
+        assert response.status_code == 404
+        assert response.json() == {"detail": "No status found for task_id 'missing-task'."}
+
+
+def test_latest_status_route_applies_output_adapter(topology_config: RelaynaTopologyConfig) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology_config=topology_config,
+            redis_url="redis://localhost:6379/0",
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    runtime.store.latest_by_task["task-123"] = {"task_id": "task-123", "status": "completed"}
+    app.include_router(
+        create_status_router(
+            sse_stream=runtime.sse_stream,
+            latest_status_store=runtime.store,
+            latest_output_adapter=lambda event: {**event, "documentId": event["task_id"]},
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/status/task-123")
+        assert response.status_code == 200
+        assert response.json() == {
+            "task_id": "task-123",
+            "event": {"task_id": "task-123", "status": "completed", "documentId": "task-123"},
+        }
+
+
+def test_status_route_is_not_registered_when_store_is_missing(topology_config: RelaynaTopologyConfig) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology_config=topology_config,
+            redis_url="redis://localhost:6379/0",
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    app.include_router(create_status_router(sse_stream=runtime.sse_stream, history_reader=runtime.history_reader))
+
+    paths = {route.path for route in app.routes}
+
+    assert "/status/{task_id}" not in paths

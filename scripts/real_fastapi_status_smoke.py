@@ -6,9 +6,17 @@ from relayna.contracts import StatusEventEnvelope
 from relayna.rabbitmq import RelaynaRabbitClient
 
 try:
-    from scripts.real_stack_common import app_client, build_app, build_config, parse_sse_events, poll_history, unique_suffix
+    from scripts.real_stack_common import (
+        app_client,
+        build_app,
+        build_config,
+        fetch_latest_status,
+        parse_sse_events,
+        poll_history,
+        unique_suffix,
+    )
 except ModuleNotFoundError:
-    from real_stack_common import app_client, build_app, build_config, parse_sse_events, poll_history, unique_suffix
+    from real_stack_common import app_client, build_app, build_config, fetch_latest_status, parse_sse_events, poll_history, unique_suffix
 
 
 async def publish_status_flow(config, task_id: str) -> None:
@@ -37,6 +45,7 @@ async def main() -> None:
     async with app_client(app) as client:
         await publish_status_flow(config, task_id)
         history = await poll_history(client, task_id=task_id, expected_count=3)
+        latest = await fetch_latest_status(client, task_id)
         events_response = await client.get("/events/" + task_id)
         events_response.raise_for_status()
         sse_events = parse_sse_events(events_response.text)
@@ -45,6 +54,13 @@ async def main() -> None:
     sse_statuses = [event["data"]["status"] for event in sse_events if event.get("event") == "status"]
 
     assert history_statuses == ["queued", "processing", "completed"]
+    assert latest["task_id"] == task_id
+    assert latest["event"]["task_id"] == task_id
+    assert latest["event"]["status"] == "completed"
+    assert latest["event"]["message"] == "Task completed."
+    assert latest["event"]["correlation_id"] == task_id
+    assert latest["event"]["meta"] == {}
+    assert isinstance(latest["event"]["event_id"], str)
     assert sse_events[0]["event"] == "ready"
     assert sse_statuses == ["queued", "processing", "completed"]
     assert all("id" in event for event in sse_events if event.get("event") == "status")

@@ -217,8 +217,11 @@ def create_status_router(
     *,
     sse_stream: SSEStatusStream,
     history_reader: StreamHistoryReader | None = None,
+    latest_status_store: RedisStatusStore | None = None,
+    latest_output_adapter: EventAdapter | None = None,
     events_path: str = "/events/{task_id}",
     history_path: str = "/history",
+    status_path: str = "/status/{task_id}",
     require_stream: bool = True,
 ) -> APIRouter:
     router = APIRouter()
@@ -226,6 +229,16 @@ def create_status_router(
     @router.get(events_path)
     async def events(task_id: str, last_event_id: str | None = Header(default=None, alias="Last-Event-ID")) -> StreamingResponse:
         return sse_response(sse_stream.stream(task_id, last_event_id=last_event_id))
+
+    if latest_status_store is not None:
+        output_adapter = latest_output_adapter or (lambda data: data)
+
+        @router.get(status_path)
+        async def latest_status(task_id: str) -> JSONResponse:
+            event = await latest_status_store.get_latest(task_id)
+            if event is None:
+                raise HTTPException(status_code=404, detail=f"No status found for task_id '{task_id}'.")
+            return JSONResponse({"task_id": task_id, "event": output_adapter(dict(event))})
 
     if history_reader is not None:
 

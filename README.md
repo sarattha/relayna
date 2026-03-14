@@ -237,6 +237,7 @@ This gives you:
 
 - `GET /events/{task_id}`: SSE stream
 - `GET /history`: stream replay endpoint
+- `GET /status/{task_id}`: latest status from Redis history
 
 ## End-to-end example
 
@@ -467,6 +468,15 @@ To keep the replay bounded, the route returns `422` unless at least one of `task
 
 The SSE endpoint also supports resume automatically via the `Last-Event-ID` request header.
 
+If you pass `latest_status_store`, `create_status_router()` also exposes
+`GET /status/{task_id}`. It returns the latest Redis-backed event as:
+
+```json
+{"task_id": "task-123", "event": {"task_id": "task-123", "status": "completed"}}
+```
+
+If no status exists yet, the route returns `404`.
+
 If you need advanced composition, you can still instantiate `StatusHub`, `RedisStatusStore`, `SSEStatusStream`, and `StreamHistoryReader` manually and keep using `create_status_router()` on its own.
 
 ## Module guide
@@ -487,6 +497,7 @@ If you need advanced composition, you can still instantiate `StatusHub`, `RedisS
   - task context and lifecycle status config
 - `relayna.status_store`
   - Redis-backed task history and pubsub store
+  - latest-status lookup helper
 - `relayna.status_hub`
   - RabbitMQ-to-Redis status bridge
 - `relayna.sse`

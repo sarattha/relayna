@@ -89,4 +89,5 @@ and route registration.
 `create_status_router` provides a small FastAPI router with:
 
 - `/events/{task_id}` for SSE
+- `/status/{task_id}` for latest Redis-backed status lookup
 - `/history` for stream replay
