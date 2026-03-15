@@ -1,0 +1,73 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync dependencies
+        run: uv sync --extra dev
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Build artifacts
+        run: uv build
+
+      - name: Validate built distributions
+        run: uv run twine check dist/*
+
+      - name: Extract release notes from changelog
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+
+          version = os.environ["RELEASE_VERSION"].lstrip("v")
+          changelog = pathlib.Path("CHANGELOG.md").read_text().splitlines()
+          target = f"## {version} -"
+          capture = False
+          lines = []
+
+          for line in changelog:
+              if line.startswith("## "):
+                  if capture:
+                      break
+                  capture = line.startswith(target)
+                  continue
+              if capture:
+                  lines.append(line)
+
+          text = "\n".join(lines).strip()
+          if not text:
+              raise SystemExit(f"Unable to find CHANGELOG section for {version}")
+          pathlib.Path("release-notes.md").write_text(text + "\n")
+          PY
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            dist/*.tar.gz
+            dist/*.whl
