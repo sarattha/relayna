@@ -1,9 +1,29 @@
 [project]
 name = "relayna"
-version = "0.2.0"
+version = "1.0.0"
 description = "Shared RabbitMQ/Redis infrastructure for Relayna."
 readme = "README.md"
 requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "Sarattha", email = "j.sarattha@gmail.com" },
+]
+maintainers = [
+    { name = "Sarattha", email = "j.sarattha@gmail.com" },
+]
+keywords = ["rabbitmq", "redis", "sse", "fastapi", "queueing", "event-streaming"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
+]
 dependencies = [
     "aio-pika>=9.4.1",
     "fastapi>=0.115.11",
@@ -11,11 +31,20 @@ dependencies = [
     "redis>=7.1.1",
 ]
 
+[project.urls]
+Homepage = "https://github.com/sarattha/relayna"
+Documentation = "https://sarattha.github.io/relayna/"
+Issues = "https://github.com/sarattha/relayna/issues"
+Releases = "https://github.com/sarattha/relayna/releases"
+Repository = "https://github.com/sarattha/relayna"
+
 [project.optional-dependencies]
 dev = [
     "httpx>=0.28.1",
+    "mkdocs>=1.6.1",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "twine>=6.1.0",
 ]
 
 [build-system]

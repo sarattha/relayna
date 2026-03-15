@@ -1,0 +1,17 @@
+site_name: relayna
+site_description: Public documentation for relayna
+site_url: https://sarattha.github.io/relayna/
+repo_url: https://github.com/sarattha/relayna
+repo_name: sarattha/relayna
+theme:
+  name: readthedocs
+nav:
+  - Overview: index.md
+  - Getting Started: getting-started.md
+  - Components: components.md
+  - Releases: releases.md
+  - Development: development.md
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
