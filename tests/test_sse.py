@@ -34,8 +34,9 @@ class FakePubSubIterator:
 
 
 class FakePubSub:
-    def __init__(self, messages: list[dict[str, Any]] | None = None) -> None:
+    def __init__(self, messages: list[dict[str, Any]] | None = None, *, supports_get_message: bool = False) -> None:
         self.messages = list(messages or [])
+        self.supports_get_message = supports_get_message
         self.subscriptions: list[str] = []
         self.unsubscriptions: list[str] = []
         self.closed = False
@@ -53,6 +54,15 @@ class FakePubSub:
         self.closed = True
 
 
+    async def get_message(self, *, timeout: float | None = None) -> dict[str, Any] | None:
+        if not self.supports_get_message:
+            raise AttributeError("get_message not supported")
+        if self.messages:
+            return self.messages.pop(0)
+        await asyncio.sleep(timeout or 0)
+        return None
+
+
 class FakeRedis:
     def __init__(self, pubsub: FakePubSub) -> None:
         self._pubsub = pubsub
@@ -68,10 +78,11 @@ class FakeStore:
         history: list[dict[str, Any]] | None = None,
         messages: list[dict[str, Any]] | None = None,
         prefix: str = "relayna",
+        supports_get_message: bool = False,
     ) -> None:
         self._history = list(history or [])
         self.prefix = prefix
-        self._pubsub = FakePubSub(messages)
+        self._pubsub = FakePubSub(messages, supports_get_message=supports_get_message)
         self.redis = FakeRedis(self._pubsub)
 
     async def get_history(self, task_id: str) -> list[dict[str, Any]]:
@@ -315,6 +326,21 @@ async def test_sse_emits_malformed_pubsub_observations() -> None:
     assert any(isinstance(event, SSEMalformedPubsubPayload) for event in observed)
     live_events = [event for event in observed if isinstance(event, SSELiveEventSent)]
     assert live_events[-1].source == "pubsub"
+
+
+@pytest.mark.asyncio
+async def test_keepalive_and_messages_use_get_message_when_available() -> None:
+    store = FakeStore(
+        messages=[status_message("task-123", "processing", event_id="evt-1")],
+        supports_get_message=True,
+    )
+    stream = SSEStatusStream(store=store, keepalive_interval_seconds=0.01)
+
+    chunks = await collect_chunks(stream.stream("task-123"), 3)
+
+    assert chunks[0] == "event: ready\ndata: {}\n\n"
+    assert chunks[1].startswith("id: evt-1\n")
+    assert chunks[2] == ": keepalive\n\n"
 
 
 @pytest.mark.asyncio

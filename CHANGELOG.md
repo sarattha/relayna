@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.0.1 - 2026-03-16
+
+### Fixed
+
+- SSE `/events/{task_id}` streams no longer risk stalling after keepalive timeouts when using Redis pubsub clients that expose `get_message(timeout=...)`.
+
 ## 1.0.0 - 2026-03-15
 
 `relayna` is now documented and packaged as a public, semver-stable library.

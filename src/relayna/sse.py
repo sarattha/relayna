@@ -142,7 +142,7 @@ class SSEStatusStream:
             message_iterator = pubsub.listen().__aiter__()
             while True:
                 try:
-                    message = await self._next_pubsub_message(message_iterator)
+                    message = await self._next_pubsub_message(pubsub, message_iterator)
                 except StopAsyncIteration:
                     break
                 if message is None:
@@ -190,9 +190,21 @@ class SSEStatusStream:
                 SSEStreamEnded(task_id=task_id, terminal_status=terminal_status, sent_count=sent_count),
             )
 
-    async def _next_pubsub_message(self, iterator: AsyncIterator[dict[str, Any]]) -> dict[str, Any] | None:
+    async def _next_pubsub_message(
+        self,
+        pubsub: Any,
+        iterator: AsyncIterator[dict[str, Any]],
+    ) -> dict[str, Any] | None:
         if self._keepalive_interval_seconds is None:
             return await anext(iterator)
+
+        get_message = getattr(pubsub, "get_message", None)
+        if callable(get_message):
+            try:
+                return await get_message(timeout=self._keepalive_interval_seconds)
+            except AttributeError:
+                pass
+
         try:
             return await asyncio.wait_for(anext(iterator), timeout=self._keepalive_interval_seconds)
         except asyncio.TimeoutError:
