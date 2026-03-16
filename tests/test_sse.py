@@ -331,7 +331,7 @@ async def test_sse_emits_malformed_pubsub_observations() -> None:
 @pytest.mark.asyncio
 async def test_keepalive_and_messages_use_get_message_when_available() -> None:
     store = FakeStore(
-        messages=[status_message("task-123", "completed", event_id="evt-1")],
+        messages=[status_message("task-123", "processing", event_id="evt-1")],
         supports_get_message=True,
     )
     stream = SSEStatusStream(store=store, keepalive_interval_seconds=0.01)
