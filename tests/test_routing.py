@@ -5,6 +5,7 @@ import pytest
 
 from relayna.config import RelaynaTopologyConfig
 from relayna.rabbitmq import RelaynaRabbitClient, ShardRoutingStrategy, TaskIdRoutingStrategy
+from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
 
 
 def test_task_id_routing_uses_task_id() -> None:
@@ -50,6 +51,10 @@ class FakeStatusExchange:
 
     async def publish(self, message: object, *, routing_key: str) -> None:
         self.publish_calls.append((message, routing_key))
+
+
+class FakeBindingQueue(FakeTaskQueue):
+    pass
 
 
 @pytest.mark.asyncio
@@ -129,3 +134,97 @@ async def test_publish_status_preserves_existing_event_id() -> None:
     payload = json.loads(exchange.publish_calls[0][0].body.decode("utf-8"))
 
     assert payload["event_id"] == "evt-custom"
+
+
+@pytest.mark.asyncio
+async def test_publish_aggregation_status_enriches_metadata_and_routes_by_shard() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._status_exchange = exchange
+
+    await client.publish_aggregation_status(
+        {"task_id": "child-1", "status": "processing", "meta": {"parent_task_id": "parent-1"}}
+    )
+
+    message, routing_key = exchange.publish_calls[0]
+    payload = json.loads(message.body.decode("utf-8"))
+
+    assert routing_key.startswith("agg.")
+    assert payload["meta"]["aggregation_role"] == "aggregation"
+    assert payload["meta"]["parent_task_id"] == "parent-1"
+    assert payload["meta"]["aggregation_shard"] == int(routing_key.split(".")[1])
+
+
+@pytest.mark.asyncio
+async def test_publish_aggregation_status_requires_parent_task_id() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=2,
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._status_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="meta.parent_task_id"):
+        await client.publish_aggregation_status({"task_id": "child-1", "status": "processing", "meta": {}})
+
+
+@pytest.mark.asyncio
+async def test_default_topology_binds_shared_status_queue_to_wildcard() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    queue = FakeBindingQueue("status.queue")
+    channel = FakeTaskChannel(queue)
+    exchange = object()
+    queue_name = await topology.ensure_status_queue(channel, status_exchange=exchange)
+
+    assert queue_name == "status.queue"
+    assert queue.bind_calls == [(exchange, "#")]
+
+
+@pytest.mark.asyncio
+async def test_sharded_topology_binds_subset_queue_to_multiple_shards() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    queue = FakeBindingQueue("aggregation.queue.shards.1-3")
+    channel = FakeTaskChannel(queue)
+    exchange = object()
+
+    queue_name = await topology.ensure_aggregation_queue(
+        channel,
+        status_exchange=exchange,
+        shards=[3, 1],
+    )
+
+    assert queue_name == "aggregation.queue.shards.1-3"
+    assert queue.bind_calls == [(exchange, "agg.1"), (exchange, "agg.3")]

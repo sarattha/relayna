@@ -11,6 +11,8 @@ streaming.
 - replays stored history before switching clients to live SSE updates
 - exposes small FastAPI helpers for lifecycle wiring and status routes
 - supports RabbitMQ stream replay for bounded operational history reads
+- supports named RabbitMQ topologies for shared queues and shard-aware
+  aggregation workers
 
 ## Requirements
 
@@ -45,6 +47,7 @@ flowchart LR
 
 The semver-stable v1 API is the documented surface of:
 
+- `relayna.topology`
 - `relayna.config`
 - `relayna.contracts`
 - `relayna.rabbitmq`

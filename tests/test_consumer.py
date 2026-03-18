@@ -7,7 +7,13 @@ from typing import Any
 import pytest
 
 from relayna.config import RelaynaTopologyConfig
-from relayna.consumer import FailureAction, LifecycleStatusConfig, TaskConsumer, TaskContext
+from relayna.consumer import (
+    AggregationWorkerRuntime,
+    FailureAction,
+    LifecycleStatusConfig,
+    TaskConsumer,
+    TaskContext,
+)
 from relayna.contracts import StatusEventEnvelope
 from relayna.observability import (
     TaskConsumerLoopError,
@@ -102,8 +108,11 @@ class FakeRabbitClient:
         self.acquire_results = list(acquire_results)
         self._last_channel: FakeChannel | None = None
         self.ensure_tasks_queue_calls = 0
+        self.initialize_calls = 0
+        self.close_calls = 0
         self.acquire_channel_calls: list[int] = []
         self.published_statuses: list[dict[str, Any]] = []
+        self.aggregation_queue_calls: list[dict[str, Any]] = []
 
     async def ensure_tasks_queue(self) -> str:
         self.ensure_tasks_queue_calls += 1
@@ -121,11 +130,24 @@ class FakeRabbitClient:
         self._last_channel = result
         return result
 
+    async def initialize(self) -> None:
+        self.initialize_calls += 1
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
     async def publish_status(self, event: StatusEventEnvelope | dict[str, Any]) -> None:
         if isinstance(event, StatusEventEnvelope):
             self.published_statuses.append(event.model_dump(mode="json", exclude_none=True))
         else:
             self.published_statuses.append(dict(event))
+
+    async def publish_aggregation_status(self, event: StatusEventEnvelope | dict[str, Any]) -> None:
+        await self.publish_status(event)
+
+    async def ensure_aggregation_queue(self, *, shards: list[int], queue_name: str | None = None) -> str:
+        self.aggregation_queue_calls.append({"shards": list(shards), "queue_name": queue_name})
+        return queue_name or f"aggregation.queue.{'-'.join(str(shard) for shard in shards)}"
 
 
 def make_config() -> RelaynaTopologyConfig:
@@ -181,6 +203,25 @@ async def test_task_context_publish_status_uses_task_and_correlation_id() -> Non
             "timestamp": rabbit.published_statuses[1]["timestamp"],
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_task_context_publish_aggregation_status_uses_parent_metadata() -> None:
+    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[])
+    context = TaskContext(
+        rabbitmq=rabbit,
+        consumer_name="worker-a",
+        raw_payload={"task_id": "task-123"},
+        correlation_id="corr-123",
+        delivery_tag=7,
+        redelivered=False,
+        _task_id="task-123",
+    )
+
+    await context.publish_aggregation_status(status="aggregating", meta={"parent_task_id": "parent-1"})
+
+    assert rabbit.published_statuses[0]["status"] == "aggregating"
+    assert rabbit.published_statuses[0]["meta"]["parent_task_id"] == "parent-1"
 
 
 @pytest.mark.asyncio
@@ -518,4 +559,31 @@ async def test_task_consumer_sink_failures_do_not_break_processing() -> None:
 
     await run_consumer_until_message_done(consumer, message)
 
-    assert message.acked is True
+
+@pytest.mark.asyncio
+async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
+    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    runtime = AggregationWorkerRuntime(
+        rabbitmq=rabbit,
+        handler=handler,
+        shard_groups=[[0], [1, 2]],
+    )
+
+    await runtime.start()
+    await runtime.stop()
+
+    assert rabbit.initialize_calls == 1
+    assert rabbit.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_aggregation_worker_runtime_requires_topology_or_rabbitmq() -> None:
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    with pytest.raises(ValueError, match="rabbitmq=.*topology"):
+        AggregationWorkerRuntime(handler=handler, shard_groups=[[0]])

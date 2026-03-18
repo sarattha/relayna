@@ -4,6 +4,24 @@
 
 These modules are part of the documented v1 API surface.
 
+## `relayna.topology`
+
+RabbitMQ topology definitions and routing strategies:
+
+- `RelaynaTopology`
+- `SharedTasksSharedStatusTopology`
+- `SharedTasksSharedStatusShardedAggregationTopology`
+- `TaskIdRoutingStrategy`
+- `ShardRoutingStrategy`
+
+Use this module to choose the topology shape your service should run with.
+
+## `relayna.config`
+
+`RelaynaTopologyConfig` is the legacy compatibility adapter for the original
+single-topology configuration shape. New code should prefer
+`relayna.topology`.
+
 ## `relayna.contracts`
 
 Canonical message envelopes and compatibility helpers:
@@ -14,35 +32,33 @@ Canonical message envelopes and compatibility helpers:
 - `normalize_event_aliases`
 - `denormalize_document_aliases`
 
-## `relayna.config`
-
-`RelaynaTopologyConfig` centralizes RabbitMQ topology and queue settings for
-task and status traffic.
-
 ## `relayna.rabbitmq`
 
 RabbitMQ publishing and topology helpers:
 
 - `RelaynaRabbitClient`
-- `TaskIdRoutingStrategy`
-- `ShardRoutingStrategy`
 - `DirectQueuePublisher`
+- `declare_stream_queue`
 
-Use this module when you want shared exchange and queue declaration plus JSON
-task and status publishing.
+Use this module when you want topology-driven exchange and queue declaration
+plus JSON task, status, and aggregation-status publishing.
 
 ## `relayna.consumer`
 
-Worker-side task consumption helpers:
+Worker-side helpers:
 
 - `TaskConsumer`
+- `AggregationConsumer`
+- `AggregationWorkerRuntime`
 - `TaskContext`
 - `TaskHandler`
+- `AggregationHandler`
 - `FailureAction`
 - `LifecycleStatusConfig`
 
-This module provides validated task delivery, consistent ack/reject behavior,
-and optional lifecycle status publishing.
+This module provides validated task delivery, shard-aware aggregation
+consumption, optional lifecycle status publishing, and a helper runtime for
+aggregation workers outside FastAPI.
 
 ## `relayna.status_store`
 

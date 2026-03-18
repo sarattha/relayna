@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.0 - 2026-03-18
+
+### Added
+
+- First-class RabbitMQ topology classes via `relayna.topology`.
+- `SharedTasksSharedStatusTopology` as the explicit default topology.
+- `SharedTasksSharedStatusShardedAggregationTopology` for shard-aware aggregation queues on the shared status exchange.
+- `RelaynaRabbitClient.publish_aggregation_status(...)` for shard-routed aggregation work items that remain visible to `StatusHub`, `StreamHistoryReader`, and SSE consumers.
+- `AggregationConsumer` and `AggregationWorkerRuntime` for running shard-owned aggregation workers outside the FastAPI lifecycle.
+
+### Changed
+
+- `RelaynaRabbitClient` and `create_relayna_lifespan(...)` now accept named topology objects as the primary API.
+- `RelaynaTopologyConfig` is retained as a compatibility adapter for the original single-topology configuration shape.
+- Documentation now uses the named topology classes as the primary configuration examples.
+
 ## 1.0.1 - 2026-03-16
 
 ### Fixed
