@@ -6,6 +6,7 @@ around task processing and live status delivery.
 It provides:
 
 - RabbitMQ task publishing and shared status fanout
+- Named RabbitMQ topology classes for default and sharded aggregation flows
 - Redis-backed status history and pubsub
 - Server-Sent Events replay plus live updates
 - RabbitMQ stream replay for history/debug endpoints
@@ -45,10 +46,10 @@ uv sync --extra dev
 ```python
 from fastapi import FastAPI
 
-from relayna.config import RelaynaTopologyConfig
 from relayna.fastapi import create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.topology import SharedTasksSharedStatusTopology
 
-config = RelaynaTopologyConfig(
+topology = SharedTasksSharedStatusTopology(
     rabbitmq_url="amqp://guest:guest@localhost:5672/",
     tasks_exchange="tasks.exchange",
     tasks_queue="tasks.queue",
@@ -59,7 +60,7 @@ config = RelaynaTopologyConfig(
 
 app = FastAPI(
     lifespan=create_relayna_lifespan(
-        topology_config=config,
+        topology=topology,
         redis_url="redis://localhost:6379/0",
     )
 )
@@ -79,10 +80,28 @@ This setup gives you:
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
 
+## Topologies
+
+`relayna` currently ships two first-class topology classes:
+
+- `SharedTasksSharedStatusTopology`
+  One shared task queue and one shared status queue/stream.
+- `SharedTasksSharedStatusShardedAggregationTopology`
+  The same shared task and status plane, plus shard-owned aggregation worker
+  queues bound to the status exchange.
+
+Aggregation messages published through the sharded aggregation topology stay on
+the shared status exchange, so `StatusHub`, `StreamHistoryReader`, and SSE
+consumers still observe them.
+
+See [docs/getting-started.md](docs/getting-started.md) for concrete examples of
+both topologies, including `AggregationWorkerRuntime`.
+
 ## Public API
 
 The v1 semver-stable API is the documented surface of these submodules:
 
+- `relayna.topology`
 - `relayna.config`
 - `relayna.contracts`
 - `relayna.rabbitmq`
