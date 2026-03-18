@@ -26,13 +26,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.0.0/relayna-1.0.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.0.0/relayna-1.0.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0.tar.gz
 ```
 
 For local development in this repository:
