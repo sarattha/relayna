@@ -47,10 +47,11 @@ class StatusHub:
 
     async def run_forever(self) -> None:
         queue_name = await self._rabbitmq.ensure_status_queue()
-        config = self._rabbitmq.config
+        topology = getattr(self._rabbitmq, "topology", self._rabbitmq.config)
         consume_args = dict(self._consume_arguments)
-        if config.status_use_streams and "x-stream-offset" not in consume_args:
-            consume_args["x-stream-offset"] = config.status_stream_initial_offset
+        default_stream_args = topology.status_stream_consume_arguments()
+        if "x-stream-offset" not in consume_args and "x-stream-offset" in default_stream_args:
+            consume_args.update(default_stream_args)
         await emit_observation(self._observation_sink, StatusHubStarted(queue_name=queue_name))
 
         while not self._stop.is_set():
@@ -60,7 +61,7 @@ class StatusHub:
                 queue: AbstractQueue = await channel.declare_queue(
                     queue_name,
                     durable=True,
-                    arguments=config.status_queue_arguments() or None,
+                    arguments=topology.status_queue_arguments() or None,
                 )
                 async with queue.iterator(arguments=consume_args or None) as iterator:
                     async for message in iterator:

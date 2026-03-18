@@ -21,10 +21,15 @@ from .observability import (
     emit_observation,
 )
 from .rabbitmq import RelaynaRabbitClient
+from .topology import RelaynaTopology
 
 
 class TaskHandler(Protocol):
     async def __call__(self, task: TaskEnvelope, context: TaskContext) -> None: ...
+
+
+class AggregationHandler(Protocol):
+    async def __call__(self, event: StatusEventEnvelope, context: TaskContext) -> None: ...
 
 
 class FailureAction(str, Enum):
@@ -87,6 +92,45 @@ class TaskContext:
             )
 
         await self.rabbitmq.publish_status(event)
+
+    async def publish_aggregation_status(
+        self,
+        event: StatusEventEnvelope | None = None,
+        *,
+        status: str | None = None,
+        message: str | None = None,
+        meta: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        service: str | None = None,
+    ) -> None:
+        if event is not None and status is not None:
+            raise ValueError("Pass either a StatusEventEnvelope or keyword fields, not both.")
+        if event is None and status is None:
+            raise ValueError("status is required when event is not provided.")
+
+        payload_meta = dict(meta or {})
+        if event is None:
+            event = StatusEventEnvelope(
+                task_id=self._task_id,
+                status=status or "",
+                message=message,
+                meta=payload_meta,
+                result=result,
+                correlation_id=self.correlation_id,
+                event_id=event_id,
+                service=service,
+            )
+        else:
+            event = event.model_copy(
+                update={
+                    "task_id": self._task_id,
+                    "correlation_id": event.correlation_id or self.correlation_id,
+                    "meta": {**payload_meta, **event.meta},
+                }
+            )
+
+        await self.rabbitmq.publish_aggregation_status(event)
 
 
 class TaskConsumer:
@@ -298,3 +342,137 @@ def _coerce_task_id(payload: Any) -> str | None:
         if isinstance(task_id, str):
             return task_id
     return None
+
+
+class AggregationConsumer:
+    """Consumes status-compatible aggregation messages from shard queues."""
+
+    def __init__(
+        self,
+        *,
+        rabbitmq: RelaynaRabbitClient,
+        handler: AggregationHandler,
+        shards: list[int],
+        queue_name: str | None = None,
+        consumer_name: str = "relayna-aggregation-consumer",
+        prefetch: int | None = None,
+        consume_arguments: dict[str, Any] | None = None,
+        idle_retry_seconds: float = 2.0,
+    ) -> None:
+        self._rabbitmq = rabbitmq
+        self._handler = handler
+        self._shards = list(shards)
+        self._queue_name = queue_name
+        self._consumer_name = consumer_name
+        self._prefetch = prefetch
+        self._consume_arguments = consume_arguments or {}
+        self._idle_retry_seconds = idle_retry_seconds
+        self._stop = asyncio.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    async def run_forever(self) -> None:
+        queue_name: str | None = self._queue_name
+        prefetch = self._prefetch or self._rabbitmq.topology.prefetch_count
+
+        while not self._stop.is_set():
+            channel = None
+            try:
+                if queue_name is None:
+                    queue_name = await self._rabbitmq.ensure_aggregation_queue(shards=self._shards)
+                channel = await self._rabbitmq.acquire_channel(prefetch=prefetch)
+                queue = await channel.declare_queue(
+                    queue_name,
+                    durable=True,
+                    arguments=self._rabbitmq.topology.aggregation_queue_arguments() or None,
+                )
+                async with queue.iterator(arguments=self._consume_arguments or None, timeout=1.0) as iterator:
+                    async for message in iterator:
+                        try:
+                            payload = json.loads(message.body.decode("utf-8", errors="replace"))
+                            event = StatusEventEnvelope.model_validate(payload)
+                        except Exception:
+                            await message.reject(requeue=False)
+                            continue
+
+                        context = TaskContext(
+                            rabbitmq=self._rabbitmq,
+                            consumer_name=self._consumer_name,
+                            raw_payload=dict(payload),
+                            correlation_id=event.correlation_id or getattr(message, "correlation_id", None),
+                            delivery_tag=getattr(message, "delivery_tag", None),
+                            redelivered=bool(getattr(message, "redelivered", False)),
+                            _task_id=event.task_id,
+                        )
+                        await self._handler(event, context)
+                        await message.ack()
+                        if self._stop.is_set():
+                            break
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                if self._stop.is_set():
+                    return
+                await asyncio.sleep(0)
+            except Exception:
+                if self._stop.is_set():
+                    return
+                await asyncio.sleep(self._idle_retry_seconds)
+            finally:
+                if channel is not None:
+                    try:
+                        await channel.close()
+                    except Exception:
+                        pass
+
+
+class AggregationWorkerRuntime:
+    """Owns one or more aggregation consumer loops outside the FastAPI lifecycle."""
+
+    def __init__(
+        self,
+        *,
+        handler: AggregationHandler,
+        shard_groups: list[list[int]],
+        topology: RelaynaTopology | None = None,
+        rabbitmq: RelaynaRabbitClient | None = None,
+        connection_name: str = "relayna-aggregation-runtime",
+        consumer_name_prefix: str = "relayna-aggregation-worker",
+        prefetch: int | None = None,
+        consume_arguments: dict[str, Any] | None = None,
+    ) -> None:
+        if rabbitmq is None and topology is None:
+            raise ValueError("Pass rabbitmq=... or topology=... to AggregationWorkerRuntime.")
+        self._owns_rabbitmq = rabbitmq is None
+        self._rabbitmq = rabbitmq or RelaynaRabbitClient(topology=topology, connection_name=connection_name)
+        self._consumers = [
+            AggregationConsumer(
+                rabbitmq=self._rabbitmq,
+                handler=handler,
+                shards=shards,
+                consumer_name=f"{consumer_name_prefix}-{index}",
+                prefetch=prefetch,
+                consume_arguments=consume_arguments,
+            )
+            for index, shards in enumerate(shard_groups)
+        ]
+        self._tasks: list[asyncio.Task[None]] = []
+
+    async def start(self) -> None:
+        await self._rabbitmq.initialize()
+        if self._tasks:
+            return
+        self._tasks = [
+            asyncio.create_task(consumer.run_forever(), name=f"aggregation-{index}")
+            for index, consumer in enumerate(self._consumers)
+        ]
+
+    async def stop(self) -> None:
+        for consumer in self._consumers:
+            consumer.stop()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks = []
+        if self._owns_rabbitmq:
+            await self._rabbitmq.close()

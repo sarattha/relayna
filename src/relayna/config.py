@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .topology import SharedTasksSharedStatusTopology
+
 
 def _pick(settings: Any, *names: str, default: Any = None) -> Any:
     for name in names:
@@ -12,21 +14,8 @@ def _pick(settings: Any, *names: str, default: Any = None) -> Any:
 
 
 @dataclass(slots=True)
-class RelaynaTopologyConfig:
-    rabbitmq_url: str
-    tasks_exchange: str
-    tasks_queue: str
-    tasks_routing_key: str
-    status_exchange: str
-    status_queue: str
-    dead_letter_exchange: str | None = None
-    prefetch_count: int = 1
-    tasks_message_ttl_ms: int | None = None
-    status_use_streams: bool = True
-    status_queue_ttl_ms: int | None = None
-    status_stream_max_length_gb: int | None = None
-    status_stream_max_segment_size_mb: int | None = None
-    status_stream_initial_offset: str = "last"
+class RelaynaTopologyConfig(SharedTasksSharedStatusTopology):
+    """Legacy compatibility adapter for the original single-topology config."""
 
     @classmethod
     def from_settings(cls, settings: Any) -> RelaynaTopologyConfig:
@@ -48,35 +37,3 @@ class RelaynaTopologyConfig:
             ),
             status_stream_initial_offset=str(_pick(settings, "status_stream_initial_offset", default="last")),
         )
-
-    def connection_string(self, connection_name: str | None = None) -> str:
-        if connection_name:
-            separator = "&" if "?" in self.rabbitmq_url else "?"
-            return f"{self.rabbitmq_url}{separator}name={connection_name}"
-        return self.rabbitmq_url
-
-    def task_queue_arguments(self) -> dict[str, Any]:
-        args: dict[str, Any] = {}
-        if self.tasks_message_ttl_ms:
-            args["x-message-ttl"] = int(self.tasks_message_ttl_ms)
-        if self.dead_letter_exchange:
-            args["x-dead-letter-exchange"] = self.dead_letter_exchange
-        return args
-
-    def status_queue_arguments(self) -> dict[str, Any]:
-        if self.status_use_streams:
-            args: dict[str, Any] = {"x-queue-type": "stream"}
-            if self.status_stream_max_length_gb is not None:
-                args["x-max-length-bytes"] = int(self.status_stream_max_length_gb) * 1024**3
-            if self.status_stream_max_segment_size_mb is not None:
-                args["x-stream-max-segment-size-bytes"] = int(self.status_stream_max_segment_size_mb) * 1024**2
-            return args
-        args: dict[str, Any] = {}
-        if self.status_queue_ttl_ms:
-            args["x-expires"] = int(self.status_queue_ttl_ms)
-        return args
-
-    def status_stream_consume_arguments(self) -> dict[str, Any]:
-        if not self.status_use_streams:
-            return {}
-        return {"x-stream-offset": self.status_stream_initial_offset}

@@ -12,6 +12,7 @@ PUBLIC_MODULES = [
     "relayna.history",
     "relayna.fastapi",
     "relayna.observability",
+    "relayna.topology",
 ]
 
 

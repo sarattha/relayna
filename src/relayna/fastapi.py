@@ -17,6 +17,7 @@ from .rabbitmq import RelaynaRabbitClient
 from .sse import EventAdapter, SSEStatusStream
 from .status_hub import StatusHub
 from .status_store import RedisStatusStore
+from .topology import RelaynaTopology
 
 
 class HistoryOutputAdapter(Protocol):
@@ -38,7 +39,7 @@ class _RelaynaLifespan:
     def __init__(
         self,
         *,
-        topology_config: RelaynaTopologyConfig,
+        topology: RelaynaTopology,
         redis_url: str,
         store_prefix: str,
         store_ttl_seconds: int | None,
@@ -53,7 +54,7 @@ class _RelaynaLifespan:
         history_output_adapter: HistoryOutputAdapter | None,
         app_state_key: str,
     ) -> None:
-        self._topology_config = topology_config
+        self._topology = topology
         self._redis_url = redis_url
         self._store_prefix = store_prefix
         self._store_ttl_seconds = store_ttl_seconds
@@ -76,7 +77,7 @@ class _RelaynaLifespan:
     def ensure_runtime(self) -> RelaynaRuntime:
         if self._runtime is None:
             rabbitmq = RelaynaRabbitClient(
-                self._topology_config,
+                self._topology,
                 connection_name=self._rabbit_connection_name,
             )
             redis = Redis.from_url(self._redis_url)
@@ -154,7 +155,8 @@ async def _shutdown_runtime(runtime: RelaynaRuntime) -> None:
 
 def create_relayna_lifespan(
     *,
-    topology_config: RelaynaTopologyConfig,
+    topology: RelaynaTopology | None = None,
+    topology_config: RelaynaTopologyConfig | None = None,
     redis_url: str,
     store_prefix: str = "relayna",
     store_ttl_seconds: int | None = 86400,
@@ -169,8 +171,11 @@ def create_relayna_lifespan(
     history_output_adapter: HistoryOutputAdapter | None = None,
     app_state_key: str = "relayna",
 ) -> _RelaynaLifespan:
+    resolved_topology = topology or topology_config
+    if resolved_topology is None:
+        raise ValueError("Pass topology=... (preferred) or topology_config=... for legacy compatibility.")
     return _RelaynaLifespan(
-        topology_config=topology_config,
+        topology=resolved_topology,
         redis_url=redis_url,
         store_prefix=store_prefix,
         store_ttl_seconds=store_ttl_seconds,
