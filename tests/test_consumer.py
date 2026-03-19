@@ -8,6 +8,7 @@ import pytest
 
 from relayna.config import RelaynaTopologyConfig
 from relayna.consumer import (
+    AggregationConsumer,
     AggregationWorkerRuntime,
     FailureAction,
     LifecycleStatusConfig,
@@ -578,6 +579,46 @@ async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
 
     assert rabbit.initialize_calls == 1
     assert rabbit.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_ensures_custom_queue_bindings() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "status": "done"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[channel])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[1, 2],
+        queue_name="aggregation.queue.custom",
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert rabbit.aggregation_queue_calls == [{"shards": [1, 2], "queue_name": "aggregation.queue.custom"}]
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_rejects_failed_messages_without_requeue() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "status": "done"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[channel])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = AggregationConsumer(rabbitmq=rabbit, handler=handler, shards=[0])
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is False
+    assert message.rejected_with is False
 
 
 @pytest.mark.asyncio

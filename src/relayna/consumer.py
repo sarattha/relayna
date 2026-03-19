@@ -379,8 +379,10 @@ class AggregationConsumer:
         while not self._stop.is_set():
             channel = None
             try:
-                if queue_name is None:
-                    queue_name = await self._rabbitmq.ensure_aggregation_queue(shards=self._shards)
+                queue_name = await self._rabbitmq.ensure_aggregation_queue(
+                    shards=self._shards,
+                    queue_name=queue_name,
+                )
                 channel = await self._rabbitmq.acquire_channel(prefetch=prefetch)
                 queue = await channel.declare_queue(
                     queue_name,
@@ -405,7 +407,13 @@ class AggregationConsumer:
                             redelivered=bool(getattr(message, "redelivered", False)),
                             _task_id=event.task_id,
                         )
-                        await self._handler(event, context)
+                        try:
+                            await self._handler(event, context)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            await message.reject(requeue=False)
+                            continue
                         await message.ack()
                         if self._stop.is_set():
                             break
