@@ -1,5 +1,9 @@
 # Plan: first-class multi-stage workflow topology
 
+> Status: proposed design only. Nothing in this document is implemented or
+> advertised as a supported topology yet; it is a contributor-facing plan for
+> future work.
+
 ## Context
 
 `relayna` currently treats two RabbitMQ shapes as first-class:

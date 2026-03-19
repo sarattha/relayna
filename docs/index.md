@@ -67,4 +67,3 @@ The package root stays minimal and only exports `relayna.__version__`.
 - [Components](components.md)
 - [Release installation](releases.md)
 - [Development](development.md)
-- [Workflow topology plan](workflow-topology-plan.md)

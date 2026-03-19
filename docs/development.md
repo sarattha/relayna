@@ -33,6 +33,12 @@ This produces:
 uv run --extra dev mkdocs serve
 ```
 
+## Design notes
+
+Contributor-facing implementation plans live here when a feature needs design
+alignment before code lands. For the proposed multi-stage workflow topology,
+see [Workflow topology plan](workflow-topology-plan.md).
+
 ## Public API policy
 
 The package root `relayna` is intentionally small and only exposes

@@ -96,8 +96,6 @@ consumers still observe them.
 
 See [docs/getting-started.md](docs/getting-started.md) for concrete examples of
 both topologies, including `AggregationWorkerRuntime`.
-For planned first-class support of multi-stage workflow topologies, see
-[docs/workflow-topology-plan.md](docs/workflow-topology-plan.md).
 
 ## Public API
 
