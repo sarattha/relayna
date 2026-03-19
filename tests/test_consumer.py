@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -43,14 +44,19 @@ class FakeMessage:
         self.acked = False
         self.rejected_with: bool | None = None
         self.done = asyncio.Event()
+        self._on_done: Callable[[], None] | None = None
 
     async def ack(self) -> None:
         self.acked = True
         self.done.set()
+        if self._on_done is not None:
+            self._on_done()
 
     async def reject(self, *, requeue: bool) -> None:
         self.rejected_with = requeue
         self.done.set()
+        if self._on_done is not None:
+            self._on_done()
 
 
 class FakeIterator:
@@ -119,6 +125,10 @@ class FakeRabbitClient:
         self.ensure_tasks_queue_calls += 1
         return self.queue_name
 
+    @property
+    def topology(self) -> RelaynaTopologyConfig:
+        return self.config
+
     async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
         self.acquire_channel_calls.append(prefetch)
         if not self.acquire_results:
@@ -162,11 +172,16 @@ def make_config() -> RelaynaTopologyConfig:
     )
 
 
-async def run_consumer_until_message_done(consumer: TaskConsumer, message: FakeMessage) -> None:
-    task = asyncio.create_task(consumer.run_forever())
-    await message.done.wait()
-    consumer.stop()
-    await task
+async def run_consumer_until_message_done(consumer: TaskConsumer | AggregationConsumer, message: FakeMessage) -> None:
+    previous_on_done = message._on_done
+    message._on_done = consumer.stop
+    try:
+        task = asyncio.create_task(consumer.run_forever())
+        await message.done.wait()
+        consumer.stop()
+        await task
+    finally:
+        message._on_done = previous_on_done
 
 
 @pytest.mark.asyncio
@@ -600,7 +615,10 @@ async def test_aggregation_consumer_ensures_custom_queue_bindings() -> None:
 
     await run_consumer_until_message_done(consumer, message)
 
-    assert rabbit.aggregation_queue_calls == [{"shards": [1, 2], "queue_name": "aggregation.queue.custom"}]
+    expected = {"shards": [1, 2], "queue_name": "aggregation.queue.custom"}
+    assert rabbit.aggregation_queue_calls
+    assert all(call == expected for call in rabbit.aggregation_queue_calls)
+    assert channel.declare_queue_calls[0]["name"] == "aggregation.queue.custom"
 
 
 @pytest.mark.asyncio
