@@ -9,18 +9,26 @@ try:
     from scripts.real_stack_common import (
         app_client,
         build_app,
-        build_config,
+        build_shared_topology,
         fetch_latest_status,
         parse_sse_events,
         poll_history,
         unique_suffix,
     )
 except ModuleNotFoundError:
-    from real_stack_common import app_client, build_app, build_config, fetch_latest_status, parse_sse_events, poll_history, unique_suffix
+    from real_stack_common import (
+        app_client,
+        build_app,
+        build_shared_topology,
+        fetch_latest_status,
+        parse_sse_events,
+        poll_history,
+        unique_suffix,
+    )
 
 
-async def publish_status_flow(config, task_id: str) -> None:
-    client = RelaynaRabbitClient(config, connection_name="relayna-real-status-publisher")
+async def publish_status_flow(topology, task_id: str) -> None:
+    client = RelaynaRabbitClient(topology=topology, connection_name="relayna-real-status-publisher")
     await client.initialize()
     try:
         await client.publish_status(
@@ -39,11 +47,11 @@ async def publish_status_flow(config, task_id: str) -> None:
 async def main() -> None:
     suffix = unique_suffix()
     task_id = f"task-{suffix}"
-    config = build_config(suffix)
-    app = build_app(config, suffix)
+    topology = build_shared_topology(suffix)
+    app = build_app(topology, suffix)
 
     async with app_client(app) as client:
-        await publish_status_flow(config, task_id)
+        await publish_status_flow(topology, task_id)
         history = await poll_history(client, task_id=task_id, expected_count=3)
         latest = await fetch_latest_status(client, task_id)
         events_response = await client.get("/events/" + task_id)

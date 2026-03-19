@@ -15,12 +15,9 @@ RabbitMQ topology definitions and routing strategies:
 - `ShardRoutingStrategy`
 
 Use this module to choose the topology shape your service should run with.
-
-## `relayna.config`
-
-`RelaynaTopologyConfig` is the legacy compatibility adapter for the original
-single-topology configuration shape. New code should prefer
-`relayna.topology`.
+For sharded topologies, `aggregation_queue_template` and
+`aggregation_queue_name_prefix` let you namespace aggregation queues per
+deployment or test environment.
 
 ## `relayna.contracts`
 

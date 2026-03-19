@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-from relayna.config import RelaynaTopologyConfig
 from relayna.consumer import (
     AggregationConsumer,
     AggregationWorkerRuntime,
@@ -26,6 +25,7 @@ from relayna.observability import (
     TaskMessageReceived,
     TaskMessageRejected,
 )
+from relayna.topology import SharedTasksSharedStatusTopology
 
 
 class FakeMessage:
@@ -106,11 +106,11 @@ class FakeRabbitClient:
     def __init__(
         self,
         *,
-        config: RelaynaTopologyConfig,
+        topology: SharedTasksSharedStatusTopology,
         queue_name: str = "tasks.queue",
         acquire_results: list[FakeChannel | Exception],
     ) -> None:
-        self.config = config
+        self.topology = topology
         self.queue_name = queue_name
         self.acquire_results = list(acquire_results)
         self._last_channel: FakeChannel | None = None
@@ -124,10 +124,6 @@ class FakeRabbitClient:
     async def ensure_tasks_queue(self) -> str:
         self.ensure_tasks_queue_calls += 1
         return self.queue_name
-
-    @property
-    def topology(self) -> RelaynaTopologyConfig:
-        return self.config
 
     async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
         self.acquire_channel_calls.append(prefetch)
@@ -161,8 +157,8 @@ class FakeRabbitClient:
         return queue_name or f"aggregation.queue.{'-'.join(str(shard) for shard in shards)}"
 
 
-def make_config() -> RelaynaTopologyConfig:
-    return RelaynaTopologyConfig(
+def make_topology() -> SharedTasksSharedStatusTopology:
+    return SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         tasks_exchange="tasks.exchange",
         tasks_queue="tasks.queue",
@@ -186,7 +182,7 @@ async def run_consumer_until_message_done(consumer: TaskConsumer | AggregationCo
 
 @pytest.mark.asyncio
 async def test_task_context_publish_status_uses_task_and_correlation_id() -> None:
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
     context = TaskContext(
         rabbitmq=rabbit,
         consumer_name="worker-a",
@@ -223,7 +219,7 @@ async def test_task_context_publish_status_uses_task_and_correlation_id() -> Non
 
 @pytest.mark.asyncio
 async def test_task_context_publish_aggregation_status_uses_parent_metadata() -> None:
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
     context = TaskContext(
         rabbitmq=rabbit,
         consumer_name="worker-a",
@@ -245,7 +241,7 @@ async def test_task_consumer_acknowledges_successful_messages() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123", "payload": {"kind": "demo"}}).encode("utf-8"))
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[channel])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
     handled: list[str] = []
 
     async def handler(task: Any, context: TaskContext) -> None:
@@ -271,7 +267,7 @@ async def test_task_consumer_acknowledges_successful_messages() -> None:
 async def test_task_consumer_rejects_malformed_json_without_requeue() -> None:
     message = FakeMessage(b"{not-json")
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
     handled = False
 
     async def handler(task: Any, context: TaskContext) -> None:
@@ -291,7 +287,7 @@ async def test_task_consumer_rejects_malformed_json_without_requeue() -> None:
 async def test_task_consumer_rejects_invalid_envelope_without_requeue() -> None:
     message = FakeMessage(json.dumps({"payload": {"kind": "demo"}}).encode("utf-8"))
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise AssertionError("handler should not run")
@@ -308,7 +304,7 @@ async def test_task_consumer_rejects_invalid_envelope_without_requeue() -> None:
 async def test_task_consumer_rejects_handler_errors_by_default() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise RuntimeError("boom")
@@ -326,7 +322,7 @@ async def test_task_consumer_rejects_handler_errors_by_default() -> None:
 async def test_task_consumer_can_requeue_handler_errors() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise RuntimeError("boom")
@@ -342,7 +338,7 @@ async def test_task_consumer_can_requeue_handler_errors() -> None:
 async def test_task_consumer_publishes_lifecycle_statuses_when_enabled() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"), correlation_id="corr-123")
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
     order: list[str] = []
 
     async def handler(task: Any, context: TaskContext) -> None:
@@ -366,7 +362,7 @@ async def test_task_consumer_publishes_lifecycle_statuses_when_enabled() -> None
 async def test_task_consumer_publishes_failed_status_on_handler_error() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise RuntimeError("handler exploded")
@@ -387,7 +383,7 @@ async def test_task_consumer_publishes_failed_status_on_handler_error() -> None:
 async def test_task_consumer_does_not_publish_lifecycle_statuses_when_disabled() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
 
     async def handler(task: Any, context: TaskContext) -> None:
         return None
@@ -409,7 +405,7 @@ async def test_task_consumer_retries_after_unexpected_errors(monkeypatch: pytest
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
     rabbit = FakeRabbitClient(
-        config=make_config(),
+        topology=make_topology(),
         acquire_results=[RuntimeError("temporary failure"), channel],
     )
     sleep_calls: list[float] = []
@@ -434,7 +430,7 @@ async def test_task_consumer_retries_after_unexpected_errors(monkeypatch: pytest
 @pytest.mark.asyncio
 async def test_task_consumer_stop_exits_idle_loop_cleanly() -> None:
     queue = FakeQueue([])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue), FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue), FakeChannel(queue)])
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise AssertionError("handler should not run")
@@ -460,7 +456,7 @@ def test_fake_queue_helper_signature_supports_consumer_timeout() -> None:
 async def test_task_consumer_emits_observations_for_successful_processing() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
     observed: list[object] = []
 
     async def sink(event: object) -> None:
@@ -491,7 +487,7 @@ async def test_task_consumer_emits_observations_for_successful_processing() -> N
 async def test_task_consumer_emits_rejected_and_failed_observations() -> None:
     malformed = FakeMessage(b"{not-json")
     malformed_queue = FakeQueue([malformed])
-    malformed_rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(malformed_queue)])
+    malformed_rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(malformed_queue)])
     malformed_observed: list[object] = []
 
     async def sink(event: object) -> None:
@@ -511,7 +507,7 @@ async def test_task_consumer_emits_rejected_and_failed_observations() -> None:
 
     failed = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     failed_queue = FakeQueue([failed])
-    failed_rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(failed_queue)])
+    failed_rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(failed_queue)])
     failed_observed: list[object] = []
 
     async def failing_sink(event: object) -> None:
@@ -536,7 +532,7 @@ async def test_task_consumer_emits_loop_error_observation(monkeypatch: pytest.Mo
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[RuntimeError("temporary failure"), channel])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[RuntimeError("temporary failure"), channel])
     observed: list[object] = []
     original_sleep = asyncio.sleep
 
@@ -563,7 +559,7 @@ async def test_task_consumer_emits_loop_error_observation(monkeypatch: pytest.Mo
 async def test_task_consumer_sink_failures_do_not_break_processing() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
 
     async def sink(event: object) -> None:
         raise RuntimeError("sink failed")
@@ -578,7 +574,7 @@ async def test_task_consumer_sink_failures_do_not_break_processing() -> None:
 
 @pytest.mark.asyncio
 async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
 
     async def handler(task: Any, context: TaskContext) -> None:
         return None
@@ -597,11 +593,38 @@ async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_aggregation_worker_runtime_stop_cancels_stuck_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    runtime = AggregationWorkerRuntime(
+        rabbitmq=rabbit,
+        handler=handler,
+        shard_groups=[[0]],
+    )
+    stuck = asyncio.create_task(asyncio.Event().wait())
+    runtime._tasks = [stuck]
+
+    async def fake_wait_for(awaitable: object, timeout: float) -> object:
+        del awaitable, timeout
+        raise TimeoutError
+
+    monkeypatch.setattr("relayna.consumer.asyncio.wait_for", fake_wait_for)
+
+    await runtime.stop()
+
+    assert stuck.cancelled()
+    assert runtime._tasks == []
+
+
+@pytest.mark.asyncio
 async def test_aggregation_consumer_ensures_custom_queue_bindings() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123", "status": "done"}).encode("utf-8"))
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[channel])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
 
     async def handler(task: Any, context: TaskContext) -> None:
         return None
@@ -626,7 +649,7 @@ async def test_aggregation_consumer_rejects_failed_messages_without_requeue() ->
     message = FakeMessage(json.dumps({"task_id": "task-123", "status": "done"}).encode("utf-8"))
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
-    rabbit = FakeRabbitClient(config=make_config(), acquire_results=[channel])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise RuntimeError("boom")

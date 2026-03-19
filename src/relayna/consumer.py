@@ -163,7 +163,7 @@ class TaskConsumer:
 
     async def run_forever(self) -> None:
         queue_name: str | None = None
-        prefetch = self._prefetch or self._rabbitmq.config.prefetch_count
+        prefetch = self._prefetch or self._rabbitmq.topology.prefetch_count
         started = False
 
         while not self._stop.is_set():
@@ -182,7 +182,7 @@ class TaskConsumer:
                 queue = await channel.declare_queue(
                     queue_name,
                     durable=True,
-                    arguments=self._rabbitmq.config.task_queue_arguments() or None,
+                    arguments=self._rabbitmq.topology.task_queue_arguments() or None,
                 )
                 async with queue.iterator(arguments=self._consume_arguments or None, timeout=1.0) as iterator:
                     async for message in iterator:
@@ -479,8 +479,17 @@ class AggregationWorkerRuntime:
     async def stop(self) -> None:
         for consumer in self._consumers:
             consumer.stop()
-        if self._tasks:
+        try:
+            if self._tasks:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._tasks, return_exceptions=True),
+                    timeout=5.0,
+                )
+        except TimeoutError:
+            for task in self._tasks:
+                task.cancel()
             await asyncio.gather(*self._tasks, return_exceptions=True)
-        self._tasks = []
-        if self._owns_rabbitmq:
-            await self._rabbitmq.close()
+        finally:
+            self._tasks = []
+            if self._owns_rabbitmq:
+                await self._rabbitmq.close()

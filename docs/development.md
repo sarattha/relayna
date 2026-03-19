@@ -16,6 +16,19 @@ uv sync --extra dev
 uv run --extra dev pytest -q
 ```
 
+## Run real-stack smoke checks
+
+If you have RabbitMQ on `localhost:5672` and Redis on `localhost:6379`, run:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
+```
+
+The sharded smoke uses deployment-scoped aggregation queue names so repeated
+local runs do not collide on the default global shard queue names.
+
 ## Build artifacts
 
 ```bash

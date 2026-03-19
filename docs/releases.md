@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.1.0.tar.gz`
-- `dist/relayna-1.1.0-py3-none-any.whl`
+- `dist/relayna-1.1.5.tar.gz`
+- `dist/relayna-1.1.5-py3-none-any.whl`
 
 ## Versioning policy
 

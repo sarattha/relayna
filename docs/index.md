@@ -48,7 +48,6 @@ flowchart LR
 The semver-stable v1 API is the documented surface of:
 
 - `relayna.topology`
-- `relayna.config`
 - `relayna.contracts`
 - `relayna.rabbitmq`
 - `relayna.consumer`

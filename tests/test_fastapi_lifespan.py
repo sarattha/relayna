@@ -6,17 +6,17 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from relayna.config import RelaynaTopologyConfig
 from relayna.fastapi import create_status_router
 import relayna.fastapi as relayna_fastapi
+from relayna.topology import SharedTasksSharedStatusTopology
 
 
 class FakeRabbitClient:
     instances: list["FakeRabbitClient"] = []
     fail_initialize = False
 
-    def __init__(self, config: RelaynaTopologyConfig, *, connection_name: str) -> None:
-        self.config = config
+    def __init__(self, topology: SharedTasksSharedStatusTopology, *, connection_name: str) -> None:
+        self.topology = topology
         self.connection_name = connection_name
         self.initialize_calls = 0
         self.close_calls = 0
@@ -181,8 +181,8 @@ def patch_fastapi_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def topology_config() -> RelaynaTopologyConfig:
-    return RelaynaTopologyConfig(
+def topology() -> SharedTasksSharedStatusTopology:
+    return SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         tasks_exchange="tasks.exchange",
         tasks_queue="tasks.queue",
@@ -193,10 +193,10 @@ def topology_config() -> RelaynaTopologyConfig:
 
 
 @pytest.mark.asyncio
-async def test_lifespan_startup_and_shutdown_manage_runtime(topology_config: RelaynaTopologyConfig) -> None:
+async def test_lifespan_startup_and_shutdown_manage_runtime(topology: SharedTasksSharedStatusTopology) -> None:
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
         )
     )
@@ -233,7 +233,7 @@ async def test_get_relayna_runtime_raises_when_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_startup_failure_after_rabbit_init_cleans_up_resources(
-    topology_config: RelaynaTopologyConfig,
+    topology: SharedTasksSharedStatusTopology,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fail_create_task(coro: object, *, name: str | None = None) -> object:
@@ -245,7 +245,7 @@ async def test_startup_failure_after_rabbit_init_cleans_up_resources(
 
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
         )
     )
@@ -263,12 +263,12 @@ async def test_startup_failure_after_rabbit_init_cleans_up_resources(
 
 
 @pytest.mark.asyncio
-async def test_startup_failure_after_redis_creation_closes_redis(topology_config: RelaynaTopologyConfig) -> None:
+async def test_startup_failure_after_redis_creation_closes_redis(topology: SharedTasksSharedStatusTopology) -> None:
     FakeRabbitClient.fail_initialize = True
 
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
         )
     )
@@ -285,10 +285,10 @@ async def test_startup_failure_after_redis_creation_closes_redis(topology_config
 
 
 @pytest.mark.asyncio
-async def test_runtime_is_available_under_custom_state_key(topology_config: RelaynaTopologyConfig) -> None:
+async def test_runtime_is_available_under_custom_state_key(topology: SharedTasksSharedStatusTopology) -> None:
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
             app_state_key="custom_runtime",
         )
@@ -301,11 +301,11 @@ async def test_runtime_is_available_under_custom_state_key(topology_config: Rela
 
 
 def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
-    topology_config: RelaynaTopologyConfig,
+    topology: SharedTasksSharedStatusTopology,
 ) -> None:
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
         )
     )
@@ -360,10 +360,10 @@ def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
     ]
 
 
-def test_latest_status_route_returns_404_when_event_missing(topology_config: RelaynaTopologyConfig) -> None:
+def test_latest_status_route_returns_404_when_event_missing(topology: SharedTasksSharedStatusTopology) -> None:
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
         )
     )
@@ -382,10 +382,10 @@ def test_latest_status_route_returns_404_when_event_missing(topology_config: Rel
         assert response.json() == {"detail": "No status found for task_id 'missing-task'."}
 
 
-def test_latest_status_route_applies_output_adapter(topology_config: RelaynaTopologyConfig) -> None:
+def test_latest_status_route_applies_output_adapter(topology: SharedTasksSharedStatusTopology) -> None:
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
         )
     )
@@ -409,10 +409,10 @@ def test_latest_status_route_applies_output_adapter(topology_config: RelaynaTopo
         }
 
 
-def test_status_route_is_not_registered_when_store_is_missing(topology_config: RelaynaTopologyConfig) -> None:
+def test_status_route_is_not_registered_when_store_is_missing(topology: SharedTasksSharedStatusTopology) -> None:
     app = FastAPI(
         lifespan=relayna_fastapi.create_relayna_lifespan(
-            topology_config=topology_config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
         )
     )

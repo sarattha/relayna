@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5.tar.gz
 ```
 
 For local work in this repository:
@@ -39,8 +39,14 @@ API.
   shared status plane, plus shard-bound aggregation worker queues on the status
   exchange.
 
-`RelaynaTopologyConfig` still exists for backward compatibility, but new code
-should prefer the topology classes in `relayna.topology`.
+## Topology naming guidance
+
+Shared topology resources are usually namespaced by exchange, queue, and Redis
+prefix values. For sharded topologies, remember that the default aggregation
+queue names such as `aggregation.queue.0` and
+`aggregation.queue.shards.1-3` are global durable queues. If multiple
+deployments, smoke tests, or local stacks share one RabbitMQ vhost, give the
+aggregation queues a deployment-specific prefix too.
 
 ## Example: shared tasks + shared status
 
@@ -128,6 +134,8 @@ topology = SharedTasksSharedStatusShardedAggregationTopology(
     status_exchange="status.exchange",
     status_queue="status.queue",
     shard_count=4,
+    aggregation_queue_template="aggregation.queue.dev.{shard}",
+    aggregation_queue_name_prefix="aggregation.queue.dev.shards",
 )
 
 client = RelaynaRabbitClient(topology=topology)
@@ -200,6 +208,64 @@ finally:
 - one aggregation consumer owns shard `0`
 - a second aggregation consumer owns shards `1`, `2`, and `3`
 
+### Direct aggregation-queue probe example
+
+Use this when you want to validate shard routing directly against RabbitMQ in a
+real environment.
+
+```python
+import json
+
+from relayna.contracts import StatusEventEnvelope
+from relayna.rabbitmq import RelaynaRabbitClient
+
+probe = RelaynaRabbitClient(topology=topology, connection_name="aggregation-probe")
+await probe.initialize()
+
+queue_name = await probe.ensure_aggregation_queue(shards=[0, 1, 2, 3])
+await probe.publish_aggregation_status(
+    StatusEventEnvelope(
+        task_id="agg-task-123",
+        status="aggregating",
+        message="Aggregation input ready.",
+        meta={"parent_task_id": "parent-123"},
+    )
+)
+
+channel = await probe.acquire_channel(prefetch=1)
+queue = await channel.declare_queue(
+    queue_name,
+    durable=True,
+    arguments=topology.aggregation_queue_arguments() or None,
+)
+message = await queue.get(timeout=5.0, fail=True)
+payload = json.loads(message.body.decode("utf-8"))
+await message.ack()
+```
+
+`payload["meta"]["aggregation_shard"]` tells you which shard routing key was
+used, and the fact that the queue received the message proves that the
+aggregation queue binding is live.
+
+### Custom SSE terminal statuses
+
+If your aggregation workflow finishes on a status other than `completed` or
+`failed`, pass a `TerminalStatusSet` to FastAPI so `/events/{task_id}` streams
+terminate correctly.
+
+```python
+from relayna.contracts import TerminalStatusSet
+from relayna.fastapi import create_relayna_lifespan
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        sse_terminal_statuses=TerminalStatusSet({"aggregation-processed"}),
+    )
+)
+```
+
 ## Redis-backed status history
 
 ```python
@@ -236,3 +302,14 @@ For the sharded aggregation topology:
 2. Task workers publish aggregation work with `publish_aggregation_status(...)`.
 3. Aggregation workers consume shard-owned queues through `AggregationWorkerRuntime`.
 4. `StatusHub`, `StreamHistoryReader`, and SSE still observe aggregation events from the shared status exchange.
+
+## Real-environment smoke commands
+
+If RabbitMQ is running at `localhost:5672` and Redis at `localhost:6379`, these
+scripts exercise both topology families against the real stack:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
+```

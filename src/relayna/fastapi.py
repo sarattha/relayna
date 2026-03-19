@@ -10,7 +10,6 @@ from fastapi import APIRouter, FastAPI, Header, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
 
-from .config import RelaynaTopologyConfig
 from .contracts import TerminalStatusSet
 from .history import StreamHistoryReader, StreamOffset
 from .rabbitmq import RelaynaRabbitClient
@@ -155,8 +154,7 @@ async def _shutdown_runtime(runtime: RelaynaRuntime) -> None:
 
 def create_relayna_lifespan(
     *,
-    topology: RelaynaTopology | None = None,
-    topology_config: RelaynaTopologyConfig | None = None,
+    topology: RelaynaTopology,
     redis_url: str,
     store_prefix: str = "relayna",
     store_ttl_seconds: int | None = 86400,
@@ -171,11 +169,8 @@ def create_relayna_lifespan(
     history_output_adapter: HistoryOutputAdapter | None = None,
     app_state_key: str = "relayna",
 ) -> _RelaynaLifespan:
-    resolved_topology = topology or topology_config
-    if resolved_topology is None:
-        raise ValueError("Pass topology=... (preferred) or topology_config=... for legacy compatibility.")
     return _RelaynaLifespan(
-        topology=resolved_topology,
+        topology=topology,
         redis_url=redis_url,
         store_prefix=store_prefix,
         store_ttl_seconds=store_ttl_seconds,
