@@ -281,3 +281,26 @@ async def test_sharded_aggregation_topology_does_not_predeclare_all_aggregation_
 
     declared_names = [name for name, _durable, _arguments in channel.declare_queue_calls]
     assert declared_names == ["status.queue", "tasks.queue"]
+
+
+@pytest.mark.asyncio
+async def test_sharded_topology_declare_queues_works_on_python_313_slots_dataclass() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    queue = FakeBindingQueue("status.queue")
+    channel = FakeTaskChannel(queue)
+
+    await topology.declare_queues(
+        channel,
+        tasks_exchange=object(),
+        status_exchange=object(),
+    )
+
+    assert [name for name, _durable, _arguments in channel.declare_queue_calls] == ["status.queue", "tasks.queue"]
