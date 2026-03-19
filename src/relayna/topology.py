@@ -344,6 +344,23 @@ class SharedTasksSharedStatusShardedAggregationTopology(SharedTasksSharedStatusT
     def aggregation_shard(self, event: BaseModel | Mapping[str, Any]) -> int:
         return self._aggregation_routing().shard_for_event(event)
 
+    async def declare_queues(
+        self,
+        channel: AbstractRobustChannel,
+        *,
+        tasks_exchange: AbstractRobustExchange,
+        status_exchange: AbstractRobustExchange,
+    ) -> None:
+        # Python 3.13 can raise ``TypeError: super(type, obj)`` for zero-argument
+        # ``super()`` inside ``@dataclass(slots=True)`` subclasses. Using the
+        # explicit two-argument form keeps normal MRO behavior while avoiding that
+        # runtime failure.
+        await super(SharedTasksSharedStatusShardedAggregationTopology, self).declare_queues(
+            channel=channel,
+            tasks_exchange=tasks_exchange,
+            status_exchange=status_exchange,
+        )
+
     async def ensure_aggregation_queue(
         self,
         channel: AbstractChannel,
