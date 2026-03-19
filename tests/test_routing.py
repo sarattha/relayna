@@ -231,6 +231,33 @@ async def test_sharded_topology_binds_subset_queue_to_multiple_shards() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sharded_topology_binds_custom_aggregation_queue_name() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    queue = FakeBindingQueue("aggregation.queue.custom")
+    channel = FakeTaskChannel(queue)
+    exchange = object()
+
+    queue_name = await topology.ensure_aggregation_queue(
+        channel,
+        status_exchange=exchange,
+        shards=[2, 0],
+        queue_name="aggregation.queue.custom",
+    )
+
+    assert queue_name == "aggregation.queue.custom"
+    assert channel.declare_queue_calls == [("aggregation.queue.custom", True, None)]
+    assert queue.bind_calls == [(exchange, "agg.0"), (exchange, "agg.2")]
+
+
+@pytest.mark.asyncio
 async def test_sharded_aggregation_topology_does_not_predeclare_all_aggregation_queues() -> None:
     topology = SharedTasksSharedStatusShardedAggregationTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",

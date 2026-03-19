@@ -344,19 +344,6 @@ class SharedTasksSharedStatusShardedAggregationTopology(SharedTasksSharedStatusT
     def aggregation_shard(self, event: BaseModel | Mapping[str, Any]) -> int:
         return self._aggregation_routing().shard_for_event(event)
 
-    async def declare_queues(
-        self,
-        channel: AbstractRobustChannel,
-        *,
-        tasks_exchange: AbstractRobustExchange,
-        status_exchange: AbstractRobustExchange,
-    ) -> None:
-        await super(SharedTasksSharedStatusShardedAggregationTopology, self).declare_queues(
-            channel,
-            tasks_exchange=tasks_exchange,
-            status_exchange=status_exchange,
-        )
-
     async def ensure_aggregation_queue(
         self,
         channel: AbstractChannel,
