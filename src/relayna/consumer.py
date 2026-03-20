@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -10,6 +11,8 @@ from pydantic import ValidationError
 
 from .contracts import StatusEventEnvelope, TaskEnvelope
 from .observability import (
+    ConsumerDeadLetterPublished,
+    ConsumerRetryScheduled,
     ObservationSink,
     TaskConsumerLoopError,
     TaskConsumerStarted,
@@ -20,7 +23,7 @@ from .observability import (
     TaskMessageRejected,
     emit_observation,
 )
-from .rabbitmq import RelaynaRabbitClient
+from .rabbitmq import RelaynaRabbitClient, RetryInfrastructure
 from .topology import RelaynaTopology
 
 
@@ -47,6 +50,22 @@ class LifecycleStatusConfig:
 
 
 @dataclass(slots=True)
+class RetryPolicy:
+    max_retries: int = 3
+    delay_ms: int = 30000
+    retry_queue_suffix: str = ".retry"
+    dead_letter_queue_suffix: str = ".dlq"
+
+
+@dataclass(slots=True)
+class RetryStatusConfig:
+    enabled: bool = False
+    retrying_status: str = "retrying"
+    dead_lettered_status: str = "failed"
+    include_error_message: bool = True
+
+
+@dataclass(slots=True)
 class TaskContext:
     rabbitmq: RelaynaRabbitClient
     consumer_name: str
@@ -55,6 +74,9 @@ class TaskContext:
     delivery_tag: int | None
     redelivered: bool
     _task_id: str = field(repr=False)
+    retry_attempt: int = 0
+    max_retries: int | None = None
+    source_queue_name: str | None = None
 
     async def publish_status(
         self,
@@ -144,6 +166,8 @@ class TaskConsumer:
         consume_arguments: dict[str, Any] | None = None,
         failure_action: FailureAction = FailureAction.REJECT,
         lifecycle_statuses: LifecycleStatusConfig | None = None,
+        retry_policy: RetryPolicy | None = None,
+        retry_statuses: RetryStatusConfig | None = None,
         idle_retry_seconds: float = 2.0,
         observation_sink: ObservationSink | None = None,
     ) -> None:
@@ -154,6 +178,8 @@ class TaskConsumer:
         self._consume_arguments = consume_arguments or {}
         self._failure_action = failure_action
         self._lifecycle_statuses = lifecycle_statuses or LifecycleStatusConfig()
+        self._retry_policy = retry_policy
+        self._retry_statuses = retry_statuses or RetryStatusConfig()
         self._idle_retry_seconds = idle_retry_seconds
         self._observation_sink = observation_sink
         self._stop = asyncio.Event()
@@ -163,6 +189,7 @@ class TaskConsumer:
 
     async def run_forever(self) -> None:
         queue_name: str | None = None
+        retry_infrastructure: RetryInfrastructure | None = None
         prefetch = self._prefetch or self._rabbitmq.topology.prefetch_count
         started = False
 
@@ -171,6 +198,13 @@ class TaskConsumer:
             try:
                 if queue_name is None:
                     queue_name = await self._rabbitmq.ensure_tasks_queue()
+                if retry_infrastructure is None and self._retry_policy is not None:
+                    retry_infrastructure = await self._rabbitmq.ensure_retry_infrastructure(
+                        source_queue_name=queue_name,
+                        delay_ms=self._retry_policy.delay_ms,
+                        retry_queue_suffix=self._retry_policy.retry_queue_suffix,
+                        dead_letter_queue_suffix=self._retry_policy.dead_letter_queue_suffix,
+                    )
                 if not started:
                     await emit_observation(
                         self._observation_sink,
@@ -186,7 +220,11 @@ class TaskConsumer:
                 )
                 async with queue.iterator(arguments=self._consume_arguments or None, timeout=1.0) as iterator:
                     async for message in iterator:
-                        await self._handle_message(message)
+                        await self._handle_message(
+                            message,
+                            source_queue_name=queue_name,
+                            retry_infrastructure=retry_infrastructure,
+                        )
                         if self._stop.is_set():
                             break
             except asyncio.CancelledError:
@@ -215,20 +253,38 @@ class TaskConsumer:
                     except Exception:
                         pass
 
-    async def _handle_message(self, message: Any) -> None:
+    async def _handle_message(
+        self,
+        message: Any,
+        *,
+        source_queue_name: str,
+        retry_infrastructure: RetryInfrastructure | None,
+    ) -> None:
         try:
             payload = json.loads(message.body.decode("utf-8", errors="replace"))
         except Exception:
-            await message.reject(requeue=False)
-            await emit_observation(
-                self._observation_sink,
-                TaskMessageRejected(
-                    consumer_name=self._consumer_name,
+            if self._retry_policy is None:
+                await message.reject(requeue=False)
+                await emit_observation(
+                    self._observation_sink,
+                    TaskMessageRejected(
+                        consumer_name=self._consumer_name,
+                        task_id=None,
+                        requeue=False,
+                        reason="malformed_json",
+                    ),
+                )
+            else:
+                await self._publish_dead_letter(
+                    message,
+                    retry_infrastructure=retry_infrastructure,
+                    source_queue_name=source_queue_name,
                     task_id=None,
-                    requeue=False,
+                    retry_attempt=_retry_attempt(message),
                     reason="malformed_json",
-                ),
-            )
+                    exception_type=None,
+                )
+                await message.ack()
             return
 
         await emit_observation(
@@ -244,18 +300,31 @@ class TaskConsumer:
         try:
             task = TaskEnvelope.model_validate(payload)
         except ValidationError:
-            await message.reject(requeue=False)
-            await emit_observation(
-                self._observation_sink,
-                TaskMessageRejected(
-                    consumer_name=self._consumer_name,
+            if self._retry_policy is None:
+                await message.reject(requeue=False)
+                await emit_observation(
+                    self._observation_sink,
+                    TaskMessageRejected(
+                        consumer_name=self._consumer_name,
+                        task_id=_coerce_task_id(payload),
+                        requeue=False,
+                        reason="invalid_envelope",
+                    ),
+                )
+            else:
+                await self._publish_dead_letter(
+                    message,
+                    retry_infrastructure=retry_infrastructure,
+                    source_queue_name=source_queue_name,
                     task_id=_coerce_task_id(payload),
-                    requeue=False,
+                    retry_attempt=_retry_attempt(message),
                     reason="invalid_envelope",
-                ),
-            )
+                    exception_type="ValidationError",
+                )
+                await message.ack()
             return
 
+        current_retry_attempt = _retry_attempt(message)
         context = TaskContext(
             rabbitmq=self._rabbitmq,
             consumer_name=self._consumer_name,
@@ -264,6 +333,9 @@ class TaskConsumer:
             delivery_tag=getattr(message, "delivery_tag", None),
             redelivered=bool(getattr(message, "redelivered", False)),
             _task_id=task.task_id,
+            retry_attempt=current_retry_attempt,
+            max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
+            source_queue_name=source_queue_name,
         )
 
         try:
@@ -286,36 +358,63 @@ class TaskConsumer:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            failed_message = "Task processing failed."
-            if self._lifecycle_statuses.include_error_message:
-                text = str(exc).strip()
-                if text:
-                    failed_message = text
-            await self._publish_lifecycle_status(
-                context,
-                status=self._lifecycle_statuses.failed_status,
-                message=failed_message,
-            )
-            requeue = self._failure_action is FailureAction.REQUEUE
             await emit_observation(
                 self._observation_sink,
                 TaskHandlerFailed(
                     consumer_name=self._consumer_name,
                     task_id=task.task_id,
                     exception_type=type(exc).__name__,
-                    requeue=requeue,
+                    requeue=self._retry_policy is None and self._failure_action is FailureAction.REQUEUE,
                 ),
             )
-            await message.reject(requeue=requeue)
-            await emit_observation(
-                self._observation_sink,
-                TaskMessageRejected(
-                    consumer_name=self._consumer_name,
+            if self._retry_policy is None:
+                failed_message = _failure_message(exc, include_error_message=self._lifecycle_statuses.include_error_message)
+                await self._publish_lifecycle_status(
+                    context,
+                    status=self._lifecycle_statuses.failed_status,
+                    message=failed_message,
+                )
+                requeue = self._failure_action is FailureAction.REQUEUE
+                await message.reject(requeue=requeue)
+                await emit_observation(
+                    self._observation_sink,
+                    TaskMessageRejected(
+                        consumer_name=self._consumer_name,
+                        task_id=task.task_id,
+                        requeue=requeue,
+                        reason="handler_error",
+                    ),
+                )
+                return
+
+            max_retries = self._retry_policy.max_retries
+            if current_retry_attempt < max_retries:
+                next_attempt = current_retry_attempt + 1
+                await self._publish_retry(
+                    message,
+                    retry_infrastructure=retry_infrastructure,
+                    source_queue_name=source_queue_name,
                     task_id=task.task_id,
-                    requeue=requeue,
+                    retry_attempt=next_attempt,
+                    max_retries=max_retries,
                     reason="handler_error",
-                ),
+                    exception_type=type(exc).__name__,
+                )
+                await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
+                await message.ack()
+                return
+
+            await self._publish_dead_letter(
+                message,
+                retry_infrastructure=retry_infrastructure,
+                source_queue_name=source_queue_name,
+                task_id=task.task_id,
+                retry_attempt=current_retry_attempt,
+                reason="handler_error",
+                exception_type=type(exc).__name__,
             )
+            await self._publish_dead_letter_status(context, exc)
+            await message.ack()
 
     async def _publish_lifecycle_status(self, context: TaskContext, *, status: str, message: str) -> None:
         if not self._lifecycle_statuses.enabled:
@@ -335,6 +434,111 @@ class TaskConsumer:
         except Exception:
             return
 
+    async def _publish_retry_status(self, context: TaskContext, *, next_attempt: int, max_retries: int) -> None:
+        if not self._retry_statuses.enabled:
+            return
+        try:
+            await context.publish_status(
+                status=self._retry_statuses.retrying_status,
+                message=f"Task processing failed. Scheduling retry {next_attempt}/{max_retries}.",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+
+    async def _publish_dead_letter_status(self, context: TaskContext, exc: Exception) -> None:
+        if not self._retry_statuses.enabled:
+            return
+        try:
+            await context.publish_status(
+                status=self._retry_statuses.dead_lettered_status,
+                message=_failure_message(exc, include_error_message=self._retry_statuses.include_error_message),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+
+    async def _publish_retry(
+        self,
+        message: Any,
+        *,
+        retry_infrastructure: RetryInfrastructure | None,
+        source_queue_name: str,
+        task_id: str | None,
+        retry_attempt: int,
+        max_retries: int,
+        reason: str,
+        exception_type: str | None,
+    ) -> None:
+        if retry_infrastructure is None:
+            raise RuntimeError("Retry infrastructure is not initialized")
+        await self._rabbitmq.publish_raw_to_queue(
+            retry_infrastructure.retry_queue_name,
+            message.body,
+            correlation_id=getattr(message, "correlation_id", None),
+            headers=_retry_headers(
+                message,
+                source_queue_name=source_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=max_retries,
+                reason=reason,
+                exception_type=exception_type,
+            ),
+            content_type=getattr(message, "content_type", "application/json"),
+        )
+        await emit_observation(
+            self._observation_sink,
+            ConsumerRetryScheduled(
+                consumer_name=self._consumer_name,
+                task_id=task_id,
+                queue_name=retry_infrastructure.retry_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=max_retries,
+                reason=reason,
+            ),
+        )
+
+    async def _publish_dead_letter(
+        self,
+        message: Any,
+        *,
+        retry_infrastructure: RetryInfrastructure | None,
+        source_queue_name: str,
+        task_id: str | None,
+        retry_attempt: int,
+        reason: str,
+        exception_type: str | None,
+    ) -> None:
+        if retry_infrastructure is None or self._retry_policy is None:
+            raise RuntimeError("Retry infrastructure is not initialized")
+        await self._rabbitmq.publish_raw_to_queue(
+            retry_infrastructure.dead_letter_queue_name,
+            message.body,
+            correlation_id=getattr(message, "correlation_id", None),
+            headers=_retry_headers(
+                message,
+                source_queue_name=source_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=self._retry_policy.max_retries,
+                reason=reason,
+                exception_type=exception_type,
+            ),
+            content_type=getattr(message, "content_type", "application/json"),
+        )
+        await emit_observation(
+            self._observation_sink,
+            ConsumerDeadLetterPublished(
+                consumer_name=self._consumer_name,
+                task_id=task_id,
+                queue_name=retry_infrastructure.dead_letter_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=self._retry_policy.max_retries,
+                reason=reason,
+            ),
+        )
+
 
 def _coerce_task_id(payload: Any) -> str | None:
     if isinstance(payload, dict):
@@ -342,6 +546,47 @@ def _coerce_task_id(payload: Any) -> str | None:
         if isinstance(task_id, str):
             return task_id
     return None
+
+
+def _message_headers(message: Any) -> dict[str, Any]:
+    headers = getattr(message, "headers", None)
+    if isinstance(headers, Mapping):
+        return dict(headers)
+    return {}
+
+
+def _retry_attempt(message: Any) -> int:
+    value = _message_headers(message).get("x-relayna-retry-attempt")
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _retry_headers(
+    message: Any,
+    *,
+    source_queue_name: str,
+    retry_attempt: int,
+    max_retries: int,
+    reason: str,
+    exception_type: str | None,
+) -> dict[str, Any]:
+    headers = _message_headers(message)
+    headers["x-relayna-retry-attempt"] = int(retry_attempt)
+    headers["x-relayna-max-retries"] = int(max_retries)
+    headers["x-relayna-source-queue"] = source_queue_name
+    headers["x-relayna-failure-reason"] = reason
+    headers["x-relayna-exception-type"] = exception_type
+    return headers
+
+
+def _failure_message(exc: Exception, *, include_error_message: bool) -> str:
+    if include_error_message:
+        text = str(exc).strip()
+        if text:
+            return text
+    return "Task processing failed."
 
 
 class AggregationConsumer:
@@ -357,7 +602,10 @@ class AggregationConsumer:
         consumer_name: str = "relayna-aggregation-consumer",
         prefetch: int | None = None,
         consume_arguments: dict[str, Any] | None = None,
+        retry_policy: RetryPolicy | None = None,
+        retry_statuses: RetryStatusConfig | None = None,
         idle_retry_seconds: float = 2.0,
+        observation_sink: ObservationSink | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -366,7 +614,10 @@ class AggregationConsumer:
         self._consumer_name = consumer_name
         self._prefetch = prefetch
         self._consume_arguments = consume_arguments or {}
+        self._retry_policy = retry_policy
+        self._retry_statuses = retry_statuses or RetryStatusConfig()
         self._idle_retry_seconds = idle_retry_seconds
+        self._observation_sink = observation_sink
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -374,6 +625,7 @@ class AggregationConsumer:
 
     async def run_forever(self) -> None:
         queue_name: str | None = self._queue_name
+        retry_infrastructure: RetryInfrastructure | None = None
         prefetch = self._prefetch or self._rabbitmq.topology.prefetch_count
 
         while not self._stop.is_set():
@@ -383,6 +635,13 @@ class AggregationConsumer:
                     shards=self._shards,
                     queue_name=queue_name,
                 )
+                if retry_infrastructure is None and self._retry_policy is not None:
+                    retry_infrastructure = await self._rabbitmq.ensure_retry_infrastructure(
+                        source_queue_name=queue_name,
+                        delay_ms=self._retry_policy.delay_ms,
+                        retry_queue_suffix=self._retry_policy.retry_queue_suffix,
+                        dead_letter_queue_suffix=self._retry_policy.dead_letter_queue_suffix,
+                    )
                 channel = await self._rabbitmq.acquire_channel(prefetch=prefetch)
                 queue = await channel.declare_queue(
                     queue_name,
@@ -391,13 +650,43 @@ class AggregationConsumer:
                 )
                 async with queue.iterator(arguments=self._consume_arguments or None, timeout=1.0) as iterator:
                     async for message in iterator:
+                        payload: Any = None
                         try:
                             payload = json.loads(message.body.decode("utf-8", errors="replace"))
-                            event = StatusEventEnvelope.model_validate(payload)
                         except Exception:
-                            await message.reject(requeue=False)
+                            if self._retry_policy is None:
+                                await message.reject(requeue=False)
+                            else:
+                                await self._publish_dead_letter(
+                                    message,
+                                    retry_infrastructure=retry_infrastructure,
+                                    source_queue_name=queue_name,
+                                    task_id=None,
+                                    retry_attempt=_retry_attempt(message),
+                                    reason="malformed_json",
+                                    exception_type=None,
+                                )
+                                await message.ack()
+                            continue
+                        try:
+                            event = StatusEventEnvelope.model_validate(payload)
+                        except ValidationError:
+                            if self._retry_policy is None:
+                                await message.reject(requeue=False)
+                            else:
+                                await self._publish_dead_letter(
+                                    message,
+                                    retry_infrastructure=retry_infrastructure,
+                                    source_queue_name=queue_name,
+                                    task_id=_coerce_task_id(payload),
+                                    retry_attempt=_retry_attempt(message),
+                                    reason="invalid_envelope",
+                                    exception_type="ValidationError",
+                                )
+                                await message.ack()
                             continue
 
+                        current_retry_attempt = _retry_attempt(message)
                         context = TaskContext(
                             rabbitmq=self._rabbitmq,
                             consumer_name=self._consumer_name,
@@ -406,13 +695,50 @@ class AggregationConsumer:
                             delivery_tag=getattr(message, "delivery_tag", None),
                             redelivered=bool(getattr(message, "redelivered", False)),
                             _task_id=event.task_id,
+                            retry_attempt=current_retry_attempt,
+                            max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
+                            source_queue_name=queue_name,
                         )
                         try:
                             await self._handler(event, context)
                         except asyncio.CancelledError:
                             raise
-                        except Exception:
-                            await message.reject(requeue=False)
+                        except Exception as exc:
+                            if self._retry_policy is None:
+                                await message.reject(requeue=False)
+                                continue
+                            max_retries = self._retry_policy.max_retries
+                            if current_retry_attempt < max_retries:
+                                next_attempt = current_retry_attempt + 1
+                                await self._publish_retry(
+                                    message,
+                                    retry_infrastructure=retry_infrastructure,
+                                    source_queue_name=queue_name,
+                                    task_id=event.task_id,
+                                    retry_attempt=next_attempt,
+                                    max_retries=max_retries,
+                                    reason="handler_error",
+                                    exception_type=type(exc).__name__,
+                                )
+                                await self._publish_retry_status(
+                                    context,
+                                    next_attempt=next_attempt,
+                                    max_retries=max_retries,
+                                    meta=event.meta,
+                                )
+                                await message.ack()
+                                continue
+                            await self._publish_dead_letter(
+                                message,
+                                retry_infrastructure=retry_infrastructure,
+                                source_queue_name=queue_name,
+                                task_id=event.task_id,
+                                retry_attempt=current_retry_attempt,
+                                reason="handler_error",
+                                exception_type=type(exc).__name__,
+                            )
+                            await self._publish_dead_letter_status(context, exc, meta=event.meta)
+                            await message.ack()
                             continue
                         await message.ack()
                         if self._stop.is_set():
@@ -434,6 +760,126 @@ class AggregationConsumer:
                     except Exception:
                         pass
 
+    async def _publish_retry_status(
+        self,
+        context: TaskContext,
+        *,
+        next_attempt: int,
+        max_retries: int,
+        meta: Mapping[str, Any],
+    ) -> None:
+        if not self._retry_statuses.enabled:
+            return
+        try:
+            await context.publish_aggregation_status(
+                status=self._retry_statuses.retrying_status,
+                message=f"Task processing failed. Scheduling retry {next_attempt}/{max_retries}.",
+                meta=dict(meta),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+
+    async def _publish_dead_letter_status(
+        self,
+        context: TaskContext,
+        exc: Exception,
+        *,
+        meta: Mapping[str, Any],
+    ) -> None:
+        if not self._retry_statuses.enabled:
+            return
+        try:
+            await context.publish_aggregation_status(
+                status=self._retry_statuses.dead_lettered_status,
+                message=_failure_message(exc, include_error_message=self._retry_statuses.include_error_message),
+                meta=dict(meta),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
+
+    async def _publish_retry(
+        self,
+        message: Any,
+        *,
+        retry_infrastructure: RetryInfrastructure | None,
+        source_queue_name: str,
+        task_id: str | None,
+        retry_attempt: int,
+        max_retries: int,
+        reason: str,
+        exception_type: str | None,
+    ) -> None:
+        if retry_infrastructure is None:
+            raise RuntimeError("Retry infrastructure is not initialized")
+        await self._rabbitmq.publish_raw_to_queue(
+            retry_infrastructure.retry_queue_name,
+            message.body,
+            correlation_id=getattr(message, "correlation_id", None),
+            headers=_retry_headers(
+                message,
+                source_queue_name=source_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=max_retries,
+                reason=reason,
+                exception_type=exception_type,
+            ),
+            content_type=getattr(message, "content_type", "application/json"),
+        )
+        await emit_observation(
+            self._observation_sink,
+            ConsumerRetryScheduled(
+                consumer_name=self._consumer_name,
+                task_id=task_id,
+                queue_name=retry_infrastructure.retry_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=max_retries,
+                reason=reason,
+            ),
+        )
+
+    async def _publish_dead_letter(
+        self,
+        message: Any,
+        *,
+        retry_infrastructure: RetryInfrastructure | None,
+        source_queue_name: str,
+        task_id: str | None,
+        retry_attempt: int,
+        reason: str,
+        exception_type: str | None,
+    ) -> None:
+        if retry_infrastructure is None or self._retry_policy is None:
+            raise RuntimeError("Retry infrastructure is not initialized")
+        await self._rabbitmq.publish_raw_to_queue(
+            retry_infrastructure.dead_letter_queue_name,
+            message.body,
+            correlation_id=getattr(message, "correlation_id", None),
+            headers=_retry_headers(
+                message,
+                source_queue_name=source_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=self._retry_policy.max_retries,
+                reason=reason,
+                exception_type=exception_type,
+            ),
+            content_type=getattr(message, "content_type", "application/json"),
+        )
+        await emit_observation(
+            self._observation_sink,
+            ConsumerDeadLetterPublished(
+                consumer_name=self._consumer_name,
+                task_id=task_id,
+                queue_name=retry_infrastructure.dead_letter_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=self._retry_policy.max_retries,
+                reason=reason,
+            ),
+        )
+
 
 class AggregationWorkerRuntime:
     """Owns one or more aggregation consumer loops outside the FastAPI lifecycle."""
@@ -449,6 +895,9 @@ class AggregationWorkerRuntime:
         consumer_name_prefix: str = "relayna-aggregation-worker",
         prefetch: int | None = None,
         consume_arguments: dict[str, Any] | None = None,
+        retry_policy: RetryPolicy | None = None,
+        retry_statuses: RetryStatusConfig | None = None,
+        observation_sink: ObservationSink | None = None,
     ) -> None:
         if rabbitmq is None and topology is None:
             raise ValueError("Pass rabbitmq=... or topology=... to AggregationWorkerRuntime.")
@@ -462,6 +911,9 @@ class AggregationWorkerRuntime:
                 consumer_name=f"{consumer_name_prefix}-{index}",
                 prefetch=prefetch,
                 consume_arguments=consume_arguments,
+                retry_policy=retry_policy,
+                retry_statuses=retry_statuses,
+                observation_sink=observation_sink,
             )
             for index, shards in enumerate(shard_groups)
         ]

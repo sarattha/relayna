@@ -34,11 +34,13 @@ Canonical message envelopes and compatibility helpers:
 RabbitMQ publishing and topology helpers:
 
 - `RelaynaRabbitClient`
+- `RetryInfrastructure`
 - `DirectQueuePublisher`
 - `declare_stream_queue`
 
 Use this module when you want topology-driven exchange and queue declaration
-plus JSON task, status, and aggregation-status publishing.
+plus JSON task, status, and aggregation-status publishing. It also provides
+raw queue publishing and retry/DLQ queue declaration helpers for worker paths.
 
 ## `relayna.consumer`
 
@@ -52,10 +54,13 @@ Worker-side helpers:
 - `AggregationHandler`
 - `FailureAction`
 - `LifecycleStatusConfig`
+- `RetryPolicy`
+- `RetryStatusConfig`
 
 This module provides validated task delivery, shard-aware aggregation
-consumption, optional lifecycle status publishing, and a helper runtime for
-aggregation workers outside FastAPI.
+consumption, optional lifecycle status publishing, broker-delayed retry and
+dead-letter behavior, and a helper runtime for aggregation workers outside
+FastAPI.
 
 ## `relayna.status_store`
 

@@ -98,7 +98,7 @@ This exposes:
 ### Task worker example
 
 ```python
-from relayna.consumer import TaskConsumer, TaskContext
+from relayna.consumer import RetryPolicy, TaskConsumer, TaskContext
 from relayna.contracts import TaskEnvelope
 
 
@@ -107,9 +107,17 @@ async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
     await context.publish_status(status="completed", message="Task processing completed.")
 
 
-consumer = TaskConsumer(rabbitmq=client, handler=handle_task)
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+)
 await consumer.run_forever()
 ```
+
+When `retry_policy` is enabled, Relayna creates a broker-delayed retry queue and
+a per-source DLQ. Malformed JSON and invalid envelopes go straight to the DLQ;
+handler failures retry until `max_retries` is exhausted, then dead-letter.
 
 ## Example: shared tasks + shared status + sharded aggregation
 
@@ -145,7 +153,7 @@ await client.initialize()
 ### Task worker publishes aggregation work
 
 ```python
-from relayna.consumer import TaskConsumer, TaskContext
+from relayna.consumer import RetryPolicy, RetryStatusConfig, TaskConsumer, TaskContext
 from relayna.contracts import TaskEnvelope
 
 
@@ -160,7 +168,12 @@ async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
     )
 
 
-consumer = TaskConsumer(rabbitmq=client, handler=handle_task)
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=15000),
+    retry_statuses=RetryStatusConfig(enabled=True),
+)
 await consumer.run_forever()
 ```
 
@@ -174,7 +187,7 @@ like `agg.0`.
 ```python
 import asyncio
 
-from relayna.consumer import AggregationWorkerRuntime, TaskContext
+from relayna.consumer import AggregationWorkerRuntime, RetryPolicy, RetryStatusConfig, TaskContext
 from relayna.contracts import StatusEventEnvelope
 
 
@@ -194,6 +207,8 @@ runtime = AggregationWorkerRuntime(
     topology=topology,
     handler=aggregate,
     shard_groups=[[0], [1, 2, 3]],
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=15000),
+    retry_statuses=RetryStatusConfig(enabled=True),
 )
 
 await runtime.start()

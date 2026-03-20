@@ -6,6 +6,7 @@ around task processing and live status delivery.
 It provides:
 
 - RabbitMQ task publishing and shared status fanout
+- Broker-delayed retry and dead-letter utilities for worker consumers
 - Named RabbitMQ topology classes for default and sharded aggregation flows
 - Redis-backed status history and pubsub
 - Server-Sent Events replay plus live updates
@@ -101,7 +102,8 @@ durable queues, so local smoke runs or multiple environments can interfere if
 they reuse the same queue names.
 
 See [docs/getting-started.md](docs/getting-started.md) for concrete examples of
-both topologies, including `AggregationWorkerRuntime`.
+both topologies, including `AggregationWorkerRuntime`, `RetryPolicy`, and
+retry/DLQ-enabled workers.
 
 ## Real-Stack Smoke Commands
 
