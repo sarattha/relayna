@@ -41,6 +41,8 @@ RabbitMQ publishing and topology helpers:
 Use this module when you want topology-driven exchange and queue declaration
 plus JSON task, status, and aggregation-status publishing. It also provides
 raw queue publishing and retry/DLQ queue declaration helpers for worker paths.
+Relayna retry metadata is carried in RabbitMQ `x-relayna-*` headers rather than
+rewriting the payload body.
 
 ## `relayna.consumer`
 
@@ -95,4 +97,5 @@ FastAPI integration helpers:
 ## `relayna.observability`
 
 Structured observation types and helper functions for feeding runtime events
-into logging, metrics, tracing, or debugging sinks.
+into logging, metrics, tracing, or debugging sinks. See
+[Observability](observability.md) for detailed event groups and usage examples.

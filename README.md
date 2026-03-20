@@ -103,7 +103,8 @@ they reuse the same queue names.
 
 See [docs/getting-started.md](docs/getting-started.md) for concrete examples of
 both topologies, including `AggregationWorkerRuntime`, `RetryPolicy`, and
-retry/DLQ-enabled workers.
+retry/DLQ-enabled workers. The getting-started guide also documents every
+`x-relayna-*` retry header with a concrete DLQ example.
 
 ## Real-Stack Smoke Commands
 
@@ -136,6 +137,7 @@ The package root is intentionally minimal and only exports `relayna.__version__`
 ## Docs and releases
 
 - Documentation: [sarattha.github.io/relayna](https://sarattha.github.io/relayna/)
+- Observability guide: [docs/observability.md](docs/observability.md)
 - GitHub Releases: [github.com/sarattha/relayna/releases](https://github.com/sarattha/relayna/releases)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)

@@ -95,6 +95,8 @@ This exposes:
 - `GET /history`
 - `GET /status/{task_id}`
 
+For a detailed observability walkthrough, see [Observability](observability.md).
+
 ### Task worker example
 
 ```python
@@ -118,6 +120,61 @@ await consumer.run_forever()
 When `retry_policy` is enabled, Relayna creates a broker-delayed retry queue and
 a per-source DLQ. Malformed JSON and invalid envelopes go straight to the DLQ;
 handler failures retry until `max_retries` is exhausted, then dead-letter.
+
+### Retry and DLQ headers
+
+Relayna keeps retry metadata in RabbitMQ message headers. The task or
+aggregation payload body is not rewritten.
+
+Headers added by Relayna:
+
+- `headers["x-relayna-retry-attempt"]`
+  The current retry attempt number on the republished message.
+  `0` means the original delivery. `1` means the first delayed retry.
+- `headers["x-relayna-max-retries"]`
+  The configured retry limit for this consumer. Relayna compares the current
+  attempt against this value to decide whether to retry again or dead-letter.
+- `headers["x-relayna-source-queue"]`
+  The original worker queue that owns the message. Relayna uses this to make it
+  clear which queue the retry or DLQ message came from.
+- `headers["x-relayna-failure-reason"]`
+  A short machine-readable failure category such as `handler_error`,
+  `malformed_json`, or `invalid_envelope`.
+- `headers["x-relayna-exception-type"]`
+  The Python exception type name when one exists, such as `RuntimeError` or
+  `ValidationError`. Relayna sets this to `null`/`None` style absence when the
+  failure was not caused by a raised exception, such as malformed JSON decode.
+
+Example DLQ message metadata after a handler fails on the last allowed retry:
+
+```python
+headers = {
+    "x-relayna-retry-attempt": 3,
+    "x-relayna-max-retries": 3,
+    "x-relayna-source-queue": "tasks.queue",
+    "x-relayna-failure-reason": "handler_error",
+    "x-relayna-exception-type": "RuntimeError",
+}
+```
+
+Example task body in that same DLQ message:
+
+```json
+{
+  "task_id": "task-123",
+  "payload": {
+    "kind": "demo"
+  }
+}
+```
+
+That example means:
+
+- the task has already been retried three times
+- the consumer limit was three retries
+- the message originated from `tasks.queue`
+- the final failure came from application handler code
+- the thrown exception type was `RuntimeError`
 
 ## Example: shared tasks + shared status + sharded aggregation
 
