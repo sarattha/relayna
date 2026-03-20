@@ -448,17 +448,24 @@ class TaskConsumer:
             return
 
     async def _publish_dead_letter_status(self, context: TaskContext, exc: Exception) -> None:
-        if not self._retry_statuses.enabled:
+        if self._retry_statuses.enabled:
+            try:
+                await context.publish_status(
+                    status=self._retry_statuses.dead_lettered_status,
+                    message=_failure_message(exc, include_error_message=self._retry_statuses.include_error_message),
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return
             return
-        try:
-            await context.publish_status(
-                status=self._retry_statuses.dead_lettered_status,
-                message=_failure_message(exc, include_error_message=self._retry_statuses.include_error_message),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
+        if not self._lifecycle_statuses.enabled:
             return
+        await self._publish_lifecycle_status(
+            context,
+            status=self._lifecycle_statuses.failed_status,
+            message=_failure_message(exc, include_error_message=self._lifecycle_statuses.include_error_message),
+        )
 
     async def _publish_retry(
         self,
@@ -771,7 +778,7 @@ class AggregationConsumer:
         if not self._retry_statuses.enabled:
             return
         try:
-            await context.publish_aggregation_status(
+            await context.publish_status(
                 status=self._retry_statuses.retrying_status,
                 message=f"Task processing failed. Scheduling retry {next_attempt}/{max_retries}.",
                 meta=dict(meta),
@@ -791,7 +798,7 @@ class AggregationConsumer:
         if not self._retry_statuses.enabled:
             return
         try:
-            await context.publish_aggregation_status(
+            await context.publish_status(
                 status=self._retry_statuses.dead_lettered_status,
                 message=_failure_message(exc, include_error_message=self._retry_statuses.include_error_message),
                 meta=dict(meta),
