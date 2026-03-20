@@ -3,7 +3,6 @@ import json
 
 import pytest
 
-from relayna.config import RelaynaTopologyConfig
 from relayna.rabbitmq import RelaynaRabbitClient, ShardRoutingStrategy, TaskIdRoutingStrategy
 from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
 
@@ -45,6 +44,34 @@ class FakeTaskChannel:
         return self.queue
 
 
+class FakeRobustChannel(FakeTaskChannel):
+    def __init__(self, queue: FakeTaskQueue) -> None:
+        super().__init__(queue)
+        self.prefetch_calls: list[int] = []
+        self.declare_exchange_calls: list[tuple[str, object, bool]] = []
+
+    async def set_qos(self, *, prefetch_count: int) -> None:
+        self.prefetch_calls.append(prefetch_count)
+
+    async def declare_exchange(self, name: str, exchange_type: object, *, durable: bool) -> object:
+        self.declare_exchange_calls.append((name, exchange_type, durable))
+        return object()
+
+
+class FakeRobustConnection:
+    def __init__(self, channel: FakeRobustChannel) -> None:
+        self._channel = channel
+        self.channel_calls = 0
+        self.is_closed = False
+
+    async def channel(self) -> FakeRobustChannel:
+        self.channel_calls += 1
+        return self._channel
+
+    async def close(self) -> None:
+        self.is_closed = True
+
+
 class FakeStatusExchange:
     def __init__(self) -> None:
         self.publish_calls: list[tuple[object, str]] = []
@@ -59,7 +86,7 @@ class FakeBindingQueue(FakeTaskQueue):
 
 @pytest.mark.asyncio
 async def test_ensure_tasks_queue_declares_and_binds_queue() -> None:
-    config = RelaynaTopologyConfig(
+    topology = SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         tasks_exchange="tasks.exchange",
         tasks_queue="tasks.queue",
@@ -69,7 +96,7 @@ async def test_ensure_tasks_queue_declares_and_binds_queue() -> None:
     )
     queue = FakeTaskQueue("tasks.queue")
     channel = FakeTaskChannel(queue)
-    client = RelaynaRabbitClient(config)
+    client = RelaynaRabbitClient(topology=topology)
     client._initialized = True
     client._lock = asyncio.Lock()
     client._channel = channel
@@ -84,7 +111,7 @@ async def test_ensure_tasks_queue_declares_and_binds_queue() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_status_generates_event_id_when_missing() -> None:
-    config = RelaynaTopologyConfig(
+    topology = SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         tasks_exchange="tasks.exchange",
         tasks_queue="tasks.queue",
@@ -93,7 +120,7 @@ async def test_publish_status_generates_event_id_when_missing() -> None:
         status_queue="status.queue",
     )
     exchange = FakeStatusExchange()
-    client = RelaynaRabbitClient(config)
+    client = RelaynaRabbitClient(topology=topology)
     client._initialized = True
     client._lock = asyncio.Lock()
     client._status_exchange = exchange
@@ -115,7 +142,7 @@ async def test_publish_status_generates_event_id_when_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_publish_status_preserves_existing_event_id() -> None:
-    config = RelaynaTopologyConfig(
+    topology = SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         tasks_exchange="tasks.exchange",
         tasks_queue="tasks.queue",
@@ -124,7 +151,7 @@ async def test_publish_status_preserves_existing_event_id() -> None:
         status_queue="status.queue",
     )
     exchange = FakeStatusExchange()
-    client = RelaynaRabbitClient(config)
+    client = RelaynaRabbitClient(topology=topology)
     client._initialized = True
     client._lock = asyncio.Lock()
     client._status_exchange = exchange
@@ -228,3 +255,111 @@ async def test_sharded_topology_binds_subset_queue_to_multiple_shards() -> None:
 
     assert queue_name == "aggregation.queue.shards.1-3"
     assert queue.bind_calls == [(exchange, "agg.1"), (exchange, "agg.3")]
+
+
+@pytest.mark.asyncio
+async def test_sharded_topology_binds_custom_aggregation_queue_name() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    queue = FakeBindingQueue("aggregation.queue.custom")
+    channel = FakeTaskChannel(queue)
+    exchange = object()
+
+    queue_name = await topology.ensure_aggregation_queue(
+        channel,
+        status_exchange=exchange,
+        shards=[2, 0],
+        queue_name="aggregation.queue.custom",
+    )
+
+    assert queue_name == "aggregation.queue.custom"
+    assert channel.declare_queue_calls == [("aggregation.queue.custom", True, None)]
+    assert queue.bind_calls == [(exchange, "agg.0"), (exchange, "agg.2")]
+
+
+@pytest.mark.asyncio
+async def test_sharded_aggregation_topology_does_not_predeclare_all_aggregation_queues() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    queue = FakeBindingQueue("status.queue")
+    channel = FakeTaskChannel(queue)
+    tasks_exchange = object()
+    status_exchange = object()
+
+    await topology.declare_queues(
+        channel,
+        tasks_exchange=tasks_exchange,
+        status_exchange=status_exchange,
+    )
+
+    declared_names = [name for name, _durable, _arguments in channel.declare_queue_calls]
+    assert declared_names == ["status.queue", "tasks.queue"]
+
+
+@pytest.mark.asyncio
+async def test_sharded_topology_declare_queues_works_on_python_313_slots_dataclass() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    queue = FakeBindingQueue("status.queue")
+    channel = FakeTaskChannel(queue)
+
+    await topology.declare_queues(
+        channel,
+        tasks_exchange=object(),
+        status_exchange=object(),
+    )
+
+    assert [name for name, _durable, _arguments in channel.declare_queue_calls] == ["status.queue", "tasks.queue"]
+
+
+@pytest.mark.asyncio
+async def test_sharded_topology_client_initialize_works_on_python_313_slots_dataclass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+    )
+    queue = FakeBindingQueue("status.queue")
+    channel = FakeRobustChannel(queue)
+    connection = FakeRobustConnection(channel)
+
+    async def fake_connect_robust(url: str) -> FakeRobustConnection:
+        assert url == "amqp://guest:guest@localhost:5672/?name=relayna-robust"
+        return connection
+
+    monkeypatch.setattr("relayna.rabbitmq.aio_pika.connect_robust", fake_connect_robust)
+
+    client = RelaynaRabbitClient(topology=topology)
+
+    await client.initialize()
+
+    assert channel.prefetch_calls == [1]
+    assert connection.channel_calls == 1
+    assert [name for name, _durable, _arguments in channel.declare_queue_calls] == ["status.queue", "tasks.queue"]

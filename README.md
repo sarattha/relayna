@@ -26,13 +26,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.0/relayna-1.1.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5.tar.gz
 ```
 
 For local development in this repository:
@@ -94,15 +94,31 @@ Aggregation messages published through the sharded aggregation topology stay on
 the shared status exchange, so `StatusHub`, `StreamHistoryReader`, and SSE
 consumers still observe them.
 
+When multiple sharded deployments share the same RabbitMQ vhost, namespace the
+aggregation queues with `aggregation_queue_template` and
+`aggregation_queue_name_prefix`. The default shard queue names are global
+durable queues, so local smoke runs or multiple environments can interfere if
+they reuse the same queue names.
+
 See [docs/getting-started.md](docs/getting-started.md) for concrete examples of
 both topologies, including `AggregationWorkerRuntime`.
+
+## Real-Stack Smoke Commands
+
+These scripts exercise the library against real RabbitMQ and Redis services on
+`localhost`:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
+```
 
 ## Public API
 
 The v1 semver-stable API is the documented surface of these submodules:
 
 - `relayna.topology`
-- `relayna.config`
 - `relayna.contracts`
 - `relayna.rabbitmq`
 - `relayna.consumer`

@@ -7,13 +7,20 @@ from relayna.contracts import TaskEnvelope
 from relayna.rabbitmq import RelaynaRabbitClient
 
 try:
-    from scripts.real_stack_common import app_client, build_app, build_config, parse_sse_events, poll_history, unique_suffix
+    from scripts.real_stack_common import (
+        app_client,
+        build_app,
+        build_shared_topology,
+        parse_sse_events,
+        poll_history,
+        unique_suffix,
+    )
 except ModuleNotFoundError:
-    from real_stack_common import app_client, build_app, build_config, parse_sse_events, poll_history, unique_suffix
+    from real_stack_common import app_client, build_app, build_shared_topology, parse_sse_events, poll_history, unique_suffix
 
 
-async def run_worker_once(config, task_id: str) -> None:
-    rabbitmq = RelaynaRabbitClient(config, connection_name="relayna-real-worker-consumer")
+async def run_worker_once(topology, task_id: str) -> None:
+    rabbitmq = RelaynaRabbitClient(topology=topology, connection_name="relayna-real-worker-consumer")
     await rabbitmq.initialize()
     processed = asyncio.Event()
 
@@ -31,7 +38,7 @@ async def run_worker_once(config, task_id: str) -> None:
 
     consumer = TaskConsumer(rabbitmq=rabbitmq, handler=handler, idle_retry_seconds=0.1)
     consumer_task = asyncio.create_task(consumer.run_forever(), name="relayna-real-worker-consumer")
-    publisher = RelaynaRabbitClient(config, connection_name="relayna-real-worker-publisher")
+    publisher = RelaynaRabbitClient(topology=topology, connection_name="relayna-real-worker-publisher")
     await publisher.initialize()
 
     try:
@@ -53,11 +60,11 @@ def suffix_from_task(task_id: str) -> str:
 async def main() -> None:
     suffix = unique_suffix()
     task_id = f"task-{suffix}"
-    config = build_config(suffix)
-    app = build_app(config, suffix)
+    topology = build_shared_topology(suffix)
+    app = build_app(topology, suffix)
 
     async with app_client(app) as client:
-        await run_worker_once(config, task_id)
+        await run_worker_once(topology, task_id)
         history = await poll_history(client, task_id=task_id, expected_count=2)
         events_response = await client.get("/events/" + task_id)
         events_response.raise_for_status()

@@ -47,7 +47,7 @@ class StatusHub:
 
     async def run_forever(self) -> None:
         queue_name = await self._rabbitmq.ensure_status_queue()
-        topology = getattr(self._rabbitmq, "topology", self._rabbitmq.config)
+        topology = self._rabbitmq.topology
         consume_args = dict(self._consume_arguments)
         default_stream_args = topology.status_stream_consume_arguments()
         if "x-stream-offset" not in consume_args and "x-stream-offset" in default_stream_args:

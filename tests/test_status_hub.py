@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-from relayna.config import RelaynaTopologyConfig
 from relayna.observability import (
     StatusHubLoopError,
     StatusHubMalformedMessage,
@@ -16,6 +15,7 @@ from relayna.observability import (
     StatusHubStoreWriteFailed,
 )
 from relayna.status_hub import StatusHub
+from relayna.topology import SharedTasksSharedStatusTopology
 
 
 class FakeMessage:
@@ -74,14 +74,14 @@ class FakeChannel:
 
 
 class FakeRabbitClient:
-    def __init__(self, *, config: RelaynaTopologyConfig, acquire_results: list[FakeChannel | Exception]) -> None:
-        self.config = config
+    def __init__(self, *, topology: SharedTasksSharedStatusTopology, acquire_results: list[FakeChannel | Exception]) -> None:
+        self.topology = topology
         self.acquire_results = list(acquire_results)
         self.ensure_status_queue_calls = 0
 
     async def ensure_status_queue(self) -> str:
         self.ensure_status_queue_calls += 1
-        return self.config.status_queue
+        return self.topology.status_queue
 
     async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
         if not self.acquire_results:
@@ -106,8 +106,8 @@ class FakeStore:
             self.on_store()
 
 
-def make_config() -> RelaynaTopologyConfig:
-    return RelaynaTopologyConfig(
+def make_topology() -> SharedTasksSharedStatusTopology:
+    return SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         tasks_exchange="tasks.exchange",
         tasks_queue="tasks.queue",
@@ -120,7 +120,7 @@ def make_config() -> RelaynaTopologyConfig:
 @pytest.mark.asyncio
 async def test_status_hub_emits_started_and_stored_event_observations() -> None:
     observed: list[object] = []
-    config = make_config()
+    topology = make_topology()
     stop_event = asyncio.Event()
     hub: StatusHub | None = None
 
@@ -136,7 +136,7 @@ async def test_status_hub_emits_started_and_stored_event_observations() -> None:
         json.dumps({"task_id": "task-123", "status": "completed", "event_id": "evt-1"}).encode("utf-8")
     )
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=config, acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
     store = FakeStore(on_store=stop_hub)
     hub = StatusHub(rabbitmq=rabbit, store=store, observation_sink=sink)
 
@@ -151,7 +151,7 @@ async def test_status_hub_emits_started_and_stored_event_observations() -> None:
 @pytest.mark.asyncio
 async def test_status_hub_emits_malformed_message_observation() -> None:
     observed: list[object] = []
-    config = make_config()
+    topology = make_topology()
     hub: StatusHub | None = None
 
     async def sink(event: object) -> None:
@@ -163,7 +163,7 @@ async def test_status_hub_emits_malformed_message_observation() -> None:
 
     message = FakeMessage(b"{not-json", on_ack=stop_hub)
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=config, acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
     store = FakeStore()
     hub = StatusHub(rabbitmq=rabbit, store=store, observation_sink=sink)
 
@@ -175,7 +175,7 @@ async def test_status_hub_emits_malformed_message_observation() -> None:
 @pytest.mark.asyncio
 async def test_status_hub_emits_store_write_failed_observation() -> None:
     observed: list[object] = []
-    config = make_config()
+    topology = make_topology()
     hub: StatusHub | None = None
 
     async def sink(event: object) -> None:
@@ -190,7 +190,7 @@ async def test_status_hub_emits_store_write_failed_observation() -> None:
         on_ack=stop_hub,
     )
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=config, acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
     store = FakeStore(fail=True)
     hub = StatusHub(rabbitmq=rabbit, store=store, observation_sink=sink)
 
@@ -202,11 +202,11 @@ async def test_status_hub_emits_store_write_failed_observation() -> None:
 @pytest.mark.asyncio
 async def test_status_hub_emits_loop_error_observation(monkeypatch: pytest.MonkeyPatch) -> None:
     observed: list[object] = []
-    config = make_config()
+    topology = make_topology()
     message = FakeMessage(json.dumps({"task_id": "task-123", "status": "completed"}).encode("utf-8"))
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
-    rabbit = FakeRabbitClient(config=config, acquire_results=[RuntimeError("temporary failure"), channel])
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[RuntimeError("temporary failure"), channel])
     hub: StatusHub | None = None
     original_sleep = asyncio.sleep
 
@@ -234,7 +234,7 @@ async def test_status_hub_emits_loop_error_observation(monkeypatch: pytest.Monke
 
 @pytest.mark.asyncio
 async def test_status_hub_sink_failures_do_not_break_storage() -> None:
-    config = make_config()
+    topology = make_topology()
     hub: StatusHub | None = None
 
     async def sink(event: object) -> None:
@@ -249,7 +249,7 @@ async def test_status_hub_sink_failures_do_not_break_storage() -> None:
         on_ack=stop_hub,
     )
     queue = FakeQueue([message])
-    rabbit = FakeRabbitClient(config=config, acquire_results=[FakeChannel(queue)])
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
     store = FakeStore()
     hub = StatusHub(rabbitmq=rabbit, store=store, observation_sink=sink)
 

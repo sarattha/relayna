@@ -38,7 +38,7 @@ class StreamHistoryReader:
         max_scan: int | None = None,
         require_stream: bool = True,
     ) -> list[dict[str, Any]]:
-        topology = getattr(self._rabbitmq, "topology", self._rabbitmq.config)
+        topology = self._rabbitmq.topology
         queue_args = self._queue_arguments if self._queue_arguments is not None else topology.status_queue_arguments()
         if require_stream and queue_args.get("x-queue-type") != "stream":
             raise RuntimeError("History replay requires a stream queue")

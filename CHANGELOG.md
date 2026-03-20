@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.5 - 2026-03-19
+
+### Changed
+
+- `relayna` is now topology-only: `relayna.config`, `RelaynaTopologyConfig`, `RelaynaRabbitClient(config=...)`, `RelaynaRabbitClient.config`, and `create_relayna_lifespan(topology_config=...)` are removed.
+- Documentation, tests, and packaging smoke checks now reference `relayna.topology` as the only supported configuration entrypoint.
+- Packaging metadata now declares Python 3.14 support, and CI runs the full workflow on both Python 3.13 and 3.14.
+
+### Fixed
+
+- `SharedTasksSharedStatusShardedAggregationTopology.declare_queues(...)` now avoids a Python 3.13 `super(type, obj)` failure that can occur with `@dataclass(slots=True)` subclasses during application startup.
+
 ## 1.1.0 - 2026-03-18
 
 ### Added
@@ -15,7 +27,6 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - `RelaynaRabbitClient` and `create_relayna_lifespan(...)` now accept named topology objects as the primary API.
-- `RelaynaTopologyConfig` is retained as a compatibility adapter for the original single-topology configuration shape.
 - Documentation now uses the named topology classes as the primary configuration examples.
 
 ## 1.0.1 - 2026-03-16
@@ -32,7 +43,6 @@ All notable changes to this project will be documented in this file.
 
 The v1 public API consists of the documented symbols from:
 
-- `relayna.config`
 - `relayna.contracts`
 - `relayna.rabbitmq`
 - `relayna.consumer`

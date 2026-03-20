@@ -8,16 +8,17 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI
 
-from relayna.config import RelaynaTopologyConfig
+from relayna.contracts import TerminalStatusSet
 from relayna.fastapi import create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
 
 
 def unique_suffix() -> str:
     return uuid4().hex[:8]
 
 
-def build_config(suffix: str) -> RelaynaTopologyConfig:
-    return RelaynaTopologyConfig(
+def build_shared_topology(suffix: str) -> SharedTasksSharedStatusTopology:
+    return SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         tasks_exchange=f"relayna.tasks.exchange.{suffix}",
         tasks_queue=f"relayna.tasks.queue.{suffix}",
@@ -27,12 +28,32 @@ def build_config(suffix: str) -> RelaynaTopologyConfig:
     )
 
 
-def build_app(config: RelaynaTopologyConfig, suffix: str) -> FastAPI:
+def build_sharded_topology(suffix: str, *, shard_count: int = 4) -> SharedTasksSharedStatusShardedAggregationTopology:
+    return SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange=f"relayna.tasks.exchange.{suffix}",
+        tasks_queue=f"relayna.tasks.queue.{suffix}",
+        tasks_routing_key=f"relayna.task.request.{suffix}",
+        status_exchange=f"relayna.status.exchange.{suffix}",
+        status_queue=f"relayna.status.queue.{suffix}",
+        shard_count=shard_count,
+        aggregation_queue_template=f"aggregation.queue.{suffix}.{{shard}}",
+        aggregation_queue_name_prefix=f"aggregation.queue.{suffix}.shards",
+    )
+
+
+def build_app(
+    topology: SharedTasksSharedStatusTopology,
+    suffix: str,
+    *,
+    sse_terminal_statuses: TerminalStatusSet | None = None,
+) -> FastAPI:
     app = FastAPI(
         lifespan=create_relayna_lifespan(
-            topology_config=config,
+            topology=topology,
             redis_url="redis://localhost:6379/0",
             store_prefix=f"relayna-smoke-{suffix}",
+            sse_terminal_statuses=sse_terminal_statuses,
         )
     )
     runtime = get_relayna_runtime(app)

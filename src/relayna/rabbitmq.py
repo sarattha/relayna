@@ -31,15 +31,11 @@ class RelaynaRabbitClient:
 
     def __init__(
         self,
-        topology: RelaynaTopology | None = None,
+        topology: RelaynaTopology,
         *,
-        config: RelaynaTopology | None = None,
         connection_name: str = "relayna-robust",
     ) -> None:
-        resolved_topology = topology or config
-        if resolved_topology is None:
-            raise ValueError("Pass topology=... (preferred) or config=... for legacy compatibility.")
-        self._topology = resolved_topology
+        self._topology = topology
         self._connection_name = connection_name
         self._connection: AbstractRobustConnection | None = None
         self._channel: AbstractRobustChannel | None = None
@@ -50,11 +46,6 @@ class RelaynaRabbitClient:
 
     @property
     def topology(self) -> RelaynaTopology:
-        return self._topology
-
-    @property
-    def config(self) -> RelaynaTopology:
-        """Backward-compatible alias for older consumers/tests."""
         return self._topology
 
     async def initialize(self) -> None:
