@@ -104,7 +104,9 @@ they reuse the same queue names.
 See [docs/getting-started.md](docs/getting-started.md) for concrete examples of
 both topologies, including `AggregationWorkerRuntime`, `RetryPolicy`, and
 retry/DLQ-enabled workers. The getting-started guide also documents every
-`x-relayna-*` retry header with a concrete DLQ example.
+`x-relayna-*` retry header with a concrete DLQ example, plus when to use
+`context.publish_status(...)` vs `context.publish_aggregation_status(...)` for
+child and parent workflows.
 
 ## Real-Stack Smoke Commands
 

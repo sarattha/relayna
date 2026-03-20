@@ -239,6 +239,124 @@ computes the shard from that parent id, writes `meta.aggregation_shard`, sets
 `meta.aggregation_role="aggregation"`, and publishes the event to a routing key
 like `agg.0`.
 
+### Choosing `publish_status(...)` vs `publish_aggregation_status(...)`
+
+This is the most important rule:
+
+- `TaskContext.publish_status(...)` publishes a normal shared status event for
+  the current context task
+- `TaskContext.publish_aggregation_status(...)` publishes an aggregation input
+  event for the current context task, routed by `meta.parent_task_id`
+
+In both helpers, the canonical `task_id` stays the current context task id.
+`meta.parent_task_id` does not replace `task_id`; it only describes the parent
+relationship and shard-routing key.
+
+That means:
+
+- use `publish_status(...)` when you want to say something about the current
+  child task itself
+- use `publish_aggregation_status(...)` when the current child task is emitting
+  input for parent-level aggregation workers
+- if you need to publish a status whose real `task_id` is the parent task, do
+  not use the context helper; publish an explicit `StatusEventEnvelope` with the
+  parent task id through `rabbitmq.publish_status(...)`
+
+#### Child task status example
+
+Use `publish_status(...)` for ordinary child lifecycle updates:
+
+```python
+async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
+    await context.publish_status(
+        status="processing",
+        message="Child task started.",
+    )
+
+    await context.publish_status(
+        status="completed",
+        message="Child task finished successfully.",
+    )
+```
+
+Result:
+
+- `task_id` is the child task id from `context`
+- the event goes to the shared status stream
+- SSE, latest-status, and history readers will treat it as normal status for
+  that child task
+
+#### Child emits aggregation input example
+
+Use `publish_aggregation_status(...)` when a child has partial output that a
+parent-level aggregation worker should consume:
+
+```python
+async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
+    await context.publish_aggregation_status(
+        status="aggregating",
+        message="Partial result ready for parent aggregation.",
+        meta={"parent_task_id": "root-task-123"},
+        result={"chunk_id": task.task_id, "value": 42},
+    )
+```
+
+Result:
+
+- `task_id` is still the child task id from `context`
+- `meta.parent_task_id` tells Relayna which parent/root task this child belongs to
+- the event is routed to the aggregation shard queue for that parent
+- aggregation workers can process it, while `StatusHub`, SSE, and history can
+  still observe it from the shared status exchange
+
+#### Parent task status example
+
+If you want a status event whose canonical identity is the parent task itself,
+publish it explicitly instead of using the child context helper:
+
+```python
+from relayna.contracts import StatusEventEnvelope
+
+
+async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
+    await context.rabbitmq.publish_status(
+        StatusEventEnvelope(
+            task_id="root-task-123",
+            status="aggregation-complete",
+            message="Parent task finished aggregation.",
+            meta={"source_child_task_id": task.task_id},
+            correlation_id="root-task-123",
+        )
+    )
+```
+
+Result:
+
+- `task_id` is the parent task id, not the child task id
+- clients querying `/events/root-task-123` or `/status/root-task-123` will see
+  this as a parent-task status
+- this does not route back into aggregation queues
+
+#### Practical decision guide
+
+Use `context.publish_status(...)` when:
+
+- the status belongs to the current task in the handler context
+- you want normal status history, SSE, and latest-status behavior
+- you are inside an aggregation worker and want to publish bookkeeping or final
+  statuses without feeding the aggregation queue again
+
+Use `context.publish_aggregation_status(...)` when:
+
+- the current task is emitting work or partial output for parent aggregation
+- you need shard routing based on `meta.parent_task_id`
+- the event is intended to be consumed by `AggregationConsumer`
+
+Use `context.rabbitmq.publish_status(StatusEventEnvelope(...))` when:
+
+- the event should belong to a different task id than the current context task
+- you are publishing a real parent/root status from child or aggregation logic
+
 ### Aggregation worker runtime example
 
 ```python
