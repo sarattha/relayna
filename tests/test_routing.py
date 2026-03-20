@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from relayna.rabbitmq import RelaynaRabbitClient, ShardRoutingStrategy, TaskIdRoutingStrategy
+from relayna.rabbitmq import RelaynaRabbitClient, RetryInfrastructure, ShardRoutingStrategy, TaskIdRoutingStrategy
 from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
 
 
@@ -32,6 +32,7 @@ class FakeTaskChannel:
     def __init__(self, queue: FakeTaskQueue) -> None:
         self.queue = queue
         self.declare_queue_calls: list[tuple[str, bool, dict[str, object] | None]] = []
+        self.default_exchange = FakeStatusExchange()
 
     async def declare_queue(
         self,
@@ -107,6 +108,76 @@ async def test_ensure_tasks_queue_declares_and_binds_queue() -> None:
     assert queue_name == "tasks.queue"
     assert channel.declare_queue_calls == [("tasks.queue", True, None)]
     assert queue.bind_calls == [(client._tasks_exchange, "task.request")]
+
+
+@pytest.mark.asyncio
+async def test_ensure_retry_infrastructure_declares_retry_and_dead_letter_queues() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    queue = FakeTaskQueue("tasks.queue")
+    channel = FakeTaskChannel(queue)
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._channel = channel
+
+    infrastructure = await client.ensure_retry_infrastructure(source_queue_name="tasks.queue", delay_ms=3000)
+
+    assert infrastructure == RetryInfrastructure(
+        source_queue_name="tasks.queue",
+        retry_queue_name="tasks.queue.retry",
+        dead_letter_queue_name="tasks.queue.dlq",
+    )
+    assert channel.declare_queue_calls == [
+        (
+            "tasks.queue.retry",
+            True,
+            {
+                "x-message-ttl": 3000,
+                "x-dead-letter-exchange": "",
+                "x-dead-letter-routing-key": "tasks.queue",
+            },
+        ),
+        ("tasks.queue.dlq", True, None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_publish_raw_to_queue_uses_default_exchange_and_preserves_headers() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    queue = FakeTaskQueue("tasks.queue")
+    channel = FakeTaskChannel(queue)
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._channel = channel
+
+    await client.publish_raw_to_queue(
+        "tasks.queue.retry",
+        b'{"task_id":"task-123"}',
+        correlation_id="corr-123",
+        headers={"x-relayna-retry-attempt": 2},
+        content_type="application/json",
+    )
+
+    message, routing_key = channel.default_exchange.publish_calls[0]
+    assert routing_key == "tasks.queue.retry"
+    assert message.body == b'{"task_id":"task-123"}'
+    assert message.correlation_id == "corr-123"
+    assert message.headers["x-relayna-retry-attempt"] == 2
 
 
 @pytest.mark.asyncio

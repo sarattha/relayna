@@ -63,6 +63,7 @@ The package root stays minimal and only exports `relayna.__version__`.
 ## Guides
 
 - [Getting started](getting-started.md)
+- [Observability](observability.md)
 - [Components](components.md)
 - [Release installation](releases.md)
 - [Development](development.md)

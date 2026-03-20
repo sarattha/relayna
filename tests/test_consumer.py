@@ -12,11 +12,15 @@ from relayna.consumer import (
     AggregationWorkerRuntime,
     FailureAction,
     LifecycleStatusConfig,
+    RetryPolicy,
+    RetryStatusConfig,
     TaskConsumer,
     TaskContext,
 )
 from relayna.contracts import StatusEventEnvelope
 from relayna.observability import (
+    ConsumerDeadLetterPublished,
+    ConsumerRetryScheduled,
     TaskConsumerLoopError,
     TaskConsumerStarted,
     TaskHandlerFailed,
@@ -25,6 +29,7 @@ from relayna.observability import (
     TaskMessageReceived,
     TaskMessageRejected,
 )
+from relayna.rabbitmq import RetryInfrastructure
 from relayna.topology import SharedTasksSharedStatusTopology
 
 
@@ -34,11 +39,15 @@ class FakeMessage:
         body: bytes,
         *,
         correlation_id: str | None = None,
+        headers: dict[str, Any] | None = None,
+        content_type: str | None = "application/json",
         delivery_tag: int | None = 1,
         redelivered: bool = False,
     ) -> None:
         self.body = body
         self.correlation_id = correlation_id
+        self.headers = dict(headers or {})
+        self.content_type = content_type
         self.delivery_tag = delivery_tag
         self.redelivered = redelivered
         self.acked = False
@@ -119,7 +128,10 @@ class FakeRabbitClient:
         self.close_calls = 0
         self.acquire_channel_calls: list[int] = []
         self.published_statuses: list[dict[str, Any]] = []
+        self.published_status_calls: list[tuple[str, dict[str, Any]]] = []
         self.aggregation_queue_calls: list[dict[str, Any]] = []
+        self.retry_infrastructure_calls: list[dict[str, Any]] = []
+        self.raw_queue_publishes: list[dict[str, Any]] = []
 
     async def ensure_tasks_queue(self) -> str:
         self.ensure_tasks_queue_calls += 1
@@ -145,16 +157,66 @@ class FakeRabbitClient:
 
     async def publish_status(self, event: StatusEventEnvelope | dict[str, Any]) -> None:
         if isinstance(event, StatusEventEnvelope):
-            self.published_statuses.append(event.model_dump(mode="json", exclude_none=True))
+            payload = event.model_dump(mode="json", exclude_none=True)
         else:
-            self.published_statuses.append(dict(event))
+            payload = dict(event)
+        self.published_statuses.append(payload)
+        self.published_status_calls.append(("status", payload))
 
     async def publish_aggregation_status(self, event: StatusEventEnvelope | dict[str, Any]) -> None:
-        await self.publish_status(event)
+        if isinstance(event, StatusEventEnvelope):
+            payload = event.model_dump(mode="json", exclude_none=True)
+        else:
+            payload = dict(event)
+        self.published_statuses.append(payload)
+        self.published_status_calls.append(("aggregation", payload))
 
     async def ensure_aggregation_queue(self, *, shards: list[int], queue_name: str | None = None) -> str:
         self.aggregation_queue_calls.append({"shards": list(shards), "queue_name": queue_name})
         return queue_name or f"aggregation.queue.{'-'.join(str(shard) for shard in shards)}"
+
+    async def ensure_retry_infrastructure(
+        self,
+        *,
+        source_queue_name: str,
+        delay_ms: int,
+        retry_queue_suffix: str = ".retry",
+        dead_letter_queue_suffix: str = ".dlq",
+    ) -> RetryInfrastructure:
+        self.retry_infrastructure_calls.append(
+            {
+                "source_queue_name": source_queue_name,
+                "delay_ms": delay_ms,
+                "retry_queue_suffix": retry_queue_suffix,
+                "dead_letter_queue_suffix": dead_letter_queue_suffix,
+            }
+        )
+        return RetryInfrastructure(
+            source_queue_name=source_queue_name,
+            retry_queue_name=f"{source_queue_name}{retry_queue_suffix}",
+            dead_letter_queue_name=f"{source_queue_name}{dead_letter_queue_suffix}",
+        )
+
+    async def publish_raw_to_queue(
+        self,
+        queue_name: str,
+        body: bytes,
+        *,
+        correlation_id: str | None = None,
+        headers: dict[str, Any] | None = None,
+        content_type: str | None = "application/json",
+        delivery_mode: object | None = None,
+    ) -> None:
+        self.raw_queue_publishes.append(
+            {
+                "queue_name": queue_name,
+                "body": body,
+                "correlation_id": correlation_id,
+                "headers": dict(headers or {}),
+                "content_type": content_type,
+                "delivery_mode": delivery_mode,
+            }
+        )
 
 
 def make_topology() -> SharedTasksSharedStatusTopology:
@@ -573,6 +635,187 @@ async def test_task_consumer_sink_failures_do_not_break_processing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_declares_retry_infrastructure_when_enabled() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        return None
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=5000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert rabbit.retry_infrastructure_calls == [
+        {
+            "source_queue_name": "tasks.queue",
+            "delay_ms": 5000,
+            "retry_queue_suffix": ".retry",
+            "dead_letter_queue_suffix": ".dlq",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_republishes_failed_messages_to_retry_queue() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123"}).encode("utf-8"),
+        correlation_id="corr-123",
+        headers={"x-relayna-retry-attempt": 1},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    observed: list[object] = []
+    seen_context: list[tuple[int, int | None, str | None]] = []
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        seen_context.append((context.retry_attempt, context.max_retries, context.source_queue_name))
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
+        retry_statuses=RetryStatusConfig(enabled=True),
+        observation_sink=sink,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert seen_context == [(1, 3, "tasks.queue")]
+    assert message.acked is True
+    assert message.rejected_with is None
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.retry"
+    assert rabbit.raw_queue_publishes[0]["body"] == message.body
+    assert rabbit.raw_queue_publishes[0]["correlation_id"] == "corr-123"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-retry-attempt"] == 2
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-max-retries"] == 3
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-source-queue"] == "tasks.queue"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "handler_error"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-exception-type"] == "RuntimeError"
+    assert [event["status"] for event in rabbit.published_statuses] == ["retrying"]
+    assert any(isinstance(event, ConsumerRetryScheduled) for event in observed)
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_dead_letters_exhausted_failed_messages() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123"}).encode("utf-8"),
+        headers={"x-relayna-retry-attempt": 3},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    observed: list[object] = []
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
+        retry_statuses=RetryStatusConfig(enabled=True),
+        observation_sink=sink,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.dlq"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-retry-attempt"] == 3
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "handler_error"
+    assert [event["status"] for event in rabbit.published_statuses] == ["failed"]
+    assert rabbit.published_statuses[0]["message"] == "boom"
+    assert any(isinstance(event, ConsumerDeadLetterPublished) for event in observed)
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_preserves_lifecycle_failed_status_when_retry_statuses_are_disabled() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123"}).encode("utf-8"),
+        headers={"x-relayna-retry-attempt": 1},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=1, delay_ms=1000),
+        lifecycle_statuses=LifecycleStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.dlq"
+    assert [event["status"] for event in rabbit.published_statuses] == ["processing", "failed"]
+    assert rabbit.published_status_calls[-1][0] == "status"
+    assert rabbit.published_statuses[-1]["message"] == "boom"
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_dead_letters_malformed_json_when_retry_enabled() -> None:
+    message = FakeMessage(b"{not-json")
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("handler should not run")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert message.rejected_with is None
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.dlq"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "malformed_json"
+    assert rabbit.published_statuses == []
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_dead_letters_invalid_envelope_when_retry_enabled() -> None:
+    message = FakeMessage(json.dumps({"payload": {"kind": "demo"}}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("handler should not run")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.dlq"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "invalid_envelope"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-exception-type"] == "ValidationError"
+
+
+@pytest.mark.asyncio
 async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
 
@@ -660,6 +903,65 @@ async def test_aggregation_consumer_rejects_failed_messages_without_requeue() ->
 
     assert message.acked is False
     assert message.rejected_with is False
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_retries_failed_messages_and_preserves_parent_metadata() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "status": "done", "meta": {"parent_task_id": "parent-1"}}).encode("utf-8")
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("agg failed")
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+        retry_statuses=RetryStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "aggregation.queue.0.retry"
+    assert rabbit.published_statuses[0]["status"] == "retrying"
+    assert rabbit.published_statuses[0]["meta"]["parent_task_id"] == "parent-1"
+    assert rabbit.published_status_calls[0][0] == "status"
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_dead_letters_exhausted_messages_and_preserves_parent_metadata() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "status": "done", "meta": {"parent_task_id": "parent-1"}}).encode("utf-8"),
+        headers={"x-relayna-retry-attempt": 2},
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("agg failed")
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+        retry_statuses=RetryStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "aggregation.queue.0.dlq"
+    assert rabbit.published_statuses[0]["status"] == "failed"
+    assert rabbit.published_statuses[0]["meta"]["parent_task_id"] == "parent-1"
+    assert rabbit.published_status_calls[0][0] == "status"
 
 
 @pytest.mark.asyncio

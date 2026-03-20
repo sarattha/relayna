@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 import aio_pika
@@ -87,6 +88,41 @@ class RelaynaRabbitClient:
             queue_name=queue_name,
         )
 
+    async def ensure_retry_infrastructure(
+        self,
+        *,
+        source_queue_name: str,
+        delay_ms: int,
+        retry_queue_suffix: str = ".retry",
+        dead_letter_queue_suffix: str = ".dlq",
+    ) -> "RetryInfrastructure":
+        await self._ensure_ready()
+        if self._channel is None:
+            raise RuntimeError("RabbitMQ connection is not initialized")
+        if not source_queue_name.strip():
+            raise ValueError("source_queue_name must not be empty")
+        if int(delay_ms) <= 0:
+            raise ValueError("delay_ms must be greater than zero")
+
+        retry_queue_name = f"{source_queue_name}{retry_queue_suffix}"
+        dead_letter_queue_name = f"{source_queue_name}{dead_letter_queue_suffix}"
+
+        await self._channel.declare_queue(
+            retry_queue_name,
+            durable=True,
+            arguments={
+                "x-message-ttl": int(delay_ms),
+                "x-dead-letter-exchange": "",
+                "x-dead-letter-routing-key": source_queue_name,
+            },
+        )
+        await self._channel.declare_queue(dead_letter_queue_name, durable=True, arguments=None)
+        return RetryInfrastructure(
+            source_queue_name=source_queue_name,
+            retry_queue_name=retry_queue_name,
+            dead_letter_queue_name=dead_letter_queue_name,
+        )
+
     async def publish_task(self, task: BaseModel | Mapping[str, Any]) -> None:
         await self._ensure_ready()
         if self._tasks_exchange is None:
@@ -115,6 +151,28 @@ class RelaynaRabbitClient:
         payload_meta["aggregation_role"] = "aggregation"
         payload["meta"] = payload_meta
         await self._publish_status_payload(payload, routing_key=self._topology.aggregation_status_routing_key(payload))
+
+    async def publish_raw_to_queue(
+        self,
+        queue_name: str,
+        body: bytes,
+        *,
+        correlation_id: str | None = None,
+        headers: Mapping[str, Any] | None = None,
+        content_type: str | None = "application/json",
+        delivery_mode: DeliveryMode = DeliveryMode.PERSISTENT,
+    ) -> None:
+        await self._ensure_ready()
+        if self._channel is None:
+            raise RuntimeError("RabbitMQ connection is not initialized")
+        message = Message(
+            body,
+            content_type=content_type,
+            delivery_mode=delivery_mode,
+            correlation_id=correlation_id,
+            headers=dict(headers or {}),
+        )
+        await self._channel.default_exchange.publish(message, routing_key=queue_name)
 
     async def acquire_channel(self, prefetch: int = 200) -> AbstractChannel:
         await self._ensure_ready()
@@ -258,9 +316,17 @@ def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
+@dataclass(slots=True)
+class RetryInfrastructure:
+    source_queue_name: str
+    retry_queue_name: str
+    dead_letter_queue_name: str
+
+
 __all__ = [
     "DirectQueuePublisher",
     "RelaynaRabbitClient",
+    "RetryInfrastructure",
     "ShardRoutingStrategy",
     "TaskIdRoutingStrategy",
     "declare_stream_queue",
