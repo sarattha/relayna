@@ -126,6 +126,10 @@ class DLQStore(Protocol):
 
     async def summarize_queues(self) -> list[tuple[str, int, datetime | None]]: ...
 
+    async def claim_replay(self, dlq_id: str, *, force: bool = False) -> DLQRecord | None: ...
+
+    async def release_replay_claim(self, dlq_id: str) -> None: ...
+
     async def mark_replayed(
         self,
         dlq_id: str,
@@ -230,6 +234,9 @@ class RedisDLQStore:
     def records_key(self) -> str:
         return f"{self.prefix}:dlq:records"
 
+    def replay_lock_key(self, dlq_id: str) -> str:
+        return f"{self.prefix}:dlq:replay-lock:{dlq_id}"
+
     async def add(self, record: DLQRecord) -> None:
         payload = record.model_dump_json()
         pipe = self.redis.pipeline()
@@ -310,15 +317,38 @@ class RedisDLQStore:
         return items, next_cursor
 
     async def summarize_queues(self) -> list[tuple[str, int, datetime | None]]:
-        records, _ = await self.list_records(limit=100000)
+        raw_ids = await self.redis.lrange(self.records_key(), 0, -1)  # type: ignore[misc]
+        ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
         counts: dict[str, int] = {}
         latest: dict[str, datetime] = {}
-        for record in records:
+        for dlq_id in ids:
+            record = await self.get(dlq_id)
+            if record is None:
+                continue
             counts[record.queue_name] = counts.get(record.queue_name, 0) + 1
             previous = latest.get(record.queue_name)
             if previous is None or record.dead_lettered_at > previous:
                 latest[record.queue_name] = record.dead_lettered_at
         return [(queue_name, counts[queue_name], latest.get(queue_name)) for queue_name in sorted(counts)]
+
+    async def claim_replay(self, dlq_id: str, *, force: bool = False) -> DLQRecord | None:
+        lock_acquired = await self.redis.set(self.replay_lock_key(dlq_id), "1", nx=True, ex=30)
+        if not lock_acquired:
+            raise DLQReplayConflict(dlq_id, detail="DLQ replay is already in progress.")
+
+        try:
+            record = await self.get(dlq_id)
+            if record is None:
+                return None
+            if record.state == DLQRecordState.REPLAYED and not force:
+                raise DLQReplayConflict(dlq_id)
+            return record
+        except Exception:
+            await self.release_replay_claim(dlq_id)
+            raise
+
+    async def release_replay_claim(self, dlq_id: str) -> None:
+        await self.redis.delete(self.replay_lock_key(dlq_id))
 
     async def mark_replayed(
         self,
@@ -411,11 +441,10 @@ class DLQService:
         )
 
     async def replay_message(self, dlq_id: str, *, force: bool = False) -> DLQReplayResult | None:
-        record = await self.dlq_store.get(dlq_id)
+        record = await self.dlq_store.claim_replay(dlq_id, force=force)
         if record is None:
+            await self.dlq_store.release_replay_claim(dlq_id)
             return None
-        if record.state == DLQRecordState.REPLAYED and not force:
-            raise DLQReplayConflict(dlq_id)
 
         replayed_at = _utcnow()
         headers = dict(record.headers)
@@ -432,28 +461,31 @@ class DLQService:
         headers.pop("x-relayna-failure-reason", None)
         headers.pop("x-relayna-exception-type", None)
 
-        await self.rabbitmq.publish_raw_to_queue(
-            record.retry_queue_name,
-            base64.b64decode(record.raw_body_b64.encode("ascii")),
-            correlation_id=record.correlation_id,
-            headers=headers,
-            content_type=record.content_type,
-        )
-        updated = await self.dlq_store.mark_replayed(
-            record.dlq_id,
-            replayed_at=replayed_at,
-            target_queue_name=record.retry_queue_name,
-        )
-        if updated is None:
-            return None
-        return DLQReplayResult(
-            dlq_id=updated.dlq_id,
-            target_queue_name=updated.retry_queue_name,
-            state=updated.state,
-            replayed_at=updated.replayed_at or replayed_at,
-            replay_count=updated.replay_count,
-            forced=force,
-        )
+        try:
+            await self.rabbitmq.publish_raw_to_queue(
+                record.retry_queue_name,
+                base64.b64decode(record.raw_body_b64.encode("ascii")),
+                correlation_id=record.correlation_id,
+                headers=headers,
+                content_type=record.content_type,
+            )
+            updated = await self.dlq_store.mark_replayed(
+                record.dlq_id,
+                replayed_at=replayed_at,
+                target_queue_name=record.retry_queue_name,
+            )
+            if updated is None:
+                return None
+            return DLQReplayResult(
+                dlq_id=updated.dlq_id,
+                target_queue_name=updated.retry_queue_name,
+                state=updated.state,
+                replayed_at=updated.replayed_at or replayed_at,
+                replay_count=updated.replay_count,
+                forced=force,
+            )
+        finally:
+            await self.dlq_store.release_replay_claim(dlq_id)
 
     def _summary(self, record: DLQRecord) -> DLQMessageSummary:
         return DLQMessageSummary(
@@ -478,8 +510,8 @@ class DLQService:
 
 
 class DLQReplayConflict(RuntimeError):
-    def __init__(self, dlq_id: str) -> None:
-        super().__init__(f"DLQ message '{dlq_id}' has already been replayed.")
+    def __init__(self, dlq_id: str, *, detail: str | None = None) -> None:
+        super().__init__(detail or f"DLQ message '{dlq_id}' has already been replayed.")
         self.dlq_id = dlq_id
 
 

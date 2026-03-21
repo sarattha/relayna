@@ -57,11 +57,18 @@ class FakeRedis:
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
 
-    async def set(self, key: str, value: str, ex: int | None = None) -> bool:
+    async def set(self, key: str, value: str, ex: int | None = None, nx: bool = False) -> bool:
+        if nx and key in self.values:
+            return False
         self.values[key] = value
         if ex is not None:
             self.expirations[key] = ex
         return True
+
+    async def delete(self, key: str) -> int:
+        existed = key in self.values
+        self.values.pop(key, None)
+        return 1 if existed else 0
 
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
@@ -263,3 +270,45 @@ async def test_dlq_service_detail_and_queue_summary_use_status_store_and_rabbitm
     assert queue_summaries[0].indexed_count == 1
     assert queue_summaries[0].exists is True
     assert queue_summaries[0].message_count == 3
+
+
+@pytest.mark.asyncio
+async def test_redis_dlq_store_summarize_queues_scans_full_index_without_list_records() -> None:
+    redis = FakeRedis()
+    store = RedisDLQStore(redis, prefix="relayna-dlq")
+    record_a = make_record(dead_lettered_at=datetime(2026, 3, 21, 1, tzinfo=UTC))
+    record_b = make_record(
+        queue_name="aggregation.queue.0.dlq",
+        source_queue_name="aggregation.queue.0",
+        retry_queue_name="aggregation.queue.0.retry",
+        task_id="task-456",
+        dead_lettered_at=datetime(2026, 3, 21, 2, tzinfo=UTC),
+    )
+    await store.add(record_a)
+    await store.add(record_b)
+
+    async def fail_list_records(**kwargs):
+        raise AssertionError(f"unexpected list_records call: {kwargs}")
+
+    store.list_records = fail_list_records  # type: ignore[method-assign]
+
+    queue_summary = await store.summarize_queues()
+
+    assert ("tasks.queue.dlq", 1, datetime(2026, 3, 21, 1, tzinfo=UTC)) in queue_summary
+    assert ("aggregation.queue.0.dlq", 1, datetime(2026, 3, 21, 2, tzinfo=UTC)) in queue_summary
+
+
+@pytest.mark.asyncio
+async def test_dlq_service_replay_conflicts_when_claim_already_exists() -> None:
+    redis = FakeRedis()
+    store = RedisDLQStore(redis, prefix="relayna-dlq")
+    rabbit = FakeRabbit()
+    service = DLQService(rabbitmq=rabbit, dlq_store=store)
+    record = make_record()
+    await store.add(record)
+    redis.values[store.replay_lock_key(record.dlq_id)] = "1"
+
+    with pytest.raises(DLQReplayConflict, match="already in progress"):
+        await service.replay_message(record.dlq_id)
+
+    assert rabbit.publishes == []

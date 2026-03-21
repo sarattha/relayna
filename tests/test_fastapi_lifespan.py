@@ -270,6 +270,17 @@ class FakeDLQStore:
             summary[record.queue_name] = (current_count + 1, latest)
         return [(queue_name, count, last_indexed_at) for queue_name, (count, last_indexed_at) in summary.items()]
 
+    async def claim_replay(self, dlq_id: str, *, force: bool = False) -> DLQRecord | None:
+        record = self.records.get(dlq_id)
+        if record is None:
+            return None
+        if record.state == DLQRecordState.REPLAYED and not force:
+            raise relayna_fastapi.DLQReplayConflict(dlq_id)
+        return record
+
+    async def release_replay_claim(self, dlq_id: str) -> None:
+        del dlq_id
+
     async def mark_replayed(self, dlq_id: str, *, replayed_at, target_queue_name: str) -> DLQRecord | None:
         record = self.records.get(dlq_id)
         if record is None:
