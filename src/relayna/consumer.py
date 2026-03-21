@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 
 from .contracts import StatusEventEnvelope, TaskEnvelope
+from .dlq import DLQRecorder, build_dlq_record
 from .observability import (
     ConsumerDeadLetterPublished,
     ConsumerRetryScheduled,
@@ -170,6 +171,7 @@ class TaskConsumer:
         retry_statuses: RetryStatusConfig | None = None,
         idle_retry_seconds: float = 2.0,
         observation_sink: ObservationSink | None = None,
+        dlq_store: DLQRecorder | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -182,6 +184,7 @@ class TaskConsumer:
         self._retry_statuses = retry_statuses or RetryStatusConfig()
         self._idle_retry_seconds = idle_retry_seconds
         self._observation_sink = observation_sink
+        self._dlq_store = dlq_store
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -545,6 +548,28 @@ class TaskConsumer:
                 reason=reason,
             ),
         )
+        await _persist_dlq_record(
+            self._dlq_store,
+            queue_name=retry_infrastructure.dead_letter_queue_name,
+            source_queue_name=source_queue_name,
+            retry_queue_name=retry_infrastructure.retry_queue_name,
+            task_id=task_id,
+            correlation_id=getattr(message, "correlation_id", None),
+            reason=reason,
+            exception_type=exception_type,
+            retry_attempt=retry_attempt,
+            max_retries=self._retry_policy.max_retries,
+            headers=_retry_headers(
+                message,
+                source_queue_name=source_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=self._retry_policy.max_retries,
+                reason=reason,
+                exception_type=exception_type,
+            ),
+            content_type=getattr(message, "content_type", "application/json"),
+            body=message.body,
+        )
 
 
 def _coerce_task_id(payload: Any) -> str | None:
@@ -596,6 +621,47 @@ def _failure_message(exc: Exception, *, include_error_message: bool) -> str:
     return "Task processing failed."
 
 
+async def _persist_dlq_record(
+    dlq_store: DLQRecorder | None,
+    *,
+    queue_name: str,
+    source_queue_name: str,
+    retry_queue_name: str,
+    task_id: str | None,
+    correlation_id: str | None,
+    reason: str,
+    exception_type: str | None,
+    retry_attempt: int,
+    max_retries: int,
+    headers: Mapping[str, Any],
+    content_type: str | None,
+    body: bytes,
+) -> None:
+    if dlq_store is None:
+        return
+    try:
+        await dlq_store.add(
+            build_dlq_record(
+                queue_name=queue_name,
+                source_queue_name=source_queue_name,
+                retry_queue_name=retry_queue_name,
+                task_id=task_id,
+                correlation_id=correlation_id,
+                reason=reason,
+                exception_type=exception_type,
+                retry_attempt=retry_attempt,
+                max_retries=max_retries,
+                headers=headers,
+                content_type=content_type,
+                body=body,
+            )
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return
+
+
 class AggregationConsumer:
     """Consumes status-compatible aggregation messages from shard queues."""
 
@@ -613,6 +679,7 @@ class AggregationConsumer:
         retry_statuses: RetryStatusConfig | None = None,
         idle_retry_seconds: float = 2.0,
         observation_sink: ObservationSink | None = None,
+        dlq_store: DLQRecorder | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -625,6 +692,7 @@ class AggregationConsumer:
         self._retry_statuses = retry_statuses or RetryStatusConfig()
         self._idle_retry_seconds = idle_retry_seconds
         self._observation_sink = observation_sink
+        self._dlq_store = dlq_store
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -886,6 +954,28 @@ class AggregationConsumer:
                 reason=reason,
             ),
         )
+        await _persist_dlq_record(
+            self._dlq_store,
+            queue_name=retry_infrastructure.dead_letter_queue_name,
+            source_queue_name=source_queue_name,
+            retry_queue_name=retry_infrastructure.retry_queue_name,
+            task_id=task_id,
+            correlation_id=getattr(message, "correlation_id", None),
+            reason=reason,
+            exception_type=exception_type,
+            retry_attempt=retry_attempt,
+            max_retries=self._retry_policy.max_retries,
+            headers=_retry_headers(
+                message,
+                source_queue_name=source_queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=self._retry_policy.max_retries,
+                reason=reason,
+                exception_type=exception_type,
+            ),
+            content_type=getattr(message, "content_type", "application/json"),
+            body=message.body,
+        )
 
 
 class AggregationWorkerRuntime:
@@ -905,6 +995,7 @@ class AggregationWorkerRuntime:
         retry_policy: RetryPolicy | None = None,
         retry_statuses: RetryStatusConfig | None = None,
         observation_sink: ObservationSink | None = None,
+        dlq_store: DLQRecorder | None = None,
     ) -> None:
         if rabbitmq is None and topology is None:
             raise ValueError("Pass rabbitmq=... or topology=... to AggregationWorkerRuntime.")
@@ -921,6 +1012,7 @@ class AggregationWorkerRuntime:
                 retry_policy=retry_policy,
                 retry_statuses=retry_statuses,
                 observation_sink=observation_sink,
+                dlq_store=dlq_store,
             )
             for index, shards in enumerate(shard_groups)
         ]

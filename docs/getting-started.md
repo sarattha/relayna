@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6.tar.gz
 ```
 
 For local work in this repository:
@@ -56,7 +56,8 @@ status endpoints.
 ```python
 from fastapi import FastAPI
 
-from relayna.fastapi import create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.dlq import DLQService
+from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.rabbitmq import RelaynaRabbitClient
 from relayna.topology import SharedTasksSharedStatusTopology
 
@@ -87,6 +88,16 @@ app.include_router(
         latest_status_store=runtime.store,
     )
 )
+if runtime.dlq_store is not None:
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+            )
+        )
+    )
 ```
 
 This exposes:
@@ -175,6 +186,63 @@ That example means:
 - the message originated from `tasks.queue`
 - the final failure came from application handler code
 - the thrown exception type was `RuntimeError`
+
+### DLQ monitoring router
+
+If you want a dashboard or internal tool to investigate dead-lettered messages,
+enable the optional Redis-backed DLQ index in FastAPI and pass the same store to
+workers.
+
+```python
+from redis.asyncio import Redis
+
+from relayna.consumer import RetryPolicy, TaskConsumer
+from relayna.dlq import DLQService, RedisDLQStore
+from relayna.fastapi import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
+
+dlq_store_prefix = "relayna-dlq"
+worker_dlq_store = RedisDLQStore(Redis.from_url("redis://localhost:6379/0"), prefix=dlq_store_prefix)
+
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    dlq_store=worker_dlq_store,
+)
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        dlq_store_prefix=dlq_store_prefix,
+    )
+)
+runtime = get_relayna_runtime(app)
+if runtime.dlq_store is not None:
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+            )
+        )
+    )
+```
+
+This exposes:
+
+- `GET /dlq/queues`
+- `GET /dlq/messages`
+- `GET /dlq/messages/{dlq_id}`
+- `POST /dlq/messages/{dlq_id}/replay`
+
+Important limitation:
+
+- Relayna does not read live DLQ payloads directly from RabbitMQ because
+  classic queues do not support a read-only payload peek over AMQP
+- the DLQ router uses Redis for message detail and RabbitMQ only for live queue
+  counts and replay transport
 
 ## Example: shared tasks + shared status + sharded aggregation
 

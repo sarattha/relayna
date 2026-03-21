@@ -9,7 +9,8 @@ import httpx
 from fastapi import FastAPI
 
 from relayna.contracts import TerminalStatusSet
-from relayna.fastapi import create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.dlq import DLQService
+from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
 
 
@@ -47,6 +48,7 @@ def build_app(
     suffix: str,
     *,
     sse_terminal_statuses: TerminalStatusSet | None = None,
+    dlq_store_prefix: str | None = None,
 ) -> FastAPI:
     app = FastAPI(
         lifespan=create_relayna_lifespan(
@@ -54,6 +56,7 @@ def build_app(
             redis_url="redis://localhost:6379/0",
             store_prefix=f"relayna-smoke-{suffix}",
             sse_terminal_statuses=sse_terminal_statuses,
+            dlq_store_prefix=dlq_store_prefix,
         )
     )
     runtime = get_relayna_runtime(app)
@@ -64,6 +67,16 @@ def build_app(
             latest_status_store=runtime.store,
         )
     )
+    if runtime.dlq_store is not None:
+        app.include_router(
+            create_dlq_router(
+                dlq_service=DLQService(
+                    rabbitmq=runtime.rabbitmq,
+                    dlq_store=runtime.dlq_store,
+                    status_store=runtime.store,
+                )
+            )
+        )
     return app
 
 
