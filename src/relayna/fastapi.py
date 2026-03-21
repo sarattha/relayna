@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
 
 from .contracts import TerminalStatusSet
+from .dlq import DLQReplayConflict, DLQRecordState, DLQService, RedisDLQStore
 from .history import StreamHistoryReader, StreamOffset
 from .rabbitmq import RelaynaRabbitClient
 from .sse import EventAdapter, SSEStatusStream
@@ -28,6 +29,7 @@ class RelaynaRuntime:
     rabbitmq: RelaynaRabbitClient
     redis: Redis
     store: RedisStatusStore
+    dlq_store: RedisDLQStore | None
     hub: StatusHub
     sse_stream: SSEStatusStream
     history_reader: StreamHistoryReader
@@ -51,6 +53,8 @@ class _RelaynaLifespan:
         sse_output_adapter: EventAdapter | None,
         history_queue_arguments: dict[str, Any] | None,
         history_output_adapter: HistoryOutputAdapter | None,
+        dlq_store_prefix: str | None,
+        dlq_store_ttl_seconds: int | None,
         app_state_key: str,
     ) -> None:
         self._topology = topology
@@ -66,6 +70,8 @@ class _RelaynaLifespan:
         self._sse_output_adapter = sse_output_adapter
         self._history_queue_arguments = history_queue_arguments
         self._history_output_adapter = history_output_adapter
+        self._dlq_store_prefix = dlq_store_prefix
+        self._dlq_store_ttl_seconds = dlq_store_ttl_seconds
         self._app_state_key = app_state_key
         self._runtime: RelaynaRuntime | None = None
 
@@ -86,6 +92,13 @@ class _RelaynaLifespan:
                 ttl_seconds=self._store_ttl_seconds,
                 history_maxlen=self._store_history_maxlen,
             )
+            dlq_store = None
+            if self._dlq_store_prefix is not None:
+                dlq_store = RedisDLQStore(
+                    redis,
+                    prefix=self._dlq_store_prefix,
+                    ttl_seconds=self._dlq_store_ttl_seconds,
+                )
             hub = StatusHub(
                 rabbitmq=rabbitmq,
                 store=store,
@@ -107,6 +120,7 @@ class _RelaynaLifespan:
                 rabbitmq=rabbitmq,
                 redis=redis,
                 store=store,
+                dlq_store=dlq_store,
                 hub=hub,
                 sse_stream=sse_stream,
                 history_reader=history_reader,
@@ -167,6 +181,8 @@ def create_relayna_lifespan(
     sse_output_adapter: EventAdapter | None = None,
     history_queue_arguments: dict[str, Any] | None = None,
     history_output_adapter: HistoryOutputAdapter | None = None,
+    dlq_store_prefix: str | None = None,
+    dlq_store_ttl_seconds: int | None = None,
     app_state_key: str = "relayna",
 ) -> _RelaynaLifespan:
     return _RelaynaLifespan(
@@ -183,6 +199,8 @@ def create_relayna_lifespan(
         sse_output_adapter=sse_output_adapter,
         history_queue_arguments=history_queue_arguments,
         history_output_adapter=history_output_adapter,
+        dlq_store_prefix=dlq_store_prefix,
+        dlq_store_ttl_seconds=dlq_store_ttl_seconds,
         app_state_key=app_state_key,
     )
 
@@ -267,5 +285,61 @@ def create_status_router(
             except RuntimeError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             return JSONResponse({"task_id": task_id, "count": len(events), "events": events})
+
+    return router
+
+
+def create_dlq_router(
+    *,
+    dlq_service: DLQService,
+    queues_path: str = "/dlq/queues",
+    messages_path: str = "/dlq/messages",
+    message_path: str = "/dlq/messages/{dlq_id}",
+    replay_path: str = "/dlq/messages/{dlq_id}/replay",
+) -> APIRouter:
+    router = APIRouter()
+
+    @router.get(queues_path)
+    async def queues() -> JSONResponse:
+        items = await dlq_service.get_queue_summaries()
+        return JSONResponse({"queues": [item.model_dump(mode="json") for item in items]})
+
+    @router.get(messages_path)
+    async def messages(
+        queue_name: str | None = None,
+        task_id: str | None = None,
+        reason: str | None = None,
+        source_queue_name: str | None = None,
+        state: DLQRecordState | None = None,
+        cursor: str | None = None,
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> JSONResponse:
+        payload = await dlq_service.list_messages(
+            queue_name=queue_name,
+            task_id=task_id,
+            reason=reason,
+            source_queue_name=source_queue_name,
+            state=state,
+            cursor=cursor,
+            limit=limit,
+        )
+        return JSONResponse(payload.model_dump(mode="json"))
+
+    @router.post(replay_path)
+    async def replay(dlq_id: str, force: bool = Query(default=False)) -> JSONResponse:
+        try:
+            result = await dlq_service.replay_message(dlq_id, force=force)
+        except DLQReplayConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"No DLQ message found for dlq_id '{dlq_id}'.")
+        return JSONResponse(result.model_dump(mode="json"))
+
+    @router.get(message_path)
+    async def message_detail(dlq_id: str) -> JSONResponse:
+        result = await dlq_service.get_message_detail(dlq_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"No DLQ message found for dlq_id '{dlq_id}'.")
+        return JSONResponse(result.model_dump(mode="json"))
 
     return router

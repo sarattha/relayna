@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.1.6 - 2026-03-21
+
+### Added
+
+- Redis-backed DLQ indexing via `relayna.dlq.RedisDLQStore`, including persisted DLQ record detail for inspection and replay.
+- `relayna.dlq.DLQService` plus `create_dlq_router(...)` for FastAPI queue summaries, DLQ message list/detail endpoints, and controlled replay.
+- Optional `dlq_store_prefix` / `dlq_store_ttl_seconds` support in `create_relayna_lifespan(...)` so FastAPI apps can share a DLQ store with workers.
+
+### Changed
+
+- `TaskConsumer`, `AggregationConsumer`, and `AggregationWorkerRuntime` now accept an optional `dlq_store=...` to persist dead-letter records alongside RabbitMQ DLQ publishing.
+- `RelaynaRabbitClient` now exposes passive queue inspection for DLQ message-count monitoring.
+- Documentation and smoke coverage now include the DLQ monitoring API and replay workflow.
+
 ## 1.1.5 - 2026-03-19
 
 ### Changed

@@ -182,6 +182,27 @@ class RelaynaRabbitClient:
         await channel.set_qos(prefetch_count=prefetch)
         return channel
 
+    async def inspect_queue(self, queue_name: str) -> "QueueInspection | None":
+        await self._ensure_ready()
+        channel = None
+        try:
+            channel = await self.acquire_channel(prefetch=1)
+            queue = await channel.declare_queue(queue_name, durable=True, passive=True)
+            result = getattr(queue, "declaration_result", None)
+            return QueueInspection(
+                queue_name=queue_name,
+                message_count=int(getattr(result, "message_count", 0)),
+                consumer_count=int(getattr(result, "consumer_count", 0)),
+            )
+        except Exception:
+            return None
+        finally:
+            if channel is not None:
+                try:
+                    await channel.close()
+                except Exception:
+                    pass
+
     async def ping(self) -> None:
         channel = await self.acquire_channel(prefetch=self._topology.prefetch_count)
         try:
@@ -323,8 +344,16 @@ class RetryInfrastructure:
     dead_letter_queue_name: str
 
 
+@dataclass(slots=True)
+class QueueInspection:
+    queue_name: str
+    message_count: int
+    consumer_count: int
+
+
 __all__ = [
     "DirectQueuePublisher",
+    "QueueInspection",
     "RelaynaRabbitClient",
     "RetryInfrastructure",
     "ShardRoutingStrategy",

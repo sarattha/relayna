@@ -18,6 +18,7 @@ from relayna.consumer import (
     TaskContext,
 )
 from relayna.contracts import StatusEventEnvelope
+from relayna.dlq import DLQRecord
 from relayna.observability import (
     ConsumerDeadLetterPublished,
     ConsumerRetryScheduled,
@@ -217,6 +218,14 @@ class FakeRabbitClient:
                 "delivery_mode": delivery_mode,
             }
         )
+
+
+class FakeDLQStore:
+    def __init__(self) -> None:
+        self.records: list[DLQRecord] = []
+
+    async def add(self, record: DLQRecord) -> None:
+        self.records.append(record)
 
 
 def make_topology() -> SharedTasksSharedStatusTopology:
@@ -741,6 +750,45 @@ async def test_task_consumer_dead_letters_exhausted_failed_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_indexes_dead_lettered_messages() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "payload": {"kind": "demo"}}).encode("utf-8"),
+        correlation_id="corr-123",
+        headers={"x-relayna-retry-attempt": 3},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    dlq_store = FakeDLQStore()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
+        dlq_store=dlq_store,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert len(dlq_store.records) == 1
+    record = dlq_store.records[0]
+    assert record.queue_name == "tasks.queue.dlq"
+    assert record.source_queue_name == "tasks.queue"
+    assert record.retry_queue_name == "tasks.queue.retry"
+    assert record.task_id == "task-123"
+    assert record.correlation_id == "corr-123"
+    assert record.reason == "handler_error"
+    assert record.exception_type == "RuntimeError"
+    assert record.retry_attempt == 3
+    assert record.max_retries == 3
+    assert record.body == {"task_id": "task-123", "payload": {"kind": "demo"}}
+    assert record.body_encoding == "json"
+    assert record.headers["x-relayna-source-queue"] == "tasks.queue"
+
+
+@pytest.mark.asyncio
 async def test_task_consumer_preserves_lifecycle_failed_status_when_retry_statuses_are_disabled() -> None:
     message = FakeMessage(
         json.dumps({"task_id": "task-123"}).encode("utf-8"),
@@ -790,6 +838,33 @@ async def test_task_consumer_dead_letters_malformed_json_when_retry_enabled() ->
     assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.dlq"
     assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "malformed_json"
     assert rabbit.published_statuses == []
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_indexes_malformed_dead_letter_payload_as_text() -> None:
+    message = FakeMessage(b"{not-json")
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    dlq_store = FakeDLQStore()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("handler should not run")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+        dlq_store=dlq_store,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert len(dlq_store.records) == 1
+    record = dlq_store.records[0]
+    assert record.reason == "malformed_json"
+    assert record.exception_type is None
+    assert record.body == "{not-json"
+    assert record.body_encoding == "text"
 
 
 @pytest.mark.asyncio
@@ -962,6 +1037,39 @@ async def test_aggregation_consumer_dead_letters_exhausted_messages_and_preserve
     assert rabbit.published_statuses[0]["status"] == "failed"
     assert rabbit.published_statuses[0]["meta"]["parent_task_id"] == "parent-1"
     assert rabbit.published_status_calls[0][0] == "status"
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_indexes_dead_lettered_messages() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "status": "done", "meta": {"parent_task_id": "parent-1"}}).encode("utf-8"),
+        headers={"x-relayna-retry-attempt": 2},
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
+    dlq_store = FakeDLQStore()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("agg failed")
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+        dlq_store=dlq_store,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert len(dlq_store.records) == 1
+    record = dlq_store.records[0]
+    assert record.queue_name == "aggregation.queue.0.dlq"
+    assert record.source_queue_name == "aggregation.queue.0"
+    assert record.retry_queue_name == "aggregation.queue.0.retry"
+    assert record.reason == "handler_error"
+    assert record.body["meta"]["parent_task_id"] == "parent-1"
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ It provides:
 - Broker-delayed retry and dead-letter utilities for worker consumers
 - Named RabbitMQ topology classes for default and sharded aggregation flows
 - Redis-backed status history and pubsub
+- Redis-backed DLQ indexing and replay helpers
 - Server-Sent Events replay plus live updates
 - RabbitMQ stream replay for history/debug endpoints
 - FastAPI lifecycle and route helpers
@@ -27,13 +28,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.5/relayna-1.1.5.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6.tar.gz
 ```
 
 For local development in this repository:
@@ -80,6 +81,46 @@ This setup gives you:
 - `GET /events/{task_id}` for SSE status updates
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
+
+## DLQ monitoring API
+
+DLQ payload inspection is opt-in. Relayna stores message-level DLQ detail in
+Redis and uses RabbitMQ only for live queue counts and replay transport, since
+classic queues do not support a read-only payload peek over AMQP.
+
+```python
+from fastapi import FastAPI
+
+from relayna.dlq import DLQService
+from relayna.fastapi import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        dlq_store_prefix="relayna-dlq",
+    )
+)
+
+runtime = get_relayna_runtime(app)
+if runtime.dlq_store is not None:
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+            )
+        )
+    )
+```
+
+When workers also receive `dlq_store=...`, this adds:
+
+- `GET /dlq/queues`
+- `GET /dlq/messages`
+- `GET /dlq/messages/{dlq_id}`
+- `POST /dlq/messages/{dlq_id}/replay`
 
 ## Topologies
 
@@ -132,6 +173,7 @@ The v1 semver-stable API is the documented surface of these submodules:
 - `relayna.sse`
 - `relayna.history`
 - `relayna.fastapi`
+- `relayna.dlq`
 - `relayna.observability`
 
 The package root is intentionally minimal and only exports `relayna.__version__`.
