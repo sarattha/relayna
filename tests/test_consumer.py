@@ -891,6 +891,122 @@ async def test_task_consumer_dead_letters_invalid_envelope_when_retry_enabled() 
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_rejects_batch_envelope_without_retry_policy() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "batch_id": "batch-123",
+                "tasks": [{"task_id": "task-123", "payload": {"kind": "demo"}}],
+            }
+        ).encode("utf-8")
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("handler should not run")
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.rejected_with is False
+    assert not rabbit.raw_queue_publishes
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_fans_out_batch_envelope_into_individual_messages() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "batch_id": "batch-123",
+                "tasks": [
+                    {"task_id": "task-1", "payload": {"kind": "demo"}},
+                    {"task_id": "task-2", "payload": {"kind": "demo"}},
+                ],
+            }
+        ).encode("utf-8"),
+        correlation_id="batch-123",
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("handler should not run for the original batch envelope")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert len(rabbit.raw_queue_publishes) == 2
+    assert [publish["queue_name"] for publish in rabbit.raw_queue_publishes] == ["tasks.queue", "tasks.queue"]
+    first_payload = json.loads(rabbit.raw_queue_publishes[0]["body"].decode("utf-8"))
+    second_payload = json.loads(rabbit.raw_queue_publishes[1]["body"].decode("utf-8"))
+    assert first_payload["task_id"] == "task-1"
+    assert first_payload["payload"] == {"kind": "demo"}
+    assert first_payload["spec_version"] == "1.0"
+    assert isinstance(first_payload["created_at"], str)
+    assert second_payload["task_id"] == "task-2"
+    assert second_payload["payload"] == {"kind": "demo"}
+    assert second_payload["spec_version"] == "1.0"
+    assert isinstance(second_payload["created_at"], str)
+    assert rabbit.raw_queue_publishes[0]["headers"] == {
+        "task_id": "task-1",
+        "batch_id": "batch-123",
+        "batch_index": 0,
+        "batch_size": 2,
+    }
+    assert rabbit.raw_queue_publishes[1]["headers"] == {
+        "task_id": "task-2",
+        "batch_id": "batch-123",
+        "batch_index": 1,
+        "batch_size": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_retries_failed_batch_item_using_headers() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-1", "payload": {"kind": "demo"}}).encode("utf-8"),
+        correlation_id="task-1",
+        headers={"task_id": "task-1", "batch_id": "batch-123", "batch_index": 0, "batch_size": 2},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    handled: list[tuple[str, str | None, int | None, int | None]] = []
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        handled.append((task.task_id, context.batch_id, context.batch_index, context.batch_size))
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert handled == [("task-1", "batch-123", 0, 2)]
+    assert len(rabbit.raw_queue_publishes) == 1
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.retry"
+    republished = json.loads(rabbit.raw_queue_publishes[0]["body"].decode("utf-8"))
+    assert republished["task_id"] == "task-1"
+    assert republished["payload"] == {"kind": "demo"}
+    assert rabbit.raw_queue_publishes[0]["headers"]["task_id"] == "task-1"
+    assert rabbit.raw_queue_publishes[0]["headers"]["batch_id"] == "batch-123"
+    assert rabbit.raw_queue_publishes[0]["headers"]["batch_index"] == 0
+    assert rabbit.raw_queue_publishes[0]["headers"]["batch_size"] == 2
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-retry-attempt"] == 1
+
+
+@pytest.mark.asyncio
 async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
 

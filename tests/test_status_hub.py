@@ -255,6 +255,4 @@ async def test_status_hub_sink_failures_do_not_break_storage() -> None:
 
     await hub.run_forever()
 
-    assert store.stored == [
-        ("task-123", {"task_id": "task-123", "status": "completed", "documentId": "task-123"})
-    ]
+    assert store.stored == [("task-123", {"task_id": "task-123", "status": "completed"})]

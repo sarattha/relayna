@@ -7,7 +7,7 @@ from typing import Any
 
 from aio_pika.abc import AbstractChannel, AbstractQueue
 
-from .contracts import normalize_event_aliases
+from .contracts import ContractAliasConfig, normalize_contract_aliases
 from .observability import (
     ObservationSink,
     StatusHubLoopError,
@@ -33,6 +33,7 @@ class StatusHub:
         sanitize_meta_keys: set[str] | None = None,
         prefetch: int = 200,
         observation_sink: ObservationSink | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._store = store
@@ -40,6 +41,7 @@ class StatusHub:
         self._sanitize_meta_keys = sanitize_meta_keys or {"auth_token"}
         self._prefetch = prefetch
         self._observation_sink = observation_sink
+        self._alias_config = alias_config
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -76,7 +78,7 @@ class StatusHub:
                             continue
                         await message.ack()
 
-                        data = normalize_event_aliases(payload)
+                        data = normalize_contract_aliases(payload, self._alias_config, drop_aliases=True)
                         meta = data.get("meta")
                         if isinstance(meta, Mapping):
                             sanitized_meta = dict(meta)

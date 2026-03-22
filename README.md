@@ -28,13 +28,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1.tar.gz
 ```
 
 For local development in this repository:
@@ -81,6 +81,85 @@ This setup gives you:
 - `GET /events/{task_id}` for SSE status updates
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
+
+## Contract Aliases And Batch Tasks
+
+Use `ContractAliasConfig` when producers and HTTP clients should speak aliased
+top-level envelope fields.
+
+```python
+from relayna.contracts import ContractAliasConfig
+from relayna.rabbitmq import RelaynaRabbitClient
+
+alias_config = ContractAliasConfig(
+    field_aliases={
+        "task_id": "attempt_id",
+        "correlation_id": "request_id",
+        "service": "source_service",
+        "task_type": "job_type",
+    }
+)
+client = RelaynaRabbitClient(topology=topology, alias_config=alias_config)
+await client.initialize()
+
+await client.publish_task(
+    {
+        "attempt_id": "attempt-123",
+        "request_id": "req-123",
+        "source_service": "billing-api",
+        "job_type": "invoice.render",
+        "payload": {"kind": "demo"},
+    }
+)
+await client.publish_tasks(
+    [
+        {
+            "attempt_id": "attempt-123",
+            "request_id": "req-123",
+            "source_service": "billing-api",
+            "job_type": "invoice.render",
+            "payload": {"kind": "demo"},
+        },
+        {
+            "attempt_id": "attempt-124",
+            "request_id": "req-124",
+            "source_service": "billing-api",
+            "job_type": "invoice.render",
+            "payload": {"kind": "demo"},
+        },
+    ],
+    mode="batch_envelope",
+    batch_id="batch-123",
+    meta={"source": "bulk-api"},
+)
+```
+
+When the same `alias_config` is passed into `create_relayna_lifespan(...)` and
+`create_status_router(...)`:
+
+- producers can send `attempt_id` instead of `task_id`
+- producers can also alias other top-level fields such as `correlation_id`,
+  `service`, and `task_type`
+- workers still receive canonical `TaskEnvelope` fields internally
+- `GET /events/{attempt_id}`, `GET /status/{attempt_id}`, and
+  `GET /history?attempt_id=...` use the aliased name
+- HTTP responses and SSE payloads emit the configured aliases
+- if `http_aliases` differs from `field_aliases`, routes/query params follow
+  `http_aliases` but JSON bodies still follow `field_aliases`
+- nested keys inside `payload`, `meta`, and `result` are not aliased
+
+Batch-envelope workers also receive batch context on `TaskContext`:
+
+- `context.batch_id`
+- `context.batch_index`
+- `context.batch_size`
+
+Failed items from a batch envelope are retried individually when the worker has
+`retry_policy=...`. Relayna does not execute the whole batch under one RabbitMQ
+delivery: it fans the envelope out into one queue message per task before
+running handlers, which avoids rerunning already-completed items when a later
+item fails. See [docs/getting-started.md](docs/getting-started.md) for full
+request/response examples and worker code.
 
 ## DLQ monitoring API
 
@@ -158,6 +237,7 @@ These scripts exercise the library against real RabbitMQ and Redis services on
 PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_alias_batch_task_smoke.py
 ```
 
 ## Public API

@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import Any
 
-from .contracts import TerminalStatusSet, denormalize_document_aliases
+from .contracts import ContractAliasConfig, TerminalStatusSet, denormalize_document_aliases, public_output_aliases
 from .observability import (
     ObservationSink,
     SSEHistoryReplayed,
@@ -60,12 +60,14 @@ class SSEStatusStream:
         output_adapter: EventAdapter | None = None,
         keepalive_interval_seconds: float | None = 15.0,
         observation_sink: ObservationSink | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self._store = store
         self._terminal_statuses = terminal_statuses or TerminalStatusSet()
         self._output_adapter = output_adapter or _default_adapter
         self._keepalive_interval_seconds = keepalive_interval_seconds
         self._observation_sink = observation_sink
+        self._alias_config = alias_config
 
     async def stream(self, task_id: str, *, last_event_id: str | None = None) -> AsyncIterator[bytes]:
         yield b"event: ready\ndata: {}\n\n"
@@ -109,7 +111,7 @@ class SSEStatusStream:
             seen_event_ids: set[str] = set()
             replayed_count = 0
             for item in history_items:
-                data = self._output_adapter(dict(item))
+                data = self._to_public_event(dict(item))
                 emitted_event_id = _event_id(data)
                 if emitted_event_id is not None:
                     seen_event_ids.add(emitted_event_id)
@@ -160,7 +162,7 @@ class SSEStatusStream:
                     await emit_observation(self._observation_sink, SSEMalformedPubsubPayload(task_id=task_id))
                     continue
 
-                data = self._output_adapter(dict(parsed))
+                data = self._to_public_event(dict(parsed))
                 emitted_event_id = _event_id(data)
                 if emitted_event_id is not None:
                     if emitted_event_id in seen_event_ids:
@@ -209,6 +211,10 @@ class SSEStatusStream:
             return await asyncio.wait_for(anext(iterator), timeout=self._keepalive_interval_seconds)
         except asyncio.TimeoutError:
             return None
+
+    def _to_public_event(self, data: dict[str, Any]) -> dict[str, Any]:
+        adapted = self._output_adapter(dict(data))
+        return public_output_aliases(adapted, self._alias_config)
 
 
 def document_output_adapter(data: Mapping[str, Any]) -> dict[str, Any]:

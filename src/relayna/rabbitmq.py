@@ -4,7 +4,7 @@ import asyncio
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import aio_pika
 from aio_pika import DeliveryMode, Message
@@ -18,7 +18,16 @@ from aio_pika.abc import (
 )
 from pydantic import BaseModel
 
-from .contracts import StatusEventEnvelope, ensure_status_event_id, normalize_event_aliases
+from .contracts import (
+    BatchTaskEnvelope,
+    ContractAliasConfig,
+    StatusEventEnvelope,
+    TaskEnvelope,
+    ensure_status_event_id,
+    normalize_contract_aliases,
+    normalize_event_aliases,
+    normalize_task_collection,
+)
 from .topology import (
     RelaynaTopology,
     ShardRoutingStrategy,
@@ -35,9 +44,11 @@ class RelaynaRabbitClient:
         topology: RelaynaTopology,
         *,
         connection_name: str = "relayna-robust",
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self._topology = topology
         self._connection_name = connection_name
+        self._alias_config = alias_config
         self._connection: AbstractRobustConnection | None = None
         self._channel: AbstractRobustChannel | None = None
         self._tasks_exchange: AbstractRobustExchange | None = None
@@ -48,6 +59,10 @@ class RelaynaRabbitClient:
     @property
     def topology(self) -> RelaynaTopology:
         return self._topology
+
+    @property
+    def alias_config(self) -> ContractAliasConfig | None:
+        return self._alias_config
 
     async def initialize(self) -> None:
         async with self._lock:
@@ -127,7 +142,7 @@ class RelaynaRabbitClient:
         await self._ensure_ready()
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
-        task_dict = _to_dict(task)
+        task_dict = self._prepare_task_payload(task)
         message = Message(
             _to_json_bytes(task_dict),
             content_type="application/json",
@@ -135,7 +150,31 @@ class RelaynaRabbitClient:
             correlation_id=str(task_dict.get("task_id", "")) or None,
             headers={"task_id": str(task_dict.get("task_id", ""))},
         )
-        await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(task))
+        await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(task_dict))
+
+    async def publish_tasks(
+        self,
+        tasks: Sequence[BaseModel | Mapping[str, Any]],
+        *,
+        mode: Literal["individual", "batch_envelope"] = "individual",
+        batch_id: str | None = None,
+        meta: Mapping[str, Any] | None = None,
+    ) -> None:
+        prepared_tasks = [self._prepare_task_payload(task) for task in tasks]
+        if mode == "individual":
+            for task in prepared_tasks:
+                await self.publish_task(task)
+            return
+        if mode != "batch_envelope":
+            raise ValueError(f"Unsupported publish mode '{mode}'.")
+        if not batch_id or not str(batch_id).strip():
+            raise ValueError("batch_id is required when mode='batch_envelope'.")
+        envelope = BatchTaskEnvelope(
+            batch_id=str(batch_id),
+            tasks=[TaskEnvelope.model_validate(task) for task in prepared_tasks],
+            meta=dict(meta or {}),
+        )
+        await self._publish_batch_envelope(envelope.model_dump(mode="json", exclude_none=True))
 
     async def publish_status(self, event: BaseModel | Mapping[str, Any]) -> None:
         payload = self._prepare_status_payload(event)
@@ -230,7 +269,7 @@ class RelaynaRabbitClient:
         elif isinstance(event, BaseModel):
             event_dict = _to_dict(event)
         else:
-            event_dict = normalize_event_aliases(_to_dict(event))
+            event_dict = normalize_contract_aliases(_to_dict(event), self._alias_config, drop_aliases=True)
 
         status = event_dict.get("status")
         if isinstance(status, str):
@@ -248,6 +287,11 @@ class RelaynaRabbitClient:
 
         return ensure_status_event_id(event_dict)
 
+    def _prepare_task_payload(self, task: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
+        normalized = normalize_contract_aliases(_to_dict(task), self._alias_config, drop_aliases=True)
+        envelope = TaskEnvelope.model_validate(normalized)
+        return envelope.model_dump(mode="json", exclude_none=True)
+
     async def _publish_status_payload(self, payload: dict[str, Any], *, routing_key: str) -> None:
         await self._ensure_ready()
         if self._status_exchange is None:
@@ -262,6 +306,22 @@ class RelaynaRabbitClient:
             headers={"task_id": task_id, "status": str(payload.get("status", ""))},
         )
         await self._status_exchange.publish(message, routing_key=routing_key)
+
+    async def _publish_batch_envelope(self, payload: dict[str, Any]) -> None:
+        await self._ensure_ready()
+        if self._tasks_exchange is None:
+            raise RuntimeError("Tasks exchange is not initialized")
+        tasks = payload.get("tasks")
+        first_task = tasks[0] if isinstance(tasks, list) and tasks else payload
+        batch_id = str(payload.get("batch_id", ""))
+        message = Message(
+            _to_json_bytes(payload),
+            content_type="application/json",
+            delivery_mode=DeliveryMode.PERSISTENT,
+            correlation_id=batch_id or None,
+            headers={"batch_id": batch_id, "batch_size": len(tasks) if isinstance(tasks, list) else 0},
+        )
+        await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(first_task))
 
 
 async def declare_stream_queue(

@@ -8,7 +8,7 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI
 
-from relayna.contracts import TerminalStatusSet
+from relayna.contracts import ContractAliasConfig, TerminalStatusSet
 from relayna.dlq import DLQService
 from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
@@ -49,6 +49,7 @@ def build_app(
     *,
     sse_terminal_statuses: TerminalStatusSet | None = None,
     dlq_store_prefix: str | None = None,
+    alias_config: ContractAliasConfig | None = None,
 ) -> FastAPI:
     app = FastAPI(
         lifespan=create_relayna_lifespan(
@@ -57,6 +58,7 @@ def build_app(
             store_prefix=f"relayna-smoke-{suffix}",
             sse_terminal_statuses=sse_terminal_statuses,
             dlq_store_prefix=dlq_store_prefix,
+            alias_config=alias_config,
         )
     )
     runtime = get_relayna_runtime(app)
@@ -65,6 +67,7 @@ def build_app(
             sse_stream=runtime.sse_stream,
             history_reader=runtime.history_reader,
             latest_status_store=runtime.store,
+            alias_config=alias_config,
         )
     )
     if runtime.dlq_store is not None:
@@ -75,7 +78,8 @@ def build_app(
                     dlq_store=runtime.dlq_store,
                     status_store=runtime.store,
                 )
-            )
+            ),
+            alias_config=alias_config,
         )
     return app
 
@@ -94,11 +98,12 @@ async def poll_history(
     task_id: str,
     expected_count: int,
     timeout_seconds: float = 10.0,
+    task_param_name: str = "task_id",
 ) -> dict[str, object]:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     last_response: dict[str, object] | None = None
     while asyncio.get_running_loop().time() < deadline:
-        response = await client.get("/history", params={"task_id": task_id})
+        response = await client.get("/history", params={task_param_name: task_id})
         response.raise_for_status()
         payload = response.json()
         last_response = payload

@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from aio_pika.abc import AbstractChannel, AbstractQueue  # ty:ignore[unresolved-import]
 
-from .contracts import normalize_event_aliases
+from .contracts import ContractAliasConfig, normalize_contract_aliases, public_output_aliases
 from .rabbitmq import RelaynaRabbitClient
 
 StreamOffset = Literal["first", "last"] | int
@@ -22,10 +22,12 @@ class StreamHistoryReader:
         rabbitmq: RelaynaRabbitClient,
         queue_arguments: dict[str, Any] | None = None,
         output_adapter: callable | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._queue_arguments = queue_arguments
         self._output_adapter = output_adapter
+        self._alias_config = alias_config
 
     async def replay(
         self,
@@ -71,13 +73,14 @@ class StreamHistoryReader:
                         continue
                     await message.ack()
 
-                    normalized = normalize_event_aliases(payload)
+                    normalized = normalize_contract_aliases(payload, self._alias_config, drop_aliases=True)
                     current_task_id = str(normalized.get("task_id", ""))
                     if task_id and current_task_id != task_id:
                         continue
 
                     if self._output_adapter is not None:
                         normalized = self._output_adapter(normalized)
+                    normalized = public_output_aliases(normalized, self._alias_config)
                     events.append(normalized)
 
                     if max_scan is not None and len(events) >= max_scan:

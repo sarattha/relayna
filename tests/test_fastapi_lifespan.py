@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from relayna.contracts import ContractAliasConfig
 from relayna.dlq import DLQRecord, DLQRecordState, build_dlq_record
 from relayna.fastapi import create_dlq_router, create_status_router
 from relayna.dlq import DLQService
@@ -17,9 +19,16 @@ class FakeRabbitClient:
     instances: list["FakeRabbitClient"] = []
     fail_initialize = False
 
-    def __init__(self, topology: SharedTasksSharedStatusTopology, *, connection_name: str) -> None:
+    def __init__(
+        self,
+        topology: SharedTasksSharedStatusTopology,
+        *,
+        connection_name: str,
+        alias_config: ContractAliasConfig | None = None,
+    ) -> None:
         self.topology = topology
         self.connection_name = connection_name
+        self.alias_config = alias_config
         self.initialize_calls = 0
         self.close_calls = 0
         self.queue_counts: dict[str, int] = {}
@@ -127,12 +136,14 @@ class FakeHub:
         consume_arguments: dict[str, object] | None = None,
         sanitize_meta_keys: set[str] | None = None,
         prefetch: int = 200,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self.rabbitmq = rabbitmq
         self.store = store
         self.consume_arguments = consume_arguments
         self.sanitize_meta_keys = sanitize_meta_keys
         self.prefetch = prefetch
+        self.alias_config = alias_config
         self.stop_calls = 0
         self.run_calls = 0
         self._stopped = asyncio.Event()
@@ -156,10 +167,12 @@ class FakeSSEStatusStream:
         store: FakeStore,
         terminal_statuses: object | None = None,
         output_adapter: object | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self.store = store
         self.terminal_statuses = terminal_statuses
         self.output_adapter = output_adapter
+        self.alias_config = alias_config
         self.stream_calls: list[dict[str, str | None]] = []
         FakeSSEStatusStream.instances.append(self)
 
@@ -178,10 +191,12 @@ class FakeHistoryReader:
         rabbitmq: FakeRabbitClient,
         queue_arguments: dict[str, object] | None = None,
         output_adapter: object | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self.rabbitmq = rabbitmq
         self.queue_arguments = queue_arguments
         self.output_adapter = output_adapter
+        self.alias_config = alias_config
         self.replay_calls: list[dict[str, object]] = []
         FakeHistoryReader.instances.append(self)
 
@@ -435,6 +450,159 @@ async def test_runtime_is_available_under_custom_state_key(topology: SharedTasks
 
     assert runtime.store.prefix == "relayna"
     assert getattr(app.state, "custom_runtime") is runtime
+
+
+def test_alias_config_changes_public_route_shapes_without_testclient(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    alias_config = ContractAliasConfig(field_aliases={"task_id": "attempt_id"})
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            alias_config=alias_config,
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    runtime.store.latest_by_task["attempt-123"] = {"task_id": "attempt-123", "status": "completed"}
+    router = create_status_router(
+        sse_stream=runtime.sse_stream,
+        history_reader=runtime.history_reader,
+        latest_status_store=runtime.store,
+        alias_config=alias_config,
+    )
+    app.include_router(router)
+
+    paths = {route.path for route in app.routes}
+    assert "/events/{attempt_id}" in paths
+    assert "/status/{attempt_id}" in paths
+
+    history_route = next(route for route in router.routes if route.path == "/history")
+    assert {param.alias for param in history_route.dependant.query_params} >= {"attempt_id"}
+
+    status_route = next(route for route in router.routes if route.path == "/status/{attempt_id}")
+    status_response = asyncio.run(status_route.endpoint(task_id="attempt-123"))
+    assert json.loads(status_response.body) == {
+        "attempt_id": "attempt-123",
+        "event": {"attempt_id": "attempt-123", "status": "completed"},
+    }
+
+    history_response = asyncio.run(
+        history_route.endpoint(task_id="attempt-123", start_offset="first", max_seconds=None, max_scan=1)
+    )
+    assert json.loads(history_response.body) == {
+        "count": 1,
+        "events": [{"attempt_id": "attempt-123", "status": "completed"}],
+        "attempt_id": "attempt-123",
+    }
+
+
+def test_http_aliases_do_not_change_status_history_body_shape_without_testclient(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    alias_config = ContractAliasConfig(
+        field_aliases={"task_id": "attempt_id"},
+        http_aliases={"task_id": "attemptId"},
+    )
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            alias_config=alias_config,
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    runtime.store.latest_by_task["attempt-123"] = {"task_id": "attempt-123", "status": "completed"}
+    router = create_status_router(
+        sse_stream=runtime.sse_stream,
+        history_reader=runtime.history_reader,
+        latest_status_store=runtime.store,
+        alias_config=alias_config,
+    )
+    app.include_router(router)
+
+    paths = {route.path for route in app.routes}
+    assert "/events/{attemptId}" in paths
+    assert "/status/{attemptId}" in paths
+
+    history_route = next(route for route in router.routes if route.path == "/history")
+    assert {param.alias for param in history_route.dependant.query_params} >= {"attemptId"}
+
+    status_route = next(route for route in router.routes if route.path == "/status/{attemptId}")
+    status_response = asyncio.run(status_route.endpoint(task_id="attempt-123"))
+    assert json.loads(status_response.body) == {
+        "attempt_id": "attempt-123",
+        "event": {"attempt_id": "attempt-123", "status": "completed"},
+    }
+
+    history_response = asyncio.run(
+        history_route.endpoint(task_id="attempt-123", start_offset="first", max_seconds=None, max_scan=1)
+    )
+    assert json.loads(history_response.body) == {
+        "count": 1,
+        "events": [{"attempt_id": "attempt-123", "status": "completed"}],
+        "attempt_id": "attempt-123",
+    }
+
+
+def test_alias_config_changes_dlq_query_and_output_shapes_without_testclient(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    alias_config = ContractAliasConfig(field_aliases={"task_id": "attempt_id"})
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            dlq_store_prefix="relayna-dlq",
+            alias_config=alias_config,
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    assert runtime.dlq_store is not None
+    runtime.store.latest_by_task["attempt-123"] = {"task_id": "attempt-123", "status": "failed"}
+    record = build_dlq_record(
+        queue_name="tasks.queue.dlq",
+        source_queue_name="tasks.queue",
+        retry_queue_name="tasks.queue.retry",
+        task_id="attempt-123",
+        correlation_id="corr-123",
+        reason="handler_error",
+        exception_type="RuntimeError",
+        retry_attempt=2,
+        max_retries=2,
+        headers={"x-relayna-retry-attempt": 2},
+        content_type="application/json",
+        body=b'{"task_id":"attempt-123","payload":{"kind":"demo"}}',
+    )
+
+    async def preload() -> None:
+        await runtime.dlq_store.add(record)
+
+    asyncio.run(preload())
+
+    router = create_dlq_router(
+        dlq_service=DLQService(
+            rabbitmq=runtime.rabbitmq,
+            dlq_store=runtime.dlq_store,
+            status_store=runtime.store,
+        ),
+        alias_config=alias_config,
+    )
+    app.include_router(router)
+
+    messages_route = next(route for route in router.routes if route.path == "/dlq/messages")
+    assert {param.alias for param in messages_route.dependant.query_params} >= {"attempt_id"}
+
+    detail_route = next(route for route in router.routes if route.path == "/dlq/messages/{dlq_id}")
+    detail_response = asyncio.run(detail_route.endpoint(dlq_id=record.dlq_id))
+    detail_payload = json.loads(detail_response.body)
+    assert detail_payload["attempt_id"] == "attempt-123"
+    assert detail_payload["body"]["attempt_id"] == "attempt-123"
+    assert "task_id" not in detail_payload
+    assert "task_id" not in detail_payload["body"]
 
 
 def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(

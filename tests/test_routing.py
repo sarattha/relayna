@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from relayna.contracts import ContractAliasConfig
 from relayna.rabbitmq import RelaynaRabbitClient, RetryInfrastructure, ShardRoutingStrategy, TaskIdRoutingStrategy
 from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
 
@@ -209,6 +210,77 @@ async def test_publish_status_generates_event_id_when_missing() -> None:
     assert first_payload["correlation_id"] == "task-123"
     assert first_payload["event_id"] == second_payload["event_id"]
     assert len(first_payload["event_id"]) == 64
+
+
+@pytest.mark.asyncio
+async def test_publish_task_normalizes_custom_aliases() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(
+        topology=topology,
+        alias_config=ContractAliasConfig(field_aliases={"task_id": "attempt_id"}),
+    )
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = exchange
+
+    await client.publish_task({"attempt_id": "attempt-123", "payload": {"kind": "demo"}})
+
+    message, routing_key = exchange.publish_calls[0]
+    payload = json.loads(message.body.decode("utf-8"))
+
+    assert routing_key == "task.request"
+    assert payload["task_id"] == "attempt-123"
+    assert "attempt_id" not in payload
+    assert message.headers["task_id"] == "attempt-123"
+
+
+@pytest.mark.asyncio
+async def test_publish_tasks_batch_envelope_uses_batch_id_headers_and_canonical_tasks() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(
+        topology=topology,
+        alias_config=ContractAliasConfig(field_aliases={"task_id": "attempt_id"}),
+    )
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = exchange
+
+    await client.publish_tasks(
+        [
+            {"attempt_id": "attempt-1", "payload": {"kind": "demo"}},
+            {"attempt_id": "attempt-2", "payload": {"kind": "demo"}},
+        ],
+        mode="batch_envelope",
+        batch_id="batch-123",
+        meta={"source": "bulk-api"},
+    )
+
+    message, routing_key = exchange.publish_calls[0]
+    payload = json.loads(message.body.decode("utf-8"))
+
+    assert routing_key == "task.request"
+    assert payload["batch_id"] == "batch-123"
+    assert payload["meta"] == {"source": "bulk-api"}
+    assert [task["task_id"] for task in payload["tasks"]] == ["attempt-1", "attempt-2"]
+    assert all("attempt_id" not in task for task in payload["tasks"])
+    assert message.correlation_id == "batch-123"
+    assert message.headers == {"batch_id": "batch-123", "batch_size": 2}
 
 
 @pytest.mark.asyncio

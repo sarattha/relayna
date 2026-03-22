@@ -9,7 +9,14 @@ from typing import Any, Protocol
 
 from pydantic import ValidationError
 
-from .contracts import StatusEventEnvelope, TaskEnvelope
+from .contracts import (
+    BatchTaskEnvelope,
+    ContractAliasConfig,
+    StatusEventEnvelope,
+    TaskEnvelope,
+    is_batch_task_payload,
+    normalize_contract_aliases,
+)
 from .dlq import DLQRecorder, build_dlq_record
 from .observability import (
     ConsumerDeadLetterPublished,
@@ -78,6 +85,9 @@ class TaskContext:
     retry_attempt: int = 0
     max_retries: int | None = None
     source_queue_name: str | None = None
+    batch_id: str | None = None
+    batch_index: int | None = None
+    batch_size: int | None = None
 
     async def publish_status(
         self,
@@ -172,6 +182,7 @@ class TaskConsumer:
         idle_retry_seconds: float = 2.0,
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -185,6 +196,7 @@ class TaskConsumer:
         self._idle_retry_seconds = idle_retry_seconds
         self._observation_sink = observation_sink
         self._dlq_store = dlq_store
+        self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -290,18 +302,40 @@ class TaskConsumer:
                 await message.ack()
             return
 
+        normalized_payload = _normalize_payload(payload, alias_config=self._alias_config)
         await emit_observation(
             self._observation_sink,
             TaskMessageReceived(
                 consumer_name=self._consumer_name,
-                task_id=_coerce_task_id(payload),
+                task_id=_coerce_task_id(normalized_payload),
                 delivery_tag=getattr(message, "delivery_tag", None),
                 redelivered=bool(getattr(message, "redelivered", False)),
             ),
         )
 
+        if isinstance(normalized_payload, Mapping) and is_batch_task_payload(normalized_payload):
+            if self._retry_policy is None:
+                await message.reject(requeue=False)
+                await emit_observation(
+                    self._observation_sink,
+                    TaskMessageRejected(
+                        consumer_name=self._consumer_name,
+                        task_id=None,
+                        requeue=False,
+                        reason="unsupported_batch_envelope",
+                    ),
+                )
+                return
+            await self._handle_batch_message(
+                message,
+                payload=normalized_payload,
+                source_queue_name=source_queue_name,
+                retry_infrastructure=retry_infrastructure,
+            )
+            return
+
         try:
-            task = TaskEnvelope.model_validate(payload)
+            task = TaskEnvelope.model_validate(normalized_payload)
         except ValidationError:
             if self._retry_policy is None:
                 await message.reject(requeue=False)
@@ -309,7 +343,7 @@ class TaskConsumer:
                     self._observation_sink,
                     TaskMessageRejected(
                         consumer_name=self._consumer_name,
-                        task_id=_coerce_task_id(payload),
+                        task_id=_coerce_task_id(normalized_payload),
                         requeue=False,
                         reason="invalid_envelope",
                     ),
@@ -319,7 +353,7 @@ class TaskConsumer:
                     message,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
-                    task_id=_coerce_task_id(payload),
+                    task_id=_coerce_task_id(normalized_payload),
                     retry_attempt=_retry_attempt(message),
                     reason="invalid_envelope",
                     exception_type="ValidationError",
@@ -327,20 +361,112 @@ class TaskConsumer:
                 await message.ack()
             return
 
-        current_retry_attempt = _retry_attempt(message)
-        context = TaskContext(
+        context = self._make_task_context(
+            task=task,
+            raw_payload=dict(normalized_payload),
+            message=message,
+            source_queue_name=source_queue_name,
+        )
+        success = await self._process_task(
+            task=task,
+            context=context,
+            message=message,
+            retry_infrastructure=retry_infrastructure,
+            source_queue_name=source_queue_name,
+        )
+        if success:
+            await message.ack()
+            await emit_observation(
+                self._observation_sink,
+                TaskMessageAcked(consumer_name=self._consumer_name, task_id=task.task_id),
+            )
+
+    async def _handle_batch_message(
+        self,
+        message: Any,
+        *,
+        payload: Mapping[str, Any],
+        source_queue_name: str,
+        retry_infrastructure: RetryInfrastructure | None,
+    ) -> None:
+        try:
+            batch = BatchTaskEnvelope.model_validate(_normalize_batch_payload(payload, alias_config=self._alias_config))
+        except ValidationError:
+            await self._publish_dead_letter(
+                message,
+                retry_infrastructure=retry_infrastructure,
+                source_queue_name=source_queue_name,
+                task_id=None,
+                retry_attempt=_retry_attempt(message),
+                reason="invalid_envelope",
+                exception_type="ValidationError",
+            )
+            await message.ack()
+            return
+
+        batch_size = len(batch.tasks)
+        for index, task in enumerate(batch.tasks):
+            task_payload = task.model_dump(mode="json", exclude_none=True)
+            await self._rabbitmq.publish_raw_to_queue(
+                source_queue_name,
+                _to_json_bytes(task_payload),
+                correlation_id=task.correlation_id or task.task_id,
+                headers={
+                    "task_id": task.task_id,
+                    "batch_id": batch.batch_id,
+                    "batch_index": index,
+                    "batch_size": batch_size,
+                },
+                content_type=getattr(message, "content_type", "application/json"),
+            )
+
+        await message.ack()
+        await emit_observation(
+            self._observation_sink,
+            TaskMessageAcked(consumer_name=self._consumer_name, task_id=None),
+        )
+
+    def _make_task_context(
+        self,
+        *,
+        task: TaskEnvelope,
+        raw_payload: dict[str, Any],
+        message: Any,
+        source_queue_name: str,
+        batch_id: str | None = None,
+        batch_index: int | None = None,
+        batch_size: int | None = None,
+    ) -> TaskContext:
+        headers = _message_headers(message)
+        return TaskContext(
             rabbitmq=self._rabbitmq,
             consumer_name=self._consumer_name,
-            raw_payload=dict(payload),
+            raw_payload=dict(raw_payload),
             correlation_id=task.correlation_id or getattr(message, "correlation_id", None),
             delivery_tag=getattr(message, "delivery_tag", None),
             redelivered=bool(getattr(message, "redelivered", False)),
             _task_id=task.task_id,
-            retry_attempt=current_retry_attempt,
+            retry_attempt=_retry_attempt(message),
             max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
             source_queue_name=source_queue_name,
+            batch_id=batch_id if batch_id is not None else _header_string(headers, "batch_id"),
+            batch_index=batch_index if batch_index is not None else _header_int(headers, "batch_index"),
+            batch_size=batch_size if batch_size is not None else _header_int(headers, "batch_size"),
         )
 
+    async def _process_task(
+        self,
+        *,
+        task: TaskEnvelope,
+        context: TaskContext,
+        message: Any,
+        retry_infrastructure: RetryInfrastructure | None,
+        source_queue_name: str,
+        ack_message: bool = True,
+        retry_body: bytes | None = None,
+        retry_correlation_id: str | None = None,
+        retry_headers: Mapping[str, Any] | None = None,
+    ) -> bool:
         try:
             await self._publish_lifecycle_status(
                 context,
@@ -353,11 +479,7 @@ class TaskConsumer:
                 status=self._lifecycle_statuses.completed_status,
                 message="Task processing completed.",
             )
-            await message.ack()
-            await emit_observation(
-                self._observation_sink,
-                TaskMessageAcked(consumer_name=self._consumer_name, task_id=task.task_id),
-            )
+            return True
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -377,22 +499,23 @@ class TaskConsumer:
                     status=self._lifecycle_statuses.failed_status,
                     message=failed_message,
                 )
-                requeue = self._failure_action is FailureAction.REQUEUE
-                await message.reject(requeue=requeue)
-                await emit_observation(
-                    self._observation_sink,
-                    TaskMessageRejected(
-                        consumer_name=self._consumer_name,
-                        task_id=task.task_id,
-                        requeue=requeue,
-                        reason="handler_error",
-                    ),
-                )
-                return
+                if ack_message:
+                    requeue = self._failure_action is FailureAction.REQUEUE
+                    await message.reject(requeue=requeue)
+                    await emit_observation(
+                        self._observation_sink,
+                        TaskMessageRejected(
+                            consumer_name=self._consumer_name,
+                            task_id=task.task_id,
+                            requeue=requeue,
+                            reason="handler_error",
+                        ),
+                    )
+                return False
 
             max_retries = self._retry_policy.max_retries
-            if current_retry_attempt < max_retries:
-                next_attempt = current_retry_attempt + 1
+            if context.retry_attempt < max_retries:
+                next_attempt = context.retry_attempt + 1
                 await self._publish_retry(
                     message,
                     retry_infrastructure=retry_infrastructure,
@@ -402,22 +525,31 @@ class TaskConsumer:
                     max_retries=max_retries,
                     reason="handler_error",
                     exception_type=type(exc).__name__,
+                    body=retry_body,
+                    correlation_id=retry_correlation_id,
+                    extra_headers=_merge_batch_retry_headers(context, retry_headers),
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
-                await message.ack()
-                return
+                if ack_message:
+                    await message.ack()
+                return False
 
             await self._publish_dead_letter(
                 message,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=task.task_id,
-                retry_attempt=current_retry_attempt,
+                retry_attempt=context.retry_attempt,
                 reason="handler_error",
                 exception_type=type(exc).__name__,
+                body=retry_body,
+                correlation_id=retry_correlation_id,
+                extra_headers=_merge_batch_retry_headers(context, retry_headers),
             )
             await self._publish_dead_letter_status(context, exc)
-            await message.ack()
+            if ack_message:
+                await message.ack()
+            return False
 
     async def _publish_lifecycle_status(self, context: TaskContext, *, status: str, message: str) -> None:
         if not self._lifecycle_statuses.enabled:
@@ -481,21 +613,26 @@ class TaskConsumer:
         max_retries: int,
         reason: str,
         exception_type: str | None,
+        body: bytes | None = None,
+        correlation_id: str | None = None,
+        extra_headers: Mapping[str, Any] | None = None,
     ) -> None:
         if retry_infrastructure is None:
             raise RuntimeError("Retry infrastructure is not initialized")
+        headers = _retry_headers(
+            message,
+            source_queue_name=source_queue_name,
+            retry_attempt=retry_attempt,
+            max_retries=max_retries,
+            reason=reason,
+            exception_type=exception_type,
+            extra_headers=extra_headers,
+        )
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.retry_queue_name,
-            message.body,
-            correlation_id=getattr(message, "correlation_id", None),
-            headers=_retry_headers(
-                message,
-                source_queue_name=source_queue_name,
-                retry_attempt=retry_attempt,
-                max_retries=max_retries,
-                reason=reason,
-                exception_type=exception_type,
-            ),
+            body or message.body,
+            correlation_id=correlation_id or getattr(message, "correlation_id", None),
+            headers=headers,
             content_type=getattr(message, "content_type", "application/json"),
         )
         await emit_observation(
@@ -520,21 +657,26 @@ class TaskConsumer:
         retry_attempt: int,
         reason: str,
         exception_type: str | None,
+        body: bytes | None = None,
+        correlation_id: str | None = None,
+        extra_headers: Mapping[str, Any] | None = None,
     ) -> None:
         if retry_infrastructure is None or self._retry_policy is None:
             raise RuntimeError("Retry infrastructure is not initialized")
+        headers = _retry_headers(
+            message,
+            source_queue_name=source_queue_name,
+            retry_attempt=retry_attempt,
+            max_retries=self._retry_policy.max_retries,
+            reason=reason,
+            exception_type=exception_type,
+            extra_headers=extra_headers,
+        )
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.dead_letter_queue_name,
-            message.body,
-            correlation_id=getattr(message, "correlation_id", None),
-            headers=_retry_headers(
-                message,
-                source_queue_name=source_queue_name,
-                retry_attempt=retry_attempt,
-                max_retries=self._retry_policy.max_retries,
-                reason=reason,
-                exception_type=exception_type,
-            ),
+            body or message.body,
+            correlation_id=correlation_id or getattr(message, "correlation_id", None),
+            headers=headers,
             content_type=getattr(message, "content_type", "application/json"),
         )
         await emit_observation(
@@ -554,21 +696,14 @@ class TaskConsumer:
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
             task_id=task_id,
-            correlation_id=getattr(message, "correlation_id", None),
+            correlation_id=correlation_id or getattr(message, "correlation_id", None),
             reason=reason,
             exception_type=exception_type,
             retry_attempt=retry_attempt,
             max_retries=self._retry_policy.max_retries,
-            headers=_retry_headers(
-                message,
-                source_queue_name=source_queue_name,
-                retry_attempt=retry_attempt,
-                max_retries=self._retry_policy.max_retries,
-                reason=reason,
-                exception_type=exception_type,
-            ),
+            headers=headers,
             content_type=getattr(message, "content_type", "application/json"),
-            body=message.body,
+            body=body or message.body,
         )
 
 
@@ -603,8 +738,10 @@ def _retry_headers(
     max_retries: int,
     reason: str,
     exception_type: str | None,
+    extra_headers: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     headers = _message_headers(message)
+    headers.update(dict(extra_headers or {}))
     headers["x-relayna-retry-attempt"] = int(retry_attempt)
     headers["x-relayna-max-retries"] = int(max_retries)
     headers["x-relayna-source-queue"] = source_queue_name
@@ -613,12 +750,58 @@ def _retry_headers(
     return headers
 
 
+def _header_string(headers: Mapping[str, Any], key: str) -> str | None:
+    value = headers.get(key)
+    if isinstance(value, str):
+        value = value.strip()
+        if value:
+            return value
+    return None
+
+
+def _header_int(headers: Mapping[str, Any], key: str) -> int | None:
+    value = headers.get(key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _merge_batch_retry_headers(context: TaskContext, headers: Mapping[str, Any] | None) -> dict[str, Any]:
+    merged = dict(headers or {})
+    if context.batch_id is not None:
+        merged["batch_id"] = context.batch_id
+    if context.batch_index is not None:
+        merged["batch_index"] = context.batch_index
+    if context.batch_size is not None:
+        merged["batch_size"] = context.batch_size
+    return merged
+
+
 def _failure_message(exc: Exception, *, include_error_message: bool) -> str:
     if include_error_message:
         text = str(exc).strip()
         if text:
             return text
     return "Task processing failed."
+
+
+def _normalize_payload(payload: Any, *, alias_config: ContractAliasConfig | None) -> Any:
+    if isinstance(payload, Mapping):
+        return normalize_contract_aliases(payload, alias_config, drop_aliases=True)
+    return payload
+
+
+def _normalize_batch_payload(payload: Mapping[str, Any], *, alias_config: ContractAliasConfig | None) -> dict[str, Any]:
+    normalized = normalize_contract_aliases(payload, alias_config, drop_aliases=True)
+    tasks = normalized.get("tasks")
+    if isinstance(tasks, list):
+        normalized["tasks"] = [_normalize_payload(task, alias_config=alias_config) for task in tasks]
+    return normalized
+
+
+def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
 async def _persist_dlq_record(
@@ -680,6 +863,7 @@ class AggregationConsumer:
         idle_retry_seconds: float = 2.0,
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -693,6 +877,7 @@ class AggregationConsumer:
         self._idle_retry_seconds = idle_retry_seconds
         self._observation_sink = observation_sink
         self._dlq_store = dlq_store
+        self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -743,6 +928,7 @@ class AggregationConsumer:
                                 )
                                 await message.ack()
                             continue
+                        payload = _normalize_payload(payload, alias_config=self._alias_config)
                         try:
                             event = StatusEventEnvelope.model_validate(payload)
                         except ValidationError:
