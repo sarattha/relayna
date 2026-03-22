@@ -10,6 +10,8 @@ streaming.
 - bridges shared status traffic into Redis history and pubsub
 - replays stored history before switching clients to live SSE updates
 - exposes small FastAPI helpers for lifecycle wiring and status routes
+- supports payload and HTTP aliases for `task_id`-style fields
+- supports batch-envelope task publishing with per-item worker context
 - supports RabbitMQ stream replay for bounded operational history reads
 - supports named RabbitMQ topologies for shared queues and shard-aware
   aggregation workers

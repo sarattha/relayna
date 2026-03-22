@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.0 - 2026-03-22
+
+### Added
+
+- Payload and FastAPI alias support via `relayna.contracts.ContractAliasConfig`, including aliased task/status inputs and aliased `/events`, `/status`, `/history`, and DLQ route shapes when the same config is wired through FastAPI.
+- Batch task publishing through `RelaynaRabbitClient.publish_tasks(..., mode="batch_envelope")`, with per-item worker metadata on `TaskContext.batch_id`, `TaskContext.batch_index`, and `TaskContext.batch_size`.
+- Real-stack smoke coverage for aliased batch-envelope task handling against local RabbitMQ and Redis.
+
+### Changed
+
+- The getting-started and README guides now include concrete aliasing and batch-envelope examples, including sample HTTP/SSE payloads and worker behavior notes.
+
 ## 1.1.6 - 2026-03-21
 
 ### Added

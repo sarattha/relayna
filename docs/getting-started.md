@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.0/relayna-1.2.0-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.1.6/relayna-1.1.6.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.0/relayna-1.2.0.tar.gz
 ```
 
 For local work in this repository:
@@ -56,7 +56,6 @@ status endpoints.
 ```python
 from fastapi import FastAPI
 
-from relayna.contracts import ContractAliasConfig
 from relayna.dlq import DLQService
 from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.rabbitmq import RelaynaRabbitClient
@@ -71,11 +70,72 @@ topology = SharedTasksSharedStatusTopology(
     status_queue="status.queue",
 )
 
-alias_config = ContractAliasConfig(field_aliases={"task_id": "attempt_id"})
+client = RelaynaRabbitClient(topology=topology)
+await client.initialize()
+await client.publish_task({"task_id": "task-123", "payload": {"kind": "demo"}})
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+    )
+)
+runtime = get_relayna_runtime(app)
+app.include_router(
+    create_status_router(
+        sse_stream=runtime.sse_stream,
+        history_reader=runtime.history_reader,
+        latest_status_store=runtime.store,
+    )
+)
+if runtime.dlq_store is not None:
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+            )
+        )
+    )
+```
+
+This exposes:
+
+- `GET /events/{task_id}`
+- `GET /history`
+- `GET /status/{task_id}`
+
+For a detailed observability walkthrough, see [Observability](observability.md).
+
+### Contract aliases
+
+Use `ContractAliasConfig` when external producers or API clients should use
+different top-level envelope field names.
+
+```python
+from relayna.contracts import ContractAliasConfig
+
+alias_config = ContractAliasConfig(
+    field_aliases={
+        "task_id": "attempt_id",
+        "correlation_id": "request_id",
+        "service": "source_service",
+        "task_type": "job_type",
+    }
+)
 
 client = RelaynaRabbitClient(topology=topology, alias_config=alias_config)
 await client.initialize()
-await client.publish_task({"attempt_id": "task-123", "payload": {"kind": "demo"}})
+await client.publish_task(
+    {
+        "attempt_id": "attempt-123",
+        "request_id": "req-123",
+        "source_service": "billing-api",
+        "job_type": "invoice.render",
+        "payload": {"kind": "demo"},
+    }
+)
 
 app = FastAPI(
     lifespan=create_relayna_lifespan(
@@ -93,44 +153,128 @@ app.include_router(
         alias_config=alias_config,
     )
 )
-if runtime.dlq_store is not None:
-    app.include_router(
-        create_dlq_router(
-            dlq_service=DLQService(
-                rabbitmq=runtime.rabbitmq,
-                dlq_store=runtime.dlq_store,
-                status_store=runtime.store,
-            ),
-            alias_config=alias_config,
-        )
-    )
 ```
 
-This exposes:
+Relayna keeps the transport canonical internally and only applies aliases at the
+edges:
 
-- `GET /events/{attempt_id}`
-- `GET /history`
-- `GET /status/{attempt_id}`
+- inbound task and status payloads accept aliased top-level names such as
+  `attempt_id`, `request_id`, `source_service`, and `job_type`
+- workers still receive canonical envelope fields such as
+  `TaskEnvelope.task_id`, `TaskEnvelope.correlation_id`, `TaskEnvelope.service`,
+  and `TaskEnvelope.task_type`
+- `/events/{attempt_id}`, `/status/{attempt_id}`, and `/history?attempt_id=...`
+  use the alias when the same config is passed into FastAPI
+- history, latest-status, and SSE bodies expose the aliased names instead of
+  the canonical keys
+- aliasing is top-level only; nested keys inside `payload`, `meta`, or `result`
+  are not renamed
 
-For a detailed observability walkthrough, see [Observability](observability.md).
+Example latest-status response with aliasing enabled:
+
+```json
+{
+  "attempt_id": "attempt-123",
+  "event": {
+    "attempt_id": "attempt-123",
+    "request_id": "req-123",
+    "source_service": "billing-api",
+    "job_type": "invoice.render",
+    "status": "completed",
+    "message": "Task completed.",
+    "event_id": "8e53f4...",
+    "meta": {}
+  }
+}
+```
+
+Example SSE event with aliasing enabled:
+
+```text
+id: 8e53f4...
+event: status
+data: {"attempt_id":"attempt-123","request_id":"req-123","source_service":"billing-api","job_type":"invoice.render","status":"completed","message":"Task completed.","event_id":"8e53f4...","meta":{}}
+```
+
+Example worker view of the same task after Relayna normalizes aliases:
+
+```python
+async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
+    assert task.task_id == "attempt-123"
+    assert task.correlation_id == "req-123"
+    assert task.service == "billing-api"
+    assert task.task_type == "invoice.render"
+```
+
+If your HTTP route parameter should differ from the payload alias, add
+`http_aliases`:
+
+```python
+alias_config = ContractAliasConfig(
+    field_aliases={
+        "task_id": "attempt_id",
+        "correlation_id": "request_id",
+    },
+    http_aliases={"task_id": "attemptId"},
+)
+```
+
+With that config, request bodies still use `attempt_id`, while FastAPI routes
+and query parameters use `attemptId`.
 
 ### Batch publishing
 
 Use `publish_tasks(...)` when you want one client call to submit several tasks.
+Relayna supports two modes.
+
+#### Individual mode
+
+`mode="individual"` publishes one RabbitMQ message per task.
 
 ```python
 await client.publish_tasks(
     [
-        {"attempt_id": "task-1", "payload": {"kind": "demo"}},
-        {"attempt_id": "task-2", "payload": {"kind": "demo"}},
+        {
+            "attempt_id": "task-1",
+            "request_id": "req-1",
+            "source_service": "bulk-api",
+            "job_type": "invoice.render",
+            "payload": {"kind": "demo"},
+        },
+        {
+            "attempt_id": "task-2",
+            "request_id": "req-2",
+            "source_service": "bulk-api",
+            "job_type": "invoice.render",
+            "payload": {"kind": "demo"},
+        },
     ],
     mode="individual",
 )
+```
 
+#### Batch-envelope mode
+
+`mode="batch_envelope"` publishes one RabbitMQ message containing several task
+items plus a `batch_id`.
+
+```python
 await client.publish_tasks(
     [
-        {"attempt_id": "task-1", "payload": {"kind": "demo"}},
-        {"attempt_id": "task-2", "payload": {"kind": "demo"}},
+        {
+            "attempt_id": "task-1",
+            "request_id": "req-1",
+            "source_service": "bulk-api",
+            "job_type": "invoice.render",
+            "payload": {"kind": "demo"},
+        },
+        {
+            "attempt_id": "task-2",
+            "request_id": "req-2",
+            "source_service": "bulk-api",
+            "job_type": "invoice.render",
+            "payload": {"kind": "demo"},
+        },
     ],
     mode="batch_envelope",
     batch_id="batch-123",
@@ -138,10 +282,40 @@ await client.publish_tasks(
 )
 ```
 
-`mode="individual"` publishes one RabbitMQ message per task. `mode="batch_envelope"`
-publishes one RabbitMQ message that Relayna workers unpack into per-task handler
-calls. Batch-envelope consumption requires `retry_policy` on the worker so failed
-items can be republished individually.
+Example batch-envelope transport body published by Relayna:
+
+```json
+{
+  "batch_id": "batch-123",
+  "tasks": [
+    {
+      "task_id": "task-1",
+      "correlation_id": "req-1",
+      "service": "bulk-api",
+      "task_type": "invoice.render",
+      "payload": {
+        "kind": "demo"
+      }
+    },
+    {
+      "task_id": "task-2",
+      "correlation_id": "req-2",
+      "service": "bulk-api",
+      "task_type": "invoice.render",
+      "payload": {
+        "kind": "demo"
+      }
+    }
+  ],
+  "meta": {
+    "source": "bulk-api"
+  }
+}
+```
+
+Even if producers publish aliased fields such as `attempt_id`,
+`request_id`, `source_service`, or `job_type`, Relayna normalizes the envelope
+to canonical top-level fields before it reaches the worker.
 
 ### Task worker example
 
@@ -151,21 +325,65 @@ from relayna.contracts import TaskEnvelope
 
 
 async def handle_task(task: TaskEnvelope, context: TaskContext) -> None:
-    await context.publish_status(status="processing", message="Task processing started.")
-    await context.publish_status(status="completed", message="Task processing completed.")
+    await context.publish_status(
+        status="processing",
+        message=f"Batch {context.batch_id} item {context.batch_index + 1}/{context.batch_size} started."
+        if context.batch_id is not None
+        else "Task processing started.",
+    )
+    await context.publish_status(
+        status="completed",
+        message="Task processing completed.",
+        result={
+            "batch_id": context.batch_id,
+            "batch_index": context.batch_index,
+            "batch_size": context.batch_size,
+        },
+    )
 
 
 consumer = TaskConsumer(
     rabbitmq=client,
     handler=handle_task,
     retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    alias_config=alias_config,
 )
 await consumer.run_forever()
 ```
 
-When `retry_policy` is enabled, Relayna creates a broker-delayed retry queue and
-a per-source DLQ. Malformed JSON and invalid envelopes go straight to the DLQ;
-handler failures retry until `max_retries` is exhausted, then dead-letter.
+Inside the handler:
+
+- `task.task_id` is always canonical, even when the producer sent `attempt_id`
+- `context.batch_id` is set only for batch-envelope deliveries
+- `context.batch_index` is zero-based within the batch
+- `context.batch_size` is the total number of items in that envelope
+
+Batch-envelope consumption requires `retry_policy`. When one item fails, Relayna
+republishes only the failed item to the retry queue instead of retrying the
+entire batch envelope.
+
+Example status response for the first item in a batch:
+
+```json
+{
+  "attempt_id": "attempt-123",
+  "event": {
+    "attempt_id": "attempt-123",
+    "status": "completed",
+    "message": "Task processing completed.",
+    "result": {
+      "batch_id": "batch-123",
+      "batch_index": 0,
+      "batch_size": 2
+    }
+  }
+}
+```
+
+When `retry_policy` is enabled more generally, Relayna creates a broker-delayed
+retry queue and a per-source DLQ. Malformed JSON and invalid envelopes go
+straight to the DLQ; handler failures retry until `max_retries` is exhausted,
+then dead-letter.
 
 ### Retry and DLQ headers
 
