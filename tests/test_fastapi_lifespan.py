@@ -498,6 +498,55 @@ def test_alias_config_changes_public_route_shapes_without_testclient(
     }
 
 
+def test_http_aliases_do_not_change_status_history_body_shape_without_testclient(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    alias_config = ContractAliasConfig(
+        field_aliases={"task_id": "attempt_id"},
+        http_aliases={"task_id": "attemptId"},
+    )
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            alias_config=alias_config,
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    runtime.store.latest_by_task["attempt-123"] = {"task_id": "attempt-123", "status": "completed"}
+    router = create_status_router(
+        sse_stream=runtime.sse_stream,
+        history_reader=runtime.history_reader,
+        latest_status_store=runtime.store,
+        alias_config=alias_config,
+    )
+    app.include_router(router)
+
+    paths = {route.path for route in app.routes}
+    assert "/events/{attemptId}" in paths
+    assert "/status/{attemptId}" in paths
+
+    history_route = next(route for route in router.routes if route.path == "/history")
+    assert {param.alias for param in history_route.dependant.query_params} >= {"attemptId"}
+
+    status_route = next(route for route in router.routes if route.path == "/status/{attemptId}")
+    status_response = asyncio.run(status_route.endpoint(task_id="attempt-123"))
+    assert json.loads(status_response.body) == {
+        "attempt_id": "attempt-123",
+        "event": {"attempt_id": "attempt-123", "status": "completed"},
+    }
+
+    history_response = asyncio.run(
+        history_route.endpoint(task_id="attempt-123", start_offset="first", max_seconds=None, max_scan=1)
+    )
+    assert json.loads(history_response.body) == {
+        "count": 1,
+        "events": [{"attempt_id": "attempt-123", "status": "completed"}],
+        "attempt_id": "attempt-123",
+    }
+
+
 def test_alias_config_changes_dlq_query_and_output_shapes_without_testclient(
     topology: SharedTasksSharedStatusTopology,
 ) -> None:

@@ -28,13 +28,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.0/relayna-1.2.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.0/relayna-1.2.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1.tar.gz
 ```
 
 For local development in this repository:
@@ -144,6 +144,8 @@ When the same `alias_config` is passed into `create_relayna_lifespan(...)` and
 - `GET /events/{attempt_id}`, `GET /status/{attempt_id}`, and
   `GET /history?attempt_id=...` use the aliased name
 - HTTP responses and SSE payloads emit the configured aliases
+- if `http_aliases` differs from `field_aliases`, routes/query params follow
+  `http_aliases` but JSON bodies still follow `field_aliases`
 - nested keys inside `payload`, `meta`, and `result` are not aliased
 
 Batch-envelope workers also receive batch context on `TaskContext`:
@@ -153,8 +155,11 @@ Batch-envelope workers also receive batch context on `TaskContext`:
 - `context.batch_size`
 
 Failed items from a batch envelope are retried individually when the worker has
-`retry_policy=...`. See [docs/getting-started.md](docs/getting-started.md) for
-full request/response examples and worker code.
+`retry_policy=...`. Relayna does not execute the whole batch under one RabbitMQ
+delivery: it fans the envelope out into one queue message per task before
+running handlers, which avoids rerunning already-completed items when a later
+item fails. See [docs/getting-started.md](docs/getting-started.md) for full
+request/response examples and worker code.
 
 ## DLQ monitoring API
 

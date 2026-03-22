@@ -258,7 +258,7 @@ def create_status_router(
     task_http_name = _http_field_name("task_id", alias_config)
     resolved_events_path = events_path.replace("{task_id}", "{" + task_http_name + "}")
     resolved_status_path = status_path.replace("{task_id}", "{" + task_http_name + "}")
-    task_response_name = task_http_name if alias_config is not None else "task_id"
+    task_response_name = _payload_field_name("task_id", alias_config)
 
     @router.get(resolved_events_path)
     async def events(
@@ -381,6 +381,12 @@ def _http_field_name(field_name: str, alias_config: ContractAliasConfig | None) 
     if alias_config is None:
         return field_name
     return alias_config.http_alias_for(field_name) or field_name
+
+
+def _payload_field_name(field_name: str, alias_config: ContractAliasConfig | None) -> str:
+    if alias_config is None:
+        return field_name
+    return alias_config.payload_alias_for(field_name) or field_name
 
 
 def _public_dlq_payload(payload: Any, alias_config: ContractAliasConfig | None) -> Any:

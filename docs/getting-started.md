@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.0/relayna-1.2.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.0/relayna-1.2.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1.tar.gz
 ```
 
 For local work in this repository:
@@ -222,6 +222,26 @@ alias_config = ContractAliasConfig(
 With that config, request bodies still use `attempt_id`, while FastAPI routes
 and query parameters use `attemptId`.
 
+Example split between HTTP naming and JSON body naming:
+
+- request path: `GET /status/attempt-123` using the route template
+  `GET /status/{attemptId}`
+- request query: `GET /history?attemptId=attempt-123`
+- response body:
+
+```json
+{
+  "attempt_id": "attempt-123",
+  "event": {
+    "attempt_id": "attempt-123",
+    "status": "completed"
+  }
+}
+```
+
+That split is intentional: `http_aliases` controls path/query parameter names,
+while `field_aliases` controls JSON payload and response field names.
+
 ### Batch publishing
 
 Use `publish_tasks(...)` when you want one client call to submit several tasks.
@@ -317,6 +337,44 @@ Even if producers publish aliased fields such as `attempt_id`,
 `request_id`, `source_service`, or `job_type`, Relayna normalizes the envelope
 to canonical top-level fields before it reaches the worker.
 
+When a `TaskConsumer` with `retry_policy=...` receives that batch envelope, it
+does not run all items inline under the original delivery. Relayna first fans
+the envelope back out into one task-queue message per item, preserving:
+
+- `task_id`
+- `batch_id`
+- `batch_index`
+- `batch_size`
+
+That means later failures do not cause RabbitMQ to redeliver earlier successful
+items from the same original batch envelope.
+
+Example per-item message shape after fan-out:
+
+```json
+{
+  "task_id": "task-1",
+  "correlation_id": "req-1",
+  "service": "bulk-api",
+  "task_type": "invoice.render",
+  "payload": {
+    "kind": "demo"
+  },
+  "spec_version": "1.0"
+}
+```
+
+Example headers on that per-item message:
+
+```json
+{
+  "task_id": "task-1",
+  "batch_id": "batch-123",
+  "batch_index": 0,
+  "batch_size": 2
+}
+```
+
 ### Task worker example
 
 ```python
@@ -359,8 +417,8 @@ Inside the handler:
 - `context.batch_size` is the total number of items in that envelope
 
 Batch-envelope consumption requires `retry_policy`. When one item fails, Relayna
-republishes only the failed item to the retry queue instead of retrying the
-entire batch envelope.
+retries only that failed per-item message instead of retrying the original
+batch envelope.
 
 Example status response for the first item in a batch:
 

@@ -404,27 +404,20 @@ class TaskConsumer:
             await message.ack()
             return
 
+        batch_size = len(batch.tasks)
         for index, task in enumerate(batch.tasks):
             task_payload = task.model_dump(mode="json", exclude_none=True)
-            context = self._make_task_context(
-                task=task,
-                raw_payload=task_payload,
-                message=message,
-                source_queue_name=source_queue_name,
-                batch_id=batch.batch_id,
-                batch_index=index,
-                batch_size=len(batch.tasks),
-            )
-            await self._process_task(
-                task=task,
-                context=context,
-                message=message,
-                retry_infrastructure=retry_infrastructure,
-                source_queue_name=source_queue_name,
-                ack_message=False,
-                retry_body=_to_json_bytes(task_payload),
-                retry_correlation_id=task.correlation_id or task.task_id,
-                retry_headers={"task_id": task.task_id, "batch_id": batch.batch_id, "batch_index": index},
+            await self._rabbitmq.publish_raw_to_queue(
+                source_queue_name,
+                _to_json_bytes(task_payload),
+                correlation_id=task.correlation_id or task.task_id,
+                headers={
+                    "task_id": task.task_id,
+                    "batch_id": batch.batch_id,
+                    "batch_index": index,
+                    "batch_size": batch_size,
+                },
+                content_type=getattr(message, "content_type", "application/json"),
             )
 
         await message.ack()
@@ -444,6 +437,7 @@ class TaskConsumer:
         batch_index: int | None = None,
         batch_size: int | None = None,
     ) -> TaskContext:
+        headers = _message_headers(message)
         return TaskContext(
             rabbitmq=self._rabbitmq,
             consumer_name=self._consumer_name,
@@ -455,9 +449,9 @@ class TaskConsumer:
             retry_attempt=_retry_attempt(message),
             max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
             source_queue_name=source_queue_name,
-            batch_id=batch_id,
-            batch_index=batch_index,
-            batch_size=batch_size,
+            batch_id=batch_id if batch_id is not None else _header_string(headers, "batch_id"),
+            batch_index=batch_index if batch_index is not None else _header_int(headers, "batch_index"),
+            batch_size=batch_size if batch_size is not None else _header_int(headers, "batch_size"),
         )
 
     async def _process_task(
@@ -533,7 +527,7 @@ class TaskConsumer:
                     exception_type=type(exc).__name__,
                     body=retry_body,
                     correlation_id=retry_correlation_id,
-                    extra_headers=retry_headers,
+                    extra_headers=_merge_batch_retry_headers(context, retry_headers),
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 if ack_message:
@@ -550,7 +544,7 @@ class TaskConsumer:
                 exception_type=type(exc).__name__,
                 body=retry_body,
                 correlation_id=retry_correlation_id,
-                extra_headers=retry_headers,
+                extra_headers=_merge_batch_retry_headers(context, retry_headers),
             )
             await self._publish_dead_letter_status(context, exc)
             if ack_message:
@@ -754,6 +748,34 @@ def _retry_headers(
     headers["x-relayna-failure-reason"] = reason
     headers["x-relayna-exception-type"] = exception_type
     return headers
+
+
+def _header_string(headers: Mapping[str, Any], key: str) -> str | None:
+    value = headers.get(key)
+    if isinstance(value, str):
+        value = value.strip()
+        if value:
+            return value
+    return None
+
+
+def _header_int(headers: Mapping[str, Any], key: str) -> int | None:
+    value = headers.get(key)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _merge_batch_retry_headers(context: TaskContext, headers: Mapping[str, Any] | None) -> dict[str, Any]:
+    merged = dict(headers or {})
+    if context.batch_id is not None:
+        merged["batch_id"] = context.batch_id
+    if context.batch_index is not None:
+        merged["batch_index"] = context.batch_index
+    if context.batch_size is not None:
+        merged["batch_size"] = context.batch_size
+    return merged
 
 
 def _failure_message(exc: Exception, *, include_error_message: bool) -> str:

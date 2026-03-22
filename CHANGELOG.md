@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.1 - 2026-03-22
+
+### Fixed
+
+- `TaskConsumer` batch-envelope handling now fans the original batch message out into per-item queue messages before handler execution, preventing later failures from causing RabbitMQ to redeliver already-completed batch items.
+- FastAPI status/history responses now keep JSON body field names aligned with payload aliases even when `http_aliases` uses a different route/query parameter name.
+
+### Changed
+
+- The README and getting-started guide now document the split between `http_aliases` and `field_aliases`, and explain the batch-envelope fan-out behavior with concrete examples.
+
 ## 1.2.0 - 2026-03-22
 
 ### Added
