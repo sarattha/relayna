@@ -15,7 +15,7 @@ from aio_pika.abc import (
 )
 from pydantic import BaseModel
 
-from .contracts import normalize_event_aliases
+from .contracts import ContractAliasConfig, normalize_contract_aliases
 
 
 class RoutingStrategy(Protocol):
@@ -98,15 +98,16 @@ class RelaynaTopology(Protocol):
 class TaskIdRoutingStrategy:
     """Default route strategy: tasks to static key, statuses keyed by task_id."""
 
-    def __init__(self, tasks_routing_key: str) -> None:
+    def __init__(self, tasks_routing_key: str, *, alias_config: ContractAliasConfig | None = None) -> None:
         self._tasks_routing_key = tasks_routing_key
+        self._alias_config = alias_config
 
     def task_routing_key(self, task: BaseModel | Mapping[str, Any]) -> str:
         return self._tasks_routing_key
 
     def status_routing_key(self, event: BaseModel | Mapping[str, Any]) -> str:
         data = _to_dict(event)
-        normalized = normalize_event_aliases(data)
+        normalized = normalize_contract_aliases(data, self._alias_config, drop_aliases=True)
         task_id = str(normalized.get("task_id", ""))
         if not task_id:
             raise ValueError("status event missing task_id")
@@ -123,8 +124,9 @@ class ShardRoutingStrategy(TaskIdRoutingStrategy):
         shard_count: int,
         routing_prefix: str = "agg",
         key_extractor: Callable[[dict[str, Any]], str] | None = None,
+        alias_config: ContractAliasConfig | None = None,
     ) -> None:
-        super().__init__(tasks_routing_key)
+        super().__init__(tasks_routing_key, alias_config=alias_config)
         self._shard_count = max(1, int(shard_count))
         self._routing_prefix = routing_prefix
         self._key_extractor = key_extractor
@@ -139,7 +141,7 @@ class ShardRoutingStrategy(TaskIdRoutingStrategy):
 
     def shard_for_event(self, event: BaseModel | Mapping[str, Any]) -> int:
         data = _to_dict(event)
-        normalized = normalize_event_aliases(data)
+        normalized = normalize_contract_aliases(data, self._alias_config, drop_aliases=True)
         if self._key_extractor is not None:
             key = self._key_extractor(normalized)
         else:

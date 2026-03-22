@@ -56,6 +56,7 @@ status endpoints.
 ```python
 from fastapi import FastAPI
 
+from relayna.contracts import ContractAliasConfig
 from relayna.dlq import DLQService
 from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.rabbitmq import RelaynaRabbitClient
@@ -70,14 +71,17 @@ topology = SharedTasksSharedStatusTopology(
     status_queue="status.queue",
 )
 
-client = RelaynaRabbitClient(topology=topology)
+alias_config = ContractAliasConfig(field_aliases={"task_id": "attempt_id"})
+
+client = RelaynaRabbitClient(topology=topology, alias_config=alias_config)
 await client.initialize()
-await client.publish_task({"task_id": "task-123", "payload": {"kind": "demo"}})
+await client.publish_task({"attempt_id": "task-123", "payload": {"kind": "demo"}})
 
 app = FastAPI(
     lifespan=create_relayna_lifespan(
         topology=topology,
         redis_url="redis://localhost:6379/0",
+        alias_config=alias_config,
     )
 )
 runtime = get_relayna_runtime(app)
@@ -86,6 +90,7 @@ app.include_router(
         sse_stream=runtime.sse_stream,
         history_reader=runtime.history_reader,
         latest_status_store=runtime.store,
+        alias_config=alias_config,
     )
 )
 if runtime.dlq_store is not None:
@@ -95,18 +100,48 @@ if runtime.dlq_store is not None:
                 rabbitmq=runtime.rabbitmq,
                 dlq_store=runtime.dlq_store,
                 status_store=runtime.store,
-            )
+            ),
+            alias_config=alias_config,
         )
     )
 ```
 
 This exposes:
 
-- `GET /events/{task_id}`
+- `GET /events/{attempt_id}`
 - `GET /history`
-- `GET /status/{task_id}`
+- `GET /status/{attempt_id}`
 
 For a detailed observability walkthrough, see [Observability](observability.md).
+
+### Batch publishing
+
+Use `publish_tasks(...)` when you want one client call to submit several tasks.
+
+```python
+await client.publish_tasks(
+    [
+        {"attempt_id": "task-1", "payload": {"kind": "demo"}},
+        {"attempt_id": "task-2", "payload": {"kind": "demo"}},
+    ],
+    mode="individual",
+)
+
+await client.publish_tasks(
+    [
+        {"attempt_id": "task-1", "payload": {"kind": "demo"}},
+        {"attempt_id": "task-2", "payload": {"kind": "demo"}},
+    ],
+    mode="batch_envelope",
+    batch_id="batch-123",
+    meta={"source": "bulk-api"},
+)
+```
+
+`mode="individual"` publishes one RabbitMQ message per task. `mode="batch_envelope"`
+publishes one RabbitMQ message that Relayna workers unpack into per-task handler
+calls. Batch-envelope consumption requires `retry_policy` on the worker so failed
+items can be republished individually.
 
 ### Task worker example
 
