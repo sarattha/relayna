@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.2 - 2026-03-23
+
+### Added
+
+- Manual handoff retry support through `TaskContext.manual_retry(...)`, including routed-task topologies for `task_type`-driven worker handoff while keeping one shared status timeline per `task_id`.
+- Real-stack smoke coverage for routed manual retry handoff against local RabbitMQ and Redis.
+
+### Changed
+
+- The README, getting-started guide, and component reference now document routed task topologies in more detail, with concrete examples for handing a task off to a different `task_type`.
+- Real-stack helper docs now include the routed manual retry smoke command.
+
 ## 1.2.1 - 2026-03-22
 
 ### Fixed

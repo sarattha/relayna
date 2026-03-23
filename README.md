@@ -28,13 +28,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.2/relayna-1.2.2-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.2/relayna-1.2.2.tar.gz
 ```
 
 For local development in this repository:
@@ -203,13 +203,18 @@ When workers also receive `dlq_store=...`, this adds:
 
 ## Topologies
 
-`relayna` currently ships two first-class topology classes:
+`relayna` currently ships four first-class topology classes:
 
 - `SharedTasksSharedStatusTopology`
   One shared task queue and one shared status queue/stream.
 - `SharedTasksSharedStatusShardedAggregationTopology`
   The same shared task and status plane, plus shard-owned aggregation worker
   queues bound to the status exchange.
+- `RoutedTasksSharedStatusTopology`
+  Shared status queue/stream plus routed task worker queues bound by `task_type`.
+- `RoutedTasksSharedStatusShardedAggregationTopology`
+  Routed task worker queues plus the shared status plane and shard-owned
+  aggregation worker queues.
 
 Aggregation messages published through the sharded aggregation topology stay on
 the shared status exchange, so `StatusHub`, `StreamHistoryReader`, and SSE
@@ -226,7 +231,8 @@ both topologies, including `AggregationWorkerRuntime`, `RetryPolicy`, and
 retry/DLQ-enabled workers. The getting-started guide also documents every
 `x-relayna-*` retry header with a concrete DLQ example, plus when to use
 `context.publish_status(...)` vs `context.publish_aggregation_status(...)` for
-child and parent workflows.
+child and parent workflows, and how to use `context.manual_retry(...)` to hand
+the same `task_id` off to a different routed `task_type`.
 
 ## Real-Stack Smoke Commands
 
@@ -238,6 +244,7 @@ PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_alias_batch_task_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_manual_retry_routed_smoke.py
 ```
 
 ## Public API

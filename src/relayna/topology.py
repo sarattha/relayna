@@ -156,6 +156,21 @@ class ShardRoutingStrategy(TaskIdRoutingStrategy):
         return f"{self._routing_prefix}.{self.shard_for_event(event)}"
 
 
+class TaskTypeRoutingStrategy(TaskIdRoutingStrategy):
+    """Routes tasks by task_type while keeping statuses keyed by task_id."""
+
+    def __init__(self, *, alias_config: ContractAliasConfig | None = None) -> None:
+        super().__init__("", alias_config=alias_config)
+
+    def task_routing_key(self, task: BaseModel | Mapping[str, Any]) -> str:
+        data = _to_dict(task)
+        normalized = normalize_contract_aliases(data, self._alias_config, drop_aliases=True)
+        task_type = str(normalized.get("task_type") or "").strip()
+        if not task_type:
+            raise ValueError("task message missing task_type")
+        return task_type
+
+
 @dataclass(slots=True)
 class SharedTasksSharedStatusTopology:
     rabbitmq_url: str
@@ -407,6 +422,114 @@ class SharedTasksSharedStatusShardedAggregationTopology(SharedTasksSharedStatusT
         )
 
 
+@dataclass(slots=True)
+class RoutedTasksSharedStatusTopology(SharedTasksSharedStatusTopology):
+    task_types: Sequence[str] = field(default_factory=tuple)
+    tasks_routing_key: str = field(init=False, default="", repr=False)
+
+    def task_binding_keys(self) -> tuple[str, ...]:
+        return self._normalized_task_types()
+
+    def _routing(self) -> RoutingStrategy:
+        return TaskTypeRoutingStrategy()
+
+    def _normalized_task_types(self) -> tuple[str, ...]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in self.task_types:
+            task_type = str(value).strip()
+            if not task_type or task_type in seen:
+                continue
+            normalized.append(task_type)
+            seen.add(task_type)
+        if not normalized:
+            raise ValueError("At least one task_type must be configured")
+        return tuple(normalized)
+
+
+@dataclass(slots=True)
+class RoutedTasksSharedStatusShardedAggregationTopology(RoutedTasksSharedStatusTopology):
+    shard_count: int = 1
+    aggregation_routing_prefix: str = "agg"
+    aggregation_queue_template: str = "aggregation.queue.{shard}"
+    aggregation_queue_name_prefix: str = "aggregation.queue.shards"
+    aggregation_queue_arguments_overrides: dict[str, Any] = field(default_factory=dict)
+
+    def aggregation_queue_arguments(self) -> dict[str, Any]:
+        return dict(self.aggregation_queue_arguments_overrides)
+
+    def aggregation_queue_name(self, shards: Sequence[int], *, queue_name: str | None = None) -> str:
+        normalized_shards = self._normalize_shards(shards)
+        return queue_name or self._aggregation_queue_name(normalized_shards)
+
+    def aggregation_binding_keys(self, shards: Sequence[int]) -> tuple[str, ...]:
+        normalized_shards = self._normalize_shards(shards)
+        prefix = self._aggregation_routing().routing_prefix
+        return tuple(f"{prefix}.{shard}" for shard in normalized_shards)
+
+    def aggregation_status_routing_key(self, event: BaseModel | Mapping[str, Any]) -> str:
+        return self._aggregation_routing().status_routing_key(event)
+
+    def aggregation_shard(self, event: BaseModel | Mapping[str, Any]) -> int:
+        return self._aggregation_routing().shard_for_event(event)
+
+    async def declare_queues(
+        self,
+        channel: AbstractRobustChannel,
+        *,
+        tasks_exchange: AbstractRobustExchange,
+        status_exchange: AbstractRobustExchange,
+    ) -> None:
+        await super(RoutedTasksSharedStatusShardedAggregationTopology, self).declare_queues(
+            channel=channel,
+            tasks_exchange=tasks_exchange,
+            status_exchange=status_exchange,
+        )
+
+    async def ensure_aggregation_queue(
+        self,
+        channel: AbstractChannel,
+        *,
+        status_exchange: AbstractExchange,
+        shards: Sequence[int],
+        queue_name: str | None = None,
+    ) -> str:
+        normalized_shards = self._normalize_shards(shards)
+        resolved_queue_name = self.aggregation_queue_name(normalized_shards, queue_name=queue_name)
+        queue = await channel.declare_queue(
+            resolved_queue_name,
+            durable=True,
+            arguments=self.aggregation_queue_arguments() or None,
+        )
+        for routing_key in self.aggregation_binding_keys(normalized_shards):
+            await queue.bind(status_exchange, routing_key=routing_key)
+        return queue.name
+
+    def _aggregation_queue_name(self, shards: tuple[int, ...]) -> str:
+        if len(shards) == 1:
+            return self.aggregation_queue_template.format(shard=shards[0])
+        suffix = "-".join(str(shard) for shard in shards)
+        return f"{self.aggregation_queue_name_prefix}.{suffix}"
+
+    def _normalize_shards(self, shards: Sequence[int]) -> tuple[int, ...]:
+        if not shards:
+            raise ValueError("At least one aggregation shard must be selected")
+        normalized = tuple(sorted({int(shard) for shard in shards}))
+        shard_count = self._aggregation_routing().shard_count
+        for shard in normalized:
+            if shard < 0 or shard >= shard_count:
+                raise ValueError(f"Aggregation shard {shard} is outside the configured range 0..{shard_count - 1}")
+        return normalized
+
+    def _aggregation_routing(self) -> ShardRoutingStrategy:
+        return ShardRoutingStrategy(
+            self._normalized_task_types()[0],
+            shard_count=self.shard_count,
+            routing_prefix=self.aggregation_routing_prefix,
+            key_extractor=_aggregation_parent_task_id,
+        )
+
+
 def _aggregation_parent_task_id(event: dict[str, Any]) -> str:
     meta = event.get("meta")
     if not isinstance(meta, Mapping):
@@ -418,3 +541,16 @@ def _to_dict(payload: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(payload, BaseModel):
         return cast(dict[str, Any], payload.model_dump(mode="json", exclude_none=True))
     return dict(payload)
+
+
+__all__ = [
+    "RelaynaTopology",
+    "RoutedTasksSharedStatusShardedAggregationTopology",
+    "RoutedTasksSharedStatusTopology",
+    "RoutingStrategy",
+    "ShardRoutingStrategy",
+    "SharedTasksSharedStatusShardedAggregationTopology",
+    "SharedTasksSharedStatusTopology",
+    "TaskIdRoutingStrategy",
+    "TaskTypeRoutingStrategy",
+]

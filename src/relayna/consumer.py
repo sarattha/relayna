@@ -74,6 +74,18 @@ class RetryStatusConfig:
 
 
 @dataclass(slots=True)
+class _ManualRetryRequest:
+    task: dict[str, Any]
+    headers: dict[str, Any]
+    status_message: str
+    status_meta: dict[str, Any]
+
+
+class _ManualRetryRequested(Exception):
+    pass
+
+
+@dataclass(slots=True)
 class TaskContext:
     rabbitmq: RelaynaRabbitClient
     consumer_name: str
@@ -88,6 +100,13 @@ class TaskContext:
     batch_id: str | None = None
     batch_index: int | None = None
     batch_size: int | None = None
+    headers: dict[str, Any] = field(default_factory=dict)
+    is_task_context: bool = True
+    manual_retry_count: int = 0
+    manual_retry_previous_task_type: str | None = None
+    manual_retry_source_consumer: str | None = None
+    manual_retry_reason: str | None = None
+    _manual_retry_request: _ManualRetryRequest | None = field(default=None, init=False, repr=False)
 
     async def publish_status(
         self,
@@ -105,12 +124,13 @@ class TaskContext:
         if event is None and status is None:
             raise ValueError("status is required when event is not provided.")
 
+        payload_meta = self._merge_status_meta(meta)
         if event is None:
             event = StatusEventEnvelope(
                 task_id=self._task_id,
                 status=status or "",
                 message=message,
-                meta=meta or {},
+                meta=payload_meta,
                 result=result,
                 correlation_id=self.correlation_id,
                 event_id=event_id,
@@ -121,6 +141,7 @@ class TaskContext:
                 update={
                     "task_id": self._task_id,
                     "correlation_id": event.correlation_id or self.correlation_id,
+                    "meta": self._merge_status_meta(event.meta),
                 }
             )
 
@@ -142,7 +163,7 @@ class TaskContext:
         if event is None and status is None:
             raise ValueError("status is required when event is not provided.")
 
-        payload_meta = dict(meta or {})
+        payload_meta = self._merge_status_meta(meta)
         if event is None:
             event = StatusEventEnvelope(
                 task_id=self._task_id,
@@ -164,6 +185,89 @@ class TaskContext:
             )
 
         await self.rabbitmq.publish_aggregation_status(event)
+
+    async def manual_retry(
+        self,
+        *,
+        task_type: str | None = None,
+        payload: Mapping[str, Any] | None = None,
+        payload_merge: Mapping[str, Any] | None = None,
+        service: str | None = None,
+        correlation_id: str | None = None,
+        reason: str | None = None,
+        message: str | None = None,
+        meta: Mapping[str, Any] | None = None,
+        headers: Mapping[str, Any] | None = None,
+        extra_fields: Mapping[str, Any] | None = None,
+    ) -> None:
+        if payload is not None and payload_merge is not None:
+            raise ValueError("Pass either payload or payload_merge, not both.")
+        if not self.is_task_context:
+            raise ValueError("manual_retry requires a task envelope context")
+
+        try:
+            current = TaskEnvelope.model_validate(dict(self.raw_payload)).model_dump(mode="json", exclude_none=True)
+        except ValidationError as exc:
+            raise ValueError("manual_retry requires a task envelope context") from exc
+
+        next_task = dict(current)
+        next_task["task_id"] = self._task_id
+        next_task["correlation_id"] = correlation_id or self.correlation_id or current.get("correlation_id")
+        if task_type is not None:
+            resolved_task_type = str(task_type).strip()
+            if not resolved_task_type:
+                raise ValueError("task_type must not be empty when provided")
+            next_task["task_type"] = resolved_task_type
+        if service is not None:
+            next_task["service"] = service
+        if payload is not None:
+            next_task["payload"] = dict(payload)
+        elif payload_merge is not None:
+            merged_payload = dict(next_task.get("payload") or {})
+            merged_payload.update(dict(payload_merge))
+            next_task["payload"] = merged_payload
+        if extra_fields is not None:
+            next_task.update(dict(extra_fields))
+
+        prepared = TaskEnvelope.model_validate(next_task).model_dump(mode="json", exclude_none=True)
+        next_count = self.manual_retry_count + 1
+        previous_task_type = str(current.get("task_type") or "").strip() or None
+        target_task_type = str(prepared.get("task_type") or "").strip() or None
+
+        self._manual_retry_request = _ManualRetryRequest(
+            task=prepared,
+            headers=_manual_retry_headers(
+                self.headers,
+                manual_retry_count=next_count,
+                previous_task_type=previous_task_type,
+                source_consumer=self.consumer_name,
+                reason=reason,
+                task_id=self._task_id,
+                extra_headers=headers,
+            ),
+            status_message=message or reason or "Task handed off for manual retry.",
+            status_meta=_manual_retry_status_meta(
+                manual_retry_count=next_count,
+                previous_task_type=previous_task_type,
+                source_consumer=self.consumer_name,
+                reason=reason,
+                target_task_type=target_task_type,
+                extra_meta=meta,
+            ),
+        )
+        raise _ManualRetryRequested()
+
+    def _merge_status_meta(self, meta: Mapping[str, Any] | None) -> dict[str, Any]:
+        merged = dict(meta or {})
+        lineage = _manual_retry_context_meta(self)
+        if not lineage:
+            return merged
+        existing = merged.get("manual_retry")
+        if isinstance(existing, Mapping):
+            merged["manual_retry"] = {**lineage["manual_retry"], **dict(existing)}
+            return merged
+        merged.update(lineage)
+        return merged
 
 
 class TaskConsumer:
@@ -452,6 +556,11 @@ class TaskConsumer:
             batch_id=batch_id if batch_id is not None else _header_string(headers, "batch_id"),
             batch_index=batch_index if batch_index is not None else _header_int(headers, "batch_index"),
             batch_size=batch_size if batch_size is not None else _header_int(headers, "batch_size"),
+            headers=headers,
+            manual_retry_count=_manual_retry_count(headers),
+            manual_retry_previous_task_type=_header_string(headers, "x-relayna-manual-retry-from-task-type"),
+            manual_retry_source_consumer=_header_string(headers, "x-relayna-manual-retry-source-consumer"),
+            manual_retry_reason=_header_string(headers, "x-relayna-manual-retry-reason"),
         )
 
     async def _process_task(
@@ -473,7 +582,13 @@ class TaskConsumer:
                 status=self._lifecycle_statuses.processing_status,
                 message="Task processing started.",
             )
-            await self._handler(task, context)
+            try:
+                await self._handler(task, context)
+            except _ManualRetryRequested:
+                pass
+            if context._manual_retry_request is not None:
+                await self._publish_manual_retry_request(context, context._manual_retry_request)
+                return True
             await self._publish_lifecycle_status(
                 context,
                 status=self._lifecycle_statuses.completed_status,
@@ -550,6 +665,19 @@ class TaskConsumer:
             if ack_message:
                 await message.ack()
             return False
+
+    async def _publish_manual_retry_request(self, context: TaskContext, request: _ManualRetryRequest) -> None:
+        await self._rabbitmq.publish_task(request.task, headers=request.headers)
+        try:
+            await context.publish_status(
+                status="manual_retrying",
+                message=request.status_message,
+                meta=request.status_meta,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return
 
     async def _publish_lifecycle_status(self, context: TaskContext, *, status: str, message: str) -> None:
         if not self._lifecycle_statuses.enabled:
@@ -767,6 +895,10 @@ def _header_int(headers: Mapping[str, Any], key: str) -> int | None:
         return None
 
 
+def _manual_retry_count(headers: Mapping[str, Any]) -> int:
+    return max(0, _header_int(headers, "x-relayna-manual-retry-count") or 0)
+
+
 def _merge_batch_retry_headers(context: TaskContext, headers: Mapping[str, Any] | None) -> dict[str, Any]:
     merged = dict(headers or {})
     if context.batch_id is not None:
@@ -775,6 +907,81 @@ def _merge_batch_retry_headers(context: TaskContext, headers: Mapping[str, Any] 
         merged["batch_index"] = context.batch_index
     if context.batch_size is not None:
         merged["batch_size"] = context.batch_size
+    return merged
+
+
+def _manual_retry_headers(
+    headers: Mapping[str, Any],
+    *,
+    manual_retry_count: int,
+    previous_task_type: str | None,
+    source_consumer: str,
+    reason: str | None,
+    task_id: str,
+    extra_headers: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    forwarded = {
+        key: value
+        for key, value in dict(headers).items()
+        if key
+        not in {
+            "x-relayna-retry-attempt",
+            "x-relayna-max-retries",
+            "x-relayna-source-queue",
+            "x-relayna-failure-reason",
+            "x-relayna-exception-type",
+            "x-relayna-manual-retry-count",
+            "x-relayna-manual-retry-from-task-type",
+            "x-relayna-manual-retry-source-consumer",
+            "x-relayna-manual-retry-reason",
+        }
+    }
+    forwarded["task_id"] = task_id
+    forwarded["x-relayna-manual-retry-count"] = int(manual_retry_count)
+    forwarded["x-relayna-manual-retry-source-consumer"] = source_consumer
+    if previous_task_type:
+        forwarded["x-relayna-manual-retry-from-task-type"] = previous_task_type
+    if reason:
+        forwarded["x-relayna-manual-retry-reason"] = reason
+    forwarded.update(dict(extra_headers or {}))
+    return forwarded
+
+
+def _manual_retry_context_meta(context: TaskContext) -> dict[str, Any]:
+    manual_retry: dict[str, Any] = {"count": int(context.manual_retry_count)}
+    if context.manual_retry_previous_task_type:
+        manual_retry["previous_task_type"] = context.manual_retry_previous_task_type
+    if context.manual_retry_source_consumer:
+        manual_retry["source_consumer"] = context.manual_retry_source_consumer
+    if context.manual_retry_reason:
+        manual_retry["reason"] = context.manual_retry_reason
+    if len(manual_retry) == 1 and manual_retry["count"] == 0:
+        return {}
+    return {"manual_retry": manual_retry}
+
+
+def _manual_retry_status_meta(
+    *,
+    manual_retry_count: int,
+    previous_task_type: str | None,
+    source_consumer: str,
+    reason: str | None,
+    target_task_type: str | None,
+    extra_meta: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(extra_meta or {})
+    manual_retry: dict[str, Any] = {"count": int(manual_retry_count), "source_consumer": source_consumer}
+    if previous_task_type:
+        manual_retry["previous_task_type"] = previous_task_type
+    if reason:
+        manual_retry["reason"] = reason
+    if target_task_type:
+        manual_retry["target_task_type"] = target_task_type
+    existing = merged.get("manual_retry")
+    if isinstance(existing, Mapping):
+        merged["manual_retry"] = {**manual_retry, **dict(existing)}
+    else:
+        merged["manual_retry"] = manual_retry
     return merged
 
 
@@ -948,6 +1155,7 @@ class AggregationConsumer:
                             continue
 
                         current_retry_attempt = _retry_attempt(message)
+                        headers = _message_headers(message)
                         context = TaskContext(
                             rabbitmq=self._rabbitmq,
                             consumer_name=self._consumer_name,
@@ -959,6 +1167,16 @@ class AggregationConsumer:
                             retry_attempt=current_retry_attempt,
                             max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
                             source_queue_name=queue_name,
+                            headers=headers,
+                            is_task_context=False,
+                            manual_retry_count=_manual_retry_count(headers),
+                            manual_retry_previous_task_type=_header_string(
+                                headers, "x-relayna-manual-retry-from-task-type"
+                            ),
+                            manual_retry_source_consumer=_header_string(
+                                headers, "x-relayna-manual-retry-source-consumer"
+                            ),
+                            manual_retry_reason=_header_string(headers, "x-relayna-manual-retry-reason"),
                         )
                         try:
                             await self._handler(event, context)

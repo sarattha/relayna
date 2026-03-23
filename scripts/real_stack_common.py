@@ -77,9 +77,9 @@ def build_app(
                     rabbitmq=runtime.rabbitmq,
                     dlq_store=runtime.dlq_store,
                     status_store=runtime.store,
-                )
-            ),
-            alias_config=alias_config,
+                ),
+                alias_config=alias_config,
+            )
         )
     return app
 

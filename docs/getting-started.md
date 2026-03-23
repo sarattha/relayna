@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.2/relayna-1.2.2-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.1/relayna-1.2.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.2/relayna-1.2.2.tar.gz
 ```
 
 For local work in this repository:
@@ -38,6 +38,10 @@ API.
 - `SharedTasksSharedStatusShardedAggregationTopology`: the same shared task and
   shared status plane, plus shard-bound aggregation worker queues on the status
   exchange.
+- `RoutedTasksSharedStatusTopology`: task queues are bound by `task_type`, while
+  status stays on one shared queue/stream.
+- `RoutedTasksSharedStatusShardedAggregationTopology`: routed task queues plus
+  shard-bound aggregation worker queues on the shared status exchange.
 
 ## Topology naming guidance
 
@@ -154,6 +158,49 @@ app.include_router(
     )
 )
 ```
+
+## Example: routed tasks + shared status
+
+Use `RoutedTasksSharedStatusTopology` when different workers should consume
+different `task_type` values from the same task exchange while still publishing
+into one shared status stream.
+
+Each routed worker gets its own topology instance:
+
+```python
+from relayna.topology import RoutedTasksSharedStatusTopology
+
+generate_topology = RoutedTasksSharedStatusTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    tasks_exchange="tasks.exchange",
+    tasks_queue="tasks.generate.queue",
+    task_types=("draft.generate",),
+    status_exchange="status.exchange",
+    status_queue="status.queue",
+)
+
+review_topology = RoutedTasksSharedStatusTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    tasks_exchange="tasks.exchange",
+    tasks_queue="tasks.review.queue",
+    task_types=("draft.review",),
+    status_exchange="status.exchange",
+    status_queue="status.queue",
+)
+```
+
+Important details:
+
+- the routed workers share `tasks_exchange`, `status_exchange`, and
+  `status_queue`
+- each routed worker uses its own `tasks_queue`
+- each routed worker declares one or more `task_types` that it owns
+- `RelaynaRabbitClient.publish_task(...)` routes by `TaskEnvelope.task_type`
+  under routed topologies, so `task_type` is required
+
+That layout is what makes manual handoff retry possible: one worker can
+republish the same `task_id` under a different `task_type`, and RabbitMQ will
+deliver it to another routed worker queue.
 
 Relayna keeps the transport canonical internally and only applies aliases at the
 edges:
@@ -626,6 +673,8 @@ This is the most important rule:
   the current context task
 - `TaskContext.publish_aggregation_status(...)` publishes an aggregation input
   event for the current context task, routed by `meta.parent_task_id`
+- `TaskContext.manual_retry(...)` republishes the current task under the same
+  `task_id` for a different routed worker, usually by changing `task_type`
 
 In both helpers, the canonical `task_id` stays the current context task id.
 `meta.parent_task_id` does not replace `task_id`; it only describes the parent
@@ -640,6 +689,92 @@ That means:
 - if you need to publish a status whose real `task_id` is the parent task, do
   not use the context helper; publish an explicit `StatusEventEnvelope` with the
   parent task id through `rabbitmq.publish_status(...)`
+- use `manual_retry(...)` when the current worker decides the task should be
+  handed off to another routed task worker under the same `task_id`
+
+`manual_retry(...)` is separate from broker retry/DLQ behavior. It republishes a
+new task message, emits a `manual_retrying` status for the current `task_id`,
+and preserves manual-retry lineage metadata for the next worker.
+
+#### Manual handoff retry example
+
+Use `manual_retry(...)` when the current worker decides the task should be
+reprocessed by a different routed worker with different settings.
+
+Source worker:
+
+```python
+from relayna.consumer import TaskContext
+from relayna.contracts import TaskEnvelope
+
+
+async def generate(task: TaskEnvelope, context: TaskContext) -> None:
+    score = float(task.payload.get("quality_score", 0))
+    if score < 0.9:
+        await context.manual_retry(
+            task_type="draft.review",
+            payload_merge={
+                "mode": "strict",
+                "review_required": True,
+            },
+            reason="quality gate failed",
+            meta={"quality_score": score},
+        )
+        return
+
+    await context.publish_status(status="completed", message="Draft accepted.")
+```
+
+Target worker:
+
+```python
+from relayna.consumer import TaskContext
+from relayna.contracts import TaskEnvelope
+
+
+async def review(task: TaskEnvelope, context: TaskContext) -> None:
+    assert task.task_type == "draft.review"
+    assert context.manual_retry_count == 1
+    assert context.manual_retry_previous_task_type == "draft.generate"
+
+    await context.publish_status(
+        status="processing",
+        message="Review worker accepted manual retry handoff.",
+        meta={
+            "review_mode": task.payload["mode"],
+            "handoff_reason": context.manual_retry_reason,
+        },
+    )
+
+    await context.publish_status(status="completed", message="Review completed.")
+```
+
+Result:
+
+- the republished task keeps the same `task_id`
+- the republished task can use a different `task_type`, payload, or `service`
+- Relayna emits `manual_retrying` for the original worker instead of `completed`
+- the next worker sees lineage on `TaskContext.manual_retry_count`,
+  `manual_retry_previous_task_type`, `manual_retry_source_consumer`, and
+  `manual_retry_reason`
+- status history, latest-status, and SSE remain on one timeline because all
+  events still use the same `task_id`
+
+Operational rule:
+
+- the source and target workers must use routed topologies that share the same
+  exchanges/status plane but bind different task queues to different
+  `task_type` values
+- if no queue is bound for the target `task_type`, RabbitMQ will not have a
+  routed worker queue to deliver that handoff message to
+
+Header behavior:
+
+- broker retry headers such as `x-relayna-retry-attempt` are not reused
+- manual handoff lineage is carried in separate `x-relayna-manual-retry-*`
+  headers and reflected in status metadata under `meta.manual_retry`
+- normal broker retry still applies independently if the target worker later
+  fails and has `retry_policy=...`
 
 #### Child task status example
 
@@ -735,6 +870,13 @@ Use `context.rabbitmq.publish_status(StatusEventEnvelope(...))` when:
 
 - the event should belong to a different task id than the current context task
 - you are publishing a real parent/root status from child or aggregation logic
+
+Use `context.manual_retry(...)` when:
+
+- the current task should stay on the same logical `task_id`
+- the next processing attempt should go to a different routed `task_type`
+- you want shared history/SSE/latest-status continuity across the handoff
+- you need the next worker to see standardized handoff lineage
 
 ### Aggregation worker runtime example
 

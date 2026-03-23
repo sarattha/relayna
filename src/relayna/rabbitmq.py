@@ -30,9 +30,12 @@ from .contracts import (
 )
 from .topology import (
     RelaynaTopology,
+    RoutedTasksSharedStatusShardedAggregationTopology,
+    RoutedTasksSharedStatusTopology,
     ShardRoutingStrategy,
     SharedTasksSharedStatusTopology,
     TaskIdRoutingStrategy,
+    TaskTypeRoutingStrategy,
 )
 
 
@@ -138,17 +141,24 @@ class RelaynaRabbitClient:
             dead_letter_queue_name=dead_letter_queue_name,
         )
 
-    async def publish_task(self, task: BaseModel | Mapping[str, Any]) -> None:
+    async def publish_task(
+        self,
+        task: BaseModel | Mapping[str, Any],
+        *,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
         await self._ensure_ready()
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
         task_dict = self._prepare_task_payload(task)
+        message_headers = {"task_id": str(task_dict.get("task_id", ""))}
+        message_headers.update(dict(headers or {}))
         message = Message(
             _to_json_bytes(task_dict),
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
-            correlation_id=str(task_dict.get("task_id", "")) or None,
-            headers={"task_id": str(task_dict.get("task_id", ""))},
+            correlation_id=str(task_dict.get("correlation_id") or task_dict.get("task_id", "")) or None,
+            headers=message_headers,
         )
         await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(task_dict))
 
@@ -416,7 +426,10 @@ __all__ = [
     "QueueInspection",
     "RelaynaRabbitClient",
     "RetryInfrastructure",
+    "RoutedTasksSharedStatusShardedAggregationTopology",
+    "RoutedTasksSharedStatusTopology",
     "ShardRoutingStrategy",
+    "TaskTypeRoutingStrategy",
     "TaskIdRoutingStrategy",
     "declare_stream_queue",
 ]
