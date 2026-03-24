@@ -11,8 +11,11 @@ RabbitMQ topology definitions and routing strategies:
 - `RelaynaTopology`
 - `SharedTasksSharedStatusTopology`
 - `SharedTasksSharedStatusShardedAggregationTopology`
+- `RoutedTasksSharedStatusTopology`
+- `RoutedTasksSharedStatusShardedAggregationTopology`
 - `TaskIdRoutingStrategy`
 - `ShardRoutingStrategy`
+- `TaskTypeRoutingStrategy`
 
 Use this module to choose the topology shape your service should run with.
 For sharded topologies, `aggregation_queue_template` and
@@ -61,8 +64,8 @@ Worker-side helpers:
 
 This module provides validated task delivery, shard-aware aggregation
 consumption, optional lifecycle status publishing, broker-delayed retry and
-dead-letter behavior, and a helper runtime for aggregation workers outside
-FastAPI.
+dead-letter behavior, manual handoff retry through `TaskContext.manual_retry`,
+and a helper runtime for aggregation workers outside FastAPI.
 
 ## `relayna.status_store`
 

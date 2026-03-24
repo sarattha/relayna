@@ -4,8 +4,19 @@ import json
 import pytest
 
 from relayna.contracts import ContractAliasConfig
-from relayna.rabbitmq import RelaynaRabbitClient, RetryInfrastructure, ShardRoutingStrategy, TaskIdRoutingStrategy
-from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
+from relayna.rabbitmq import (
+    RelaynaRabbitClient,
+    RetryInfrastructure,
+    ShardRoutingStrategy,
+    TaskIdRoutingStrategy,
+    TaskTypeRoutingStrategy,
+)
+from relayna.topology import (
+    RoutedTasksSharedStatusShardedAggregationTopology,
+    RoutedTasksSharedStatusTopology,
+    SharedTasksSharedStatusShardedAggregationTopology,
+    SharedTasksSharedStatusTopology,
+)
 
 
 def test_task_id_routing_uses_task_id() -> None:
@@ -18,6 +29,13 @@ def test_shard_routing_uses_parent_task_id_when_present() -> None:
     strategy = ShardRoutingStrategy("task.request", shard_count=2)
     key = strategy.status_routing_key({"task_id": "child", "meta": {"parent_task_id": "parent"}})
     assert key in {"agg.0", "agg.1"}
+
+
+def test_task_type_routing_uses_task_type_and_preserves_status_routing() -> None:
+    strategy = TaskTypeRoutingStrategy()
+
+    assert strategy.task_routing_key({"task_id": "abc", "task_type": "task.review"}) == "task.review"
+    assert strategy.status_routing_key({"task_id": "abc"}) == "abc"
 
 
 class FakeTaskQueue:
@@ -243,6 +261,34 @@ async def test_publish_task_normalizes_custom_aliases() -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_task_supports_extra_headers() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = exchange
+
+    await client.publish_task(
+        {"task_id": "task-123", "payload": {"kind": "demo"}, "correlation_id": "corr-123"},
+        headers={"x-relayna-manual-retry-count": 1},
+    )
+
+    message, routing_key = exchange.publish_calls[0]
+    assert routing_key == "task.request"
+    assert message.correlation_id == "corr-123"
+    assert message.headers["task_id"] == "task-123"
+    assert message.headers["x-relayna-manual-retry-count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_publish_tasks_batch_envelope_uses_batch_id_headers_and_canonical_tasks() -> None:
     topology = SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
@@ -376,6 +422,67 @@ async def test_default_topology_binds_shared_status_queue_to_wildcard() -> None:
 
 
 @pytest.mark.asyncio
+async def test_routed_tasks_topology_binds_queue_to_task_types() -> None:
+    topology = RoutedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.review.queue",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_types=("task.review", "task.audit"),
+    )
+    queue = FakeBindingQueue("tasks.review.queue")
+    channel = FakeTaskChannel(queue)
+    exchange = object()
+
+    queue_name = await topology.ensure_tasks_queue(channel, tasks_exchange=exchange)
+
+    assert queue_name == "tasks.review.queue"
+    assert queue.bind_calls == [(exchange, "task.review"), (exchange, "task.audit")]
+
+
+@pytest.mark.asyncio
+async def test_routed_tasks_topology_publish_task_routes_by_task_type() -> None:
+    topology = RoutedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.review.queue",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_types=("task.review",),
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = exchange
+
+    await client.publish_task({"task_id": "task-123", "task_type": "task.review", "payload": {}})
+
+    assert exchange.publish_calls[0][1] == "task.review"
+
+
+@pytest.mark.asyncio
+async def test_routed_tasks_topology_requires_task_type_for_publish() -> None:
+    topology = RoutedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.review.queue",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_types=("task.review",),
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = exchange
+
+    with pytest.raises(ValueError, match="task_type"):
+        await client.publish_task({"task_id": "task-123", "payload": {}})
+
+
+@pytest.mark.asyncio
 async def test_sharded_topology_binds_subset_queue_to_multiple_shards() -> None:
     topology = SharedTasksSharedStatusShardedAggregationTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
@@ -398,6 +505,38 @@ async def test_sharded_topology_binds_subset_queue_to_multiple_shards() -> None:
 
     assert queue_name == "aggregation.queue.shards.1-3"
     assert queue.bind_calls == [(exchange, "agg.1"), (exchange, "agg.3")]
+
+
+@pytest.mark.asyncio
+async def test_routed_sharded_topology_binds_task_queue_and_aggregation_queue() -> None:
+    topology = RoutedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.review.queue",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_types=("task.review",),
+        shard_count=4,
+    )
+    task_queue = FakeBindingQueue("tasks.review.queue")
+    task_channel = FakeTaskChannel(task_queue)
+    tasks_exchange = object()
+
+    await topology.ensure_tasks_queue(task_channel, tasks_exchange=tasks_exchange)
+
+    aggregation_queue = FakeBindingQueue("aggregation.queue.2")
+    aggregation_channel = FakeTaskChannel(aggregation_queue)
+    status_exchange = object()
+
+    queue_name = await topology.ensure_aggregation_queue(
+        aggregation_channel,
+        status_exchange=status_exchange,
+        shards=[2],
+    )
+
+    assert task_queue.bind_calls == [(tasks_exchange, "task.review")]
+    assert queue_name == "aggregation.queue.2"
+    assert aggregation_queue.bind_calls == [(status_exchange, "agg.2")]
 
 
 @pytest.mark.asyncio
