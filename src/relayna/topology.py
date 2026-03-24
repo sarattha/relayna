@@ -182,11 +182,19 @@ class SharedTasksSharedStatusTopology:
     dead_letter_exchange: str | None = None
     prefetch_count: int = 1
     tasks_message_ttl_ms: int | None = None
+    task_consumer_timeout_ms: int | None = None
+    task_single_active_consumer: bool | None = None
+    task_max_priority: int | None = None
+    task_queue_type: str | None = None
+    task_queue_arguments_overrides: dict[str, Any] = field(default_factory=dict)
+    task_queue_kwargs: dict[str, Any] = field(default_factory=dict)
     status_use_streams: bool = True
     status_queue_ttl_ms: int | None = None
     status_stream_max_length_gb: int | None = None
     status_stream_max_segment_size_mb: int | None = None
     status_stream_initial_offset: str = "last"
+    status_queue_arguments_overrides: dict[str, Any] = field(default_factory=dict)
+    status_queue_kwargs: dict[str, Any] = field(default_factory=dict)
     routing_strategy: RoutingStrategy | None = None
 
     def connection_string(self, connection_name: str | None = None) -> str:
@@ -196,25 +204,44 @@ class SharedTasksSharedStatusTopology:
         return self.rabbitmq_url
 
     def task_queue_arguments(self) -> dict[str, Any]:
-        args: dict[str, Any] = {}
+        builtins: dict[str, Any] = {}
         if self.tasks_message_ttl_ms:
-            args["x-message-ttl"] = int(self.tasks_message_ttl_ms)
+            builtins["x-message-ttl"] = int(self.tasks_message_ttl_ms)
         if self.dead_letter_exchange:
-            args["x-dead-letter-exchange"] = self.dead_letter_exchange
-        return args
+            builtins["x-dead-letter-exchange"] = self.dead_letter_exchange
+        if self.task_consumer_timeout_ms is not None:
+            builtins["x-consumer-timeout"] = int(self.task_consumer_timeout_ms)
+        if self.task_single_active_consumer is not None:
+            builtins["x-single-active-consumer"] = self.task_single_active_consumer
+        if self.task_max_priority is not None:
+            builtins["x-max-priority"] = int(self.task_max_priority)
+        if self.task_queue_type is not None:
+            builtins["x-queue-type"] = self.task_queue_type
+        return _merge_queue_arguments(
+            "task",
+            builtins=builtins,
+            overrides=self.task_queue_arguments_overrides,
+            kwargs=self.task_queue_kwargs,
+        )
 
     def status_queue_arguments(self) -> dict[str, Any]:
+        builtins: dict[str, Any]
         if self.status_use_streams:
-            args: dict[str, Any] = {"x-queue-type": "stream"}
+            builtins = {"x-queue-type": "stream"}
             if self.status_stream_max_length_gb is not None:
-                args["x-max-length-bytes"] = int(self.status_stream_max_length_gb) * 1024**3
+                builtins["x-max-length-bytes"] = int(self.status_stream_max_length_gb) * 1024**3
             if self.status_stream_max_segment_size_mb is not None:
-                args["x-stream-max-segment-size-bytes"] = int(self.status_stream_max_segment_size_mb) * 1024**2
-            return args
-        args: dict[str, Any] = {}
+                builtins["x-stream-max-segment-size-bytes"] = int(self.status_stream_max_segment_size_mb) * 1024**2
+        else:
+            builtins = {}
         if self.status_queue_ttl_ms:
-            args["x-expires"] = int(self.status_queue_ttl_ms)
-        return args
+            builtins["x-expires"] = int(self.status_queue_ttl_ms)
+        return _merge_queue_arguments(
+            "status",
+            builtins=builtins,
+            overrides=self.status_queue_arguments_overrides,
+            kwargs=self.status_queue_kwargs,
+        )
 
     def status_stream_consume_arguments(self) -> dict[str, Any]:
         if not self.status_use_streams:
@@ -341,10 +368,29 @@ class SharedTasksSharedStatusShardedAggregationTopology(SharedTasksSharedStatusT
     aggregation_routing_prefix: str = "agg"
     aggregation_queue_template: str = "aggregation.queue.{shard}"
     aggregation_queue_name_prefix: str = "aggregation.queue.shards"
+    aggregation_consumer_timeout_ms: int | None = None
+    aggregation_single_active_consumer: bool | None = None
+    aggregation_max_priority: int | None = None
+    aggregation_queue_type: str | None = None
     aggregation_queue_arguments_overrides: dict[str, Any] = field(default_factory=dict)
+    aggregation_queue_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def aggregation_queue_arguments(self) -> dict[str, Any]:
-        return dict(self.aggregation_queue_arguments_overrides)
+        builtins: dict[str, Any] = {}
+        if self.aggregation_consumer_timeout_ms is not None:
+            builtins["x-consumer-timeout"] = int(self.aggregation_consumer_timeout_ms)
+        if self.aggregation_single_active_consumer is not None:
+            builtins["x-single-active-consumer"] = self.aggregation_single_active_consumer
+        if self.aggregation_max_priority is not None:
+            builtins["x-max-priority"] = int(self.aggregation_max_priority)
+        if self.aggregation_queue_type is not None:
+            builtins["x-queue-type"] = self.aggregation_queue_type
+        return _merge_queue_arguments(
+            "aggregation",
+            builtins=builtins,
+            overrides=self.aggregation_queue_arguments_overrides,
+            kwargs=self.aggregation_queue_kwargs,
+        )
 
     def aggregation_queue_name(self, shards: Sequence[int], *, queue_name: str | None = None) -> str:
         normalized_shards = self._normalize_shards(shards)
@@ -453,10 +499,29 @@ class RoutedTasksSharedStatusShardedAggregationTopology(RoutedTasksSharedStatusT
     aggregation_routing_prefix: str = "agg"
     aggregation_queue_template: str = "aggregation.queue.{shard}"
     aggregation_queue_name_prefix: str = "aggregation.queue.shards"
+    aggregation_consumer_timeout_ms: int | None = None
+    aggregation_single_active_consumer: bool | None = None
+    aggregation_max_priority: int | None = None
+    aggregation_queue_type: str | None = None
     aggregation_queue_arguments_overrides: dict[str, Any] = field(default_factory=dict)
+    aggregation_queue_kwargs: dict[str, Any] = field(default_factory=dict)
 
     def aggregation_queue_arguments(self) -> dict[str, Any]:
-        return dict(self.aggregation_queue_arguments_overrides)
+        builtins: dict[str, Any] = {}
+        if self.aggregation_consumer_timeout_ms is not None:
+            builtins["x-consumer-timeout"] = int(self.aggregation_consumer_timeout_ms)
+        if self.aggregation_single_active_consumer is not None:
+            builtins["x-single-active-consumer"] = self.aggregation_single_active_consumer
+        if self.aggregation_max_priority is not None:
+            builtins["x-max-priority"] = int(self.aggregation_max_priority)
+        if self.aggregation_queue_type is not None:
+            builtins["x-queue-type"] = self.aggregation_queue_type
+        return _merge_queue_arguments(
+            "aggregation",
+            builtins=builtins,
+            overrides=self.aggregation_queue_arguments_overrides,
+            kwargs=self.aggregation_queue_kwargs,
+        )
 
     def aggregation_queue_name(self, shards: Sequence[int], *, queue_name: str | None = None) -> str:
         normalized_shards = self._normalize_shards(shards)
@@ -541,6 +606,38 @@ def _to_dict(payload: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(payload, BaseModel):
         return cast(dict[str, Any], payload.model_dump(mode="json", exclude_none=True))
     return dict(payload)
+
+
+def _merge_queue_arguments(
+    queue_family: str,
+    *,
+    builtins: Mapping[str, Any],
+    overrides: Mapping[str, Any],
+    kwargs: Mapping[str, Any],
+) -> dict[str, Any]:
+    builtin_args = dict(builtins)
+    override_args = dict(overrides)
+    kwarg_args = dict(kwargs)
+    _raise_on_argument_conflicts(queue_family, "built-in fields", builtin_args, "overrides", override_args)
+    _raise_on_argument_conflicts(queue_family, "built-in fields", builtin_args, "kwargs", kwarg_args)
+    _raise_on_argument_conflicts(queue_family, "overrides", override_args, "kwargs", kwarg_args)
+    return builtin_args | override_args | kwarg_args
+
+
+def _raise_on_argument_conflicts(
+    queue_family: str,
+    left_name: str,
+    left: Mapping[str, Any],
+    right_name: str,
+    right: Mapping[str, Any],
+) -> None:
+    duplicate_keys = sorted(set(left).intersection(right))
+    if not duplicate_keys:
+        return
+    duplicates = ", ".join(duplicate_keys)
+    raise ValueError(
+        f"Duplicate {queue_family} queue arguments configured in {left_name} and {right_name}: {duplicates}"
+    )
 
 
 __all__ = [
