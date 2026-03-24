@@ -129,6 +129,107 @@ async def test_ensure_tasks_queue_declares_and_binds_queue() -> None:
     assert queue.bind_calls == [(client._tasks_exchange, "task.request")]
 
 
+def test_task_queue_arguments_include_curated_and_generic_fields() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        tasks_message_ttl_ms=3000,
+        dead_letter_exchange="tasks.dlx",
+        task_consumer_timeout_ms=600000,
+        task_single_active_consumer=True,
+        task_max_priority=10,
+        task_queue_type="quorum",
+        task_queue_arguments_overrides={"x-queue-mode": "lazy"},
+        task_queue_kwargs={"x-overflow": "reject-publish"},
+    )
+
+    assert topology.task_queue_arguments() == {
+        "x-message-ttl": 3000,
+        "x-dead-letter-exchange": "tasks.dlx",
+        "x-consumer-timeout": 600000,
+        "x-single-active-consumer": True,
+        "x-max-priority": 10,
+        "x-queue-type": "quorum",
+        "x-queue-mode": "lazy",
+        "x-overflow": "reject-publish",
+    }
+
+
+def test_status_queue_arguments_merge_existing_and_generic_fields() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        status_stream_max_length_gb=2,
+        status_stream_max_segment_size_mb=64,
+        status_queue_arguments_overrides={"x-initial-cluster-size": 3},
+        status_queue_kwargs={"x-queue-leader-locator": "balanced"},
+    )
+
+    assert topology.status_queue_arguments() == {
+        "x-queue-type": "stream",
+        "x-max-length-bytes": 2 * 1024**3,
+        "x-stream-max-segment-size-bytes": 64 * 1024**2,
+        "x-initial-cluster-size": 3,
+        "x-queue-leader-locator": "balanced",
+    }
+
+
+def test_status_queue_ttl_is_not_applied_to_stream_queues() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        status_use_streams=True,
+        status_queue_ttl_ms=60000,
+    )
+
+    assert topology.status_queue_arguments() == {
+        "x-queue-type": "stream",
+    }
+
+
+def test_task_queue_arguments_raise_on_duplicate_keys() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_consumer_timeout_ms=600000,
+        task_queue_kwargs={"x-consumer-timeout": 300000},
+    )
+
+    with pytest.raises(ValueError, match="Duplicate task queue arguments"):
+        topology.task_queue_arguments()
+
+
+def test_status_queue_arguments_raise_on_duplicate_keys() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        status_queue_arguments_overrides={"x-queue-type": "quorum"},
+    )
+
+    with pytest.raises(ValueError, match="Duplicate status queue arguments"):
+        topology.status_queue_arguments()
+
+
 @pytest.mark.asyncio
 async def test_ensure_retry_infrastructure_declares_retry_and_dead_letter_queues() -> None:
     topology = SharedTasksSharedStatusTopology(
@@ -442,6 +543,46 @@ async def test_routed_tasks_topology_binds_queue_to_task_types() -> None:
 
 
 @pytest.mark.asyncio
+async def test_routed_tasks_topology_inherits_task_queue_argument_fields() -> None:
+    topology = RoutedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.review.queue",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_types=("task.review",),
+        task_consumer_timeout_ms=600000,
+        task_single_active_consumer=True,
+        task_max_priority=7,
+        task_queue_type="quorum",
+        task_queue_arguments_overrides={"x-queue-mode": "lazy"},
+        task_queue_kwargs={"x-overflow": "reject-publish"},
+    )
+    queue = FakeBindingQueue("tasks.review.queue")
+    channel = FakeTaskChannel(queue)
+    exchange = object()
+
+    queue_name = await topology.ensure_tasks_queue(channel, tasks_exchange=exchange)
+
+    assert queue_name == "tasks.review.queue"
+    assert channel.declare_queue_calls == [
+        (
+            "tasks.review.queue",
+            True,
+            {
+                "x-consumer-timeout": 600000,
+                "x-single-active-consumer": True,
+                "x-max-priority": 7,
+                "x-queue-type": "quorum",
+                "x-queue-mode": "lazy",
+                "x-overflow": "reject-publish",
+            },
+        )
+    ]
+    assert queue.bind_calls == [(exchange, "task.review")]
+
+
+@pytest.mark.asyncio
 async def test_routed_tasks_topology_publish_task_routes_by_task_type() -> None:
     topology = RoutedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
@@ -505,6 +646,50 @@ async def test_sharded_topology_binds_subset_queue_to_multiple_shards() -> None:
 
     assert queue_name == "aggregation.queue.shards.1-3"
     assert queue.bind_calls == [(exchange, "agg.1"), (exchange, "agg.3")]
+
+
+def test_sharded_aggregation_topology_arguments_include_curated_and_generic_fields() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+        aggregation_consumer_timeout_ms=120000,
+        aggregation_single_active_consumer=True,
+        aggregation_max_priority=5,
+        aggregation_queue_type="quorum",
+        aggregation_queue_arguments_overrides={"x-delivery-limit": 20},
+        aggregation_queue_kwargs={"x-overflow": "reject-publish"},
+    )
+
+    assert topology.aggregation_queue_arguments() == {
+        "x-consumer-timeout": 120000,
+        "x-single-active-consumer": True,
+        "x-max-priority": 5,
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 20,
+        "x-overflow": "reject-publish",
+    }
+
+
+def test_sharded_aggregation_queue_arguments_raise_on_duplicate_keys() -> None:
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+        aggregation_queue_arguments_overrides={"x-overflow": "drop-head"},
+        aggregation_queue_kwargs={"x-overflow": "reject-publish"},
+    )
+
+    with pytest.raises(ValueError, match="Duplicate aggregation queue arguments"):
+        topology.aggregation_queue_arguments()
 
 
 @pytest.mark.asyncio

@@ -20,7 +20,16 @@ RabbitMQ topology definitions and routing strategies:
 Use this module to choose the topology shape your service should run with.
 For sharded topologies, `aggregation_queue_template` and
 `aggregation_queue_name_prefix` let you namespace aggregation queues per
-deployment or test environment.
+deployment or test environment. Topology constructors also expose first-class
+worker queue argument fields such as `task_consumer_timeout_ms`,
+`task_single_active_consumer`, `task_max_priority`, `task_queue_type`,
+`aggregation_consumer_timeout_ms`, `aggregation_single_active_consumer`,
+`aggregation_max_priority`, and `aggregation_queue_type`, plus explicit mapping
+escape hatches such as `task_queue_kwargs`, `aggregation_queue_kwargs`, and
+`status_queue_kwargs` for broker-specific queue arguments. The
+getting-started guide lists the full native field-to-RabbitMQ-argument mapping
+for task, status, and aggregation queues, including the generic
+`*_queue_arguments_overrides` and `*_queue_kwargs` escape hatches.
 
 ## `relayna.contracts`
 

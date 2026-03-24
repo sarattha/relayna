@@ -31,7 +31,11 @@ from relayna.observability import (
     TaskMessageRejected,
 )
 from relayna.rabbitmq import RetryInfrastructure
-from relayna.topology import RoutedTasksSharedStatusTopology, SharedTasksSharedStatusTopology
+from relayna.topology import (
+    RoutedTasksSharedStatusTopology,
+    SharedTasksSharedStatusShardedAggregationTopology,
+    SharedTasksSharedStatusTopology,
+)
 
 
 class FakeMessage:
@@ -527,6 +531,50 @@ async def test_task_consumer_acknowledges_successful_messages() -> None:
         {"name": "tasks.queue", "durable": True, "arguments": None}
     ]
     assert channel.close_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_declares_queue_with_topology_argument_fields() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "payload": {"kind": "demo"}}).encode("utf-8"))
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_consumer_timeout_ms=600000,
+        task_single_active_consumer=True,
+        task_max_priority=9,
+        task_queue_type="quorum",
+        task_queue_arguments_overrides={"x-queue-mode": "lazy"},
+        task_queue_kwargs={"x-overflow": "reject-publish"},
+    )
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert channel.declare_queue_calls == [
+        {
+            "name": "tasks.queue",
+            "durable": True,
+            "arguments": {
+                "x-consumer-timeout": 600000,
+                "x-single-active-consumer": True,
+                "x-max-priority": 9,
+                "x-queue-type": "quorum",
+                "x-queue-mode": "lazy",
+                "x-overflow": "reject-publish",
+            },
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1391,6 +1439,51 @@ async def test_aggregation_consumer_ensures_custom_queue_bindings() -> None:
     assert rabbit.aggregation_queue_calls
     assert all(call == expected for call in rabbit.aggregation_queue_calls)
     assert channel.declare_queue_calls[0]["name"] == "aggregation.queue.custom"
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_declares_queue_with_topology_argument_fields() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "status": "done"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    topology = SharedTasksSharedStatusShardedAggregationTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        shard_count=4,
+        aggregation_consumer_timeout_ms=120000,
+        aggregation_single_active_consumer=True,
+        aggregation_max_priority=5,
+        aggregation_queue_type="quorum",
+        aggregation_queue_arguments_overrides={"x-delivery-limit": 20},
+        aggregation_queue_kwargs={"x-overflow": "reject-publish"},
+    )
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = AggregationConsumer(rabbitmq=rabbit, handler=handler, shards=[0])
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert channel.declare_queue_calls == [
+        {
+            "name": "aggregation.queue.0",
+            "durable": True,
+            "arguments": {
+                "x-consumer-timeout": 120000,
+                "x-single-active-consumer": True,
+                "x-max-priority": 5,
+                "x-queue-type": "quorum",
+                "x-delivery-limit": 20,
+                "x-overflow": "reject-publish",
+            },
+        }
+    ]
 
 
 @pytest.mark.asyncio

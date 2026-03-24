@@ -28,13 +28,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.2/relayna-1.2.2-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.3/relayna-1.2.3-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.2/relayna-1.2.2.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.3/relayna-1.2.3.tar.gz
 ```
 
 For local development in this repository:
@@ -58,6 +58,7 @@ topology = SharedTasksSharedStatusTopology(
     tasks_routing_key="task.request",
     status_exchange="status.exchange",
     status_queue="status.queue",
+    task_consumer_timeout_ms=600000,
 )
 
 app = FastAPI(
@@ -234,6 +235,143 @@ retry/DLQ-enabled workers. The getting-started guide also documents every
 child and parent workflows, and how to use `context.manual_retry(...)` to hand
 the same `task_id` off to a different routed `task_type`.
 
+Topology constructors also expose a small curated set of RabbitMQ queue
+arguments for worker-owned queues:
+
+- `task_consumer_timeout_ms`
+- `task_single_active_consumer`
+- `task_max_priority`
+- `task_queue_type`
+- `aggregation_consumer_timeout_ms`
+- `aggregation_single_active_consumer`
+- `aggregation_max_priority`
+- `aggregation_queue_type`
+
+For broker-specific queue arguments that Relayna does not model directly, use
+the explicit mapping escape hatches such as `task_queue_kwargs`,
+`task_queue_arguments_overrides`, `aggregation_queue_kwargs`, and
+`status_queue_kwargs`.
+
+Native queue-argument fields currently map like this:
+
+- Task queue:
+  `tasks_message_ttl_ms` -> `x-message-ttl`
+- Task queue:
+  `dead_letter_exchange` -> `x-dead-letter-exchange`
+- Task queue:
+  `task_consumer_timeout_ms` -> `x-consumer-timeout`
+- Task queue:
+  `task_single_active_consumer` -> `x-single-active-consumer`
+- Task queue:
+  `task_max_priority` -> `x-max-priority`
+- Task queue:
+  `task_queue_type` -> `x-queue-type`
+- Status queue:
+  `status_use_streams=True` -> `x-queue-type=stream`
+- Status queue:
+  `status_queue_ttl_ms` -> `x-expires`
+- Status queue:
+  `status_stream_max_length_gb` -> `x-max-length-bytes`
+- Status queue:
+  `status_stream_max_segment_size_mb` -> `x-stream-max-segment-size-bytes`
+- Aggregation queue:
+  `aggregation_consumer_timeout_ms` -> `x-consumer-timeout`
+- Aggregation queue:
+  `aggregation_single_active_consumer` -> `x-single-active-consumer`
+- Aggregation queue:
+  `aggregation_max_priority` -> `x-max-priority`
+- Aggregation queue:
+  `aggregation_queue_type` -> `x-queue-type`
+
+Generic queue-argument mappings are:
+
+- Task queue:
+  `task_queue_arguments_overrides`
+- Task queue:
+  `task_queue_kwargs`
+- Status queue:
+  `status_queue_arguments_overrides`
+- Status queue:
+  `status_queue_kwargs`
+- Aggregation queue:
+  `aggregation_queue_arguments_overrides`
+- Aggregation queue:
+  `aggregation_queue_kwargs`
+
+`status_stream_initial_offset` remains a native topology field, but it affects
+the stream consumer argument `x-stream-offset`, not queue declaration
+arguments.
+
+```python
+topology = SharedTasksSharedStatusTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    tasks_exchange="tasks.exchange",
+    tasks_queue="tasks.queue",
+    tasks_routing_key="task.request",
+    status_exchange="status.exchange",
+    status_queue="status.queue",
+    task_consumer_timeout_ms=600000,
+    task_queue_kwargs={"x-overflow": "reject-publish"},
+)
+```
+
+Task queue example with only native fields:
+
+```python
+topology = SharedTasksSharedStatusTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    tasks_exchange="tasks.exchange",
+    tasks_queue="tasks.queue",
+    tasks_routing_key="task.request",
+    status_exchange="status.exchange",
+    status_queue="status.queue",
+    tasks_message_ttl_ms=30000,
+    dead_letter_exchange="tasks.dlx",
+    task_consumer_timeout_ms=600000,
+    task_single_active_consumer=True,
+    task_max_priority=10,
+    task_queue_type="quorum",
+)
+```
+
+Sharded aggregation example with native fields plus broker-specific kwargs:
+
+```python
+topology = SharedTasksSharedStatusShardedAggregationTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    tasks_exchange="tasks.exchange",
+    tasks_queue="tasks.queue",
+    tasks_routing_key="task.request",
+    status_exchange="status.exchange",
+    status_queue="status.queue",
+    shard_count=4,
+    aggregation_consumer_timeout_ms=120000,
+    aggregation_single_active_consumer=True,
+    aggregation_queue_type="quorum",
+    aggregation_queue_kwargs={"x-delivery-limit": 20},
+)
+```
+
+Status queue example with stream settings plus generic queue args:
+
+```python
+topology = SharedTasksSharedStatusTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    tasks_exchange="tasks.exchange",
+    tasks_queue="tasks.queue",
+    tasks_routing_key="task.request",
+    status_exchange="status.exchange",
+    status_queue="status.queue",
+    status_use_streams=True,
+    status_stream_max_length_gb=2,
+    status_stream_max_segment_size_mb=64,
+    status_queue_kwargs={"x-initial-cluster-size": 3},
+)
+```
+
+If the same RabbitMQ argument key is configured twice for one queue family,
+Relayna raises `ValueError` instead of silently overriding it.
+
 ## Real-Stack Smoke Commands
 
 These scripts exercise the library against real RabbitMQ and Redis services on
@@ -243,6 +381,7 @@ These scripts exercise the library against real RabbitMQ and Redis services on
 PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_queue_args_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_alias_batch_task_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_manual_retry_routed_smoke.py
 ```
