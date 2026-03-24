@@ -704,7 +704,7 @@ class TaskConsumer:
         except asyncio.CancelledError:
             raise
         except Exception:
-            return
+            pass
         await self._rabbitmq.publish_task(request.task, headers=request.headers)
 
     async def _publish_lifecycle_status(self, context: TaskContext, *, status: str, message: str) -> None:
@@ -940,8 +940,12 @@ def _manual_retry_meta_from_status(meta: Mapping[str, Any] | None) -> dict[str, 
     manual_retry = meta.get("manual_retry")
     if not isinstance(manual_retry, Mapping):
         return {"count": 0, "previous_task_type": None, "source_consumer": None, "reason": None}
+    try:
+        count = max(0, int(manual_retry.get("count") or 0))
+    except (TypeError, ValueError):
+        count = 0
     return {
-        "count": max(0, int(manual_retry.get("count") or 0)),
+        "count": count,
         "previous_task_type": _string_or_none(manual_retry.get("previous_task_type")),
         "source_consumer": _string_or_none(manual_retry.get("source_consumer")),
         "reason": _string_or_none(manual_retry.get("reason")),

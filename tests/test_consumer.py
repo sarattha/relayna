@@ -420,6 +420,36 @@ async def test_task_consumer_publishes_manual_retry_status_before_task_handoff()
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_still_republishes_manual_retry_when_status_publish_fails() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def failing_publish_status(event: StatusEventEnvelope | dict[str, Any]) -> None:
+        del event
+        raise RuntimeError("status unavailable")
+
+    rabbit.publish_status = failing_publish_status  # type: ignore[method-assign]
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        await context.manual_retry(task_type="task.review")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        lifecycle_statuses=LifecycleStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert len(rabbit.published_tasks) == 1
+
+
+@pytest.mark.asyncio
 async def test_task_context_manual_retry_rejects_reserved_extra_fields() -> None:
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
     context = TaskContext(
@@ -1271,6 +1301,43 @@ async def test_aggregation_consumer_preserves_manual_retry_lineage_from_event_me
         "previous_task_type": "task.generate",
         "source_consumer": "worker-a",
         "reason": "quality gate failed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_tolerates_non_numeric_manual_retry_count_in_meta() -> None:
+    event = {
+        "task_id": "task-123",
+        "status": "processing",
+        "meta": {
+            "manual_retry": {
+                "count": "not-a-number",
+                "previous_task_type": "task.generate",
+                "source_consumer": "worker-a",
+            }
+        },
+    }
+    message = FakeMessage(json.dumps(event).encode("utf-8"), correlation_id="task-123")
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(status_event: Any, context: TaskContext) -> None:
+        await context.publish_aggregation_status(status="aggregate", meta=dict(status_event.meta))
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        retry_statuses=RetryStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.published_statuses[0]["meta"]["manual_retry"] == {
+        "count": 0,
+        "previous_task_type": "task.generate",
+        "source_consumer": "worker-a",
     }
 
 
