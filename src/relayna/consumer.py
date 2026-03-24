@@ -32,7 +32,7 @@ from .observability import (
     emit_observation,
 )
 from .rabbitmq import RelaynaRabbitClient, RetryInfrastructure
-from .topology import RelaynaTopology
+from .topology import RelaynaTopology, RoutedTasksSharedStatusTopology
 
 
 class TaskHandler(Protocol):
@@ -227,7 +227,21 @@ class TaskContext:
             merged_payload.update(dict(payload_merge))
             next_task["payload"] = merged_payload
         if extra_fields is not None:
-            next_task.update(dict(extra_fields))
+            provided_fields = dict(extra_fields)
+            reserved_fields = {
+                "task_id",
+                "correlation_id",
+                "task_type",
+                "service",
+                "payload",
+                "spec_version",
+                "created_at",
+            }
+            conflicting = sorted(key for key in provided_fields if key in reserved_fields)
+            if conflicting:
+                conflicts = ", ".join(conflicting)
+                raise ValueError(f"extra_fields contains reserved key(s): {conflicts}")
+            next_task.update(provided_fields)
 
         prepared = TaskEnvelope.model_validate(next_task).model_dump(mode="json", exclude_none=True)
         next_count = self.manual_retry_count + 1
@@ -509,6 +523,20 @@ class TaskConsumer:
             return
 
         batch_size = len(batch.tasks)
+        if isinstance(self._rabbitmq.topology, RoutedTasksSharedStatusTopology):
+            task_types = {str(task.task_type).strip() for task in batch.tasks if str(task.task_type).strip()}
+            if len(task_types) > 1:
+                await self._publish_dead_letter(
+                    message,
+                    retry_infrastructure=retry_infrastructure,
+                    source_queue_name=source_queue_name,
+                    task_id=None,
+                    retry_attempt=_retry_attempt(message),
+                    reason="mixed_task_type_batch",
+                    exception_type="ValueError",
+                )
+                await message.ack()
+                return
         for index, task in enumerate(batch.tasks):
             task_payload = task.model_dump(mode="json", exclude_none=True)
             await self._rabbitmq.publish_raw_to_queue(
@@ -667,7 +695,6 @@ class TaskConsumer:
             return False
 
     async def _publish_manual_retry_request(self, context: TaskContext, request: _ManualRetryRequest) -> None:
-        await self._rabbitmq.publish_task(request.task, headers=request.headers)
         try:
             await context.publish_status(
                 status="manual_retrying",
@@ -678,6 +705,7 @@ class TaskConsumer:
             raise
         except Exception:
             return
+        await self._rabbitmq.publish_task(request.task, headers=request.headers)
 
     async def _publish_lifecycle_status(self, context: TaskContext, *, status: str, message: str) -> None:
         if not self._lifecycle_statuses.enabled:
@@ -887,6 +915,13 @@ def _header_string(headers: Mapping[str, Any], key: str) -> str | None:
     return None
 
 
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _header_int(headers: Mapping[str, Any], key: str) -> int | None:
     value = headers.get(key)
     try:
@@ -897,6 +932,20 @@ def _header_int(headers: Mapping[str, Any], key: str) -> int | None:
 
 def _manual_retry_count(headers: Mapping[str, Any]) -> int:
     return max(0, _header_int(headers, "x-relayna-manual-retry-count") or 0)
+
+
+def _manual_retry_meta_from_status(meta: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(meta, Mapping):
+        return {"count": 0, "previous_task_type": None, "source_consumer": None, "reason": None}
+    manual_retry = meta.get("manual_retry")
+    if not isinstance(manual_retry, Mapping):
+        return {"count": 0, "previous_task_type": None, "source_consumer": None, "reason": None}
+    return {
+        "count": max(0, int(manual_retry.get("count") or 0)),
+        "previous_task_type": _string_or_none(manual_retry.get("previous_task_type")),
+        "source_consumer": _string_or_none(manual_retry.get("source_consumer")),
+        "reason": _string_or_none(manual_retry.get("reason")),
+    }
 
 
 def _merge_batch_retry_headers(context: TaskContext, headers: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -1156,6 +1205,7 @@ class AggregationConsumer:
 
                         current_retry_attempt = _retry_attempt(message)
                         headers = _message_headers(message)
+                        manual_retry_meta = _manual_retry_meta_from_status(event.meta)
                         context = TaskContext(
                             rabbitmq=self._rabbitmq,
                             consumer_name=self._consumer_name,
@@ -1169,14 +1219,17 @@ class AggregationConsumer:
                             source_queue_name=queue_name,
                             headers=headers,
                             is_task_context=False,
-                            manual_retry_count=_manual_retry_count(headers),
+                            manual_retry_count=_manual_retry_count(headers) or manual_retry_meta["count"],
                             manual_retry_previous_task_type=_header_string(
                                 headers, "x-relayna-manual-retry-from-task-type"
-                            ),
+                            )
+                            or manual_retry_meta["previous_task_type"],
                             manual_retry_source_consumer=_header_string(
                                 headers, "x-relayna-manual-retry-source-consumer"
-                            ),
-                            manual_retry_reason=_header_string(headers, "x-relayna-manual-retry-reason"),
+                            )
+                            or manual_retry_meta["source_consumer"],
+                            manual_retry_reason=_header_string(headers, "x-relayna-manual-retry-reason")
+                            or manual_retry_meta["reason"],
                         )
                         try:
                             await self._handler(event, context)
