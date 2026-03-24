@@ -381,6 +381,7 @@ These scripts exercise the library against real RabbitMQ and Redis services on
 PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_queue_args_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_alias_batch_task_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_manual_retry_routed_smoke.py
 ```

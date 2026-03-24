@@ -1155,4 +1155,5 @@ scripts exercise both topology families against the real stack:
 PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_queue_args_smoke.py
 ```
