@@ -234,8 +234,8 @@ class SharedTasksSharedStatusTopology:
                 builtins["x-stream-max-segment-size-bytes"] = int(self.status_stream_max_segment_size_mb) * 1024**2
         else:
             builtins = {}
-        if self.status_queue_ttl_ms:
-            builtins["x-expires"] = int(self.status_queue_ttl_ms)
+            if self.status_queue_ttl_ms:
+                builtins["x-expires"] = int(self.status_queue_ttl_ms)
         return _merge_queue_arguments(
             "status",
             builtins=builtins,

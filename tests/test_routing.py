@@ -182,6 +182,23 @@ def test_status_queue_arguments_merge_existing_and_generic_fields() -> None:
     }
 
 
+def test_status_queue_ttl_is_not_applied_to_stream_queues() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        status_use_streams=True,
+        status_queue_ttl_ms=60000,
+    )
+
+    assert topology.status_queue_arguments() == {
+        "x-queue-type": "stream",
+    }
+
+
 def test_task_queue_arguments_raise_on_duplicate_keys() -> None:
     topology = SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
