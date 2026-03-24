@@ -31,7 +31,7 @@ from relayna.observability import (
     TaskMessageRejected,
 )
 from relayna.rabbitmq import RetryInfrastructure
-from relayna.topology import SharedTasksSharedStatusTopology
+from relayna.topology import RoutedTasksSharedStatusTopology, SharedTasksSharedStatusTopology
 
 
 class FakeMessage:
@@ -385,6 +385,87 @@ async def test_task_consumer_manual_retry_republishes_task_and_acks_original_mes
     assert [event["status"] for event in rabbit.published_statuses] == ["processing", "manual_retrying"]
     assert rabbit.published_statuses[-1]["meta"]["phase"] == "review"
     assert rabbit.published_statuses[-1]["meta"]["manual_retry"]["target_task_type"] == "task.review"
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_publishes_manual_retry_status_before_task_handoff() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    original_publish_task = rabbit.publish_task
+
+    async def publish_task_with_assertion(task: dict[str, Any], *, headers: dict[str, Any] | None = None) -> None:
+        assert [event["status"] for event in rabbit.published_statuses] == ["processing", "manual_retrying"]
+        await original_publish_task(task, headers=headers)
+
+    rabbit.publish_task = publish_task_with_assertion  # type: ignore[method-assign]
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        await context.manual_retry(task_type="task.review")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        lifecycle_statuses=LifecycleStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert len(rabbit.published_tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_still_republishes_manual_retry_when_status_publish_fails() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def failing_publish_status(event: StatusEventEnvelope | dict[str, Any]) -> None:
+        del event
+        raise RuntimeError("status unavailable")
+
+    rabbit.publish_status = failing_publish_status  # type: ignore[method-assign]
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        await context.manual_retry(task_type="task.review")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        lifecycle_statuses=LifecycleStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert len(rabbit.published_tasks) == 1
+
+
+@pytest.mark.asyncio
+async def test_task_context_manual_retry_rejects_reserved_extra_fields() -> None:
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+    context = TaskContext(
+        rabbitmq=rabbit,
+        consumer_name="worker-a",
+        raw_payload={"task_id": "task-123", "task_type": "task.generate", "payload": {"kind": "demo"}},
+        correlation_id="corr-123",
+        delivery_tag=1,
+        redelivered=False,
+        _task_id="task-123",
+        headers={"task_id": "task-123"},
+        is_task_context=True,
+    )
+
+    with pytest.raises(ValueError, match="reserved key"):
+        await context.manual_retry(extra_fields={"task_id": "task-999"})
 
 
 @pytest.mark.asyncio
@@ -1084,6 +1165,49 @@ async def test_task_consumer_fans_out_batch_envelope_into_individual_messages() 
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_dead_letters_mixed_task_type_batch_for_routed_topology() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "batch_id": "batch-123",
+                "tasks": [
+                    {"task_id": "task-1", "task_type": "task.review", "payload": {"kind": "demo"}},
+                    {"task_id": "task-2", "task_type": "task.audit", "payload": {"kind": "demo"}},
+                ],
+            }
+        ).encode("utf-8"),
+        correlation_id="batch-123",
+    )
+    queue = FakeQueue([message])
+    topology = RoutedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.review.queue",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_types=("task.review", "task.audit"),
+    )
+    rabbit = FakeRabbitClient(topology=topology, queue_name="tasks.review.queue", acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("handler should not run for mixed routed batch envelopes")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert not rabbit.published_tasks
+    assert len(rabbit.raw_queue_publishes) == 1
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.review.queue.dlq"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "mixed_task_type_batch"
+
+
+@pytest.mark.asyncio
 async def test_task_consumer_retries_failed_batch_item_using_headers() -> None:
     message = FakeMessage(
         json.dumps({"task_id": "task-1", "payload": {"kind": "demo"}}).encode("utf-8"),
@@ -1138,6 +1262,83 @@ async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
 
     assert rabbit.initialize_calls == 1
     assert rabbit.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_preserves_manual_retry_lineage_from_event_meta() -> None:
+    event = {
+        "task_id": "task-123",
+        "status": "processing",
+        "meta": {
+            "manual_retry": {
+                "count": 2,
+                "previous_task_type": "task.generate",
+                "source_consumer": "worker-a",
+                "reason": "quality gate failed",
+            }
+        },
+    }
+    message = FakeMessage(json.dumps(event).encode("utf-8"), correlation_id="task-123")
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(status_event: Any, context: TaskContext) -> None:
+        await context.publish_aggregation_status(status="aggregate", meta=dict(status_event.meta))
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        retry_statuses=RetryStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.published_status_calls[0][0] == "aggregation"
+    assert rabbit.published_statuses[0]["meta"]["manual_retry"] == {
+        "count": 2,
+        "previous_task_type": "task.generate",
+        "source_consumer": "worker-a",
+        "reason": "quality gate failed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_tolerates_non_numeric_manual_retry_count_in_meta() -> None:
+    event = {
+        "task_id": "task-123",
+        "status": "processing",
+        "meta": {
+            "manual_retry": {
+                "count": "not-a-number",
+                "previous_task_type": "task.generate",
+                "source_consumer": "worker-a",
+            }
+        },
+    }
+    message = FakeMessage(json.dumps(event).encode("utf-8"), correlation_id="task-123")
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(status_event: Any, context: TaskContext) -> None:
+        await context.publish_aggregation_status(status="aggregate", meta=dict(status_event.meta))
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        retry_statuses=RetryStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.published_statuses[0]["meta"]["manual_retry"] == {
+        "count": 0,
+        "previous_task_type": "task.generate",
+        "source_consumer": "worker-a",
+    }
 
 
 @pytest.mark.asyncio
