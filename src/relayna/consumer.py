@@ -278,7 +278,12 @@ class TaskContext:
             return merged
         existing = merged.get("manual_retry")
         if isinstance(existing, Mapping):
-            merged["manual_retry"] = {**lineage["manual_retry"], **dict(existing)}
+            merged_manual_retry = {**lineage["manual_retry"], **dict(existing)}
+            merged_manual_retry["count"] = _coerce_non_negative_int(
+                merged_manual_retry.get("count"),
+                fallback=int(lineage["manual_retry"].get("count", 0)),
+            )
+            merged["manual_retry"] = merged_manual_retry
             return merged
         merged.update(lineage)
         return merged
@@ -940,16 +945,19 @@ def _manual_retry_meta_from_status(meta: Mapping[str, Any] | None) -> dict[str, 
     manual_retry = meta.get("manual_retry")
     if not isinstance(manual_retry, Mapping):
         return {"count": 0, "previous_task_type": None, "source_consumer": None, "reason": None}
-    try:
-        count = max(0, int(manual_retry.get("count") or 0))
-    except (TypeError, ValueError):
-        count = 0
     return {
-        "count": count,
+        "count": _coerce_non_negative_int(manual_retry.get("count"), fallback=0),
         "previous_task_type": _string_or_none(manual_retry.get("previous_task_type")),
         "source_consumer": _string_or_none(manual_retry.get("source_consumer")),
         "reason": _string_or_none(manual_retry.get("reason")),
     }
+
+
+def _coerce_non_negative_int(value: Any, *, fallback: int) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return max(0, int(fallback))
 
 
 def _merge_batch_retry_headers(context: TaskContext, headers: Mapping[str, Any] | None) -> dict[str, Any]:
