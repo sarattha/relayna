@@ -1253,7 +1253,7 @@ async def test_aggregation_consumer_preserves_manual_retry_lineage_from_event_me
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
 
     async def handler(status_event: Any, context: TaskContext) -> None:
-        await context.publish_status(status="aggregate", meta=dict(status_event.meta))
+        await context.publish_aggregation_status(status="aggregate", meta=dict(status_event.meta))
 
     consumer = AggregationConsumer(
         rabbitmq=rabbit,
