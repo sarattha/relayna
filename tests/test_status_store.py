@@ -6,7 +6,7 @@ from relayna.status_store import RedisStatusStore
 
 
 class FakePipeline:
-    def __init__(self, redis: "FakeRedis") -> None:
+    def __init__(self, redis: FakeRedis) -> None:
         self._redis = redis
         self._ops: list[tuple[str, tuple[object, ...]]] = []
 
@@ -80,7 +80,9 @@ async def test_set_history_skips_duplicate_event_id() -> None:
     await store.set_history("task-1", event)
     await store.set_history("task-1", dict(event))
 
-    assert redis.history[store.history_key("task-1")] == ['{"task_id": "task-1", "status": "validating", "event_id": "evt-1"}']
+    assert redis.history[store.history_key("task-1")] == [
+        '{"task_id": "task-1", "status": "validating", "event_id": "evt-1"}'
+    ]
     assert redis.published == [
         (
             store.channel_name("task-1"),

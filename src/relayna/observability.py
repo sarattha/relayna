@@ -15,10 +15,10 @@ class RelaynaObservation(Protocol):
     timestamp: datetime
 
 
-ObservationSink = Callable[[RelaynaObservation], Awaitable[None]]
+ObservationSink = Callable[[object], Awaitable[None]]
 
 
-async def emit_observation(sink: ObservationSink | None, event: RelaynaObservation) -> None:
+async def emit_observation(sink: ObservationSink | None, event: object) -> None:
     if sink is None:
         return
     try:
@@ -106,7 +106,7 @@ class TaskMessageReceived:
 @dataclass(slots=True)
 class TaskMessageAcked:
     consumer_name: str
-    task_id: str
+    task_id: str | None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 

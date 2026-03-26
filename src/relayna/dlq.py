@@ -3,11 +3,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
@@ -263,7 +263,7 @@ class RedisDLQStore:
         cursor: str | None = None,
         limit: int = 50,
     ) -> tuple[list[DLQRecord], str | None]:
-        raw_ids = await self.redis.lrange(self.records_key(), 0, -1)  # type: ignore[misc]
+        raw_ids = await cast(Awaitable[list[str | bytes]], self.redis.lrange(self.records_key(), 0, -1))
         ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
         start_index = 0
         if cursor:
@@ -317,7 +317,7 @@ class RedisDLQStore:
         return items, next_cursor
 
     async def summarize_queues(self) -> list[tuple[str, int, datetime | None]]:
-        raw_ids = await self.redis.lrange(self.records_key(), 0, -1)  # type: ignore[misc]
+        raw_ids = await cast(Awaitable[list[str | bytes]], self.redis.lrange(self.records_key(), 0, -1))
         ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
         counts: dict[str, int] = {}
         latest: dict[str, datetime] = {}

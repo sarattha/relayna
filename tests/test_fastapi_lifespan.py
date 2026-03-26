@@ -7,16 +7,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from relayna.contracts import ContractAliasConfig
-from relayna.dlq import DLQRecord, DLQRecordState, build_dlq_record
-from relayna.fastapi import create_dlq_router, create_status_router
-from relayna.dlq import DLQService
 import relayna.fastapi as relayna_fastapi
+from relayna.contracts import ContractAliasConfig
+from relayna.dlq import DLQRecord, DLQRecordState, DLQService, build_dlq_record
+from relayna.fastapi import create_dlq_router, create_status_router
 from relayna.topology import SharedTasksSharedStatusTopology
 
 
 class FakeRabbitClient:
-    instances: list["FakeRabbitClient"] = []
+    instances: list[FakeRabbitClient] = []
     fail_initialize = False
 
     def __init__(
@@ -78,7 +77,7 @@ class FakeRabbitClient:
 
 
 class FakeRedis:
-    instances: list["FakeRedis"] = []
+    instances: list[FakeRedis] = []
 
     def __init__(self, url: str) -> None:
         self.url = url
@@ -86,7 +85,7 @@ class FakeRedis:
         FakeRedis.instances.append(self)
 
     @classmethod
-    def from_url(cls, url: str) -> "FakeRedis":
+    def from_url(cls, url: str) -> FakeRedis:
         return cls(url)
 
     async def aclose(self) -> None:
@@ -95,7 +94,7 @@ class FakeRedis:
 
 class FakeStore:
     fail_init = False
-    instances: list["FakeStore"] = []
+    instances: list[FakeStore] = []
 
     def __init__(
         self,
@@ -126,7 +125,7 @@ class FakeStore:
 
 
 class FakeHub:
-    instances: list["FakeHub"] = []
+    instances: list[FakeHub] = []
 
     def __init__(
         self,
@@ -159,7 +158,7 @@ class FakeHub:
 
 
 class FakeSSEStatusStream:
-    instances: list["FakeSSEStatusStream"] = []
+    instances: list[FakeSSEStatusStream] = []
 
     def __init__(
         self,
@@ -183,7 +182,7 @@ class FakeSSEStatusStream:
 
 
 class FakeHistoryReader:
-    instances: list["FakeHistoryReader"] = []
+    instances: list[FakeHistoryReader] = []
 
     def __init__(
         self,
@@ -222,7 +221,7 @@ class FakeHistoryReader:
 
 
 class FakeDLQStore:
-    instances: list["FakeDLQStore"] = []
+    instances: list[FakeDLQStore] = []
 
     def __init__(self, redis: FakeRedis, *, prefix: str, ttl_seconds: int | None) -> None:
         self.redis = redis
@@ -281,7 +280,11 @@ class FakeDLQStore:
         for dlq_id in self.order:
             record = self.records[dlq_id]
             current_count, current_last = summary.get(record.queue_name, (0, None))
-            latest = record.dead_lettered_at if current_last is None or record.dead_lettered_at > current_last else current_last
+            latest = (
+                record.dead_lettered_at
+                if current_last is None or record.dead_lettered_at > current_last
+                else current_last
+            )
             summary[record.queue_name] = (current_count + 1, latest)
         return [(queue_name, count, last_indexed_at) for queue_name, (count, last_indexed_at) in summary.items()]
 
@@ -449,7 +452,7 @@ async def test_runtime_is_available_under_custom_state_key(topology: SharedTasks
     runtime = relayna_fastapi.get_relayna_runtime(app, app_state_key="custom_runtime")
 
     assert runtime.store.prefix == "relayna"
-    assert getattr(app.state, "custom_runtime") is runtime
+    assert app.state.custom_runtime is runtime
 
 
 def test_alias_config_changes_public_route_shapes_without_testclient(
@@ -645,7 +648,7 @@ def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
         assert events_response.status_code == 200
         assert "event: ready" in events_response.text
         assert '"task_id": "task-123"' in events_response.text
-        assert getattr(app.state, "relayna") is runtime
+        assert app.state.relayna is runtime
 
     assert runtime.hub.stop_calls == 1
     assert runtime.rabbitmq.close_calls == 1
@@ -660,9 +663,7 @@ def test_fastapi_testclient_flow_registers_and_serves_relayna_routes(
             "require_stream": True,
         }
     ]
-    assert FakeSSEStatusStream.instances[0].stream_calls == [
-        {"task_id": "task-123", "last_event_id": "evt-9"}
-    ]
+    assert FakeSSEStatusStream.instances[0].stream_calls == [{"task_id": "task-123", "last_event_id": "evt-9"}]
 
 
 def test_latest_status_route_returns_404_when_event_missing(topology: SharedTasksSharedStatusTopology) -> None:

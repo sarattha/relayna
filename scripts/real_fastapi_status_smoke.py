@@ -31,15 +31,11 @@ async def publish_status_flow(topology, task_id: str) -> None:
     client = RelaynaRabbitClient(topology=topology, connection_name="relayna-real-status-publisher")
     await client.initialize()
     try:
-        await client.publish_status(
-            StatusEventEnvelope(task_id=task_id, status="queued", message="Task accepted.")
-        )
+        await client.publish_status(StatusEventEnvelope(task_id=task_id, status="queued", message="Task accepted."))
         await client.publish_status(
             StatusEventEnvelope(task_id=task_id, status="processing", message="Worker started.")
         )
-        await client.publish_status(
-            StatusEventEnvelope(task_id=task_id, status="completed", message="Task completed.")
-        )
+        await client.publish_status(StatusEventEnvelope(task_id=task_id, status="completed", message="Task completed."))
     finally:
         await client.close()
 

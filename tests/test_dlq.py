@@ -15,7 +15,7 @@ from relayna.dlq import (
 
 
 class FakePipeline:
-    def __init__(self, redis: "FakeRedis") -> None:
+    def __init__(self, redis: FakeRedis) -> None:
         self._redis = redis
         self._ops: list[tuple[str, tuple[object, ...], dict[str, object]]] = []
 

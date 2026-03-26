@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Callable
 from typing import Any, Literal
 
-from aio_pika.abc import AbstractChannel, AbstractQueue  # ty:ignore[unresolved-import]
+from aio_pika.abc import AbstractChannel, AbstractQueue
 
 from .contracts import ContractAliasConfig, normalize_contract_aliases, public_output_aliases
 from .rabbitmq import RelaynaRabbitClient
@@ -21,7 +21,7 @@ class StreamHistoryReader:
         *,
         rabbitmq: RelaynaRabbitClient,
         queue_arguments: dict[str, Any] | None = None,
-        output_adapter: callable | None = None,
+        output_adapter: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         alias_config: ContractAliasConfig | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
@@ -62,7 +62,6 @@ class StreamHistoryReader:
             # Note: Timeout just in case user provides out of bounds max_scans or max_seconds
             async with queue.iterator(arguments=consume_args or None, timeout=30.0) as iterator:
                 async for message in iterator:
-
                     if max_seconds is not None and (time.monotonic() - started) > max_seconds:
                         break
 
@@ -90,10 +89,10 @@ class StreamHistoryReader:
                     if task_id and stop_on_terminal and status in terminal_statuses:
                         break
             return events
-        
+
         except TimeoutError:
             return events
-        
+
         finally:
             if channel is not None:
                 try:

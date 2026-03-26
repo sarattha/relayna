@@ -74,7 +74,9 @@ class FakeChannel:
 
 
 class FakeRabbitClient:
-    def __init__(self, *, topology: SharedTasksSharedStatusTopology, acquire_results: list[FakeChannel | Exception]) -> None:
+    def __init__(
+        self, *, topology: SharedTasksSharedStatusTopology, acquire_results: list[FakeChannel | Exception]
+    ) -> None:
         self.topology = topology
         self.acquire_results = list(acquire_results)
         self.ensure_status_queue_calls = 0

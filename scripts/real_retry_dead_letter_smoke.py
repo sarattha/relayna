@@ -5,11 +5,12 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from redis.asyncio import Redis
+
 from relayna.consumer import RetryPolicy, RetryStatusConfig, TaskConsumer, TaskContext
 from relayna.contracts import TaskEnvelope
 from relayna.dlq import RedisDLQStore
 from relayna.rabbitmq import RelaynaRabbitClient
-from redis.asyncio import Redis
 
 try:
     from scripts.real_stack_common import (
@@ -134,7 +135,9 @@ async def fetch_dead_letter_payload(topology: Any) -> tuple[dict[str, Any], Mapp
         await probe.close()
 
 
-async def poll_latest_status_value(client: Any, task_id: str, *, expected_status: str, timeout_seconds: float = 10.0) -> dict[str, Any]:
+async def poll_latest_status_value(
+    client: Any, task_id: str, *, expected_status: str, timeout_seconds: float = 10.0
+) -> dict[str, Any]:
     deadline = asyncio.get_running_loop().time() + timeout_seconds
     last_response: dict[str, Any] | None = None
     while asyncio.get_running_loop().time() < deadline:

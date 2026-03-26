@@ -28,13 +28,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.3/relayna-1.2.3-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.4/relayna-1.2.4-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.3/relayna-1.2.3.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.4/relayna-1.2.4.tar.gz
 ```
 
 For local development in this repository:
@@ -282,6 +282,11 @@ Native queue-argument fields currently map like this:
   `aggregation_max_priority` -> `x-max-priority`
 - Aggregation queue:
   `aggregation_queue_type` -> `x-queue-type`
+
+Those topology timeout fields configure RabbitMQ queue arguments. They are
+distinct from the runtime option `consume_timeout_seconds`, which controls how
+long `TaskConsumer` and `AggregationConsumer` wait locally for the next message
+before the consumer loop iterates again.
 
 Generic queue-argument mappings are:
 
