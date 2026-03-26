@@ -7,9 +7,23 @@ from relayna.contracts import ContractAliasConfig, TaskEnvelope
 from relayna.rabbitmq import RelaynaRabbitClient
 
 try:
-    from scripts.real_stack_common import app_client, build_app, build_shared_topology, parse_sse_events, poll_history, unique_suffix
+    from scripts.real_stack_common import (
+        app_client,
+        build_app,
+        build_shared_topology,
+        parse_sse_events,
+        poll_history,
+        unique_suffix,
+    )
 except ModuleNotFoundError:
-    from real_stack_common import app_client, build_app, build_shared_topology, parse_sse_events, poll_history, unique_suffix
+    from real_stack_common import (
+        app_client,
+        build_app,
+        build_shared_topology,
+        parse_sse_events,
+        poll_history,
+        unique_suffix,
+    )
 
 
 async def run_batch_worker_once(

@@ -20,7 +20,7 @@ from relayna.sse import SSEStatusStream
 
 
 class FakePubSubIterator:
-    def __init__(self, pubsub: "FakePubSub") -> None:
+    def __init__(self, pubsub: FakePubSub) -> None:
         self._pubsub = pubsub
 
     def __aiter__(self) -> FakePubSubIterator:
@@ -52,7 +52,6 @@ class FakePubSub:
 
     async def close(self) -> None:
         self.closed = True
-
 
     async def get_message(self, *, timeout: float | None = None) -> dict[str, Any] | None:
         if not self.supports_get_message:
@@ -107,7 +106,10 @@ async def collect_chunks(stream: AsyncIterator[bytes], count: int) -> list[str]:
 
 
 def status_message(task_id: str, status: str, *, event_id: str | None = None) -> dict[str, Any]:
-    data: dict[str, Any] = {"type": "message", "data": json.dumps({"task_id": task_id, "status": status, "event_id": event_id})}
+    data: dict[str, Any] = {
+        "type": "message",
+        "data": json.dumps({"task_id": task_id, "status": status, "event_id": event_id}),
+    }
     if event_id is None:
         data["data"] = json.dumps({"task_id": task_id, "status": status})
     return data
@@ -122,9 +124,7 @@ async def test_status_frames_include_id_when_event_id_present() -> None:
 
     assert chunks[0] == "event: ready\ndata: {}\n\n"
     assert chunks[1] == (
-        'id: evt-1\n'
-        'event: status\n'
-        'data: {"task_id": "task-123", "status": "completed", "event_id": "evt-1"}\n\n'
+        'id: evt-1\nevent: status\ndata: {"task_id": "task-123", "status": "completed", "event_id": "evt-1"}\n\n'
     )
 
 

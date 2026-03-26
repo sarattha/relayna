@@ -209,7 +209,7 @@ class SSEStatusStream:
 
         try:
             return await asyncio.wait_for(anext(iterator), timeout=self._keepalive_interval_seconds)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     def _to_public_event(self, data: dict[str, Any]) -> dict[str, Any]:

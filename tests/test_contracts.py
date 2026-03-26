@@ -3,10 +3,10 @@ from relayna.contracts import (
     StatusEventEnvelope,
     TerminalStatusSet,
     denormalize_document_aliases,
-    public_output_aliases,
-    normalize_contract_aliases,
     ensure_status_event_id,
+    normalize_contract_aliases,
     normalize_event_aliases,
+    public_output_aliases,
 )
 
 

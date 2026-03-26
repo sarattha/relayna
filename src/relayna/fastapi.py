@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Path, Query
@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio import Redis
 
 from .contracts import ContractAliasConfig, TerminalStatusSet, public_output_aliases
-from .dlq import DLQReplayConflict, DLQRecordState, DLQService, RedisDLQStore
+from .dlq import DLQRecordState, DLQReplayConflict, DLQService, RedisDLQStore
 from .history import StreamHistoryReader, StreamOffset
 from .rabbitmq import RelaynaRabbitClient
 from .sse import EventAdapter, SSEStatusStream
@@ -22,6 +22,9 @@ from .topology import RelaynaTopology
 
 class HistoryOutputAdapter(Protocol):
     def __call__(self, event: dict[str, Any]) -> dict[str, Any]: ...
+
+
+HISTORY_START_OFFSET_QUERY = Query(default="first")
 
 
 @dataclass(slots=True)
@@ -287,18 +290,17 @@ def create_status_router(
         @router.get(history_path)
         async def history(
             task_id: str | None = Query(default=None, alias=task_http_name),
-            start_offset: StreamOffset = Query(default="first"),
+            start_offset: StreamOffset = HISTORY_START_OFFSET_QUERY,
             max_seconds: float | None = Query(default=None),
             max_scan: int | None = Query(default=None),
         ) -> JSONResponse:
             try:
-
                 if all(param is None for param in [max_seconds, max_scan, task_id]):
                     raise HTTPException(
                         status_code=422,
                         detail="Set either max_seconds, max_scan, or task_id to limit the scope of the history query.",
                     )
-                
+
                 events = await history_reader.replay(
                     task_id=task_id,
                     start_offset=start_offset,
@@ -404,7 +406,8 @@ def _public_dlq_payload(payload: Any, alias_config: ContractAliasConfig | None) 
         updated["latest_status"] = public_output_aliases(updated["latest_status"], alias_config)
     if "status_history" in updated and isinstance(updated["status_history"], list):
         updated["status_history"] = [
-            public_output_aliases(item, alias_config) if isinstance(item, dict) else item for item in updated["status_history"]
+            public_output_aliases(item, alias_config) if isinstance(item, dict) else item
+            for item in updated["status_history"]
         ]
     if "items" in updated and isinstance(updated["items"], list):
         updated["items"] = [_public_dlq_payload(item, alias_config) for item in updated["items"]]

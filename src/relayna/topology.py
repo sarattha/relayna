@@ -9,7 +9,6 @@ from aio_pika import ExchangeType
 from aio_pika.abc import (
     AbstractChannel,
     AbstractExchange,
-    AbstractQueue,
     AbstractRobustChannel,
     AbstractRobustExchange,
 )

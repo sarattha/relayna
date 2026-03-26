@@ -10,7 +10,6 @@ import aio_pika
 from aio_pika import DeliveryMode, Message
 from aio_pika.abc import (
     AbstractChannel,
-    AbstractExchange,
     AbstractQueue,
     AbstractRobustChannel,
     AbstractRobustConnection,
@@ -25,8 +24,6 @@ from .contracts import (
     TaskEnvelope,
     ensure_status_event_id,
     normalize_contract_aliases,
-    normalize_event_aliases,
-    normalize_task_collection,
 )
 from .topology import (
     RelaynaTopology,
@@ -113,7 +110,7 @@ class RelaynaRabbitClient:
         delay_ms: int,
         retry_queue_suffix: str = ".retry",
         dead_letter_queue_suffix: str = ".dlq",
-    ) -> "RetryInfrastructure":
+    ) -> RetryInfrastructure:
         await self._ensure_ready()
         if self._channel is None:
             raise RuntimeError("RabbitMQ connection is not initialized")
@@ -158,7 +155,7 @@ class RelaynaRabbitClient:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             correlation_id=str(task_dict.get("correlation_id") or task_dict.get("task_id", "")) or None,
-            headers=message_headers,
+            headers=cast(Any, message_headers),
         )
         await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(task_dict))
 
@@ -231,7 +228,7 @@ class RelaynaRabbitClient:
         await channel.set_qos(prefetch_count=prefetch)
         return channel
 
-    async def inspect_queue(self, queue_name: str) -> "QueueInspection | None":
+    async def inspect_queue(self, queue_name: str) -> QueueInspection | None:
         await self._ensure_ready()
         channel = None
         try:

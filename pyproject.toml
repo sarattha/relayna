@@ -1,6 +1,6 @@
 [project]
 name = "relayna"
-version = "1.2.3"
+version = "1.2.4"
 description = "Shared RabbitMQ/Redis infrastructure for Relayna."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -46,6 +46,16 @@ dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "twine>=6.1.0",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock>=3.14.0",
+    "pytest-xdist",
+    "rich>=13.1.0, <14",
+    "mkdocs-material>=9.6.0",
+    "mkdocstrings[python]>=0.28.0",
+    "mkdocs-static-i18n",
+    "ruff==0.9.2",
+    "ty"
 ]
 
 [build-system]
@@ -57,4 +67,15 @@ line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "C4", "UP"]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
+    "UP", # pyupgrade
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

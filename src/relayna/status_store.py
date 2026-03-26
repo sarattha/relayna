@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from collections.abc import Awaitable
+from typing import Any, cast
 
 from redis.asyncio import Redis
 
@@ -59,11 +60,14 @@ class RedisStatusStore:
     async def get_history(self, task_id: str, limit: int | None = None) -> list[dict[str, Any]]:
         if limit is None:
             limit = self.history_maxlen
-        items = await self.redis.lrange(self.history_key(task_id), 0, max(0, limit - 1))  # type: ignore[misc]
+        items = await cast(
+            Awaitable[list[str | bytes]],
+            self.redis.lrange(self.history_key(task_id), 0, max(0, limit - 1)),
+        )
         return [json.loads(item) for item in items]
 
     async def get_latest(self, task_id: str) -> dict[str, Any] | None:
-        item = await self.redis.lindex(self.history_key(task_id), 0)  # type: ignore[misc]
+        item = await cast(Awaitable[str | bytes | None], self.redis.lindex(self.history_key(task_id), 0))
         if item is None:
             return None
         return json.loads(item)

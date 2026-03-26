@@ -1,6 +1,5 @@
 import importlib
 
-
 PUBLIC_MODULES = [
     "relayna.contracts",
     "relayna.rabbitmq",

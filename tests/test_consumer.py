@@ -341,7 +341,9 @@ async def test_task_context_manual_retry_requires_task_envelope_context() -> Non
 @pytest.mark.asyncio
 async def test_task_consumer_manual_retry_republishes_task_and_acks_original_message() -> None:
     message = FakeMessage(
-        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode("utf-8"),
+        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode(
+            "utf-8"
+        ),
         correlation_id="corr-123",
         headers={"batch_id": "batch-123", "x-relayna-retry-attempt": 2},
     )
@@ -394,7 +396,9 @@ async def test_task_consumer_manual_retry_republishes_task_and_acks_original_mes
 @pytest.mark.asyncio
 async def test_task_consumer_publishes_manual_retry_status_before_task_handoff() -> None:
     message = FakeMessage(
-        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode("utf-8"),
+        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode(
+            "utf-8"
+        ),
         correlation_id="corr-123",
     )
     queue = FakeQueue([message])
@@ -426,7 +430,9 @@ async def test_task_consumer_publishes_manual_retry_status_before_task_handoff()
 @pytest.mark.asyncio
 async def test_task_consumer_still_republishes_manual_retry_when_status_publish_fails() -> None:
     message = FakeMessage(
-        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode("utf-8"),
+        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode(
+            "utf-8"
+        ),
         correlation_id="corr-123",
     )
     queue = FakeQueue([message])
@@ -527,9 +533,7 @@ async def test_task_consumer_acknowledges_successful_messages() -> None:
     assert message.rejected_with is None
     assert rabbit.ensure_tasks_queue_calls == 1
     assert rabbit.acquire_channel_calls == [1]
-    assert channel.declare_queue_calls == [
-        {"name": "tasks.queue", "durable": True, "arguments": None}
-    ]
+    assert channel.declare_queue_calls == [{"name": "tasks.queue", "durable": True, "arguments": None}]
     assert channel.close_calls >= 1
 
 
@@ -756,6 +760,38 @@ async def test_task_consumer_stop_exits_idle_loop_cleanly() -> None:
     await task
 
     assert rabbit.ensure_tasks_queue_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_uses_default_consume_timeout() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert queue.iterator_calls == [{"arguments": None, "timeout": 1.0}]
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_allows_indefinite_consume_timeout() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, consume_timeout_seconds=None)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert queue.iterator_calls == [{"arguments": None, "timeout": None}]
 
 
 def test_fake_queue_helper_signature_supports_consumer_timeout() -> None:
@@ -1312,6 +1348,22 @@ async def test_aggregation_worker_runtime_can_own_rabbitmq_lifecycle() -> None:
     assert rabbit.close_calls == 0
 
 
+def test_aggregation_worker_runtime_forwards_consume_timeout_to_consumers() -> None:
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    runtime = AggregationWorkerRuntime(
+        rabbitmq=rabbit,
+        handler=handler,
+        shard_groups=[[0], [1, 2]],
+        consume_timeout_seconds=None,
+    )
+
+    assert [consumer._consume_timeout_seconds for consumer in runtime._consumers] == [None, None]
+
+
 @pytest.mark.asyncio
 async def test_aggregation_consumer_preserves_manual_retry_lineage_from_event_meta() -> None:
     event = {
@@ -1484,6 +1536,43 @@ async def test_aggregation_consumer_declares_queue_with_topology_argument_fields
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_uses_default_consume_timeout() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "status": "done"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = AggregationConsumer(rabbitmq=rabbit, handler=handler, shards=[0])
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert queue.iterator_calls == [{"arguments": None, "timeout": 1.0}]
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_allows_indefinite_consume_timeout() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "status": "done"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        consume_timeout_seconds=None,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert queue.iterator_calls == [{"arguments": None, "timeout": None}]
 
 
 @pytest.mark.asyncio

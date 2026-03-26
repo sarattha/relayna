@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.3/relayna-1.2.3-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.4/relayna-1.2.4-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.2.3/relayna-1.2.3.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.2.4/relayna-1.2.4.tar.gz
 ```
 
 For local work in this repository:
@@ -107,6 +107,12 @@ Native queue-argument field mapping:
   `aggregation_max_priority` -> `x-max-priority`
 - Aggregation queue:
   `aggregation_queue_type` -> `x-queue-type`
+
+These topology timeout fields configure RabbitMQ queue arguments. They are
+separate from the runtime-side `consume_timeout_seconds` setting on
+`TaskConsumer`, `AggregationConsumer`, and `AggregationWorkerRuntime`, which
+controls how long the local consumer loop waits for the next message before it
+re-enters the loop.
 
 `status_stream_initial_offset` is also native, but it affects the consumer
 argument `x-stream-offset` rather than queue declaration arguments.
@@ -583,10 +589,16 @@ consumer = TaskConsumer(
     rabbitmq=client,
     handler=handle_task,
     retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    consume_timeout_seconds=1.0,
     alias_config=alias_config,
 )
 await consumer.run_forever()
 ```
+
+Set `consume_timeout_seconds=None` when you want the worker runtime to block
+indefinitely waiting for the next message instead of waking up every second.
+That reduces idle wake-ups, but `stop()` becomes best-effort for standalone
+consumers and may not complete until a message arrives or the task is canceled.
 
 Inside the handler:
 
@@ -697,6 +709,7 @@ consumer = TaskConsumer(
     rabbitmq=client,
     handler=handle_task,
     retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    consume_timeout_seconds=None,
     dlq_store=worker_dlq_store,
 )
 
@@ -788,6 +801,7 @@ consumer = TaskConsumer(
     handler=handle_task,
     retry_policy=RetryPolicy(max_retries=3, delay_ms=15000),
     retry_statuses=RetryStatusConfig(enabled=True),
+    consume_timeout_seconds=1.0,
 )
 await consumer.run_forever()
 ```
@@ -1037,6 +1051,7 @@ runtime = AggregationWorkerRuntime(
     shard_groups=[[0], [1, 2, 3]],
     retry_policy=RetryPolicy(max_retries=3, delay_ms=15000),
     retry_statuses=RetryStatusConfig(enabled=True),
+    consume_timeout_seconds=None,
 )
 
 await runtime.start()
@@ -1050,6 +1065,11 @@ finally:
 
 - one aggregation consumer owns shard `0`
 - a second aggregation consumer owns shards `1`, `2`, and `3`
+
+`consume_timeout_seconds=None` makes each aggregation consumer block waiting for
+the next event. `AggregationWorkerRuntime.stop()` still falls back to task
+cancellation if a blocking consumer does not exit within the runtime stop
+timeout.
 
 ### Direct aggregation-queue probe example
 

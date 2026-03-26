@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.4 - 2026-03-26
+
+### Changed
+
+- Bumped the package version to `1.2.4`.
+
 ## 1.2.3 - 2026-03-24
 
 ### Added

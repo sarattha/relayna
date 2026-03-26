@@ -109,7 +109,7 @@ class StatusHub:
                                 ),
                             )
                             continue
-                        
+
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

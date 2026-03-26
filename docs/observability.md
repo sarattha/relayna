@@ -43,6 +43,7 @@ async def sink(event: RelaynaObservation) -> None:
 consumer = TaskConsumer(
     rabbitmq=client,
     handler=handle_task,
+    consume_timeout_seconds=1.0,
     observation_sink=sink,
 )
 await consumer.run_forever()
@@ -68,7 +69,12 @@ async def sink(event) -> None:
     print(event.component, event)
 
 
-consumer = TaskConsumer(rabbitmq=client, handler=handle_task, observation_sink=sink)
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    consume_timeout_seconds=1.0,
+    observation_sink=sink,
+)
 hub = StatusHub(rabbitmq=client, store=store, observation_sink=sink)
 stream = SSEStatusStream(store=store, observation_sink=sink)
 ```

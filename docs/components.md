@@ -74,7 +74,10 @@ Worker-side helpers:
 This module provides validated task delivery, shard-aware aggregation
 consumption, optional lifecycle status publishing, broker-delayed retry and
 dead-letter behavior, manual handoff retry through `TaskContext.manual_retry`,
-and a helper runtime for aggregation workers outside FastAPI.
+and a helper runtime for aggregation workers outside FastAPI. `TaskConsumer`,
+`AggregationConsumer`, and `AggregationWorkerRuntime` also expose
+`consume_timeout_seconds` to control how long the local runtime waits for the
+next message before looping again.
 
 ## `relayna.status_store`
 

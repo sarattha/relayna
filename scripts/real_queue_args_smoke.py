@@ -130,7 +130,9 @@ async def run_aggregation_flow(
             durable=True,
             arguments=topology.aggregation_queue_arguments() or None,
         )
-        publisher = RelaynaRabbitClient(topology=topology, connection_name="relayna-real-queue-args-aggregation-publisher")
+        publisher = RelaynaRabbitClient(
+            topology=topology, connection_name="relayna-real-queue-args-aggregation-publisher"
+        )
         await publisher.initialize()
         try:
             await publisher.publish_aggregation_status(
@@ -154,9 +156,13 @@ async def run_aggregation_flow(
     assert routed_payload["status"] == "aggregating"
     assert routed_payload["meta"]["parent_task_id"] == parent_task_id
 
-    app = build_app(topology, parent_task_id.rsplit("-", 1)[1], sse_terminal_statuses=TerminalStatusSet({"aggregation-processed"}))
+    app = build_app(
+        topology, parent_task_id.rsplit("-", 1)[1], sse_terminal_statuses=TerminalStatusSet({"aggregation-processed"})
+    )
     async with app_client(app) as client:
-        finisher = RelaynaRabbitClient(topology=topology, connection_name="relayna-real-queue-args-aggregation-finisher")
+        finisher = RelaynaRabbitClient(
+            topology=topology, connection_name="relayna-real-queue-args-aggregation-finisher"
+        )
         await finisher.initialize()
         try:
             await finisher.publish_status(

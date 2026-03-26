@@ -303,6 +303,7 @@ class TaskConsumer:
         retry_policy: RetryPolicy | None = None,
         retry_statuses: RetryStatusConfig | None = None,
         idle_retry_seconds: float = 2.0,
+        consume_timeout_seconds: float | None = 1.0,
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
         alias_config: ContractAliasConfig | None = None,
@@ -317,6 +318,7 @@ class TaskConsumer:
         self._retry_policy = retry_policy
         self._retry_statuses = retry_statuses or RetryStatusConfig()
         self._idle_retry_seconds = idle_retry_seconds
+        self._consume_timeout_seconds = consume_timeout_seconds
         self._observation_sink = observation_sink
         self._dlq_store = dlq_store
         self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
@@ -356,7 +358,10 @@ class TaskConsumer:
                     durable=True,
                     arguments=self._rabbitmq.topology.task_queue_arguments() or None,
                 )
-                async with queue.iterator(arguments=self._consume_arguments or None, timeout=1.0) as iterator:
+                async with queue.iterator(
+                    arguments=self._consume_arguments or None,
+                    timeout=self._consume_timeout_seconds,
+                ) as iterator:
                     async for message in iterator:
                         await self._handle_message(
                             message,
@@ -641,7 +646,9 @@ class TaskConsumer:
                 ),
             )
             if self._retry_policy is None:
-                failed_message = _failure_message(exc, include_error_message=self._lifecycle_statuses.include_error_message)
+                failed_message = _failure_message(
+                    exc, include_error_message=self._lifecycle_statuses.include_error_message
+                )
                 await self._publish_lifecycle_status(
                     context,
                     status=self._lifecycle_statuses.failed_status,
@@ -885,6 +892,8 @@ def _message_headers(message: Any) -> dict[str, Any]:
 
 def _retry_attempt(message: Any) -> int:
     value = _message_headers(message).get("x-relayna-retry-attempt")
+    if value is None:
+        return 0
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
@@ -929,6 +938,8 @@ def _string_or_none(value: Any) -> str | None:
 
 def _header_int(headers: Mapping[str, Any], key: str) -> int | None:
     value = headers.get(key)
+    if value is None:
+        return None
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -1129,6 +1140,7 @@ class AggregationConsumer:
         retry_policy: RetryPolicy | None = None,
         retry_statuses: RetryStatusConfig | None = None,
         idle_retry_seconds: float = 2.0,
+        consume_timeout_seconds: float | None = 1.0,
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
         alias_config: ContractAliasConfig | None = None,
@@ -1143,6 +1155,7 @@ class AggregationConsumer:
         self._retry_policy = retry_policy
         self._retry_statuses = retry_statuses or RetryStatusConfig()
         self._idle_retry_seconds = idle_retry_seconds
+        self._consume_timeout_seconds = consume_timeout_seconds
         self._observation_sink = observation_sink
         self._dlq_store = dlq_store
         self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
@@ -1176,7 +1189,10 @@ class AggregationConsumer:
                     durable=True,
                     arguments=self._rabbitmq.topology.aggregation_queue_arguments() or None,
                 )
-                async with queue.iterator(arguments=self._consume_arguments or None, timeout=1.0) as iterator:
+                async with queue.iterator(
+                    arguments=self._consume_arguments or None,
+                    timeout=self._consume_timeout_seconds,
+                ) as iterator:
                     async for message in iterator:
                         payload: Any = None
                         try:
@@ -1463,13 +1479,19 @@ class AggregationWorkerRuntime:
         consume_arguments: dict[str, Any] | None = None,
         retry_policy: RetryPolicy | None = None,
         retry_statuses: RetryStatusConfig | None = None,
+        consume_timeout_seconds: float | None = 1.0,
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
     ) -> None:
         if rabbitmq is None and topology is None:
             raise ValueError("Pass rabbitmq=... or topology=... to AggregationWorkerRuntime.")
         self._owns_rabbitmq = rabbitmq is None
-        self._rabbitmq = rabbitmq or RelaynaRabbitClient(topology=topology, connection_name=connection_name)
+        if rabbitmq is not None:
+            self._rabbitmq = rabbitmq
+        else:
+            if topology is None:
+                raise ValueError("Pass rabbitmq=... or topology=... to AggregationWorkerRuntime.")
+            self._rabbitmq = RelaynaRabbitClient(topology=topology, connection_name=connection_name)
         self._consumers = [
             AggregationConsumer(
                 rabbitmq=self._rabbitmq,
@@ -1480,6 +1502,7 @@ class AggregationWorkerRuntime:
                 consume_arguments=consume_arguments,
                 retry_policy=retry_policy,
                 retry_statuses=retry_statuses,
+                consume_timeout_seconds=consume_timeout_seconds,
                 observation_sink=observation_sink,
                 dlq_store=dlq_store,
             )

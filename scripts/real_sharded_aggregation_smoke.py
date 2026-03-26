@@ -16,7 +16,14 @@ try:
         unique_suffix,
     )
 except ModuleNotFoundError:
-    from real_stack_common import app_client, build_app, build_sharded_topology, parse_sse_events, poll_history, unique_suffix
+    from real_stack_common import (
+        app_client,
+        build_app,
+        build_sharded_topology,
+        parse_sse_events,
+        poll_history,
+        unique_suffix,
+    )
 
 
 async def publish_status(topology, event: StatusEventEnvelope, *, connection_name: str) -> None:
