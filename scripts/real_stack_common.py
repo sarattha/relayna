@@ -11,7 +11,14 @@ from fastapi import FastAPI
 from relayna.contracts import ContractAliasConfig, TerminalStatusSet
 from relayna.dlq import DLQService
 from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
-from relayna.topology import SharedTasksSharedStatusShardedAggregationTopology, SharedTasksSharedStatusTopology
+from relayna.topology import (
+    RelaynaTopology,
+    SharedStatusWorkflowTopology,
+    SharedTasksSharedStatusShardedAggregationTopology,
+    SharedTasksSharedStatusTopology,
+    WorkflowEntryRoute,
+    WorkflowStage,
+)
 
 
 def unique_suffix() -> str:
@@ -43,8 +50,46 @@ def build_sharded_topology(suffix: str, *, shard_count: int = 4) -> SharedTasksS
     )
 
 
+def build_workflow_topology(suffix: str) -> SharedStatusWorkflowTopology:
+    return SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange=f"relayna.workflow.exchange.{suffix}",
+        status_exchange=f"relayna.status.exchange.{suffix}",
+        status_queue=f"relayna.status.queue.{suffix}",
+        stages=(
+            WorkflowStage(
+                name="topic_planner",
+                queue=f"relayna.workflow.topic_planner.queue.{suffix}",
+                binding_keys=(f"planner.topic_planner.in.{suffix}",),
+                publish_routing_key=f"planner.topic_planner.in.{suffix}",
+            ),
+            WorkflowStage(
+                name="docsearch_planner",
+                queue=f"relayna.workflow.docsearch_planner.queue.{suffix}",
+                binding_keys=(
+                    f"planner.docsearch_planner.in.{suffix}",
+                    f"replanner.docsearch_planner.in.{suffix}",
+                ),
+                publish_routing_key=f"planner.docsearch_planner.in.{suffix}",
+            ),
+        ),
+        entry_routes=(
+            WorkflowEntryRoute(
+                name="planner_entry",
+                routing_key=f"planner.topic_planner.in.{suffix}",
+                target_stage="topic_planner",
+            ),
+            WorkflowEntryRoute(
+                name="replanner_entry",
+                routing_key=f"replanner.docsearch_planner.in.{suffix}",
+                target_stage="docsearch_planner",
+            ),
+        ),
+    )
+
+
 def build_app(
-    topology: SharedTasksSharedStatusTopology,
+    topology: RelaynaTopology,
     suffix: str,
     *,
     sse_terminal_statuses: TerminalStatusSet | None = None,
