@@ -23,6 +23,7 @@ If you have RabbitMQ on `localhost:5672` and Redis on `localhost:6379`, run:
 ```bash
 PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_workflow_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_alias_batch_task_smoke.py
 ```

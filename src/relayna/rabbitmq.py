@@ -22,6 +22,7 @@ from .contracts import (
     ContractAliasConfig,
     StatusEventEnvelope,
     TaskEnvelope,
+    WorkflowEnvelope,
     ensure_status_event_id,
     normalize_contract_aliases,
 )
@@ -30,6 +31,7 @@ from .topology import (
     RoutedTasksSharedStatusShardedAggregationTopology,
     RoutedTasksSharedStatusTopology,
     ShardRoutingStrategy,
+    SharedStatusWorkflowTopology,
     SharedTasksSharedStatusTopology,
     TaskIdRoutingStrategy,
     TaskTypeRoutingStrategy,
@@ -52,6 +54,7 @@ class RelaynaRabbitClient:
         self._connection: AbstractRobustConnection | None = None
         self._channel: AbstractRobustChannel | None = None
         self._tasks_exchange: AbstractRobustExchange | None = None
+        self._workflow_exchange: AbstractRobustExchange | None = None
         self._status_exchange: AbstractRobustExchange | None = None
         self._lock = asyncio.Lock()
         self._initialized = False
@@ -73,6 +76,9 @@ class RelaynaRabbitClient:
             self._channel = cast(AbstractRobustChannel, await self._connection.channel())
             await self._channel.set_qos(prefetch_count=self._topology.prefetch_count)
             self._tasks_exchange, self._status_exchange = await self._topology.declare_exchanges(self._channel)
+            self._workflow_exchange = (
+                self._tasks_exchange if self._topology.workflow_exchange_name() is not None else None
+            )
             await self._topology.declare_queues(
                 self._channel,
                 tasks_exchange=self._tasks_exchange,
@@ -91,6 +97,16 @@ class RelaynaRabbitClient:
         if self._channel is None or self._tasks_exchange is None:
             raise RuntimeError("RabbitMQ connection is not initialized")
         return await self._topology.ensure_tasks_queue(self._channel, tasks_exchange=self._tasks_exchange)
+
+    async def ensure_workflow_queue(self, stage: str) -> str:
+        await self._ensure_ready()
+        if self._channel is None or self._workflow_exchange is None:
+            raise RuntimeError("Workflow exchange is not initialized")
+        return await self._topology.ensure_workflow_queue(
+            self._channel,
+            workflow_exchange=self._workflow_exchange,
+            stage=stage,
+        )
 
     async def ensure_aggregation_queue(self, *, shards: Sequence[int], queue_name: str | None = None) -> str:
         await self._ensure_ready()
@@ -144,6 +160,8 @@ class RelaynaRabbitClient:
         *,
         headers: Mapping[str, Any] | None = None,
     ) -> None:
+        if isinstance(self._topology, SharedStatusWorkflowTopology):
+            raise RuntimeError("SharedStatusWorkflowTopology requires publish_to_stage(...) or publish_to_entry(...)")
         await self._ensure_ready()
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
@@ -197,6 +215,70 @@ class RelaynaRabbitClient:
         payload_meta["aggregation_role"] = "aggregation"
         payload["meta"] = payload_meta
         await self._publish_status_payload(payload, routing_key=self._topology.aggregation_status_routing_key(payload))
+
+    async def publish_workflow(
+        self,
+        payload: WorkflowEnvelope | Mapping[str, Any],
+        *,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
+        workflow_payload = self._prepare_workflow_payload(payload)
+        routing_key = self._topology.workflow_publish_routing_key(workflow_payload["stage"])
+        await self.publish_workflow_message(workflow_payload, routing_key=routing_key, headers=headers)
+
+    async def publish_to_stage(
+        self,
+        payload: WorkflowEnvelope | Mapping[str, Any],
+        *,
+        stage: str,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
+        workflow_payload = self._prepare_workflow_payload(payload, stage=stage)
+        routing_key = self._topology.workflow_publish_routing_key(stage)
+        await self.publish_workflow_message(workflow_payload, routing_key=routing_key, headers=headers)
+
+    async def publish_to_entry(
+        self,
+        payload: WorkflowEnvelope | Mapping[str, Any],
+        *,
+        route: str,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
+        if not isinstance(self._topology, SharedStatusWorkflowTopology):
+            raise RuntimeError("publish_to_entry(...) requires SharedStatusWorkflowTopology")
+        stage = self._topology.workflow_entry_target_stage(route)
+        workflow_payload = self._prepare_workflow_payload(payload, stage=stage)
+        routing_key = self._topology.workflow_entry_routing_key(route)
+        await self.publish_workflow_message(workflow_payload, routing_key=routing_key, headers=headers)
+
+    async def publish_workflow_message(
+        self,
+        payload: WorkflowEnvelope | Mapping[str, Any],
+        *,
+        routing_key: str,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
+        await self._ensure_ready()
+        if self._workflow_exchange is None:
+            raise RuntimeError("Workflow exchange is not initialized")
+        workflow_payload = self._prepare_workflow_payload(payload)
+        message_headers = {
+            "task_id": str(workflow_payload.get("task_id", "")),
+            "message_id": str(workflow_payload.get("message_id", "")),
+            "stage": str(workflow_payload.get("stage", "")),
+        }
+        origin_stage = workflow_payload.get("origin_stage")
+        if origin_stage:
+            message_headers["origin_stage"] = str(origin_stage)
+        message_headers.update(dict(headers or {}))
+        message = Message(
+            _to_json_bytes(workflow_payload),
+            content_type="application/json",
+            delivery_mode=DeliveryMode.PERSISTENT,
+            correlation_id=str(workflow_payload.get("correlation_id") or workflow_payload.get("task_id", "")) or None,
+            headers=cast(Any, message_headers),
+        )
+        await self._workflow_exchange.publish(message, routing_key=routing_key)
 
     async def publish_raw_to_queue(
         self,
@@ -264,6 +346,7 @@ class RelaynaRabbitClient:
             self._connection = None
             self._channel = None
             self._tasks_exchange = None
+            self._workflow_exchange = None
             self._status_exchange = None
 
     async def _ensure_ready(self) -> None:
@@ -298,6 +381,23 @@ class RelaynaRabbitClient:
         normalized = normalize_contract_aliases(_to_dict(task), self._alias_config, drop_aliases=True)
         envelope = TaskEnvelope.model_validate(normalized)
         return envelope.model_dump(mode="json", exclude_none=True)
+
+    def _prepare_workflow_payload(
+        self,
+        payload: WorkflowEnvelope | Mapping[str, Any],
+        *,
+        stage: str | None = None,
+    ) -> dict[str, Any]:
+        if isinstance(payload, WorkflowEnvelope):
+            workflow_dict = payload.as_transport_dict()
+        elif isinstance(payload, BaseModel):
+            workflow_dict = _to_dict(payload)
+        else:
+            workflow_dict = normalize_contract_aliases(_to_dict(payload), self._alias_config, drop_aliases=True)
+        if stage is not None:
+            workflow_dict["stage"] = stage
+        envelope = WorkflowEnvelope.model_validate(workflow_dict)
+        return envelope.as_transport_dict()
 
     async def _publish_status_payload(self, payload: dict[str, Any], *, routing_key: str) -> None:
         await self._ensure_ready()
@@ -426,6 +526,7 @@ __all__ = [
     "RoutedTasksSharedStatusShardedAggregationTopology",
     "RoutedTasksSharedStatusTopology",
     "ShardRoutingStrategy",
+    "SharedStatusWorkflowTopology",
     "TaskTypeRoutingStrategy",
     "TaskIdRoutingStrategy",
     "declare_stream_queue",

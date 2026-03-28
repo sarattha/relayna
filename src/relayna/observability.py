@@ -150,6 +150,75 @@ class TaskConsumerLoopError:
 
 
 @dataclass(slots=True)
+class WorkflowStageStarted:
+    consumer_name: str
+    stage: str
+    queue_name: str
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["workflow"] = field(init=False, default="workflow")
+
+
+@dataclass(slots=True)
+class WorkflowMessageReceived:
+    consumer_name: str
+    queue_name: str
+    stage: str
+    routing_key: str | None
+    task_id: str | None
+    message_id: str | None
+    origin_stage: str | None
+    correlation_id: str | None
+    delivery_tag: int | None
+    redelivered: bool
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["workflow"] = field(init=False, default="workflow")
+
+
+@dataclass(slots=True)
+class WorkflowMessagePublished:
+    consumer_name: str
+    queue_name: str | None
+    stage: str
+    routing_key: str
+    task_id: str
+    message_id: str
+    origin_stage: str | None
+    correlation_id: str | None
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["workflow"] = field(init=False, default="workflow")
+
+
+@dataclass(slots=True)
+class WorkflowStageAcked:
+    consumer_name: str
+    queue_name: str
+    stage: str
+    routing_key: str | None
+    task_id: str | None
+    message_id: str | None
+    origin_stage: str | None
+    correlation_id: str | None
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["workflow"] = field(init=False, default="workflow")
+
+
+@dataclass(slots=True)
+class WorkflowStageFailed:
+    consumer_name: str
+    queue_name: str | None
+    stage: str
+    routing_key: str | None
+    task_id: str | None
+    message_id: str | None
+    origin_stage: str | None
+    correlation_id: str | None
+    exception_type: str
+    requeue: bool
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["workflow"] = field(init=False, default="workflow")
+
+
+@dataclass(slots=True)
 class ConsumerRetryScheduled:
     consumer_name: str
     task_id: str | None

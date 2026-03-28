@@ -42,6 +42,8 @@ API.
   status stays on one shared queue/stream.
 - `RoutedTasksSharedStatusShardedAggregationTopology`: routed task queues plus
   shard-bound aggregation worker queues on the shared status exchange.
+- `SharedStatusWorkflowTopology`: one workflow topic exchange, one durable inbox
+  queue per consuming stage, and one shared status queue/stream.
 
 ## Topology naming guidance
 
@@ -747,6 +749,373 @@ Important limitation:
 - the DLQ router uses Redis for message detail and RabbitMQ only for live queue
   counts and replay transport
 
+## Example: multi-stage workflow + shared status
+
+Use `SharedStatusWorkflowTopology` when work should move through multiple named
+stages such as planner, re-planner, search, writer, and file-creation steps.
+
+This topology is stage-inbox based:
+
+- one workflow topic exchange carries stage-to-stage work
+- each consuming stage owns one durable inbox queue
+- producers publish to a stage routing key or named entry route
+- status events still publish on the shared status exchange so `StatusHub`,
+  `StreamHistoryReader`, and SSE stay unchanged
+
+This is the recommended first-class model because the durable queue belongs to
+the stage that consumes it. Retry, DLQ, lag, and autoscaling therefore stay
+attached to the worker that owns the work rather than to an upstream producer.
+
+### Routing convention
+
+The examples below use these conventions:
+
+- planner-stage routing keys: `planner.<stage>.in`
+- replanner entry routes: `replanner.<stage>.in`
+- writer-stage routing keys: `writer.<stage>.in`
+- one stage may bind multiple routing keys when both planner and replanner
+  traffic should land in the same inbox queue
+
+### Planner Flow
+
+```mermaid
+flowchart LR
+    API["API"] -->|publish planner.topic_planner.in| EX["workflow exchange"]
+    EX --> TPQ["topic_planner inbox queue"]
+    TPQ --> TP["Topic Planner Agent"]
+
+    TP -->|publish planner.docsearch_planner.in| EX
+    EX --> DSPQ["docsearch_planner inbox queue"]
+    DSPQ --> DSP["Docsearch Planner Agent"]
+
+    DSP -->|publish planner.planner_assembler.in| EX
+    EX --> PAQ["planner_assembler inbox queue"]
+    PAQ --> PA["Planner Assembler"]
+
+    PA -->|publish planner.document_date_finder.in| EX
+    EX --> DDFQ["document_date_finder inbox queue"]
+    DDFQ --> DDF["Document Date Finder Agent"]
+
+    TP -. publish status .-> SX["status exchange"]
+    DSP -. publish status .-> SX
+    PA -. publish status .-> SX
+    DDF -. publish status .-> SX
+```
+
+### Re-planner Flow
+
+The re-planner path reuses the same consuming planner stages. The only thing
+that changes is the entry route and, where needed, extra binding keys on the
+shared planner inbox queue.
+
+```mermaid
+flowchart LR
+    API["API"] -->|publish replanner.docsearch_planner.in| EX["workflow exchange"]
+    API -->|publish replanner.planner_assembler.in| EX
+
+    EX --> DSPQ["docsearch_planner inbox queue"]
+    DSPQ --> DSP["Docsearch Planner Agent"]
+
+    EX --> PAQ["planner_assembler inbox queue"]
+    PAQ --> PA["Planner Assembler"]
+
+    DSP -->|publish planner.planner_assembler.in| EX
+
+    DSP -. publish status .-> SX["status exchange"]
+    PA -. publish status .-> SX
+```
+
+### Writer Flow
+
+```mermaid
+flowchart LR
+    API["API"] -->|publish writer.docsearcher.in| EX["workflow exchange"]
+    API -->|publish writer.websearcher.in| EX
+
+    EX --> DSQ["docsearcher inbox queue"]
+    DSQ --> DS["DocSearcher Agent"]
+
+    EX --> WSQ["websearcher inbox queue"]
+    WSQ --> WS["WebSearcher Agent"]
+
+    DS -->|publish writer.researcher_aggregator.in| EX
+    WS -->|publish writer.researcher_aggregator.in| EX
+
+    EX --> RAQ["researcher_aggregator inbox queue"]
+    RAQ --> RA["Researcher Aggregator"]
+
+    RA -->|publish writer.writer.in| EX
+    EX --> WQ["writer inbox queue"]
+    WQ --> W["Writer Agent"]
+
+    W -->|publish writer.writer_aggregator.in| EX
+    EX --> WAQ["writer_aggregator inbox queue"]
+    WAQ --> WA["Writer Aggregator"]
+
+    WA -->|publish writer.file_creator.in| EX
+    EX --> FCQ["file_creator inbox queue"]
+    FCQ --> FC["File Creator Agent"]
+
+    FC -->|publish writer.writer_assembler.in| EX
+    EX --> WASQ["writer_assembler inbox queue"]
+    WASQ --> WAS["Writer Assembler"]
+```
+
+### Constructing the topology
+
+```python
+from relayna.topology import SharedStatusWorkflowTopology, WorkflowEntryRoute, WorkflowStage
+
+topology = SharedStatusWorkflowTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    workflow_exchange="ca.workflow.exchange",
+    status_exchange="ca.status.exchange",
+    status_queue="ca.status.queue",
+    workflow_consumer_timeout_ms=120000,
+    workflow_queue_type="quorum",
+    stages=(
+        WorkflowStage(
+            name="topic_planner",
+            queue="cq.topic_planner.in_queue",
+            binding_keys=("planner.topic_planner.in",),
+            publish_routing_key="planner.topic_planner.in",
+        ),
+        WorkflowStage(
+            name="docsearch_planner",
+            queue="cq.docsearch_planner.in_queue",
+            binding_keys=(
+                "planner.docsearch_planner.in",
+                "replanner.docsearch_planner.in",
+            ),
+            publish_routing_key="planner.docsearch_planner.in",
+        ),
+        WorkflowStage(
+            name="planner_assembler",
+            queue="cq.planner_assembler.in_queue",
+            binding_keys=(
+                "planner.planner_assembler.in",
+                "replanner.planner_assembler.in",
+            ),
+            publish_routing_key="planner.planner_assembler.in",
+        ),
+        WorkflowStage(
+            name="document_date_finder",
+            queue="cq.document_date_finder.in_queue",
+            binding_keys=("planner.document_date_finder.in",),
+            publish_routing_key="planner.document_date_finder.in",
+        ),
+        WorkflowStage(
+            name="docsearcher",
+            queue="cq.docsearcher.in_queue",
+            binding_keys=("writer.docsearcher.in",),
+            publish_routing_key="writer.docsearcher.in",
+        ),
+        WorkflowStage(
+            name="websearcher",
+            queue="cq.websearcher.in_queue",
+            binding_keys=("writer.websearcher.in",),
+            publish_routing_key="writer.websearcher.in",
+        ),
+        WorkflowStage(
+            name="researcher_aggregator",
+            queue="cq.researcher_aggregator.in_queue",
+            binding_keys=("writer.researcher_aggregator.in",),
+            publish_routing_key="writer.researcher_aggregator.in",
+        ),
+        WorkflowStage(
+            name="writer",
+            queue="cq.writer.in_queue",
+            binding_keys=("writer.writer.in",),
+            publish_routing_key="writer.writer.in",
+        ),
+        WorkflowStage(
+            name="writer_aggregator",
+            queue="cq.writer_aggregator.in_queue",
+            binding_keys=("writer.writer_aggregator.in",),
+            publish_routing_key="writer.writer_aggregator.in",
+        ),
+        WorkflowStage(
+            name="file_creator",
+            queue="cq.file_creator.in_queue",
+            binding_keys=("writer.file_creator.in",),
+            publish_routing_key="writer.file_creator.in",
+        ),
+        WorkflowStage(
+            name="writer_assembler",
+            queue="cq.writer_assembler.in_queue",
+            binding_keys=("writer.writer_assembler.in",),
+            publish_routing_key="writer.writer_assembler.in",
+        ),
+    ),
+    entry_routes=(
+        WorkflowEntryRoute(
+            name="planner_entry",
+            routing_key="planner.topic_planner.in",
+            target_stage="topic_planner",
+        ),
+        WorkflowEntryRoute(
+            name="replanner_docsearch_entry",
+            routing_key="replanner.docsearch_planner.in",
+            target_stage="docsearch_planner",
+        ),
+        WorkflowEntryRoute(
+            name="replanner_assembler_entry",
+            routing_key="replanner.planner_assembler.in",
+            target_stage="planner_assembler",
+        ),
+        WorkflowEntryRoute(
+            name="writer_docsearch_entry",
+            routing_key="writer.docsearcher.in",
+            target_stage="docsearcher",
+        ),
+        WorkflowEntryRoute(
+            name="writer_websearch_entry",
+            routing_key="writer.websearcher.in",
+            target_stage="websearcher",
+        ),
+    ),
+)
+```
+
+### Publishing to a normal entry route
+
+Use `publish_to_entry(...)` when a producer wants the topology to own the
+workflow routing decision for a named ingress route.
+
+```python
+from relayna.contracts import WorkflowEnvelope
+from relayna.rabbitmq import RelaynaRabbitClient
+
+client = RelaynaRabbitClient(topology=topology, connection_name="planner-api")
+await client.initialize()
+
+await client.publish_to_entry(
+    WorkflowEnvelope(
+        task_id="task-001",
+        stage="topic_planner",
+        action="build-plan",
+        payload={"query": "new compliance workflow"},
+        meta={"source": "api"},
+    ),
+    route="planner_entry",
+)
+```
+
+### Publishing to a re-planner entry route
+
+Use a different named entry route when re-planner traffic should enter further
+down the same planner pipeline.
+
+```python
+await client.publish_to_entry(
+    WorkflowEnvelope(
+        task_id="task-001",
+        stage="docsearch_planner",
+        action="replan-docsearch",
+        payload={"new_documents": ["doc-100", "doc-200"]},
+        meta={"reason": "documents_changed"},
+    ),
+    route="replanner_docsearch_entry",
+)
+
+await client.publish_to_entry(
+    WorkflowEnvelope(
+        task_id="task-002",
+        stage="planner_assembler",
+        action="replan-assemble",
+        payload={"existing_documents": ["doc-001", "doc-002"]},
+        meta={"reason": "old_documents_only"},
+    ),
+    route="replanner_assembler_entry",
+)
+```
+
+### Planner-stage worker with `WorkflowConsumer`
+
+```python
+from relayna.consumer import RetryPolicy, RetryStatusConfig, WorkflowConsumer, WorkflowContext
+from relayna.contracts import WorkflowEnvelope
+
+
+async def handle_docsearch_planner(message: WorkflowEnvelope, context: WorkflowContext) -> None:
+    await context.publish_status(status="processing", message="Docsearch planner started.")
+
+    docs = [
+        {"doc_id": "doc-123", "title": "Policy Handbook"},
+        {"doc_id": "doc-456", "title": "Retention Matrix"},
+    ]
+
+    await context.publish_to_stage(
+        "planner_assembler",
+        payload={"documents": docs, "source_action": message.action},
+        action="assemble-plan",
+        meta={"planner_stage": context.stage},
+    )
+
+
+consumer = WorkflowConsumer(
+    rabbitmq=client,
+    stage="docsearch_planner",
+    handler=handle_docsearch_planner,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=15000),
+    retry_statuses=RetryStatusConfig(enabled=True),
+    consume_timeout_seconds=1.0,
+)
+await consumer.run_forever()
+```
+
+### Publishing directly to a stage
+
+Use `publish_to_stage(...)` when the caller already knows the destination stage
+and does not need a named entry-route abstraction.
+
+```python
+await client.publish_to_stage(
+    WorkflowEnvelope(
+        task_id="task-010",
+        stage="writer",
+        action="draft",
+        payload={"outline": ["intro", "body", "summary"]},
+        meta={"source_stage": "researcher_aggregator"},
+    ),
+    stage="writer",
+)
+```
+
+### Writer fan-in example
+
+Multiple upstream stages can target the same inbox queue. That is the normal
+way to model fan-in under the stage-inbox topology.
+
+```python
+from relayna.consumer import WorkflowContext
+from relayna.contracts import WorkflowEnvelope
+
+
+async def handle_docsearcher(message: WorkflowEnvelope, context: WorkflowContext) -> None:
+    await context.publish_status(status="searching", message="Docsearch results ready.")
+    await context.publish_to_stage(
+        "researcher_aggregator",
+        payload={"source": "docsearcher", "documents": [{"doc_id": "doc-100"}]},
+        action="aggregate-research",
+    )
+
+
+async def handle_websearcher(message: WorkflowEnvelope, context: WorkflowContext) -> None:
+    await context.publish_status(status="searching", message="Websearch results ready.")
+    await context.publish_to_stage(
+        "researcher_aggregator",
+        payload={"source": "websearcher", "documents": [{"doc_id": "web-200"}]},
+        action="aggregate-research",
+    )
+```
+
+In this model:
+
+- both upstream workers publish to `writer.researcher_aggregator.in`
+- `researcher_aggregator` owns the only durable inbox queue for that stage
+- retries and backlog are measured on that consumer-owned inbox queue
+
 ## Example: shared tasks + shared status + sharded aggregation
 
 Use this topology when normal task workers stay on one shared task queue, but
@@ -1174,6 +1543,7 @@ scripts exercise both topology families against the real stack:
 ```bash
 PYTHONPATH=src ./.venv/bin/python scripts/real_fastapi_status_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_task_worker_smoke.py
+PYTHONPATH=src ./.venv/bin/python scripts/real_workflow_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_queue_args_smoke.py
 ```

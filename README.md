@@ -8,6 +8,7 @@ It provides:
 - RabbitMQ task publishing and shared status fanout
 - Broker-delayed retry and dead-letter utilities for worker consumers
 - Named RabbitMQ topology classes for default and sharded aggregation flows
+- First-class stage-inbox workflow topology for multi-stage agent pipelines
 - Redis-backed status history and pubsub
 - Redis-backed DLQ indexing and replay helpers
 - Server-Sent Events replay plus live updates
@@ -204,7 +205,7 @@ When workers also receive `dlq_store=...`, this adds:
 
 ## Topologies
 
-`relayna` currently ships four first-class topology classes:
+`relayna` currently ships five first-class topology classes:
 
 - `SharedTasksSharedStatusTopology`
   One shared task queue and one shared status queue/stream.
@@ -216,10 +217,21 @@ When workers also receive `dlq_store=...`, this adds:
 - `RoutedTasksSharedStatusShardedAggregationTopology`
   Routed task worker queues plus the shared status plane and shard-owned
   aggregation worker queues.
+- `SharedStatusWorkflowTopology`
+  One workflow topic exchange, one durable inbox queue per consuming stage, and
+  one shared status queue/stream.
 
 Aggregation messages published through the sharded aggregation topology stay on
 the shared status exchange, so `StatusHub`, `StreamHistoryReader`, and SSE
 consumers still observe them.
+
+`SharedStatusWorkflowTopology` keeps workflow traffic and user-visible status
+traffic on separate lanes:
+
+- workflow messages move stage-to-stage over the workflow topic exchange
+- each consuming stage owns one durable inbox queue
+- status events still publish on the shared status exchange so existing
+  `StatusHub`, history, and SSE behavior stays unchanged
 
 When multiple sharded deployments share the same RabbitMQ vhost, namespace the
 aggregation queues with `aggregation_queue_template` and

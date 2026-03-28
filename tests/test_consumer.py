@@ -16,8 +16,10 @@ from relayna.consumer import (
     RetryStatusConfig,
     TaskConsumer,
     TaskContext,
+    WorkflowConsumer,
+    WorkflowContext,
 )
-from relayna.contracts import StatusEventEnvelope
+from relayna.contracts import StatusEventEnvelope, WorkflowEnvelope
 from relayna.dlq import DLQRecord
 from relayna.observability import (
     ConsumerDeadLetterPublished,
@@ -29,12 +31,19 @@ from relayna.observability import (
     TaskMessageAcked,
     TaskMessageReceived,
     TaskMessageRejected,
+    WorkflowMessagePublished,
+    WorkflowMessageReceived,
+    WorkflowStageAcked,
+    WorkflowStageStarted,
 )
 from relayna.rabbitmq import RetryInfrastructure
 from relayna.topology import (
     RoutedTasksSharedStatusTopology,
+    SharedStatusWorkflowTopology,
     SharedTasksSharedStatusShardedAggregationTopology,
     SharedTasksSharedStatusTopology,
+    WorkflowEntryRoute,
+    WorkflowStage,
 )
 
 
@@ -138,9 +147,19 @@ class FakeRabbitClient:
         self.retry_infrastructure_calls: list[dict[str, Any]] = []
         self.raw_queue_publishes: list[dict[str, Any]] = []
         self.published_tasks: list[dict[str, Any]] = []
+        self.workflow_queue_calls: list[str] = []
+        self.published_workflows: list[dict[str, Any]] = []
+        self.published_entries: list[dict[str, Any]] = []
+        self.published_stage_messages: list[dict[str, Any]] = []
 
     async def ensure_tasks_queue(self) -> str:
         self.ensure_tasks_queue_calls += 1
+        return self.queue_name
+
+    async def ensure_workflow_queue(self, stage: str) -> str:
+        self.workflow_queue_calls.append(stage)
+        if isinstance(self.topology, SharedStatusWorkflowTopology):
+            return self.topology.workflow_queue_name(stage)
         return self.queue_name
 
     async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
@@ -184,6 +203,57 @@ class FakeRabbitClient:
         headers: dict[str, Any] | None = None,
     ) -> None:
         self.published_tasks.append({"task": dict(task), "headers": dict(headers or {})})
+
+    async def publish_workflow(
+        self,
+        payload: WorkflowEnvelope | dict[str, Any],
+        *,
+        headers: dict[str, Any] | None = None,
+    ) -> None:
+        if isinstance(payload, WorkflowEnvelope):
+            body = payload.as_transport_dict()
+        else:
+            body = dict(payload)
+        self.published_workflows.append({"payload": body, "headers": dict(headers or {})})
+
+    async def publish_to_stage(
+        self,
+        payload: WorkflowEnvelope | dict[str, Any],
+        *,
+        stage: str,
+        headers: dict[str, Any] | None = None,
+    ) -> None:
+        if isinstance(payload, WorkflowEnvelope):
+            body = payload.as_transport_dict()
+        else:
+            body = dict(payload)
+        self.published_stage_messages.append({"payload": body, "stage": stage, "headers": dict(headers or {})})
+
+    async def publish_to_entry(
+        self,
+        payload: WorkflowEnvelope | dict[str, Any],
+        *,
+        route: str,
+        headers: dict[str, Any] | None = None,
+    ) -> None:
+        if isinstance(payload, WorkflowEnvelope):
+            body = payload.as_transport_dict()
+        else:
+            body = dict(payload)
+        self.published_entries.append({"payload": body, "route": route, "headers": dict(headers or {})})
+
+    async def publish_workflow_message(
+        self,
+        payload: WorkflowEnvelope | dict[str, Any],
+        *,
+        routing_key: str,
+        headers: dict[str, Any] | None = None,
+    ) -> None:
+        if isinstance(payload, WorkflowEnvelope):
+            body = payload.as_transport_dict()
+        else:
+            body = dict(payload)
+        self.published_workflows.append({"payload": body, "routing_key": routing_key, "headers": dict(headers or {})})
 
     async def ensure_aggregation_queue(self, *, shards: list[int], queue_name: str | None = None) -> str:
         self.aggregation_queue_calls.append({"shards": list(shards), "queue_name": queue_name})
@@ -252,7 +322,40 @@ def make_topology() -> SharedTasksSharedStatusTopology:
     )
 
 
-async def run_consumer_until_message_done(consumer: TaskConsumer | AggregationConsumer, message: FakeMessage) -> None:
+def make_workflow_topology() -> SharedStatusWorkflowTopology:
+    return SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="topic_planner",
+                queue="cq.topic_planner.in_queue",
+                binding_keys=("planner.topic_planner.in",),
+                publish_routing_key="planner.topic_planner.in",
+            ),
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in", "replanner.docsearch_planner.in"),
+                publish_routing_key="planner.docsearch_planner.in",
+            ),
+        ),
+        entry_routes=(
+            WorkflowEntryRoute(
+                name="planner",
+                routing_key="planner.topic_planner.in",
+                target_stage="topic_planner",
+            ),
+        ),
+    )
+
+
+async def run_consumer_until_message_done(
+    consumer: TaskConsumer | AggregationConsumer | WorkflowConsumer,
+    message: FakeMessage,
+) -> None:
     previous_on_done = message._on_done
     message._on_done = consumer.stop
     try:
@@ -318,6 +421,67 @@ async def test_task_context_publish_aggregation_status_uses_parent_metadata() ->
 
     assert rabbit.published_statuses[0]["status"] == "aggregating"
     assert rabbit.published_statuses[0]["meta"]["parent_task_id"] == "parent-1"
+
+
+@pytest.mark.asyncio
+async def test_workflow_context_publish_to_stage_preserves_task_identity_and_emits_observation() -> None:
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[])
+    observations: list[object] = []
+
+    async def sink(event: object) -> None:
+        observations.append(event)
+
+    context = WorkflowContext(
+        rabbitmq=rabbit,
+        consumer_name="workflow-a",
+        stage="topic_planner",
+        raw_payload={"task_id": "task-123", "message_id": "msg-1"},
+        correlation_id="corr-123",
+        delivery_tag=7,
+        redelivered=False,
+        _task_id="task-123",
+        _message_id="msg-1",
+        source_queue_name="cq.topic_planner.in_queue",
+        observation_sink=sink,
+    )
+
+    await context.publish_to_stage("docsearch_planner", {"docs": ["a"]}, action="collect")
+
+    assert rabbit.published_stage_messages[0]["stage"] == "docsearch_planner"
+    payload = rabbit.published_stage_messages[0]["payload"]
+    assert payload["task_id"] == "task-123"
+    assert payload["correlation_id"] == "corr-123"
+    assert payload["origin_stage"] == "topic_planner"
+    assert payload["stage"] == "docsearch_planner"
+    assert payload["action"] == "collect"
+    assert isinstance(observations[0], WorkflowMessagePublished)
+
+
+@pytest.mark.asyncio
+async def test_workflow_context_publish_workflow_message_resolves_stage_from_routing_key() -> None:
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[])
+    context = WorkflowContext(
+        rabbitmq=rabbit,
+        consumer_name="workflow-a",
+        stage="topic_planner",
+        raw_payload={"task_id": "task-123", "message_id": "msg-1"},
+        correlation_id="corr-123",
+        delivery_tag=7,
+        redelivered=False,
+        _task_id="task-123",
+        _message_id="msg-1",
+    )
+
+    await context.publish_workflow_message(
+        "planner.docsearch_planner.in",
+        {"docs": ["a"]},
+        action="collect",
+    )
+
+    payload = rabbit.published_workflows[0]["payload"]
+    assert rabbit.published_workflows[0]["routing_key"] == "planner.docsearch_planner.in"
+    assert payload["stage"] == "docsearch_planner"
+    assert payload["origin_stage"] == "topic_planner"
 
 
 @pytest.mark.asyncio
@@ -1692,3 +1856,83 @@ async def test_aggregation_worker_runtime_requires_topology_or_rabbitmq() -> Non
 
     with pytest.raises(ValueError, match="rabbitmq=.*topology"):
         AggregationWorkerRuntime(handler=handler, shard_groups=[[0]])
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_consumes_stage_queue_and_emits_workflow_observations() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[channel])
+    observations: list[object] = []
+
+    async def sink(event: object) -> None:
+        observations.append(event)
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        assert workflow.stage == "docsearch_planner"
+        assert context.stage == "docsearch_planner"
+        await context.publish_status(status="processing", message="Started.")
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        observation_sink=sink,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.workflow_queue_calls == ["docsearch_planner"]
+    assert channel.declare_queue_calls[0]["name"] == "cq.docsearch_planner.in_queue"
+    assert isinstance(observations[0], WorkflowStageStarted)
+    assert any(isinstance(event, WorkflowMessageReceived) for event in observations)
+    assert any(isinstance(event, WorkflowStageAcked) for event in observations)
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[channel])
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        raise RuntimeError("workflow failed")
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
+        retry_statuses=RetryStatusConfig(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "cq.docsearch_planner.in_queue.retry"
+    assert rabbit.published_statuses[0]["status"] == "retrying"

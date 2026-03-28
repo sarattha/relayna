@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from relayna.contracts import ContractAliasConfig
+from relayna.contracts import ContractAliasConfig, WorkflowEnvelope
 from relayna.rabbitmq import (
     RelaynaRabbitClient,
     RetryInfrastructure,
@@ -14,8 +14,11 @@ from relayna.rabbitmq import (
 from relayna.topology import (
     RoutedTasksSharedStatusShardedAggregationTopology,
     RoutedTasksSharedStatusTopology,
+    SharedStatusWorkflowTopology,
     SharedTasksSharedStatusShardedAggregationTopology,
     SharedTasksSharedStatusTopology,
+    WorkflowEntryRoute,
+    WorkflowStage,
 )
 
 
@@ -830,3 +833,180 @@ async def test_sharded_topology_client_initialize_works_on_python_313_slots_data
     assert channel.prefetch_calls == [1]
     assert connection.channel_calls == 1
     assert [name for name, _durable, _arguments in channel.declare_queue_calls] == ["status.queue", "tasks.queue"]
+
+
+def make_workflow_topology() -> SharedStatusWorkflowTopology:
+    return SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="topic_planner",
+                queue="cq.topic_planner.in_queue",
+                binding_keys=("planner.topic_planner.in",),
+                publish_routing_key="planner.topic_planner.in",
+            ),
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in", "replanner.docsearch_planner.in"),
+                publish_routing_key="planner.docsearch_planner.in",
+            ),
+        ),
+        entry_routes=(
+            WorkflowEntryRoute(
+                name="planner",
+                routing_key="planner.topic_planner.in",
+                target_stage="topic_planner",
+            ),
+            WorkflowEntryRoute(
+                name="replanner",
+                routing_key="replanner.docsearch_planner.in",
+                target_stage="docsearch_planner",
+            ),
+        ),
+    )
+
+
+def test_workflow_topology_validates_duplicate_stage_names() -> None:
+    with pytest.raises(ValueError, match="Duplicate workflow stage name"):
+        SharedStatusWorkflowTopology(
+            rabbitmq_url="amqp://guest:guest@localhost:5672/",
+            workflow_exchange="workflow.exchange",
+            status_exchange="status.exchange",
+            status_queue="status.queue",
+            stages=(
+                WorkflowStage(
+                    name="planner",
+                    queue="planner.1",
+                    binding_keys=("planner.in",),
+                    publish_routing_key="planner.in",
+                ),
+                WorkflowStage(
+                    name="planner",
+                    queue="planner.2",
+                    binding_keys=("planner.2.in",),
+                    publish_routing_key="planner.2.in",
+                ),
+            ),
+        )
+
+
+def test_workflow_topology_validates_unknown_entry_stage() -> None:
+    with pytest.raises(ValueError, match="unknown target stage"):
+        SharedStatusWorkflowTopology(
+            rabbitmq_url="amqp://guest:guest@localhost:5672/",
+            workflow_exchange="workflow.exchange",
+            status_exchange="status.exchange",
+            status_queue="status.queue",
+            stages=(
+                WorkflowStage(
+                    name="planner",
+                    queue="planner.1",
+                    binding_keys=("planner.in",),
+                    publish_routing_key="planner.in",
+                ),
+            ),
+            entry_routes=(WorkflowEntryRoute(name="replanner", routing_key="replanner.in", target_stage="missing"),),
+        )
+
+
+def test_workflow_queue_arguments_merge_global_and_stage_fields() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        workflow_consumer_timeout_ms=600000,
+        workflow_single_active_consumer=True,
+        workflow_queue_type="quorum",
+        workflow_queue_arguments_overrides={"x-queue-mode": "lazy"},
+        workflow_queue_kwargs={"x-overflow": "reject-publish"},
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                queue_arguments_overrides={"x-max-length": 100},
+                queue_kwargs={"x-delivery-limit": 20},
+            ),
+        ),
+    )
+
+    assert topology.workflow_queue_arguments("planner") == {
+        "x-consumer-timeout": 600000,
+        "x-single-active-consumer": True,
+        "x-queue-type": "quorum",
+        "x-queue-mode": "lazy",
+        "x-max-length": 100,
+        "x-overflow": "reject-publish",
+        "x-delivery-limit": 20,
+    }
+
+
+@pytest.mark.asyncio
+async def test_workflow_topology_declares_and_binds_stage_queue() -> None:
+    topology = make_workflow_topology()
+    queue = FakeBindingQueue("cq.docsearch_planner.in_queue")
+    channel = FakeTaskChannel(queue)
+    exchange = object()
+
+    queue_name = await topology.ensure_workflow_queue(channel, workflow_exchange=exchange, stage="docsearch_planner")
+
+    assert queue_name == "cq.docsearch_planner.in_queue"
+    assert channel.declare_queue_calls == [("cq.docsearch_planner.in_queue", True, None)]
+    assert queue.bind_calls == [
+        (exchange, "planner.docsearch_planner.in"),
+        (exchange, "replanner.docsearch_planner.in"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_publish_to_stage_uses_workflow_routing_key() -> None:
+    topology = make_workflow_topology()
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = exchange
+
+    await client.publish_to_stage(
+        {"task_id": "task-123", "stage": "ignored", "payload": {"step": 1}},
+        stage="docsearch_planner",
+    )
+
+    assert exchange.publish_calls
+    _message, routing_key = exchange.publish_calls[0]
+    assert routing_key == "planner.docsearch_planner.in"
+
+
+@pytest.mark.asyncio
+async def test_publish_to_entry_uses_named_entry_route() -> None:
+    topology = make_workflow_topology()
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = exchange
+
+    await client.publish_to_entry(
+        WorkflowEnvelope(task_id="task-123", stage="topic_planner", payload={"step": 1}),
+        route="replanner",
+    )
+
+    assert exchange.publish_calls
+    message, routing_key = exchange.publish_calls[0]
+    assert routing_key == "replanner.docsearch_planner.in"
+    body = json.loads(message.body.decode("utf-8"))
+    assert body["stage"] == "docsearch_planner"
+
+
+@pytest.mark.asyncio
+async def test_publish_task_raises_for_workflow_topology() -> None:
+    client = RelaynaRabbitClient(topology=make_workflow_topology())
+
+    with pytest.raises(RuntimeError, match="publish_to_stage"):
+        await client.publish_task({"task_id": "task-123", "payload": {}})

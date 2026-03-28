@@ -2,6 +2,7 @@ from relayna.contracts import (
     ContractAliasConfig,
     StatusEventEnvelope,
     TerminalStatusSet,
+    WorkflowEnvelope,
     denormalize_document_aliases,
     ensure_status_event_id,
     normalize_contract_aliases,
@@ -62,3 +63,15 @@ def test_status_event_transport_dict_adds_correlation_id_and_event_id() -> None:
     assert transport["correlation_id"] == "task-123"
     assert isinstance(transport["event_id"], str)
     assert len(transport["event_id"]) == 64
+
+
+def test_workflow_envelope_defaults_message_id_and_correlation_id() -> None:
+    event = WorkflowEnvelope(task_id="task-123", stage="planner")
+
+    transport = event.as_transport_dict()
+
+    assert transport["task_id"] == "task-123"
+    assert transport["stage"] == "planner"
+    assert transport["correlation_id"] == "task-123"
+    assert isinstance(transport["message_id"], str)
+    assert transport["message_id"]

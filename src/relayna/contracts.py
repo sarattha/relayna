@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -56,6 +57,27 @@ class StatusEventEnvelope(BaseModel):
         data = self.model_dump(mode="json", exclude_none=True)
         data.setdefault("correlation_id", self.correlation_id or self.task_id)
         return ensure_status_event_id(data)
+
+
+class WorkflowEnvelope(BaseModel):
+    """Canonical stage-to-stage workflow message shape for transport."""
+
+    model_config = ConfigDict(extra="allow")
+
+    task_id: str
+    message_id: str = Field(default_factory=lambda: uuid4().hex)
+    correlation_id: str | None = None
+    stage: str
+    origin_stage: str | None = None
+    action: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)
+    spec_version: str = "1.0"
+
+    def as_transport_dict(self) -> dict[str, Any]:
+        data = self.model_dump(mode="json", exclude_none=True)
+        data.setdefault("correlation_id", self.correlation_id or self.task_id)
+        return data
 
 
 @dataclass(slots=True, frozen=True)

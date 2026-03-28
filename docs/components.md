@@ -13,6 +13,9 @@ RabbitMQ topology definitions and routing strategies:
 - `SharedTasksSharedStatusShardedAggregationTopology`
 - `RoutedTasksSharedStatusTopology`
 - `RoutedTasksSharedStatusShardedAggregationTopology`
+- `SharedStatusWorkflowTopology`
+- `WorkflowStage`
+- `WorkflowEntryRoute`
 - `TaskIdRoutingStrategy`
 - `ShardRoutingStrategy`
 - `TaskTypeRoutingStrategy`
@@ -37,6 +40,7 @@ Canonical message envelopes and compatibility helpers:
 
 - `TaskEnvelope`
 - `StatusEventEnvelope`
+- `WorkflowEnvelope`
 - `TerminalStatusSet`
 - `normalize_event_aliases`
 - `denormalize_document_aliases`
@@ -51,20 +55,23 @@ RabbitMQ publishing and topology helpers:
 - `declare_stream_queue`
 
 Use this module when you want topology-driven exchange and queue declaration
-plus JSON task, status, and aggregation-status publishing. It also provides
-raw queue publishing and retry/DLQ queue declaration helpers for worker paths.
-Relayna retry metadata is carried in RabbitMQ `x-relayna-*` headers rather than
-rewriting the payload body.
+plus JSON task, workflow, status, and aggregation-status publishing. It also
+provides raw queue publishing and retry/DLQ queue declaration helpers for
+worker paths. Relayna retry metadata is carried in RabbitMQ `x-relayna-*`
+headers rather than rewriting the payload body.
 
 ## `relayna.consumer`
 
 Worker-side helpers:
 
 - `TaskConsumer`
+- `WorkflowConsumer`
 - `AggregationConsumer`
 - `AggregationWorkerRuntime`
 - `TaskContext`
+- `WorkflowContext`
 - `TaskHandler`
+- `WorkflowHandler`
 - `AggregationHandler`
 - `FailureAction`
 - `LifecycleStatusConfig`
@@ -74,10 +81,10 @@ Worker-side helpers:
 This module provides validated task delivery, shard-aware aggregation
 consumption, optional lifecycle status publishing, broker-delayed retry and
 dead-letter behavior, manual handoff retry through `TaskContext.manual_retry`,
-and a helper runtime for aggregation workers outside FastAPI. `TaskConsumer`,
-`AggregationConsumer`, and `AggregationWorkerRuntime` also expose
-`consume_timeout_seconds` to control how long the local runtime waits for the
-next message before looping again.
+stage-aware workflow delivery, and a helper runtime for aggregation workers
+outside FastAPI. `TaskConsumer`, `WorkflowConsumer`, `AggregationConsumer`, and
+`AggregationWorkerRuntime` also expose `consume_timeout_seconds` to control how
+long the local runtime waits for the next message before looping again.
 
 ## `relayna.status_store`
 
