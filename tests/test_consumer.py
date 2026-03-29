@@ -604,6 +604,58 @@ async def test_workflow_context_publish_workflow_message_prefers_exact_publish_k
 
 
 @pytest.mark.asyncio
+async def test_workflow_context_publish_workflow_message_prefers_entry_route_over_wildcard_binding() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="catch_all_planner",
+                queue="cq.catch_all_planner.in_queue",
+                binding_keys=("planner.#",),
+                publish_routing_key="planner.catch_all_planner.in",
+            ),
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch.in",),
+                publish_routing_key="planner.docsearch.in",
+            ),
+        ),
+        entry_routes=(
+            WorkflowEntryRoute(
+                name="custom_docsearch",
+                routing_key="planner.custom.in",
+                target_stage="docsearch_planner",
+            ),
+        ),
+    )
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[])
+    context = WorkflowContext(
+        rabbitmq=rabbit,
+        consumer_name="workflow-a",
+        stage="catch_all_planner",
+        raw_payload={"task_id": "task-123", "message_id": "msg-1"},
+        correlation_id="corr-123",
+        delivery_tag=7,
+        redelivered=False,
+        _task_id="task-123",
+        _message_id="msg-1",
+    )
+
+    await context.publish_workflow_message(
+        "planner.custom.in",
+        {"docs": ["a"]},
+        action="collect",
+    )
+
+    payload = rabbit.published_workflows[0]["payload"]
+    assert payload["stage"] == "docsearch_planner"
+
+
+@pytest.mark.asyncio
 async def test_task_context_manual_retry_requires_task_envelope_context() -> None:
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
     context = TaskContext(
