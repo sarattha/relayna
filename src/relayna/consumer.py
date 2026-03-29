@@ -5,6 +5,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -1416,13 +1417,40 @@ def _resolve_workflow_stage_for_routing_key(topology: RelaynaTopology, routing_k
     for stage in topology.workflow_stage_names():
         if topology.workflow_publish_routing_key(stage) == routing_key:
             return stage
+    for stage in topology.workflow_stage_names():
         if routing_key in topology.workflow_binding_keys(stage):
+            return stage
+    for stage in topology.workflow_stage_names():
+        if any(_topic_binding_matches(binding_key, routing_key) for binding_key in topology.workflow_binding_keys(stage)):
             return stage
     if isinstance(topology, SharedStatusWorkflowTopology):
         for route in topology.entry_routes:
             if route.routing_key == routing_key:
                 return route.target_stage
     raise KeyError(f"No workflow stage publishes with routing key '{routing_key}'")
+
+
+def _topic_binding_matches(binding_key: str, routing_key: str) -> bool:
+    binding_parts = tuple(binding_key.split("."))
+    routing_parts = tuple(routing_key.split("."))
+
+    @lru_cache(maxsize=None)
+    def _matches(binding_index: int, routing_index: int) -> bool:
+        if binding_index == len(binding_parts):
+            return routing_index == len(routing_parts)
+
+        token = binding_parts[binding_index]
+        if token == "#":
+            return _matches(binding_index + 1, routing_index) or (
+                routing_index < len(routing_parts) and _matches(binding_index, routing_index + 1)
+            )
+        if routing_index == len(routing_parts):
+            return False
+        if token == "*" or token == routing_parts[routing_index]:
+            return _matches(binding_index + 1, routing_index + 1)
+        return False
+
+    return _matches(0, 0)
 
 
 def _coerce_task_id(payload: Any) -> str | None:

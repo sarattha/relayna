@@ -512,6 +512,98 @@ async def test_workflow_context_publish_workflow_message_accepts_alternate_stage
 
 
 @pytest.mark.asyncio
+async def test_workflow_context_publish_workflow_message_accepts_wildcard_stage_binding_key() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="topic_planner",
+                queue="cq.topic_planner.in_queue",
+                binding_keys=("planner.topic_planner.in",),
+                publish_routing_key="planner.topic_planner.in",
+            ),
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.*.in",),
+                publish_routing_key="planner.docsearch_planner.out",
+            ),
+        ),
+    )
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[])
+    context = WorkflowContext(
+        rabbitmq=rabbit,
+        consumer_name="workflow-a",
+        stage="topic_planner",
+        raw_payload={"task_id": "task-123", "message_id": "msg-1"},
+        correlation_id="corr-123",
+        delivery_tag=7,
+        redelivered=False,
+        _task_id="task-123",
+        _message_id="msg-1",
+    )
+
+    await context.publish_workflow_message(
+        "planner.docsearch.in",
+        {"docs": ["a"]},
+        action="collect",
+    )
+
+    payload = rabbit.published_workflows[0]["payload"]
+    assert rabbit.published_workflows[0]["routing_key"] == "planner.docsearch.in"
+    assert payload["stage"] == "docsearch_planner"
+    assert payload["origin_stage"] == "topic_planner"
+
+
+@pytest.mark.asyncio
+async def test_workflow_context_publish_workflow_message_prefers_exact_publish_key_over_wildcard_binding() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="catch_all_planner",
+                queue="cq.catch_all_planner.in_queue",
+                binding_keys=("planner.*.in",),
+                publish_routing_key="planner.catch_all_planner.in",
+            ),
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch.in",),
+                publish_routing_key="planner.docsearch.in",
+            ),
+        ),
+    )
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[])
+    context = WorkflowContext(
+        rabbitmq=rabbit,
+        consumer_name="workflow-a",
+        stage="catch_all_planner",
+        raw_payload={"task_id": "task-123", "message_id": "msg-1"},
+        correlation_id="corr-123",
+        delivery_tag=7,
+        redelivered=False,
+        _task_id="task-123",
+        _message_id="msg-1",
+    )
+
+    await context.publish_workflow_message(
+        "planner.docsearch.in",
+        {"docs": ["a"]},
+        action="collect",
+    )
+
+    payload = rabbit.published_workflows[0]["payload"]
+    assert payload["stage"] == "docsearch_planner"
+
+
+@pytest.mark.asyncio
 async def test_task_context_manual_retry_requires_task_envelope_context() -> None:
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
     context = TaskContext(
