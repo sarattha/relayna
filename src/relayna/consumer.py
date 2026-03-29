@@ -1416,6 +1416,12 @@ def _resolve_workflow_stage_for_routing_key(topology: RelaynaTopology, routing_k
     for stage in topology.workflow_stage_names():
         if topology.workflow_publish_routing_key(stage) == routing_key:
             return stage
+        if routing_key in topology.workflow_binding_keys(stage):
+            return stage
+    if isinstance(topology, SharedStatusWorkflowTopology):
+        for route in topology.entry_routes:
+            if route.routing_key == routing_key:
+                return route.target_stage
     raise KeyError(f"No workflow stage publishes with routing key '{routing_key}'")
 
 
