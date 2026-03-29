@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3.1 - 2026-03-29
+
+### Fixed
+
+- `WorkflowContext.publish_workflow_message(...)` now resolves workflow stages from AMQP topic wildcard bindings such as `planner.*.in` and `planner.#`, matching real RabbitMQ routing behavior instead of requiring exact binding-key equality.
+
+### Changed
+
+- Bumped the package version to `1.3.1`.
+- Re-ran the real-stack smoke coverage against local RabbitMQ and Redis for FastAPI status, task worker, workflow, sharded aggregation, queue arguments, aliased batch tasks, manual retry routing, and DLQ replay flows.
+
 ## 1.3.0 - 2026-03-29
 
 ### Added
