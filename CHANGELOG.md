@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3.0 - 2026-03-29
+
+### Added
+
+- First-class stage-inbox workflow topology support via `SharedStatusWorkflowTopology`, `WorkflowStage`, and `WorkflowEntryRoute`.
+- Canonical stage-to-stage workflow transport via `WorkflowEnvelope`.
+- Stage-aware RabbitMQ publishing helpers: `publish_workflow(...)`, `publish_to_stage(...)`, `publish_to_entry(...)`, `publish_workflow_message(...)`, and `ensure_workflow_queue(...)`.
+- `WorkflowConsumer` and `WorkflowContext` for consuming named workflow stages and publishing downstream workflow hops while preserving shared status behavior.
+- Workflow-specific observability events for stage startup, message receipt, downstream publish, ack, and failure.
+- Real-stack workflow smoke coverage against local RabbitMQ and Redis.
+
+### Changed
+
+- Documentation now presents stage-inbox workflows as a first-class topology, including planner, re-planner, and writer flow diagrams plus end-to-end usage examples.
+- MkDocs now loads Mermaid so workflow diagrams render in the generated docs.
+- Bumped the package version to `1.3.0`.
+
+### Fixed
+
+- `WorkflowContext.publish_workflow_message(...)` now resolves destination stages from any valid stage binding key, including alternate entry keys such as re-planner routes, instead of only the canonical publish key.
+
 ## 1.2.4 - 2026-03-26
 
 ### Changed
