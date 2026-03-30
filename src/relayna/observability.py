@@ -243,6 +243,19 @@ class ConsumerDeadLetterPublished:
 
 
 @dataclass(slots=True)
+class ConsumerDLQRecordPersistFailed:
+    consumer_name: str
+    task_id: str | None
+    queue_name: str
+    retry_attempt: int
+    max_retries: int
+    reason: str
+    exception_type: str
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["consumer"] = field(init=False, default="consumer")
+
+
+@dataclass(slots=True)
 class StatusHubStarted:
     queue_name: str
     timestamp: datetime = field(default_factory=_utcnow)

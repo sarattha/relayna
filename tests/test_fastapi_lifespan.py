@@ -778,6 +778,7 @@ def test_dlq_router_lists_details_and_replays_messages(topology: SharedTasksShar
         body=b'{"task_id":"task-123","payload":{"kind":"demo"}}',
     )
     runtime.rabbitmq.queue_counts["tasks.queue.dlq"] = 1
+    runtime.rabbitmq.queue_counts["aggregation.queue.0.dlq"] = 4
 
     async def preload() -> None:
         await runtime.dlq_store.add(record)
@@ -790,7 +791,8 @@ def test_dlq_router_lists_details_and_replays_messages(topology: SharedTasksShar
                 rabbitmq=runtime.rabbitmq,
                 dlq_store=runtime.dlq_store,
                 status_store=runtime.store,
-            )
+            ),
+            broker_dlq_queue_names=["aggregation.queue.0.dlq", "tasks.queue.dlq", "missing.queue.dlq"],
         )
     )
 
@@ -806,6 +808,27 @@ def test_dlq_router_lists_details_and_replays_messages(topology: SharedTasksShar
                     "exists": True,
                     "message_count": 1,
                 }
+            ]
+        }
+
+        broker_queues_response = client.get("/broker/dlq/queues")
+        assert broker_queues_response.status_code == 200
+        assert broker_queues_response.json() == {
+            "queues": [
+                {
+                    "queue_name": "aggregation.queue.0.dlq",
+                    "indexed_count": 0,
+                    "last_indexed_at": None,
+                    "exists": True,
+                    "message_count": 4,
+                },
+                {
+                    "queue_name": "tasks.queue.dlq",
+                    "indexed_count": 1,
+                    "last_indexed_at": record.dead_lettered_at.isoformat().replace("+00:00", "Z"),
+                    "exists": True,
+                    "message_count": 1,
+                },
             ]
         }
 
@@ -859,3 +882,52 @@ def test_dlq_router_returns_404_for_unknown_message(topology: SharedTasksSharedS
         replay_response = client.post("/dlq/messages/missing/replay")
         assert replay_response.status_code == 404
         assert replay_response.json() == {"detail": "No DLQ message found for dlq_id 'missing'."}
+
+
+def test_dlq_router_does_not_discover_broker_only_queues_via_indexed_endpoints(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            dlq_store_prefix="relayna-dlq",
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    assert runtime.dlq_store is not None
+    runtime.rabbitmq.queue_counts["broker.only.dlq"] = 2
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+            ),
+            broker_dlq_queue_names=["broker.only.dlq"],
+        )
+    )
+
+    with TestClient(app) as client:
+        queues_response = client.get("/dlq/queues")
+        assert queues_response.status_code == 200
+        assert queues_response.json() == {"queues": []}
+
+        messages_response = client.get("/dlq/messages")
+        assert messages_response.status_code == 200
+        assert messages_response.json() == {"items": [], "next_cursor": None}
+
+        broker_queues_response = client.get("/broker/dlq/queues")
+        assert broker_queues_response.status_code == 200
+        assert broker_queues_response.json() == {
+            "queues": [
+                {
+                    "queue_name": "broker.only.dlq",
+                    "indexed_count": 0,
+                    "last_indexed_at": None,
+                    "exists": True,
+                    "message_count": 2,
+                }
+            ]
+        }

@@ -23,6 +23,7 @@ from relayna.contracts import StatusEventEnvelope, WorkflowEnvelope
 from relayna.dlq import DLQRecord
 from relayna.observability import (
     ConsumerDeadLetterPublished,
+    ConsumerDLQRecordPersistFailed,
     ConsumerRetryScheduled,
     TaskConsumerLoopError,
     TaskConsumerStarted,
@@ -304,10 +305,13 @@ class FakeRabbitClient:
 
 
 class FakeDLQStore:
-    def __init__(self) -> None:
+    def __init__(self, *, fail: bool = False) -> None:
         self.records: list[DLQRecord] = []
+        self.fail = fail
 
     async def add(self, record: DLQRecord) -> None:
+        if self.fail:
+            raise RuntimeError("dlq store unavailable")
         self.records.append(record)
 
 
@@ -1400,6 +1404,46 @@ async def test_task_consumer_indexes_dead_lettered_messages() -> None:
     assert record.body == {"task_id": "task-123", "payload": {"kind": "demo"}}
     assert record.body_encoding == "json"
     assert record.headers["x-relayna-source-queue"] == "tasks.queue"
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_emits_observation_when_dlq_index_write_fails() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "payload": {"kind": "demo"}}).encode("utf-8"),
+        correlation_id="corr-123",
+        headers={"x-relayna-retry-attempt": 3},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    dlq_store = FakeDLQStore(fail=True)
+    observed: list[object] = []
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
+        dlq_store=dlq_store,
+        observation_sink=sink,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.dlq"
+    persist_failed = next(event for event in observed if isinstance(event, ConsumerDLQRecordPersistFailed))
+    assert persist_failed.consumer_name == "relayna-task-consumer"
+    assert persist_failed.task_id == "task-123"
+    assert persist_failed.queue_name == "tasks.queue.dlq"
+    assert persist_failed.retry_attempt == 3
+    assert persist_failed.max_retries == 3
+    assert persist_failed.reason == "handler_error"
+    assert persist_failed.exception_type == "RuntimeError"
 
 
 @pytest.mark.asyncio

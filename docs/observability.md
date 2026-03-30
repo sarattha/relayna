@@ -155,12 +155,14 @@ Use these when you want to understand:
 - `TaskConsumerLoopError`
 - `ConsumerRetryScheduled`
 - `ConsumerDeadLetterPublished`
+- `ConsumerDLQRecordPersistFailed`
 
 `AggregationConsumer` and `AggregationWorkerRuntime` currently share the retry
 and dead-letter observation events:
 
 - `ConsumerRetryScheduled`
 - `ConsumerDeadLetterPublished`
+- `ConsumerDLQRecordPersistFailed`
 
 Use these when you want to monitor:
 
@@ -169,6 +171,7 @@ Use these when you want to monitor:
 - handler exceptions
 - lifecycle status automation
 - retry and DLQ volume
+- DLQ publish success paired with Redis index write failures
 
 ### Status hub events
 

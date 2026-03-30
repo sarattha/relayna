@@ -22,6 +22,7 @@ from .contracts import (
 from .dlq import DLQRecorder, build_dlq_record
 from .observability import (
     ConsumerDeadLetterPublished,
+    ConsumerDLQRecordPersistFailed,
     ConsumerRetryScheduled,
     ObservationSink,
     TaskConsumerLoopError,
@@ -992,6 +993,7 @@ class TaskConsumer:
         )
         await _persist_dlq_record(
             self._dlq_store,
+            consumer_name=self._consumer_name,
             queue_name=retry_infrastructure.dead_letter_queue_name,
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
@@ -1004,6 +1006,7 @@ class TaskConsumer:
             headers=headers,
             content_type=getattr(message, "content_type", "application/json"),
             body=body or message.body,
+            observation_sink=self._observation_sink,
         )
 
 
@@ -1385,6 +1388,7 @@ class WorkflowConsumer:
         )
         await _persist_dlq_record(
             self._dlq_store,
+            consumer_name=self._consumer_name,
             queue_name=retry_infrastructure.dead_letter_queue_name,
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
@@ -1397,6 +1401,7 @@ class WorkflowConsumer:
             headers=headers,
             content_type=getattr(message, "content_type", "application/json"),
             body=message.body,
+            observation_sink=self._observation_sink,
         )
 
     def _resolve_stage(self) -> str:
@@ -1664,6 +1669,7 @@ def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
 async def _persist_dlq_record(
     dlq_store: DLQRecorder | None,
     *,
+    consumer_name: str,
     queue_name: str,
     source_queue_name: str,
     retry_queue_name: str,
@@ -1676,6 +1682,7 @@ async def _persist_dlq_record(
     headers: Mapping[str, Any],
     content_type: str | None,
     body: bytes,
+    observation_sink: ObservationSink | None = None,
 ) -> None:
     if dlq_store is None:
         return
@@ -1698,7 +1705,19 @@ async def _persist_dlq_record(
         )
     except asyncio.CancelledError:
         raise
-    except Exception:
+    except Exception as exc:
+        await emit_observation(
+            observation_sink,
+            ConsumerDLQRecordPersistFailed(
+                consumer_name=consumer_name,
+                task_id=task_id,
+                queue_name=queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=max_retries,
+                reason=reason,
+                exception_type=type(exc).__name__,
+            ),
+        )
         return
 
 
@@ -2019,6 +2038,7 @@ class AggregationConsumer:
         )
         await _persist_dlq_record(
             self._dlq_store,
+            consumer_name=self._consumer_name,
             queue_name=retry_infrastructure.dead_letter_queue_name,
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
@@ -2038,6 +2058,7 @@ class AggregationConsumer:
             ),
             content_type=getattr(message, "content_type", "application/json"),
             body=message.body,
+            observation_sink=self._observation_sink,
         )
 
 
