@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.1/relayna-1.3.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.1/relayna-1.3.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2.tar.gz
 ```
 
 For local work in this repository:

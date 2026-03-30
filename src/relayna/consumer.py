@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+from functools import cache
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -1430,7 +1430,10 @@ def _resolve_workflow_stage_for_routing_key(topology: RelaynaTopology, routing_k
             if route.routing_key == routing_key:
                 return route.target_stage
     for stage in topology.workflow_stage_names():
-        if any(_topic_binding_matches(binding_key, routing_key) for binding_key in topology.workflow_binding_keys(stage)):
+        if any(
+            _topic_binding_matches(binding_key, routing_key)
+            for binding_key in topology.workflow_binding_keys(stage)
+        ):
             return stage
     raise KeyError(f"No workflow stage publishes with routing key '{routing_key}'")
 
@@ -1439,7 +1442,7 @@ def _topic_binding_matches(binding_key: str, routing_key: str) -> bool:
     binding_parts = tuple(binding_key.split("."))
     routing_parts = tuple(routing_key.split("."))
 
-    @lru_cache(maxsize=None)
+    @cache
     def _matches(binding_index: int, routing_index: int) -> bool:
         if binding_index == len(binding_parts):
             return routing_index == len(routing_parts)
