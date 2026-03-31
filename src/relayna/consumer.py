@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+from functools import cache
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -22,6 +22,7 @@ from .contracts import (
 from .dlq import DLQRecorder, build_dlq_record
 from .observability import (
     ConsumerDeadLetterPublished,
+    ConsumerDLQRecordPersistFailed,
     ConsumerRetryScheduled,
     ObservationSink,
     TaskConsumerLoopError,
@@ -992,6 +993,7 @@ class TaskConsumer:
         )
         await _persist_dlq_record(
             self._dlq_store,
+            consumer_name=self._consumer_name,
             queue_name=retry_infrastructure.dead_letter_queue_name,
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
@@ -1004,6 +1006,7 @@ class TaskConsumer:
             headers=headers,
             content_type=getattr(message, "content_type", "application/json"),
             body=body or message.body,
+            observation_sink=self._observation_sink,
         )
 
 
@@ -1385,6 +1388,7 @@ class WorkflowConsumer:
         )
         await _persist_dlq_record(
             self._dlq_store,
+            consumer_name=self._consumer_name,
             queue_name=retry_infrastructure.dead_letter_queue_name,
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
@@ -1397,6 +1401,7 @@ class WorkflowConsumer:
             headers=headers,
             content_type=getattr(message, "content_type", "application/json"),
             body=message.body,
+            observation_sink=self._observation_sink,
         )
 
     def _resolve_stage(self) -> str:
@@ -1425,7 +1430,10 @@ def _resolve_workflow_stage_for_routing_key(topology: RelaynaTopology, routing_k
             if route.routing_key == routing_key:
                 return route.target_stage
     for stage in topology.workflow_stage_names():
-        if any(_topic_binding_matches(binding_key, routing_key) for binding_key in topology.workflow_binding_keys(stage)):
+        if any(
+            _topic_binding_matches(binding_key, routing_key)
+            for binding_key in topology.workflow_binding_keys(stage)
+        ):
             return stage
     raise KeyError(f"No workflow stage publishes with routing key '{routing_key}'")
 
@@ -1434,7 +1442,7 @@ def _topic_binding_matches(binding_key: str, routing_key: str) -> bool:
     binding_parts = tuple(binding_key.split("."))
     routing_parts = tuple(routing_key.split("."))
 
-    @lru_cache(maxsize=None)
+    @cache
     def _matches(binding_index: int, routing_index: int) -> bool:
         if binding_index == len(binding_parts):
             return routing_index == len(routing_parts)
@@ -1664,6 +1672,7 @@ def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
 async def _persist_dlq_record(
     dlq_store: DLQRecorder | None,
     *,
+    consumer_name: str,
     queue_name: str,
     source_queue_name: str,
     retry_queue_name: str,
@@ -1676,6 +1685,7 @@ async def _persist_dlq_record(
     headers: Mapping[str, Any],
     content_type: str | None,
     body: bytes,
+    observation_sink: ObservationSink | None = None,
 ) -> None:
     if dlq_store is None:
         return
@@ -1698,7 +1708,19 @@ async def _persist_dlq_record(
         )
     except asyncio.CancelledError:
         raise
-    except Exception:
+    except Exception as exc:
+        await emit_observation(
+            observation_sink,
+            ConsumerDLQRecordPersistFailed(
+                consumer_name=consumer_name,
+                task_id=task_id,
+                queue_name=queue_name,
+                retry_attempt=retry_attempt,
+                max_retries=max_retries,
+                reason=reason,
+                exception_type=type(exc).__name__,
+            ),
+        )
         return
 
 
@@ -2019,6 +2041,7 @@ class AggregationConsumer:
         )
         await _persist_dlq_record(
             self._dlq_store,
+            consumer_name=self._consumer_name,
             queue_name=retry_infrastructure.dead_letter_queue_name,
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
@@ -2038,6 +2061,7 @@ class AggregationConsumer:
             ),
             content_type=getattr(message, "content_type", "application/json"),
             body=message.body,
+            observation_sink=self._observation_sink,
         )
 
 

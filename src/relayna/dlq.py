@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from collections.abc import Awaitable, Mapping
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -379,20 +379,23 @@ class DLQService:
     status_store: RedisStatusStore | None = None
 
     async def get_queue_summaries(self) -> list[DLQQueueSummary]:
-        queue_summaries = await self.dlq_store.summarize_queues()
-        items: list[DLQQueueSummary] = []
-        for queue_name, indexed_count, last_indexed_at in queue_summaries:
-            inspection = await self.inspect_queue(queue_name)
-            items.append(
-                DLQQueueSummary(
-                    queue_name=queue_name,
-                    indexed_count=indexed_count,
-                    last_indexed_at=last_indexed_at,
-                    exists=inspection.exists,
-                    message_count=inspection.message_count,
-                )
-            )
-        return items
+        return await self._build_queue_summaries(await self.dlq_store.summarize_queues())
+
+    async def get_broker_queue_summaries(self, candidate_queue_names: Sequence[str]) -> list[DLQQueueSummary]:
+        indexed = {
+            queue_name: (indexed_count, last_indexed_at)
+            for queue_name, indexed_count, last_indexed_at in await self.dlq_store.summarize_queues()
+        }
+        for queue_name in candidate_queue_names:
+            normalized = str(queue_name).strip()
+            if not normalized or normalized in indexed:
+                continue
+            indexed[normalized] = (0, None)
+        queue_summaries = [
+            (queue_name, indexed_count, last_indexed_at)
+            for queue_name, (indexed_count, last_indexed_at) in sorted(indexed.items())
+        ]
+        return await self._build_queue_summaries(queue_summaries, include_broker_only=True)
 
     async def inspect_queue(self, queue_name: str) -> QueueInspectionResult:
         inspection = await self.rabbitmq.inspect_queue(queue_name)
@@ -486,6 +489,30 @@ class DLQService:
             )
         finally:
             await self.dlq_store.release_replay_claim(dlq_id)
+
+    async def _build_queue_summaries(
+        self,
+        queue_summaries: Sequence[tuple[str, int, datetime | None]],
+        *,
+        include_broker_only: bool = False,
+    ) -> list[DLQQueueSummary]:
+        items: list[DLQQueueSummary] = []
+        for queue_name, indexed_count, last_indexed_at in queue_summaries:
+            inspection = await self.inspect_queue(queue_name)
+            if not include_broker_only and indexed_count <= 0:
+                continue
+            if include_broker_only and indexed_count <= 0 and not inspection.exists:
+                continue
+            items.append(
+                DLQQueueSummary(
+                    queue_name=queue_name,
+                    indexed_count=indexed_count,
+                    last_indexed_at=last_indexed_at,
+                    exists=inspection.exists,
+                    message_count=inspection.message_count,
+                )
+            )
+        return items
 
     def _summary(self, record: DLQRecord) -> DLQMessageSummary:
         return DLQMessageSummary(

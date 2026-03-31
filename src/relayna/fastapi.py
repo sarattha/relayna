@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -325,9 +325,11 @@ def create_dlq_router(
     *,
     dlq_service: DLQService,
     queues_path: str = "/dlq/queues",
+    broker_queues_path: str = "/broker/dlq/queues",
     messages_path: str = "/dlq/messages",
     message_path: str = "/dlq/messages/{dlq_id}",
     replay_path: str = "/dlq/messages/{dlq_id}/replay",
+    broker_dlq_queue_names: Sequence[str] | None = None,
     alias_config: ContractAliasConfig | None = None,
 ) -> APIRouter:
     router = APIRouter()
@@ -337,6 +339,13 @@ def create_dlq_router(
     async def queues() -> JSONResponse:
         items = await dlq_service.get_queue_summaries()
         return JSONResponse({"queues": [item.model_dump(mode="json") for item in items]})
+
+    if broker_dlq_queue_names is not None:
+
+        @router.get(broker_queues_path)
+        async def broker_queues() -> JSONResponse:
+            items = await dlq_service.get_broker_queue_summaries(broker_dlq_queue_names)
+            return JSONResponse({"queues": [item.model_dump(mode="json") for item in items]})
 
     @router.get(messages_path)
     async def messages(

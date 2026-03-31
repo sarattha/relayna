@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.1/relayna-1.3.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.1/relayna-1.3.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2.tar.gz
 ```
 
 For local work in this repository:
@@ -239,7 +239,8 @@ if runtime.dlq_store is not None:
                 rabbitmq=runtime.rabbitmq,
                 dlq_store=runtime.dlq_store,
                 status_store=runtime.store,
-            )
+            ),
+            broker_dlq_queue_names=["tasks.queue.dlq", "aggregation.queue.0.dlq"],
         )
     )
 ```
@@ -741,6 +742,7 @@ This exposes:
 - `GET /dlq/messages`
 - `GET /dlq/messages/{dlq_id}`
 - `POST /dlq/messages/{dlq_id}/replay`
+- `GET /broker/dlq/queues` when `broker_dlq_queue_names=...` is configured
 
 Important limitation:
 
@@ -748,6 +750,16 @@ Important limitation:
   classic queues do not support a read-only payload peek over AMQP
 - the DLQ router uses Redis for message detail and RabbitMQ only for live queue
   counts and replay transport
+
+`GET /dlq/queues` is intentionally index-backed. It means “queues known from
+indexed DLQ records plus live count lookup,” not “list all RabbitMQ DLQ
+queues.”
+
+If you want broader broker visibility, configure `broker_dlq_queue_names=...`
+and use `GET /broker/dlq/queues`. That endpoint inspects the configured
+candidate queue names together with queue names already present in the DLQ
+index. Broker-only queues appear with `indexed_count=0` and
+`last_indexed_at=null`.
 
 ## Example: multi-stage workflow + shared status
 

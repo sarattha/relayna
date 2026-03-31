@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3.2 - 2026-03-30
+
+### Added
+
+- Separate broker-visibility support for DLQ queue inspection via optional `create_dlq_router(..., broker_dlq_queue_names=...)` registration of `GET /broker/dlq/queues`.
+- `ConsumerDLQRecordPersistFailed` observability events so DLQ index-write failures can be surfaced without changing best-effort DLQ publishing behavior.
+
+### Changed
+
+- Documentation now states explicitly that `GET /dlq/queues` means “queues known from indexed DLQ records plus live count lookup,” not “list all RabbitMQ DLQ queues.”
+- Release-install examples now reference `1.3.2`.
+- Bumped the package version to `1.3.2`.
+
+### Fixed
+
+- DLQ record persistence no longer fails silently from an operator perspective; index-write exceptions now emit observability signals while preserving broker dead-letter delivery.
+- Added regression coverage for DLQ persist failures and for the distinction between index-backed `/dlq/queues` and broker-backed `/broker/dlq/queues`.
+
 ## 1.3.1 - 2026-03-29
 
 ### Fixed

@@ -29,13 +29,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.1/relayna-1.3.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.1/relayna-1.3.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2.tar.gz
 ```
 
 For local development in this repository:
@@ -191,7 +191,8 @@ if runtime.dlq_store is not None:
                 rabbitmq=runtime.rabbitmq,
                 dlq_store=runtime.dlq_store,
                 status_store=runtime.store,
-            )
+            ),
+            broker_dlq_queue_names=["tasks.queue.dlq", "aggregation.queue.0.dlq"],
         )
     )
 ```
@@ -202,6 +203,16 @@ When workers also receive `dlq_store=...`, this adds:
 - `GET /dlq/messages`
 - `GET /dlq/messages/{dlq_id}`
 - `POST /dlq/messages/{dlq_id}/replay`
+- `GET /broker/dlq/queues` when `broker_dlq_queue_names=...` is configured
+
+`GET /dlq/queues` reports queues known from indexed DLQ records and then augments
+those queue names with live RabbitMQ counts. It does not discover every DLQ
+queue that exists in RabbitMQ.
+
+If you need broader visibility, configure `broker_dlq_queue_names=...` and use
+`GET /broker/dlq/queues`. That endpoint inspects the configured candidate queue
+names plus any queue names already present in the DLQ index. Broker-only queues
+appear with `indexed_count=0` and `last_indexed_at=null`.
 
 ## Topologies
 
