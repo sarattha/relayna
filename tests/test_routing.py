@@ -362,6 +362,7 @@ async def test_publish_task_normalizes_custom_aliases() -> None:
     assert payload["task_id"] == "attempt-123"
     assert "attempt_id" not in payload
     assert message.headers["task_id"] == "attempt-123"
+    assert message.priority is None
 
 
 @pytest.mark.asyncio
@@ -390,6 +391,32 @@ async def test_publish_task_supports_extra_headers() -> None:
     assert message.correlation_id == "corr-123"
     assert message.headers["task_id"] == "task-123"
     assert message.headers["x-relayna-manual-retry-count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_task_sets_amqp_priority_from_task_priority() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = exchange
+
+    await client.publish_task({"task_id": "task-123", "payload": {"kind": "demo"}, "priority": 8})
+
+    message, routing_key = exchange.publish_calls[0]
+    payload = json.loads(message.body.decode("utf-8"))
+
+    assert routing_key == "task.request"
+    assert payload["priority"] == 8
+    assert message.priority == 8
 
 
 @pytest.mark.asyncio
@@ -430,7 +457,92 @@ async def test_publish_tasks_batch_envelope_uses_batch_id_headers_and_canonical_
     assert [task["task_id"] for task in payload["tasks"]] == ["attempt-1", "attempt-2"]
     assert all("attempt_id" not in task for task in payload["tasks"])
     assert message.correlation_id == "batch-123"
+    assert message.priority is None
     assert message.headers == {"batch_id": "batch-123", "batch_size": 2}
+
+
+@pytest.mark.asyncio
+async def test_publish_tasks_batch_envelope_sets_shared_priority() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = exchange
+
+    await client.publish_tasks(
+        [
+            {"task_id": "task-1", "payload": {"kind": "demo"}, "priority": 4},
+            {"task_id": "task-2", "payload": {"kind": "demo"}, "priority": 4},
+        ],
+        mode="batch_envelope",
+        batch_id="batch-123",
+    )
+
+    message, _routing_key = exchange.publish_calls[0]
+    payload = json.loads(message.body.decode("utf-8"))
+
+    assert message.priority == 4
+    assert [task["priority"] for task in payload["tasks"]] == [4, 4]
+
+
+@pytest.mark.asyncio
+async def test_publish_tasks_batch_envelope_rejects_mixed_priorities() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="share the same priority"):
+        await client.publish_tasks(
+            [
+                {"task_id": "task-1", "payload": {"kind": "demo"}, "priority": 1},
+                {"task_id": "task-2", "payload": {"kind": "demo"}, "priority": 2},
+            ],
+            mode="batch_envelope",
+            batch_id="batch-123",
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_tasks_batch_envelope_rejects_partial_priority_assignment() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="share the same priority"):
+        await client.publish_tasks(
+            [
+                {"task_id": "task-1", "payload": {"kind": "demo"}, "priority": 1},
+                {"task_id": "task-2", "payload": {"kind": "demo"}},
+            ],
+            mode="batch_envelope",
+            batch_id="batch-123",
+        )
 
 
 @pytest.mark.asyncio
@@ -1002,6 +1114,28 @@ async def test_publish_to_entry_uses_named_entry_route() -> None:
     assert routing_key == "replanner.docsearch_planner.in"
     body = json.loads(message.body.decode("utf-8"))
     assert body["stage"] == "docsearch_planner"
+
+
+@pytest.mark.asyncio
+async def test_publish_workflow_message_sets_amqp_priority_from_workflow_priority() -> None:
+    topology = make_workflow_topology()
+    exchange = FakeStatusExchange()
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = exchange
+
+    await client.publish_workflow_message(
+        WorkflowEnvelope(task_id="task-123", stage="topic_planner", payload={"step": 1}, priority=6),
+        routing_key="planner.topic_planner.in",
+    )
+
+    message, routing_key = exchange.publish_calls[0]
+    body = json.loads(message.body.decode("utf-8"))
+
+    assert routing_key == "planner.topic_planner.in"
+    assert body["priority"] == 6
+    assert message.priority == 6
 
 
 @pytest.mark.asyncio

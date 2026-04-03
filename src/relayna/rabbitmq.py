@@ -173,8 +173,10 @@ class RelaynaRabbitClient:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             correlation_id=str(task_dict.get("correlation_id") or task_dict.get("task_id", "")) or None,
+            priority=cast(int | None, task_dict.get("priority")),
             headers=cast(Any, message_headers),
         )
+        _clear_default_priority(message, priority=cast(int | None, task_dict.get("priority")))
         await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(task_dict))
 
     async def publish_tasks(
@@ -199,7 +201,10 @@ class RelaynaRabbitClient:
             tasks=[TaskEnvelope.model_validate(task) for task in prepared_tasks],
             meta=dict(meta or {}),
         )
-        await self._publish_batch_envelope(envelope.model_dump(mode="json", exclude_none=True))
+        await self._publish_batch_envelope(
+            envelope.model_dump(mode="json", exclude_none=True),
+            priority=self._resolve_batch_priority(prepared_tasks),
+        )
 
     async def publish_status(self, event: BaseModel | Mapping[str, Any]) -> None:
         payload = self._prepare_status_payload(event)
@@ -276,8 +281,10 @@ class RelaynaRabbitClient:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             correlation_id=str(workflow_payload.get("correlation_id") or workflow_payload.get("task_id", "")) or None,
+            priority=cast(int | None, workflow_payload.get("priority")),
             headers=cast(Any, message_headers),
         )
+        _clear_default_priority(message, priority=cast(int | None, workflow_payload.get("priority")))
         await self._workflow_exchange.publish(message, routing_key=routing_key)
 
     async def publish_raw_to_queue(
@@ -414,7 +421,7 @@ class RelaynaRabbitClient:
         )
         await self._status_exchange.publish(message, routing_key=routing_key)
 
-    async def _publish_batch_envelope(self, payload: dict[str, Any]) -> None:
+    async def _publish_batch_envelope(self, payload: dict[str, Any], *, priority: int | None) -> None:
         await self._ensure_ready()
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
@@ -426,9 +433,17 @@ class RelaynaRabbitClient:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             correlation_id=batch_id or None,
+            priority=priority,
             headers={"batch_id": batch_id, "batch_size": len(tasks) if isinstance(tasks, list) else 0},
         )
+        _clear_default_priority(message, priority=priority)
         await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(first_task))
+
+    def _resolve_batch_priority(self, tasks: Sequence[Mapping[str, Any]]) -> int | None:
+        priorities = {cast(int | None, task.get("priority")) for task in tasks}
+        if len(priorities) > 1:
+            raise ValueError("batch_envelope tasks must all share the same priority when priority is provided")
+        return next(iter(priorities), None)
 
 
 async def declare_stream_queue(
@@ -502,6 +517,11 @@ def _to_dict(payload: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
 
 def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _clear_default_priority(message: Message, *, priority: int | None) -> None:
+    if priority is None:
+        message.priority = None
 
 
 @dataclass(slots=True)

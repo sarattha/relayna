@@ -110,6 +110,7 @@ await client.publish_task(
         "request_id": "req-123",
         "source_service": "billing-api",
         "job_type": "invoice.render",
+        "priority": 8,
         "payload": {"kind": "demo"},
     }
 )
@@ -120,6 +121,7 @@ await client.publish_tasks(
             "request_id": "req-123",
             "source_service": "billing-api",
             "job_type": "invoice.render",
+            "priority": 5,
             "payload": {"kind": "demo"},
         },
         {
@@ -127,6 +129,7 @@ await client.publish_tasks(
             "request_id": "req-124",
             "source_service": "billing-api",
             "job_type": "invoice.render",
+            "priority": 5,
             "payload": {"kind": "demo"},
         },
     ],
@@ -155,6 +158,15 @@ Batch-envelope workers also receive batch context on `TaskContext`:
 - `context.batch_id`
 - `context.batch_index`
 - `context.batch_size`
+
+If you use top-level task `priority`, every task in a `mode="batch_envelope"`
+publish must use the same priority value or omit it entirely. Relayna rejects
+mixed-priority batch envelopes because RabbitMQ exposes only one AMQP priority
+per published message.
+
+RabbitMQ scheduling only uses that priority when the destination queue was
+declared with `x-max-priority`, which Relayna exposes through topology fields
+such as `task_max_priority` and `workflow_max_priority`.
 
 Failed items from a batch envelope are retried individually when the worker has
 `retry_policy=...`. Relayna does not execute the whole batch under one RabbitMQ

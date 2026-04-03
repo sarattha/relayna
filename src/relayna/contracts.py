@@ -22,6 +22,7 @@ class TaskEnvelope(BaseModel):
     service: str | None = None
     task_type: str | None = None
     correlation_id: str | None = None
+    priority: int | None = Field(default=None, ge=0, le=255)
     spec_version: str = "1.0"
 
 
@@ -72,6 +73,7 @@ class WorkflowEnvelope(BaseModel):
     action: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     meta: dict[str, Any] = Field(default_factory=dict)
+    priority: int | None = Field(default=None, ge=0, le=255)
     spec_version: str = "1.0"
 
     def as_transport_dict(self) -> dict[str, Any]:
