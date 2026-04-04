@@ -206,6 +206,7 @@ class TaskContext:
         payload_merge: Mapping[str, Any] | None = None,
         service: str | None = None,
         correlation_id: str | None = None,
+        priority: int | None = None,
         reason: str | None = None,
         message: str | None = None,
         meta: Mapping[str, Any] | None = None,
@@ -225,6 +226,8 @@ class TaskContext:
         next_task = dict(current)
         next_task["task_id"] = self._task_id
         next_task["correlation_id"] = correlation_id or self.correlation_id or current.get("correlation_id")
+        if priority is not None:
+            next_task["priority"] = priority
         if task_type is not None:
             resolved_task_type = str(task_type).strip()
             if not resolved_task_type:
@@ -246,6 +249,7 @@ class TaskContext:
                 "task_type",
                 "service",
                 "payload",
+                "priority",
                 "spec_version",
                 "created_at",
             }
@@ -363,6 +367,7 @@ class WorkflowContext:
         *,
         action: str | None = None,
         meta: Mapping[str, Any] | None = None,
+        priority: int | None = None,
     ) -> None:
         envelope = WorkflowEnvelope(
             task_id=self._task_id,
@@ -372,6 +377,7 @@ class WorkflowContext:
             action=action,
             payload=dict(payload),
             meta=dict(meta or {}),
+            priority=priority,
         )
         await self.rabbitmq.publish_to_stage(envelope, stage=stage)
         await emit_observation(
@@ -395,6 +401,7 @@ class WorkflowContext:
         *,
         action: str | None = None,
         meta: Mapping[str, Any] | None = None,
+        priority: int | None = None,
     ) -> None:
         destination_stage = _resolve_workflow_stage_for_routing_key(self.rabbitmq.topology, routing_key)
         envelope = WorkflowEnvelope(
@@ -405,6 +412,7 @@ class WorkflowContext:
             action=action,
             payload=dict(payload),
             meta=dict(meta or {}),
+            priority=priority,
         )
         await self.rabbitmq.publish_workflow_message(envelope, routing_key=routing_key)
         await emit_observation(
@@ -1431,8 +1439,7 @@ def _resolve_workflow_stage_for_routing_key(topology: RelaynaTopology, routing_k
                 return route.target_stage
     for stage in topology.workflow_stage_names():
         if any(
-            _topic_binding_matches(binding_key, routing_key)
-            for binding_key in topology.workflow_binding_keys(stage)
+            _topic_binding_matches(binding_key, routing_key) for binding_key in topology.workflow_binding_keys(stage)
         ):
             return stage
     raise KeyError(f"No workflow stage publishes with routing key '{routing_key}'")

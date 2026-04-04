@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.2/relayna-1.3.2.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3.tar.gz
 ```
 
 For local work in this repository:
@@ -67,6 +67,8 @@ arguments for worker-owned queues:
 - `aggregation_single_active_consumer`
 - `aggregation_max_priority`
 - `aggregation_queue_type`
+
+Priority queue max values must be between `1` and `255`.
 
 Status queues keep their existing dedicated stream and expiry settings, but all
 topologies also expose explicit mapping escape hatches for broker-specific queue
@@ -1006,6 +1008,7 @@ await client.publish_to_entry(
         task_id="task-001",
         stage="topic_planner",
         action="build-plan",
+        priority=7,
         payload={"query": "new compliance workflow"},
         meta={"source": "api"},
     ),
@@ -1024,6 +1027,7 @@ await client.publish_to_entry(
         task_id="task-001",
         stage="docsearch_planner",
         action="replan-docsearch",
+        priority=6,
         payload={"new_documents": ["doc-100", "doc-200"]},
         meta={"reason": "documents_changed"},
     ),
@@ -1035,6 +1039,7 @@ await client.publish_to_entry(
         task_id="task-002",
         stage="planner_assembler",
         action="replan-assemble",
+        priority=4,
         payload={"existing_documents": ["doc-001", "doc-002"]},
         meta={"reason": "old_documents_only"},
     ),
@@ -1062,6 +1067,7 @@ async def handle_docsearch_planner(message: WorkflowEnvelope, context: WorkflowC
         payload={"documents": docs, "source_action": message.action},
         action="assemble-plan",
         meta={"planner_stage": context.stage},
+        priority=5,
     )
 
 
@@ -1087,6 +1093,7 @@ await client.publish_to_stage(
         task_id="task-010",
         stage="writer",
         action="draft",
+        priority=8,
         payload={"outline": ["intro", "body", "summary"]},
         meta={"source_stage": "researcher_aggregator"},
     ),
@@ -1223,6 +1230,9 @@ That means:
 new task message, emits a `manual_retrying` status for the current `task_id`,
 and preserves manual-retry lineage metadata for the next worker.
 
+When top-level task `priority` is present, `manual_retry(...)` preserves it by
+default. Pass `priority=...` to override the republished task priority.
+
 #### Manual handoff retry example
 
 Use `manual_retry(...)` when the current worker decides the task should be
@@ -1240,6 +1250,7 @@ async def generate(task: TaskEnvelope, context: TaskContext) -> None:
     if score < 0.9:
         await context.manual_retry(
             task_type="draft.review",
+            priority=7,
             payload_merge={
                 "mode": "strict",
                 "review_required": True,
@@ -1251,6 +1262,18 @@ async def generate(task: TaskEnvelope, context: TaskContext) -> None:
 
     await context.publish_status(status="completed", message="Draft accepted.")
 ```
+
+If you publish tasks with `mode="batch_envelope"` and use top-level
+`priority`, every enclosed task must share the same priority value. Relayna
+rejects mixed-priority batch envelopes because RabbitMQ only accepts one AMQP
+message priority per published delivery.
+
+RabbitMQ only schedules by priority when the destination queue was declared
+with `x-max-priority`, using Relayna topology fields such as
+`task_max_priority` or `workflow_max_priority`.
+
+Relayna also fails client-side when a task or workflow publish requests a
+top-level `priority` above the configured queue max priority for that topology.
 
 Target worker:
 

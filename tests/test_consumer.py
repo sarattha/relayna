@@ -449,7 +449,7 @@ async def test_workflow_context_publish_to_stage_preserves_task_identity_and_emi
         observation_sink=sink,
     )
 
-    await context.publish_to_stage("docsearch_planner", {"docs": ["a"]}, action="collect")
+    await context.publish_to_stage("docsearch_planner", {"docs": ["a"]}, action="collect", priority=3)
 
     assert rabbit.published_stage_messages[0]["stage"] == "docsearch_planner"
     payload = rabbit.published_stage_messages[0]["payload"]
@@ -458,6 +458,7 @@ async def test_workflow_context_publish_to_stage_preserves_task_identity_and_emi
     assert payload["origin_stage"] == "topic_planner"
     assert payload["stage"] == "docsearch_planner"
     assert payload["action"] == "collect"
+    assert payload["priority"] == 3
     assert isinstance(observations[0], WorkflowMessagePublished)
 
 
@@ -480,12 +481,14 @@ async def test_workflow_context_publish_workflow_message_resolves_stage_from_rou
         "planner.docsearch_planner.in",
         {"docs": ["a"]},
         action="collect",
+        priority=5,
     )
 
     payload = rabbit.published_workflows[0]["payload"]
     assert rabbit.published_workflows[0]["routing_key"] == "planner.docsearch_planner.in"
     assert payload["stage"] == "docsearch_planner"
     assert payload["origin_stage"] == "topic_planner"
+    assert payload["priority"] == 5
 
 
 @pytest.mark.asyncio
@@ -680,9 +683,9 @@ async def test_task_context_manual_retry_requires_task_envelope_context() -> Non
 @pytest.mark.asyncio
 async def test_task_consumer_manual_retry_republishes_task_and_acks_original_message() -> None:
     message = FakeMessage(
-        json.dumps({"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}}).encode(
-            "utf-8"
-        ),
+        json.dumps(
+            {"task_id": "task-123", "task_type": "task.generate", "payload": {"quality": "low"}, "priority": 2}
+        ).encode("utf-8"),
         correlation_id="corr-123",
         headers={"batch_id": "batch-123", "x-relayna-retry-attempt": 2},
     )
@@ -713,6 +716,7 @@ async def test_task_consumer_manual_retry_republishes_task_and_acks_original_mes
                 "payload": {"quality": "high"},
                 "task_type": "task.review",
                 "correlation_id": "corr-123",
+                "priority": 2,
                 "spec_version": "1.0",
                 "created_at": rabbit.published_tasks[0]["task"]["created_at"],
             },
@@ -814,7 +818,30 @@ async def test_task_context_manual_retry_rejects_reserved_extra_fields() -> None
     )
 
     with pytest.raises(ValueError, match="reserved key"):
-        await context.manual_retry(extra_fields={"task_id": "task-999"})
+        await context.manual_retry(extra_fields={"priority": 9})
+
+
+@pytest.mark.asyncio
+async def test_task_context_manual_retry_overrides_priority_when_requested() -> None:
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+    context = TaskContext(
+        rabbitmq=rabbit,
+        consumer_name="worker-a",
+        raw_payload={"task_id": "task-123", "task_type": "task.generate", "payload": {"kind": "demo"}, "priority": 2},
+        correlation_id="corr-123",
+        delivery_tag=1,
+        redelivered=False,
+        _task_id="task-123",
+        headers={"task_id": "task-123"},
+        is_task_context=True,
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        await context.manual_retry(task_type="task.review", priority=7)
+
+    assert type(exc_info.value).__name__ == "_ManualRetryRequested"
+    assert context._manual_retry_request is not None
+    assert context._manual_retry_request.task["priority"] == 7
 
 
 @pytest.mark.asyncio

@@ -166,6 +166,7 @@ class RelaynaRabbitClient:
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
         task_dict = self._prepare_task_payload(task)
+        self._validate_task_priority(task_dict)
         message_headers = {"task_id": str(task_dict.get("task_id", ""))}
         message_headers.update(dict(headers or {}))
         message = Message(
@@ -173,8 +174,10 @@ class RelaynaRabbitClient:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             correlation_id=str(task_dict.get("correlation_id") or task_dict.get("task_id", "")) or None,
+            priority=cast(int | None, task_dict.get("priority")),
             headers=cast(Any, message_headers),
         )
+        _clear_default_priority(message, priority=cast(int | None, task_dict.get("priority")))
         await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(task_dict))
 
     async def publish_tasks(
@@ -199,7 +202,10 @@ class RelaynaRabbitClient:
             tasks=[TaskEnvelope.model_validate(task) for task in prepared_tasks],
             meta=dict(meta or {}),
         )
-        await self._publish_batch_envelope(envelope.model_dump(mode="json", exclude_none=True))
+        await self._publish_batch_envelope(
+            envelope.model_dump(mode="json", exclude_none=True),
+            priority=self._resolve_batch_priority(prepared_tasks),
+        )
 
     async def publish_status(self, event: BaseModel | Mapping[str, Any]) -> None:
         payload = self._prepare_status_payload(event)
@@ -262,6 +268,7 @@ class RelaynaRabbitClient:
         if self._workflow_exchange is None:
             raise RuntimeError("Workflow exchange is not initialized")
         workflow_payload = self._prepare_workflow_payload(payload)
+        self._validate_workflow_priority(workflow_payload)
         message_headers = {
             "task_id": str(workflow_payload.get("task_id", "")),
             "message_id": str(workflow_payload.get("message_id", "")),
@@ -276,8 +283,10 @@ class RelaynaRabbitClient:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             correlation_id=str(workflow_payload.get("correlation_id") or workflow_payload.get("task_id", "")) or None,
+            priority=cast(int | None, workflow_payload.get("priority")),
             headers=cast(Any, message_headers),
         )
+        _clear_default_priority(message, priority=cast(int | None, workflow_payload.get("priority")))
         await self._workflow_exchange.publish(message, routing_key=routing_key)
 
     async def publish_raw_to_queue(
@@ -414,7 +423,7 @@ class RelaynaRabbitClient:
         )
         await self._status_exchange.publish(message, routing_key=routing_key)
 
-    async def _publish_batch_envelope(self, payload: dict[str, Any]) -> None:
+    async def _publish_batch_envelope(self, payload: dict[str, Any], *, priority: int | None) -> None:
         await self._ensure_ready()
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
@@ -426,9 +435,52 @@ class RelaynaRabbitClient:
             content_type="application/json",
             delivery_mode=DeliveryMode.PERSISTENT,
             correlation_id=batch_id or None,
+            priority=priority,
             headers={"batch_id": batch_id, "batch_size": len(tasks) if isinstance(tasks, list) else 0},
         )
+        _clear_default_priority(message, priority=priority)
         await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(first_task))
+
+    def _resolve_batch_priority(self, tasks: Sequence[Mapping[str, Any]]) -> int | None:
+        priorities = {cast(int | None, task.get("priority")) for task in tasks}
+        if len(priorities) > 1:
+            raise ValueError("batch_envelope tasks must all share the same priority when priority is provided")
+        priority = next(iter(priorities), None)
+        self._validate_priority_against_limit(
+            priority,
+            max_priority=self._resolved_task_max_priority(),
+            kind="task",
+        )
+        return priority
+
+    def _validate_task_priority(self, task: Mapping[str, Any]) -> None:
+        self._validate_priority_against_limit(
+            cast(int | None, task.get("priority")),
+            max_priority=self._resolved_task_max_priority(),
+            kind="task",
+        )
+
+    def _validate_workflow_priority(self, workflow: Mapping[str, Any]) -> None:
+        stage = str(workflow.get("stage") or "").strip()
+        self._validate_priority_against_limit(
+            cast(int | None, workflow.get("priority")),
+            max_priority=self._resolved_workflow_max_priority(stage),
+            kind="workflow",
+        )
+
+    def _validate_priority_against_limit(self, priority: int | None, *, max_priority: Any, kind: str) -> None:
+        if priority is None or max_priority is None:
+            return
+        if int(priority) > int(max_priority):
+            raise ValueError(f"{kind} priority {priority} exceeds configured {kind}_max_priority {int(max_priority)}")
+
+    def _resolved_task_max_priority(self) -> int | None:
+        return _coerce_queue_max_priority(self._topology.task_queue_arguments())
+
+    def _resolved_workflow_max_priority(self, stage: str) -> int | None:
+        if not stage:
+            return None
+        return _coerce_queue_max_priority(self._topology.workflow_queue_arguments(stage))
 
 
 async def declare_stream_queue(
@@ -502,6 +554,18 @@ def _to_dict(payload: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
 
 def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _coerce_queue_max_priority(arguments: Mapping[str, Any]) -> int | None:
+    value = arguments.get("x-max-priority")
+    if value is None:
+        return None
+    return int(value)
+
+
+def _clear_default_priority(message: Message, *, priority: int | None) -> None:
+    if priority is None:
+        message.priority = None
 
 
 @dataclass(slots=True)

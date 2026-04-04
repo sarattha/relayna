@@ -1,6 +1,10 @@
+import pytest
+from pydantic import ValidationError
+
 from relayna.contracts import (
     ContractAliasConfig,
     StatusEventEnvelope,
+    TaskEnvelope,
     TerminalStatusSet,
     WorkflowEnvelope,
     denormalize_document_aliases,
@@ -75,3 +79,31 @@ def test_workflow_envelope_defaults_message_id_and_correlation_id() -> None:
     assert transport["correlation_id"] == "task-123"
     assert isinstance(transport["message_id"], str)
     assert transport["message_id"]
+
+
+def test_task_envelope_accepts_priority_in_amqp_range() -> None:
+    event = TaskEnvelope(task_id="task-123", priority=255)
+
+    transport = event.model_dump(mode="json", exclude_none=True)
+
+    assert transport["priority"] == 255
+
+
+@pytest.mark.parametrize("priority", [-1, 256, "high"])
+def test_task_envelope_rejects_invalid_priority(priority: object) -> None:
+    with pytest.raises(ValidationError):
+        TaskEnvelope(task_id="task-123", priority=priority)
+
+
+def test_workflow_envelope_accepts_priority_in_amqp_range() -> None:
+    event = WorkflowEnvelope(task_id="task-123", stage="planner", priority=0)
+
+    transport = event.as_transport_dict()
+
+    assert transport["priority"] == 0
+
+
+@pytest.mark.parametrize("priority", [-1, 256, "high"])
+def test_workflow_envelope_rejects_invalid_priority(priority: object) -> None:
+    with pytest.raises(ValidationError):
+        WorkflowEnvelope(task_id="task-123", stage="planner", priority=priority)

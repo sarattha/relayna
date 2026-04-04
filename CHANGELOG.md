@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3.3 - 2026-04-04
+
+### Added
+
+- First-class top-level `priority` support on `TaskEnvelope` and `WorkflowEnvelope`, with RabbitMQ publishing that maps the field to the AMQP message `priority` property.
+- Batch-envelope priority handling that applies one shared AMQP priority when all enclosed tasks agree and rejects mixed-priority batches.
+
+### Changed
+
+- `TaskContext.manual_retry(...)`, `WorkflowContext.publish_to_stage(...)`, and `WorkflowContext.publish_workflow_message(...)` now preserve or accept explicit top-level priority values.
+- Documentation now explains that priority scheduling requires `x-max-priority`, that queue max-priority values must be between `1` and `255`, and that Relayna rejects publishes above the configured queue max priority.
+- Release-install examples now reference `1.3.3`.
+- Bumped the package version to `1.3.3`.
+
+### Fixed
+
+- Relayna now clears `aio-pika`'s default priority value when no top-level priority is supplied, preserving the distinction between an unset AMQP priority and an explicit `priority=0`.
+- Task and workflow publishes now fail client-side when message priority exceeds the configured `task_max_priority` or `workflow_max_priority`, instead of silently relying on broker-side capping.
+
 ## 1.3.2 - 2026-03-30
 
 ### Added
