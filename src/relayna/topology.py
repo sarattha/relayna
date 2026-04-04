@@ -242,11 +242,14 @@ class SharedTasksSharedStatusTopology:
             builtins["x-max-priority"] = _validate_queue_max_priority(self.task_max_priority, label="task")
         if self.task_queue_type is not None:
             builtins["x-queue-type"] = self.task_queue_type
-        return _merge_queue_arguments(
-            "task",
-            builtins=builtins,
-            overrides=self.task_queue_arguments_overrides,
-            kwargs=self.task_queue_kwargs,
+        return _with_validated_queue_max_priority(
+            _merge_queue_arguments(
+                "task",
+                builtins=builtins,
+                overrides=self.task_queue_arguments_overrides,
+                kwargs=self.task_queue_kwargs,
+            ),
+            label="task",
         )
 
     def status_queue_arguments(self) -> dict[str, Any]:
@@ -462,11 +465,14 @@ class SharedTasksSharedStatusShardedAggregationTopology(SharedTasksSharedStatusT
             )
         if self.aggregation_queue_type is not None:
             builtins["x-queue-type"] = self.aggregation_queue_type
-        return _merge_queue_arguments(
-            "aggregation",
-            builtins=builtins,
-            overrides=self.aggregation_queue_arguments_overrides,
-            kwargs=self.aggregation_queue_kwargs,
+        return _with_validated_queue_max_priority(
+            _merge_queue_arguments(
+                "aggregation",
+                builtins=builtins,
+                overrides=self.aggregation_queue_arguments_overrides,
+                kwargs=self.aggregation_queue_kwargs,
+            ),
+            label="aggregation",
         )
 
     def aggregation_queue_name(self, shards: Sequence[int], *, queue_name: str | None = None) -> str:
@@ -600,11 +606,14 @@ class RoutedTasksSharedStatusShardedAggregationTopology(RoutedTasksSharedStatusT
             )
         if self.aggregation_queue_type is not None:
             builtins["x-queue-type"] = self.aggregation_queue_type
-        return _merge_queue_arguments(
-            "aggregation",
-            builtins=builtins,
-            overrides=self.aggregation_queue_arguments_overrides,
-            kwargs=self.aggregation_queue_kwargs,
+        return _with_validated_queue_max_priority(
+            _merge_queue_arguments(
+                "aggregation",
+                builtins=builtins,
+                overrides=self.aggregation_queue_arguments_overrides,
+                kwargs=self.aggregation_queue_kwargs,
+            ),
+            label="aggregation",
         )
 
     def aggregation_queue_name(self, shards: Sequence[int], *, queue_name: str | None = None) -> str:
@@ -843,11 +852,14 @@ class SharedStatusWorkflowTopology:
         _raise_on_argument_conflicts("workflow", "global kwargs", global_kwargs, "stage kwargs", stage_kwargs)
         combined_overrides = global_overrides | stage_overrides
         combined_kwargs = global_kwargs | stage_kwargs
-        return _merge_queue_arguments(
-            "workflow",
-            builtins=builtins,
-            overrides=combined_overrides,
-            kwargs=combined_kwargs,
+        return _with_validated_queue_max_priority(
+            _merge_queue_arguments(
+                "workflow",
+                builtins=builtins,
+                overrides=combined_overrides,
+                kwargs=combined_kwargs,
+            ),
+            label="workflow",
         )
 
     def workflow_publish_routing_key(self, stage: str) -> str:
@@ -1026,6 +1038,13 @@ def _validate_queue_max_priority(value: Any, *, label: str) -> int:
     if priority < 1 or priority > 255:
         raise ValueError(f"{label}_max_priority must be between 1 and 255")
     return priority
+
+
+def _with_validated_queue_max_priority(arguments: dict[str, Any], *, label: str) -> dict[str, Any]:
+    max_priority = arguments.get("x-max-priority")
+    if max_priority is not None:
+        arguments["x-max-priority"] = _validate_queue_max_priority(max_priority, label=label)
+    return arguments
 
 
 def _merge_queue_arguments(

@@ -178,6 +178,24 @@ def test_task_queue_arguments_reject_invalid_max_priority(value: int) -> None:
         topology.task_queue_arguments()
 
 
+@pytest.mark.parametrize("field_name", ["task_queue_arguments_overrides", "task_queue_kwargs"])
+@pytest.mark.parametrize("value", [0, 256])
+def test_task_queue_arguments_reject_invalid_max_priority_from_escape_hatches(field_name: str, value: int) -> None:
+    topology_kwargs = {
+        "rabbitmq_url": "amqp://guest:guest@localhost:5672/",
+        "tasks_exchange": "tasks.exchange",
+        "tasks_queue": "tasks.queue",
+        "tasks_routing_key": "task.request",
+        "status_exchange": "status.exchange",
+        "status_queue": "status.queue",
+        field_name: {"x-max-priority": value},
+    }
+    topology = SharedTasksSharedStatusTopology(**topology_kwargs)
+
+    with pytest.raises(ValueError, match="task_max_priority"):
+        topology.task_queue_arguments()
+
+
 def test_status_queue_arguments_merge_existing_and_generic_fields() -> None:
     topology = SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
@@ -453,6 +471,26 @@ async def test_publish_task_rejects_priority_above_configured_task_max_priority(
 
     with pytest.raises(ValueError, match="task_max_priority 5"):
         await client.publish_task({"task_id": "task-123", "payload": {"kind": "demo"}, "priority": 6})
+
+
+@pytest.mark.asyncio
+async def test_publish_task_rejects_priority_above_effective_task_queue_override_limit() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        task_queue_kwargs={"x-max-priority": 3},
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._tasks_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="task_max_priority 3"):
+        await client.publish_task({"task_id": "task-123", "payload": {"kind": "demo"}, "priority": 4})
 
 
 @pytest.mark.asyncio
@@ -843,6 +881,28 @@ def test_sharded_aggregation_queue_arguments_reject_invalid_max_priority(value: 
         topology.aggregation_queue_arguments()
 
 
+@pytest.mark.parametrize("field_name", ["aggregation_queue_arguments_overrides", "aggregation_queue_kwargs"])
+@pytest.mark.parametrize("value", [0, 256])
+def test_sharded_aggregation_queue_arguments_reject_invalid_max_priority_from_escape_hatches(
+    field_name: str,
+    value: int,
+) -> None:
+    topology_kwargs = {
+        "rabbitmq_url": "amqp://guest:guest@localhost:5672/",
+        "tasks_exchange": "tasks.exchange",
+        "tasks_queue": "tasks.queue",
+        "tasks_routing_key": "task.request",
+        "status_exchange": "status.exchange",
+        "status_queue": "status.queue",
+        "shard_count": 4,
+        field_name: {"x-max-priority": value},
+    }
+    topology = SharedTasksSharedStatusShardedAggregationTopology(**topology_kwargs)
+
+    with pytest.raises(ValueError, match="aggregation_max_priority"):
+        topology.aggregation_queue_arguments()
+
+
 def test_sharded_aggregation_queue_arguments_raise_on_duplicate_keys() -> None:
     topology = SharedTasksSharedStatusShardedAggregationTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
@@ -1134,6 +1194,58 @@ def test_workflow_queue_arguments_reject_invalid_max_priority(value: int) -> Non
         topology.workflow_queue_arguments("planner")
 
 
+@pytest.mark.parametrize("field_name", ["workflow_queue_arguments_overrides", "workflow_queue_kwargs"])
+@pytest.mark.parametrize("value", [0, 256])
+def test_workflow_queue_arguments_reject_invalid_max_priority_from_global_escape_hatches(
+    field_name: str,
+    value: int,
+) -> None:
+    topology_kwargs = {
+        "rabbitmq_url": "amqp://guest:guest@localhost:5672/",
+        "workflow_exchange": "workflow.exchange",
+        "status_exchange": "status.exchange",
+        "status_queue": "status.queue",
+        "stages": (
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+            ),
+        ),
+        field_name: {"x-max-priority": value},
+    }
+    topology = SharedStatusWorkflowTopology(**topology_kwargs)
+
+    with pytest.raises(ValueError, match="workflow_max_priority"):
+        topology.workflow_queue_arguments("planner")
+
+
+@pytest.mark.parametrize("field_name", ["queue_arguments_overrides", "queue_kwargs"])
+@pytest.mark.parametrize("value", [0, 256])
+def test_workflow_queue_arguments_reject_invalid_max_priority_from_stage_escape_hatches(
+    field_name: str,
+    value: int,
+) -> None:
+    stage_kwargs = {
+        "name": "planner",
+        "queue": "planner.queue",
+        "binding_keys": ("planner.in",),
+        "publish_routing_key": "planner.in",
+        field_name: {"x-max-priority": value},
+    }
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(WorkflowStage(**stage_kwargs),),
+    )
+
+    with pytest.raises(ValueError, match="workflow_max_priority"):
+        topology.workflow_queue_arguments("planner")
+
+
 @pytest.mark.asyncio
 async def test_workflow_topology_declares_and_binds_stage_queue() -> None:
     topology = make_workflow_topology()
@@ -1238,6 +1350,35 @@ async def test_publish_workflow_message_rejects_priority_above_configured_workfl
     with pytest.raises(ValueError, match="workflow_max_priority 4"):
         await client.publish_workflow_message(
             WorkflowEnvelope(task_id="task-123", stage="planner", payload={"step": 1}, priority=5),
+            routing_key="planner.in",
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_workflow_message_rejects_priority_above_effective_stage_override_limit() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                queue_kwargs={"x-max-priority": 2},
+            ),
+        ),
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="workflow_max_priority 2"):
+        await client.publish_workflow_message(
+            WorkflowEnvelope(task_id="task-123", stage="planner", payload={"step": 1}, priority=3),
             routing_key="planner.in",
         )
 

@@ -448,7 +448,7 @@ class RelaynaRabbitClient:
         priority = next(iter(priorities), None)
         self._validate_priority_against_limit(
             priority,
-            max_priority=getattr(self._topology, "task_max_priority", None),
+            max_priority=self._resolved_task_max_priority(),
             kind="task",
         )
         return priority
@@ -456,14 +456,15 @@ class RelaynaRabbitClient:
     def _validate_task_priority(self, task: Mapping[str, Any]) -> None:
         self._validate_priority_against_limit(
             cast(int | None, task.get("priority")),
-            max_priority=getattr(self._topology, "task_max_priority", None),
+            max_priority=self._resolved_task_max_priority(),
             kind="task",
         )
 
     def _validate_workflow_priority(self, workflow: Mapping[str, Any]) -> None:
+        stage = str(workflow.get("stage") or "").strip()
         self._validate_priority_against_limit(
             cast(int | None, workflow.get("priority")),
-            max_priority=getattr(self._topology, "workflow_max_priority", None),
+            max_priority=self._resolved_workflow_max_priority(stage),
             kind="workflow",
         )
 
@@ -472,6 +473,14 @@ class RelaynaRabbitClient:
             return
         if int(priority) > int(max_priority):
             raise ValueError(f"{kind} priority {priority} exceeds configured {kind}_max_priority {int(max_priority)}")
+
+    def _resolved_task_max_priority(self) -> int | None:
+        return _coerce_queue_max_priority(self._topology.task_queue_arguments())
+
+    def _resolved_workflow_max_priority(self, stage: str) -> int | None:
+        if not stage:
+            return None
+        return _coerce_queue_max_priority(self._topology.workflow_queue_arguments(stage))
 
 
 async def declare_stream_queue(
@@ -545,6 +554,13 @@ def _to_dict(payload: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
 
 def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _coerce_queue_max_priority(arguments: Mapping[str, Any]) -> int | None:
+    value = arguments.get("x-max-priority")
+    if value is None:
+        return None
+    return int(value)
 
 
 def _clear_default_priority(message: Message, *, priority: int | None) -> None:
