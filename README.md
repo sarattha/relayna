@@ -168,6 +168,11 @@ RabbitMQ scheduling only uses that priority when the destination queue was
 declared with `x-max-priority`, which Relayna exposes through topology fields
 such as `task_max_priority` and `workflow_max_priority`.
 
+Relayna validates queue max-priority settings client-side and requires them to
+be in the range `1..255`. It also rejects task or workflow publishes whose
+top-level `priority` exceeds the configured `task_max_priority` or
+`workflow_max_priority`.
+
 Failed items from a batch envelope are retried individually when the worker has
 `retry_policy=...`. Relayna does not execute the whole batch under one RabbitMQ
 delivery: it fans the envelope out into one queue message per task before
@@ -281,6 +286,8 @@ arguments for worker-owned queues:
 - `aggregation_single_active_consumer`
 - `aggregation_max_priority`
 - `aggregation_queue_type`
+
+Priority queue max values must be between `1` and `255`.
 
 For broker-specific queue arguments that Relayna does not model directly, use
 the explicit mapping escape hatches such as `task_queue_kwargs`,

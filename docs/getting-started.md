@@ -68,6 +68,8 @@ arguments for worker-owned queues:
 - `aggregation_max_priority`
 - `aggregation_queue_type`
 
+Priority queue max values must be between `1` and `255`.
+
 Status queues keep their existing dedicated stream and expiry settings, but all
 topologies also expose explicit mapping escape hatches for broker-specific queue
 arguments:
@@ -1269,6 +1271,9 @@ message priority per published delivery.
 RabbitMQ only schedules by priority when the destination queue was declared
 with `x-max-priority`, using Relayna topology fields such as
 `task_max_priority` or `workflow_max_priority`.
+
+Relayna also fails client-side when a task or workflow publish requests a
+top-level `priority` above the configured queue max priority for that topology.
 
 Target worker:
 

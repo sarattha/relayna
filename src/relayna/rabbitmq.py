@@ -166,6 +166,7 @@ class RelaynaRabbitClient:
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
         task_dict = self._prepare_task_payload(task)
+        self._validate_task_priority(task_dict)
         message_headers = {"task_id": str(task_dict.get("task_id", ""))}
         message_headers.update(dict(headers or {}))
         message = Message(
@@ -267,6 +268,7 @@ class RelaynaRabbitClient:
         if self._workflow_exchange is None:
             raise RuntimeError("Workflow exchange is not initialized")
         workflow_payload = self._prepare_workflow_payload(payload)
+        self._validate_workflow_priority(workflow_payload)
         message_headers = {
             "task_id": str(workflow_payload.get("task_id", "")),
             "message_id": str(workflow_payload.get("message_id", "")),
@@ -443,7 +445,33 @@ class RelaynaRabbitClient:
         priorities = {cast(int | None, task.get("priority")) for task in tasks}
         if len(priorities) > 1:
             raise ValueError("batch_envelope tasks must all share the same priority when priority is provided")
-        return next(iter(priorities), None)
+        priority = next(iter(priorities), None)
+        self._validate_priority_against_limit(
+            priority,
+            max_priority=getattr(self._topology, "task_max_priority", None),
+            kind="task",
+        )
+        return priority
+
+    def _validate_task_priority(self, task: Mapping[str, Any]) -> None:
+        self._validate_priority_against_limit(
+            cast(int | None, task.get("priority")),
+            max_priority=getattr(self._topology, "task_max_priority", None),
+            kind="task",
+        )
+
+    def _validate_workflow_priority(self, workflow: Mapping[str, Any]) -> None:
+        self._validate_priority_against_limit(
+            cast(int | None, workflow.get("priority")),
+            max_priority=getattr(self._topology, "workflow_max_priority", None),
+            kind="workflow",
+        )
+
+    def _validate_priority_against_limit(self, priority: int | None, *, max_priority: Any, kind: str) -> None:
+        if priority is None or max_priority is None:
+            return
+        if int(priority) > int(max_priority):
+            raise ValueError(f"{kind} priority {priority} exceeds configured {kind}_max_priority {int(max_priority)}")
 
 
 async def declare_stream_queue(

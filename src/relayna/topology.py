@@ -239,7 +239,7 @@ class SharedTasksSharedStatusTopology:
         if self.task_single_active_consumer is not None:
             builtins["x-single-active-consumer"] = self.task_single_active_consumer
         if self.task_max_priority is not None:
-            builtins["x-max-priority"] = int(self.task_max_priority)
+            builtins["x-max-priority"] = _validate_queue_max_priority(self.task_max_priority, label="task")
         if self.task_queue_type is not None:
             builtins["x-queue-type"] = self.task_queue_type
         return _merge_queue_arguments(
@@ -456,7 +456,10 @@ class SharedTasksSharedStatusShardedAggregationTopology(SharedTasksSharedStatusT
         if self.aggregation_single_active_consumer is not None:
             builtins["x-single-active-consumer"] = self.aggregation_single_active_consumer
         if self.aggregation_max_priority is not None:
-            builtins["x-max-priority"] = int(self.aggregation_max_priority)
+            builtins["x-max-priority"] = _validate_queue_max_priority(
+                self.aggregation_max_priority,
+                label="aggregation",
+            )
         if self.aggregation_queue_type is not None:
             builtins["x-queue-type"] = self.aggregation_queue_type
         return _merge_queue_arguments(
@@ -591,7 +594,10 @@ class RoutedTasksSharedStatusShardedAggregationTopology(RoutedTasksSharedStatusT
         if self.aggregation_single_active_consumer is not None:
             builtins["x-single-active-consumer"] = self.aggregation_single_active_consumer
         if self.aggregation_max_priority is not None:
-            builtins["x-max-priority"] = int(self.aggregation_max_priority)
+            builtins["x-max-priority"] = _validate_queue_max_priority(
+                self.aggregation_max_priority,
+                label="aggregation",
+            )
         if self.aggregation_queue_type is not None:
             builtins["x-queue-type"] = self.aggregation_queue_type
         return _merge_queue_arguments(
@@ -818,7 +824,7 @@ class SharedStatusWorkflowTopology:
         if self.workflow_single_active_consumer is not None:
             builtins["x-single-active-consumer"] = self.workflow_single_active_consumer
         if self.workflow_max_priority is not None:
-            builtins["x-max-priority"] = int(self.workflow_max_priority)
+            builtins["x-max-priority"] = _validate_queue_max_priority(self.workflow_max_priority, label="workflow")
         if self.workflow_queue_type is not None:
             builtins["x-queue-type"] = self.workflow_queue_type
 
@@ -1013,6 +1019,13 @@ def _to_dict(payload: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(payload, BaseModel):
         return cast(dict[str, Any], payload.model_dump(mode="json", exclude_none=True))
     return dict(payload)
+
+
+def _validate_queue_max_priority(value: Any, *, label: str) -> int:
+    priority = int(value)
+    if priority < 1 or priority > 255:
+        raise ValueError(f"{label}_max_priority must be between 1 and 255")
+    return priority
 
 
 def _merge_queue_arguments(
