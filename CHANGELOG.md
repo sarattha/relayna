@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 1.3.3 - 2026-04-04
 
 ### Added
 
@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
 
 - `TaskContext.manual_retry(...)`, `WorkflowContext.publish_to_stage(...)`, and `WorkflowContext.publish_workflow_message(...)` now preserve or accept explicit top-level priority values.
 - Documentation now explains that priority scheduling requires `x-max-priority`, that queue max-priority values must be between `1` and `255`, and that Relayna rejects publishes above the configured queue max priority.
+- Release-install examples now reference `1.3.3`.
+- Bumped the package version to `1.3.3`.
 
 ### Fixed
 
