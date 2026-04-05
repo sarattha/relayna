@@ -418,14 +418,7 @@ class WorkflowConsumer:
             return True
         finally:
             if dedup_acquired and stage_config.dedup_key_fields and self._contract_store is not None:
-                await self._contract_store.clear_inflight(
-                    stage=stage,
-                    task_id=workflow_message.task_id,
-                    action=workflow_message.action,
-                    payload=workflow_message.payload,
-                    dedup_key_fields=stage_config.dedup_key_fields,
-                )
-                await self._contract_store.release_dedup(
+                await self._cleanup_dedup_state(
                     stage=stage,
                     task_id=workflow_message.task_id,
                     action=workflow_message.action,
@@ -595,6 +588,43 @@ class WorkflowConsumer:
             retry_queue_suffix=base.retry_queue_suffix,
             dead_letter_queue_suffix=base.dead_letter_queue_suffix,
         )
+
+    async def _cleanup_dedup_state(
+        self,
+        *,
+        stage: str,
+        task_id: str,
+        action: str | None,
+        payload: dict[str, Any],
+        dedup_key_fields: tuple[str, ...],
+    ) -> None:
+        contract_store = self._contract_store
+        if contract_store is None:
+            return
+        try:
+            await contract_store.clear_inflight(
+                stage=stage,
+                task_id=task_id,
+                action=action,
+                payload=payload,
+                dedup_key_fields=dedup_key_fields,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        try:
+            await contract_store.release_dedup(
+                stage=stage,
+                task_id=task_id,
+                action=action,
+                payload=payload,
+                dedup_key_fields=dedup_key_fields,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
 
     def _workflow_topology(self) -> SharedStatusWorkflowTopology:
         topology = self._rabbitmq.topology

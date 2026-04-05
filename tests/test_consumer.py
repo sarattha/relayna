@@ -316,8 +316,18 @@ class FakeDLQStore:
 
 
 class FakeContractStore:
-    def __init__(self, *, acquire_result: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        acquire_result: bool = True,
+        fail_mark_inflight: bool = False,
+        fail_clear_inflight: bool = False,
+        fail_release_dedup: bool = False,
+    ) -> None:
         self.acquire_result = acquire_result
+        self.fail_mark_inflight = fail_mark_inflight
+        self.fail_clear_inflight = fail_clear_inflight
+        self.fail_release_dedup = fail_release_dedup
         self.acquire_calls: list[dict[str, Any]] = []
         self.release_calls: list[dict[str, Any]] = []
         self.inflight_mark_calls: list[dict[str, Any]] = []
@@ -352,6 +362,8 @@ class FakeContractStore:
         payload: dict[str, Any],
         dedup_key_fields: tuple[str, ...],
     ) -> None:
+        if self.fail_release_dedup:
+            raise RuntimeError("release unavailable")
         self.release_calls.append({"stage": stage, "task_id": task_id, "action": action})
 
     async def mark_inflight(
@@ -363,6 +375,8 @@ class FakeContractStore:
         payload: dict[str, Any],
         dedup_key_fields: tuple[str, ...],
     ) -> None:
+        if self.fail_mark_inflight:
+            raise RuntimeError("mark unavailable")
         self.inflight_mark_calls.append({"stage": stage, "task_id": task_id, "action": action})
 
     async def clear_inflight(
@@ -374,6 +388,8 @@ class FakeContractStore:
         payload: dict[str, Any],
         dedup_key_fields: tuple[str, ...],
     ) -> None:
+        if self.fail_clear_inflight:
+            raise RuntimeError("clear unavailable")
         self.inflight_clear_calls.append({"stage": stage, "task_id": task_id, "action": action})
 
 
@@ -2583,3 +2599,56 @@ async def test_workflow_consumer_short_circuits_on_dedup_conflict() -> None:
     assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "dedup_conflict"
     assert contract_store.acquire_calls
     assert not contract_store.inflight_mark_calls
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_acks_when_dedup_cleanup_fails() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                dedup_key_fields=("doc_id",),
+            ),
+        ),
+    )
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "action": "collect",
+                "payload": {"doc_id": "abc"},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+    contract_store = FakeContractStore(fail_clear_inflight=True)
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        return None
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        contract_store=contract_store,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert not rabbit.raw_queue_publishes
+    assert contract_store.acquire_calls
+    assert contract_store.release_calls == [{"stage": "docsearch_planner", "task_id": "task-123", "action": "collect"}]
