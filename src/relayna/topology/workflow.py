@@ -8,7 +8,7 @@ from aio_pika import ExchangeType
 from aio_pika.abc import AbstractChannel, AbstractExchange, AbstractRobustChannel, AbstractRobustExchange
 from pydantic import BaseModel
 
-from ..contracts import normalize_contract_aliases
+from ..contracts import ActionSchema, normalize_contract_aliases
 from .base import (
     merge_queue_arguments,
     raise_on_argument_conflicts,
@@ -24,6 +24,20 @@ class WorkflowStage:
     queue: str
     binding_keys: tuple[str, ...]
     publish_routing_key: str
+    description: str | None = None
+    role: str | None = None
+    owner: str | None = None
+    tags: tuple[str, ...] = ()
+    sla_ms: int | None = None
+    accepted_actions: tuple[ActionSchema, ...] = ()
+    produced_actions: tuple[ActionSchema, ...] = ()
+    allowed_next_stages: tuple[str, ...] = ()
+    terminal: bool = False
+    timeout_seconds: float | None = None
+    max_retries: int | None = None
+    retry_delay_ms: int | None = None
+    max_inflight: int | None = None
+    dedup_key_fields: tuple[str, ...] = ()
     queue_arguments_overrides: dict[str, Any] = field(default_factory=dict)
     queue_kwargs: dict[str, Any] = field(default_factory=dict)
 
@@ -82,6 +96,31 @@ class SharedStatusWorkflowTopology:
                 raise ValueError(f"Workflow stage '{stage_name}' must define at least one binding key")
             if not stage.publish_routing_key.strip():
                 raise ValueError(f"Workflow stage '{stage_name}' must define publish_routing_key")
+            if stage.sla_ms is not None and int(stage.sla_ms) < 1:
+                raise ValueError(f"Workflow stage '{stage_name}' must define sla_ms >= 1")
+            if stage.timeout_seconds is not None and float(stage.timeout_seconds) <= 0:
+                raise ValueError(f"Workflow stage '{stage_name}' must define timeout_seconds > 0")
+            if stage.max_retries is not None and int(stage.max_retries) < 0:
+                raise ValueError(f"Workflow stage '{stage_name}' must define max_retries >= 0")
+            if stage.retry_delay_ms is not None and int(stage.retry_delay_ms) <= 0:
+                raise ValueError(f"Workflow stage '{stage_name}' must define retry_delay_ms > 0")
+            if stage.max_inflight is not None and int(stage.max_inflight) < 1:
+                raise ValueError(f"Workflow stage '{stage_name}' must define max_inflight >= 1")
+            dedup_key_fields = tuple(field.strip() for field in stage.dedup_key_fields if str(field).strip())
+            if len(set(dedup_key_fields)) != len(dedup_key_fields):
+                raise ValueError(f"Workflow stage '{stage_name}' dedup_key_fields must be unique")
+            if len(dedup_key_fields) != len(stage.dedup_key_fields):
+                raise ValueError(f"Workflow stage '{stage_name}' dedup_key_fields must not be empty")
+            _validate_action_schema_collection(
+                stage.accepted_actions,
+                stage_name=stage_name,
+                field_name="accepted_actions",
+            )
+            _validate_action_schema_collection(
+                stage.produced_actions,
+                stage_name=stage_name,
+                field_name="produced_actions",
+            )
 
         route_names: set[str] = set()
         for route in self.entry_routes:
@@ -97,6 +136,21 @@ class SharedStatusWorkflowTopology:
                 raise ValueError(
                     f"Workflow entry route '{route_name}' references unknown target stage '{route.target_stage}'"
                 )
+
+        for stage in self.stages:
+            stage_name = stage.name.strip()
+            allowed_next_stages = tuple(item.strip() for item in stage.allowed_next_stages if str(item).strip())
+            if len(set(allowed_next_stages)) != len(allowed_next_stages):
+                raise ValueError(f"Workflow stage '{stage_name}' allowed_next_stages must be unique")
+            for destination in allowed_next_stages:
+                if destination not in stage_names:
+                    raise ValueError(
+                        f"Workflow stage '{stage_name}' references unknown downstream stage '{destination}'"
+                    )
+            if stage.terminal and allowed_next_stages:
+                raise ValueError(f"Workflow stage '{stage_name}' cannot be terminal and define allowed_next_stages")
+            if stage.terminal and stage.produced_actions:
+                raise ValueError(f"Workflow stage '{stage_name}' cannot be terminal and define produced_actions")
 
     def connection_string(self, connection_name: str | None = None) -> str:
         if connection_name:
@@ -148,6 +202,9 @@ class SharedStatusWorkflowTopology:
 
     def workflow_queue_name(self, stage: str) -> str:
         return self._stage(stage).queue
+
+    def workflow_stage(self, stage: str) -> WorkflowStage:
+        return self._stage(stage)
 
     def workflow_binding_keys(self, stage: str) -> tuple[str, ...]:
         resolved = self._stage(stage)
@@ -335,3 +392,14 @@ class SharedStatusWorkflowTopology:
 
 
 __all__ = ["SharedStatusWorkflowTopology", "WorkflowEntryRoute", "WorkflowStage"]
+
+
+def _validate_action_schema_collection(actions: tuple[ActionSchema, ...], *, stage_name: str, field_name: str) -> None:
+    names: list[str] = []
+    for action in actions:
+        action_name = str(action.action).strip()
+        if not action_name:
+            raise ValueError(f"Workflow stage '{stage_name}' {field_name} must define non-empty action names")
+        names.append(action_name)
+    if len(set(names)) != len(names):
+        raise ValueError(f"Workflow stage '{stage_name}' {field_name} must not define duplicate action names")

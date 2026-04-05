@@ -1,4 +1,8 @@
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from relayna.api import create_replay_router, create_workflow_router
+from relayna.contracts import ActionSchema, PayloadSchema
 from relayna.mcp import RelaynaMCPServer, inspect_topology
 from relayna.studio import build_run_view, build_topology_view
 from relayna.topology import (
@@ -25,6 +29,62 @@ def test_workflow_template_and_graph_export() -> None:
 
     assert graph["workflow_exchange"] == "workflow.exchange"
     assert [stage["id"] for stage in graph["stages"]] == ["planner", "writer"]
+
+
+def test_workflow_graph_export_includes_stage_contract_metadata() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="workflow.planner",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                description="Plans the workflow",
+                role="planner",
+                owner="ops",
+                tags=("core", "entry"),
+                sla_ms=5000,
+                accepted_actions=(
+                    ActionSchema(
+                        action="plan",
+                        payload=PayloadSchema(name="plan_payload", required_fields=("query",)),
+                    ),
+                ),
+                produced_actions=(
+                    ActionSchema(
+                        action="draft",
+                        payload=PayloadSchema(name="draft_payload", required_fields=("outline",)),
+                    ),
+                ),
+                allowed_next_stages=("writer",),
+                timeout_seconds=2.5,
+                max_retries=4,
+                retry_delay_ms=1500,
+                max_inflight=8,
+                dedup_key_fields=("query",),
+            ),
+            WorkflowStage(
+                name="writer",
+                queue="workflow.writer",
+                binding_keys=("writer.in",),
+                publish_routing_key="writer.in",
+                terminal=True,
+            ),
+        ),
+    )
+
+    graph = export_workflow_graph(topology)
+
+    planner = graph["stages"][0]
+    assert planner["description"] == "Plans the workflow"
+    assert planner["accepted_actions"][0]["action"] == "plan"
+    assert planner["allowed_next_stages"] == ["writer"]
+    assert planner["max_inflight"] == 8
+    assert planner["dedup_key_fields"] == ["query"]
 
 
 def test_studio_run_view_includes_diagnosis() -> None:
@@ -55,6 +115,31 @@ def test_mcp_server_lists_tools_and_topology_resource() -> None:
     assert resources[0]["type"] == "topology"
 
 
+def test_inspect_topology_includes_stage_contract_metadata() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="workflow.planner",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                role="planner",
+                terminal=False,
+                max_inflight=4,
+            ),
+        ),
+    )
+
+    payload = inspect_topology(topology)
+
+    assert payload["stages"][0]["role"] == "planner"
+    assert payload["stages"][0]["max_inflight"] == 4
+
+
 def test_api_exports_new_route_factories() -> None:
     assert create_workflow_router is not None
     assert create_replay_router is not None
@@ -72,6 +157,44 @@ def test_studio_topology_view_counts_graph_items() -> None:
     payload = build_topology_view(topology)
 
     assert payload["stage_count"] == 2
+    assert payload["graph"]["stages"][0]["accepted_actions"] == []
+
+
+def test_workflow_routes_expose_stage_contract_metadata() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="workflow.planner",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                role="planner",
+                max_inflight=6,
+                accepted_actions=(
+                    ActionSchema(
+                        action="plan",
+                        payload=PayloadSchema(name="plan_payload", required_fields=("query",)),
+                    ),
+                ),
+            ),
+        ),
+    )
+    app = FastAPI()
+    app.include_router(create_workflow_router(topology=topology))
+    client = TestClient(app)
+
+    stages_response = client.get("/workflow/stages")
+    topology_response = client.get("/workflow/topology")
+
+    assert stages_response.status_code == 200
+    assert stages_response.json()["stages"][0]["max_inflight"] == 6
+    assert stages_response.json()["stages"][0]["accepted_actions"][0]["action"] == "plan"
+    assert topology_response.status_code == 200
+    assert topology_response.json()["stages"][0]["role"] == "planner"
 
 
 def test_workflow_graph_mermaid_sanitizes_and_uniquifies_stage_node_ids() -> None:

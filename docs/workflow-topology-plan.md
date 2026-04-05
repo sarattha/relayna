@@ -86,6 +86,20 @@ and API behavior.
 - `queue`
 - `binding_keys`
 - `publish_routing_key`
+- `description`
+- `role`
+- `owner`
+- `tags`
+- `sla_ms`
+- `accepted_actions`
+- `produced_actions`
+- `allowed_next_stages`
+- `terminal`
+- `timeout_seconds`
+- `max_retries`
+- `retry_delay_ms`
+- `max_inflight`
+- `dedup_key_fields`
 - `queue_arguments_overrides`
 - `queue_kwargs`
 
@@ -111,6 +125,9 @@ Validation rules:
 - entry route names must be unique
 - each stage must have at least one binding key
 - each stage must define one default `publish_routing_key`
+- action definitions within `accepted_actions` and `produced_actions` must be unique
+- `allowed_next_stages` must reference existing stages
+- `terminal` stages cannot define downstream transitions or produced actions
 - entry routes must target an existing stage
 - duplicate queue-argument keys across built-ins, overrides, and kwargs fail
   fast

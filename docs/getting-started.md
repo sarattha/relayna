@@ -896,6 +896,7 @@ flowchart LR
 ### Constructing the topology
 
 ```python
+from relayna.contracts import ActionSchema, PayloadSchema
 from relayna.topology import SharedStatusWorkflowTopology, WorkflowEntryRoute, WorkflowStage
 
 topology = SharedStatusWorkflowTopology(
@@ -911,6 +912,20 @@ topology = SharedStatusWorkflowTopology(
             queue="cq.topic_planner.in_queue",
             binding_keys=("planner.topic_planner.in",),
             publish_routing_key="planner.topic_planner.in",
+            role="planner",
+            description="Initial workflow planning stage",
+            accepted_actions=(
+                ActionSchema(
+                    action="plan",
+                    payload=PayloadSchema(name="plan_payload", required_fields=("query",)),
+                ),
+            ),
+            produced_actions=(ActionSchema(action="draft"),),
+            allowed_next_stages=("docsearch_planner", "planner_assembler"),
+            timeout_seconds=30.0,
+            max_retries=3,
+            retry_delay_ms=1000,
+            max_inflight=8,
         ),
         WorkflowStage(
             name="docsearch_planner",

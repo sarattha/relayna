@@ -24,6 +24,11 @@ This package owns topology declarations only. Use it to choose the queue and
 exchange shape your service should run with. It does not own publishing,
 consumer runtimes, or Redis-backed status storage.
 
+For workflow topologies, `WorkflowStage` is the primary contract surface. It
+now carries both transport configuration and optional execution-contract
+metadata such as accepted/produced actions, downstream stage constraints,
+timeouts, retry overrides, local inflight limits, and dedup/idempotency keys.
+
 For sharded topologies, `aggregation_queue_template` and
 `aggregation_queue_name_prefix` let you namespace aggregation queues per
 deployment or test environment. Topology constructors also expose first-class
@@ -136,8 +141,10 @@ Workflow control-plane helpers:
 - `WorkflowDiagnosis`
 
 This package owns orchestration concepts that sit above message transport:
-policies, allowed transitions, fan-in state, run-state read models, replay, and
-operator diagnostics.
+fan-in state, run-state read models, replay, and operator diagnostics.
+`StageRegistry`, `StagePolicy`, and `TransitionRule` remain available as
+compatibility adapters, but `WorkflowStage` is the preferred configuration
+surface for new workflow definitions.
 
 ## `relayna.mcp`
 

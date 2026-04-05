@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from ..topology.workflow import SharedStatusWorkflowTopology
+from ..topology.workflow_contract import serialize_workflow_stage
 from ..topology.workflow_graph import export_workflow_graph
 
 
@@ -23,12 +24,10 @@ def create_workflow_router(
         return JSONResponse(
             {
                 "stages": [
-                    {
-                        "name": stage,
-                        "queue": topology.workflow_queue_name(stage),
-                        "binding_keys": list(topology.workflow_binding_keys(stage)),
-                        "publish_routing_key": topology.workflow_publish_routing_key(stage),
-                    }
+                    serialize_workflow_stage(
+                        topology.workflow_stage(stage),
+                        queue_arguments=topology.workflow_queue_arguments(stage),
+                    )
                     for stage in topology.workflow_stage_names()
                 ]
             }
