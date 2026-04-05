@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .workflow import SharedStatusWorkflowTopology
+from .workflow_contract import serialize_workflow_stage
 
 
 def export_workflow_graph(topology: SharedStatusWorkflowTopology) -> dict[str, Any]:
@@ -14,13 +15,10 @@ def export_workflow_graph(topology: SharedStatusWorkflowTopology) -> dict[str, A
     edges: list[dict[str, str]] = []
     for stage in topology.workflow_stage_names():
         stages.append(
-            {
-                "id": stage,
-                "queue": topology.workflow_queue_name(stage),
-                "binding_keys": list(topology.workflow_binding_keys(stage)),
-                "publish_routing_key": topology.workflow_publish_routing_key(stage),
-                "queue_arguments": topology.workflow_queue_arguments(stage),
-            }
+            serialize_workflow_stage(
+                topology.workflow_stage(stage),
+                queue_arguments=topology.workflow_queue_arguments(stage),
+            )
         )
 
     for source in topology.workflow_stage_names():

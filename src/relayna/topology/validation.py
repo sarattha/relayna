@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .workflow import SharedStatusWorkflowTopology
+from .workflow_contract import serialize_workflow_stage
 
 
 def validate_topology(topology: Any) -> list[str]:
@@ -19,6 +20,10 @@ def validate_topology(topology: Any) -> list[str]:
                 errors.append(f"workflow stage '{stage}' must define a queue name")
             if not topology.workflow_binding_keys(stage):
                 errors.append(f"workflow stage '{stage}' must define at least one binding key")
+            resolved = topology.workflow_stage(stage)
+            for downstream in resolved.allowed_next_stages:
+                if downstream not in topology.workflow_stage_names():
+                    errors.append(f"workflow stage '{stage}' references unknown downstream stage '{downstream}'")
     return errors
 
 
@@ -31,12 +36,10 @@ def summarize_topology(topology: Any) -> dict[str, Any]:
     if topology.workflow_exchange_name() is not None:
         summary["workflow_exchange"] = topology.workflow_exchange_name()
         summary["workflow_stages"] = [
-            {
-                "name": stage,
-                "queue": topology.workflow_queue_name(stage),
-                "binding_keys": list(topology.workflow_binding_keys(stage)),
-                "publish_routing_key": topology.workflow_publish_routing_key(stage),
-            }
+            serialize_workflow_stage(
+                topology.workflow_stage(stage),
+                queue_arguments=topology.workflow_queue_arguments(stage),
+            )
             for stage in topology.workflow_stage_names()
         ]
     else:

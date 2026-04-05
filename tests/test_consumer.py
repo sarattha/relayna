@@ -19,7 +19,7 @@ from relayna.consumer import (
     WorkflowConsumer,
     WorkflowContext,
 )
-from relayna.contracts import StatusEventEnvelope, WorkflowEnvelope
+from relayna.contracts import ActionSchema, PayloadSchema, StatusEventEnvelope, WorkflowEnvelope
 from relayna.dlq import DLQRecord
 from relayna.observability import (
     ConsumerDeadLetterPublished,
@@ -313,6 +313,68 @@ class FakeDLQStore:
         if self.fail:
             raise RuntimeError("dlq store unavailable")
         self.records.append(record)
+
+
+class FakeContractStore:
+    def __init__(self, *, acquire_result: bool = True) -> None:
+        self.acquire_result = acquire_result
+        self.acquire_calls: list[dict[str, Any]] = []
+        self.release_calls: list[dict[str, Any]] = []
+        self.inflight_mark_calls: list[dict[str, Any]] = []
+        self.inflight_clear_calls: list[dict[str, Any]] = []
+
+    async def acquire_dedup(
+        self,
+        *,
+        stage: str,
+        task_id: str,
+        action: str | None,
+        payload: dict[str, Any],
+        dedup_key_fields: tuple[str, ...],
+    ) -> bool:
+        self.acquire_calls.append(
+            {
+                "stage": stage,
+                "task_id": task_id,
+                "action": action,
+                "payload": dict(payload),
+                "dedup_key_fields": tuple(dedup_key_fields),
+            }
+        )
+        return self.acquire_result
+
+    async def release_dedup(
+        self,
+        *,
+        stage: str,
+        task_id: str,
+        action: str | None,
+        payload: dict[str, Any],
+        dedup_key_fields: tuple[str, ...],
+    ) -> None:
+        self.release_calls.append({"stage": stage, "task_id": task_id, "action": action})
+
+    async def mark_inflight(
+        self,
+        *,
+        stage: str,
+        task_id: str,
+        action: str | None,
+        payload: dict[str, Any],
+        dedup_key_fields: tuple[str, ...],
+    ) -> None:
+        self.inflight_mark_calls.append({"stage": stage, "task_id": task_id, "action": action})
+
+    async def clear_inflight(
+        self,
+        *,
+        stage: str,
+        task_id: str,
+        action: str | None,
+        payload: dict[str, Any],
+        dedup_key_fields: tuple[str, ...],
+    ) -> None:
+        self.inflight_clear_calls.append({"stage": stage, "task_id": task_id, "action": action})
 
 
 def make_topology() -> SharedTasksSharedStatusTopology:
@@ -2178,3 +2240,346 @@ async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure()
     assert message.acked is True
     assert rabbit.raw_queue_publishes[0]["queue_name"] == "cq.docsearch_planner.in_queue.retry"
     assert rabbit.published_statuses[0]["status"] == "retrying"
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_rejects_unsupported_action_when_retry_enabled() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                accepted_actions=(ActionSchema(action="collect"),),
+            ),
+        ),
+    )
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "action": "review",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+    handler_calls = 0
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        nonlocal handler_calls
+        handler_calls += 1
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert handler_calls == 0
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "unsupported_action"
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_rejects_payload_schema_violations_when_retry_enabled() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                accepted_actions=(
+                    ActionSchema(
+                        action="collect",
+                        payload=PayloadSchema(name="collect_payload", required_fields=("query",)),
+                    ),
+                ),
+            ),
+        ),
+    )
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "action": "collect",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        raise AssertionError("handler should not run")
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "payload_schema_violation"
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_uses_stage_timeout_reason_for_retries() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                timeout_seconds=0.01,
+            ),
+        ),
+    )
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        await asyncio.sleep(0.05)
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "stage_timeout"
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_stage_retry_settings_override_consumer_defaults() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                max_retries=1,
+                retry_delay_ms=250,
+            ),
+        ),
+    )
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_policy=RetryPolicy(max_retries=5, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert rabbit.retry_infrastructure_calls[0]["delay_ms"] == 250
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-max-retries"] == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_uses_stage_max_inflight_for_prefetch() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                max_inflight=7,
+            ),
+        ),
+    )
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        return None
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert rabbit.acquire_channel_calls[0] == 7
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_requires_contract_store_for_dedup_stage() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                dedup_key_fields=("doc_id",),
+            ),
+        ),
+    )
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[])
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        return None
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+    )
+
+    with pytest.raises(RuntimeError, match="requires contract_store"):
+        await consumer.run_forever()
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_short_circuits_on_dedup_conflict() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="docsearch_planner",
+                queue="cq.docsearch_planner.in_queue",
+                binding_keys=("planner.docsearch_planner.in",),
+                publish_routing_key="planner.docsearch_planner.in",
+                dedup_key_fields=("doc_id",),
+            ),
+        ),
+    )
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "action": "collect",
+                "payload": {"doc_id": "abc"},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[channel])
+    contract_store = FakeContractStore(acquire_result=False)
+    handler_calls = 0
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        nonlocal handler_calls
+        handler_calls += 1
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+        contract_store=contract_store,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert handler_calls == 0
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "dedup_conflict"
+    assert contract_store.acquire_calls
+    assert not contract_store.inflight_mark_calls

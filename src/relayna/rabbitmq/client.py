@@ -36,6 +36,7 @@ from ..topology import (
     TaskIdRoutingStrategy,
     TaskTypeRoutingStrategy,
 )
+from ..topology.workflow_contract import validate_publish_contract
 
 
 class RelaynaRabbitClient:
@@ -260,6 +261,7 @@ class RelaynaRabbitClient:
         if self._workflow_exchange is None:
             raise RuntimeError("Workflow exchange is not initialized")
         workflow_payload = self._prepare_workflow_payload(payload)
+        self._validate_workflow_contract(workflow_payload)
         self._validate_workflow_priority(workflow_payload)
         message_headers = {
             "task_id": str(workflow_payload.get("task_id", "")),
@@ -454,6 +456,21 @@ class RelaynaRabbitClient:
             cast(int | None, workflow.get("priority")),
             max_priority=self._resolved_workflow_max_priority(stage),
             kind="workflow",
+        )
+
+    def _validate_workflow_contract(self, workflow: Mapping[str, Any]) -> None:
+        if not isinstance(self._topology, SharedStatusWorkflowTopology):
+            return
+        target_stage = str(workflow.get("stage") or "").strip()
+        if not target_stage:
+            return
+        payload = workflow.get("payload")
+        validate_publish_contract(
+            self._topology,
+            target_stage=target_stage,
+            action=cast(str | None, workflow.get("action")),
+            payload=payload if isinstance(payload, Mapping) else {},
+            source_stage=str(workflow.get("origin_stage") or "").strip() or None,
         )
 
     def _validate_priority_against_limit(self, priority: int | None, *, max_priority: Any, kind: str) -> None:

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ..topology.workflow import WorkflowStage
+
 
 @dataclass(slots=True, frozen=True)
 class StageMetadata:
@@ -13,10 +15,25 @@ class StageMetadata:
     expected_actions: tuple[str, ...] = ()
     concurrency_hint: int | None = None
 
+    @classmethod
+    def from_stage(cls, stage: WorkflowStage) -> StageMetadata:
+        return cls(
+            name=stage.name,
+            description=stage.description,
+            owner=stage.owner,
+            tags=tuple(stage.tags),
+            expected_actions=tuple(action.action for action in stage.accepted_actions),
+            concurrency_hint=stage.max_inflight,
+        )
+
 
 class StageRegistry:
     def __init__(self, items: tuple[StageMetadata, ...] = ()) -> None:
         self._items = {item.name: item for item in items}
+
+    @classmethod
+    def from_stages(cls, stages: tuple[WorkflowStage, ...]) -> StageRegistry:
+        return cls(tuple(StageMetadata.from_stage(stage) for stage in stages))
 
     def register(self, item: StageMetadata) -> None:
         self._items[item.name] = item
