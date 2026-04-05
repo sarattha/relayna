@@ -394,9 +394,7 @@ class SharedStatusWorkflowTopology:
 __all__ = ["SharedStatusWorkflowTopology", "WorkflowEntryRoute", "WorkflowStage"]
 
 
-def _validate_action_schema_collection(
-    actions: tuple[ActionSchema, ...], *, stage_name: str, field_name: str
-) -> None:
+def _validate_action_schema_collection(actions: tuple[ActionSchema, ...], *, stage_name: str, field_name: str) -> None:
     names: list[str] = []
     for action in actions:
         action_name = str(action.action).strip()
