@@ -16,7 +16,7 @@ from relayna.observability import (
     SSEStreamEnded,
     SSEStreamStarted,
 )
-from relayna.sse import SSEStatusStream
+from relayna.status import SSEStatusStream
 
 
 class FakePubSubIterator:

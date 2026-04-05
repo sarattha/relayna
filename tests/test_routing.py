@@ -1049,7 +1049,7 @@ async def test_sharded_topology_client_initialize_works_on_python_313_slots_data
         assert url == "amqp://guest:guest@localhost:5672/?name=relayna-robust"
         return connection
 
-    monkeypatch.setattr("relayna.rabbitmq.aio_pika.connect_robust", fake_connect_robust)
+    monkeypatch.setattr("relayna.rabbitmq.client.aio_pika.connect_robust", fake_connect_robust)
 
     client = RelaynaRabbitClient(topology=topology)
 

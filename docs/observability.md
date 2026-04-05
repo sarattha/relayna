@@ -5,6 +5,11 @@ callbacks. The library emits typed dataclass events from long-running loops such
 as SSE streaming, worker consumption, and status fanout, but it does not ship a
 logging backend, metrics registry, or tracing exporter.
 
+`relayna.observability` owns the event model plus collector and exporter
+helpers. It does not own status storage, FastAPI routes, or worker runtime
+execution; those live in `relayna.status`, `relayna.api`, and
+`relayna.consumer`.
+
 ## How it works
 
 Observability in `relayna` is built around two public concepts from
@@ -61,8 +66,8 @@ Example with multiple components:
 
 ```python
 from relayna.consumer import TaskConsumer
-from relayna.sse import SSEStatusStream
-from relayna.status_hub import StatusHub
+from relayna.status import SSEStatusStream
+from relayna.status import StatusHub
 
 
 async def sink(event) -> None:

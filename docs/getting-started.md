@@ -45,6 +45,24 @@ API.
 - `SharedStatusWorkflowTopology`: one workflow topic exchange, one durable inbox
   queue per consuming stage, and one shared status queue/stream.
 
+## Package map
+
+The v2 API is organized by responsibility. In practice:
+
+- import topology classes and graph helpers from `relayna.topology`
+- import task, status, and workflow envelopes from `relayna.contracts`
+- import publishing and declaration helpers from `relayna.rabbitmq`
+- import worker runtimes and handler contexts from `relayna.consumer`
+- import Redis-backed latest/history storage, `StatusHub`, SSE, and stream
+  replay from `relayna.status`
+- import FastAPI lifespan and route helpers from `relayna.api`
+- import DLQ indexing and replay services from `relayna.dlq`
+- import workflow control-plane helpers from `relayna.workflow`
+- import observation events and exporters from `relayna.observability`
+
+`relayna.storage` is internal support code and is not part of the documented
+public API.
+
 ## Topology naming guidance
 
 Shared topology resources are usually namespaced by exchange, queue, and Redis
@@ -202,7 +220,7 @@ status endpoints.
 from fastapi import FastAPI
 
 from relayna.dlq import DLQService
-from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.api import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.rabbitmq import RelaynaRabbitClient
 from relayna.topology import SharedTasksSharedStatusTopology
 
@@ -705,7 +723,7 @@ from redis.asyncio import Redis
 
 from relayna.consumer import RetryPolicy, TaskConsumer
 from relayna.dlq import DLQService, RedisDLQStore
-from relayna.fastapi import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
+from relayna.api import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
 
 dlq_store_prefix = "relayna-dlq"
 worker_dlq_store = RedisDLQStore(Redis.from_url("redis://localhost:6379/0"), prefix=dlq_store_prefix)
@@ -1522,7 +1540,7 @@ terminate correctly.
 
 ```python
 from relayna.contracts import TerminalStatusSet
-from relayna.fastapi import create_relayna_lifespan
+from relayna.api import create_relayna_lifespan
 
 app = FastAPI(
     lifespan=create_relayna_lifespan(
@@ -1538,7 +1556,7 @@ app = FastAPI(
 ```python
 from redis.asyncio import Redis
 
-from relayna.status_store import RedisStatusStore
+from relayna.status import RedisStatusStore
 
 redis = Redis.from_url("redis://localhost:6379/0")
 store = RedisStatusStore(redis, prefix="relayna", ttl_seconds=86400, history_maxlen=50)
@@ -1547,7 +1565,7 @@ store = RedisStatusStore(redis, prefix="relayna", ttl_seconds=86400, history_max
 ## Status bridge
 
 ```python
-from relayna.status_hub import StatusHub
+from relayna.status import StatusHub
 
 hub = StatusHub(rabbitmq=client, store=store)
 await hub.run_forever()

@@ -14,7 +14,7 @@ from relayna.observability import (
     StatusHubStoredEvent,
     StatusHubStoreWriteFailed,
 )
-from relayna.status_hub import StatusHub
+from relayna.status import StatusHub
 from relayna.topology import SharedTasksSharedStatusTopology
 
 
@@ -225,7 +225,7 @@ async def test_status_hub_emits_loop_error_observation(monkeypatch: pytest.Monke
     async def fake_sleep(delay: float) -> None:
         await original_sleep(0)
 
-    monkeypatch.setattr("relayna.status_hub.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("relayna.status.hub.asyncio.sleep", fake_sleep)
 
     await hub.run_forever()
 

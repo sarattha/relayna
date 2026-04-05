@@ -27,8 +27,26 @@ jobs:
       - name: Sync dependencies
         run: uv sync --extra dev
 
-      - name: Run tests
-        run: uv run pytest -q
+      - name: Run make format
+        run: make format
+
+      - name: Verify formatting left no changes
+        run: git diff --exit-code
+
+      - name: Run make fix
+        run: make fix
+
+      - name: Verify fixes left no changes
+        run: git diff --exit-code
+
+      - name: Run make lint
+        run: make lint
+
+      - name: Run make typecheck
+        run: make typecheck
+
+      - name: Run make test
+        run: make test
 
       - name: Build artifacts
         run: uv build
@@ -49,12 +67,14 @@ jobs:
               "relayna.contracts",
               "relayna.rabbitmq",
               "relayna.consumer",
-              "relayna.status_store",
-              "relayna.status_hub",
-              "relayna.sse",
-              "relayna.history",
-              "relayna.fastapi",
+              "relayna.status",
+              "relayna.api",
+              "relayna.workflow",
               "relayna.observability",
+              "relayna.topology",
+              "relayna.mcp",
+              "relayna.studio",
+              "relayna.dlq",
           ]
           for name in modules:
               importlib.import_module(name)
