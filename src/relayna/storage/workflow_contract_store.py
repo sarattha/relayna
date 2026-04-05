@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
-from typing import Any, Protocol
+from collections.abc import Awaitable, Mapping, Sequence
+from typing import Any, Protocol, cast
 
 from redis.asyncio import Redis
 
@@ -120,7 +120,7 @@ class RedisWorkflowContractStore:
             },
             sort_keys=True,
         )
-        await self.redis.hset(key, signature, value)
+        await cast(Awaitable[int], self.redis.hset(key, signature, value))
         if self.ttl_seconds is not None:
             await self.redis.expire(key, self.ttl_seconds)
 
@@ -140,7 +140,7 @@ class RedisWorkflowContractStore:
             payload=payload,
             dedup_key_fields=dedup_key_fields,
         )
-        await self.redis.hdel(key, signature)
+        await cast(Awaitable[int], self.redis.hdel(key, signature))
 
     def _dedup_key(
         self,
