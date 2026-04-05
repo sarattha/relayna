@@ -1,7 +1,14 @@
 from relayna.api import create_replay_router, create_workflow_router
 from relayna.mcp import RelaynaMCPServer, inspect_topology
 from relayna.studio import build_run_view, build_topology_view
-from relayna.topology import build_linear_workflow_topology, export_workflow_graph
+from relayna.topology import (
+    SharedStatusWorkflowTopology,
+    WorkflowEntryRoute,
+    WorkflowStage,
+    build_linear_workflow_topology,
+    export_workflow_graph,
+    workflow_graph_mermaid,
+)
 from relayna.workflow import WorkflowRunState
 
 
@@ -65,3 +72,41 @@ def test_studio_topology_view_counts_graph_items() -> None:
     payload = build_topology_view(topology)
 
     assert payload["stage_count"] == 2
+
+
+def test_workflow_graph_mermaid_sanitizes_and_uniquifies_stage_node_ids() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="writer-stage",
+                queue="workflow.writer-stage",
+                binding_keys=("writer-stage.in",),
+                publish_routing_key="writer-stage.in",
+            ),
+            WorkflowStage(
+                name="writer.stage",
+                queue="workflow.writer.stage",
+                binding_keys=("writer.stage.in",),
+                publish_routing_key="writer.stage.in",
+            ),
+        ),
+        entry_routes=(
+            WorkflowEntryRoute(
+                name="start-route",
+                routing_key="writer.stage.in",
+                target_stage="writer.stage",
+            ),
+        ),
+    )
+
+    graph = workflow_graph_mermaid(topology)
+
+    assert 'stage_writer_stage["writer-stage\\nworkflow.writer-stage"]' in graph
+    assert 'stage_writer_stage_2["writer.stage\\nworkflow.writer.stage"]' in graph
+    assert 'entry_start_route["start-route\\nwriter.stage.in"] --> stage_writer_stage_2' in graph
+    assert "stage_writer_stage -->|writer-stage.in| stage_writer_stage" in graph
+    assert "stage_writer_stage_2 -->|writer.stage.in| stage_writer_stage_2" in graph

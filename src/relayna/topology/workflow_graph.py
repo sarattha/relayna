@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from typing import Any
 
 from .workflow import SharedStatusWorkflowTopology
@@ -48,15 +50,41 @@ def export_workflow_graph(topology: SharedStatusWorkflowTopology) -> dict[str, A
 
 def workflow_graph_mermaid(topology: SharedStatusWorkflowTopology) -> str:
     graph = export_workflow_graph(topology)
+    stage_node_ids = _build_mermaid_node_ids((stage["id"] for stage in graph["stages"]), prefix="stage")
+    entry_node_ids = _build_mermaid_node_ids((route["name"] for route in graph["entry_routes"]), prefix="entry")
     lines = ["flowchart LR"]
     for stage in graph["stages"]:
-        lines.append(f'    {stage["id"]}["{stage["id"]}\\n{stage["queue"]}"]')
+        node_id = stage_node_ids[stage["id"]]
+        lines.append(f'    {node_id}["{stage["id"]}\\n{stage["queue"]}"]')
     for route in graph["entry_routes"]:
-        node_id = f"entry_{route['name'].replace('-', '_')}"
-        lines.append(f'    {node_id}["{route["name"]}\\n{route["routing_key"]}"] --> {route["target_stage"]}')
+        node_id = entry_node_ids[route["name"]]
+        target_stage = stage_node_ids[route["target_stage"]]
+        lines.append(f'    {node_id}["{route["name"]}\\n{route["routing_key"]}"] --> {target_stage}')
     for edge in graph["edges"]:
-        lines.append(f"    {edge['source']} -->|{edge['routing_key']}| {edge['target']}")
+        source = stage_node_ids[edge["source"]]
+        target = stage_node_ids[edge["target"]]
+        lines.append(f"    {source} -->|{edge['routing_key']}| {target}")
     return "\n".join(lines)
+
+
+def _build_mermaid_node_ids(names: Iterable[str], *, prefix: str) -> dict[str, str]:
+    identifiers: dict[str, str] = {}
+    used: set[str] = set()
+    for name in names:
+        base = f"{prefix}_{_sanitize_mermaid_identifier(name)}"
+        candidate = base
+        suffix = 2
+        while candidate in used:
+            candidate = f"{base}_{suffix}"
+            suffix += 1
+        identifiers[name] = candidate
+        used.add(candidate)
+    return identifiers
+
+
+def _sanitize_mermaid_identifier(name: str) -> str:
+    sanitized = re.sub(r"[^0-9A-Za-z_]", "_", name).strip("_")
+    return sanitized or "node"
 
 
 def _topic_binding_matches(binding_key: str, routing_key: str) -> bool:
