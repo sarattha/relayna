@@ -7,10 +7,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import relayna.fastapi as relayna_fastapi
+import relayna.api.fastapi_lifespan as relayna_fastapi
+from relayna.api import create_dlq_router, create_status_router
 from relayna.contracts import ContractAliasConfig
-from relayna.dlq import DLQRecord, DLQRecordState, DLQService, build_dlq_record
-from relayna.fastapi import create_dlq_router, create_status_router
+from relayna.dlq import DLQRecord, DLQRecordState, DLQReplayConflict, DLQService, build_dlq_record
 from relayna.topology import SharedTasksSharedStatusTopology
 
 
@@ -293,7 +293,7 @@ class FakeDLQStore:
         if record is None:
             return None
         if record.state == DLQRecordState.REPLAYED and not force:
-            raise relayna_fastapi.DLQReplayConflict(dlq_id)
+            raise DLQReplayConflict(dlq_id)
         return record
 
     async def release_replay_claim(self, dlq_id: str) -> None:

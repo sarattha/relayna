@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from relayna.status_store import RedisStatusStore
+from relayna.status import RedisStatusStore
 
 
 class FakePipeline:

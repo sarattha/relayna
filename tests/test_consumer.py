@@ -1102,7 +1102,7 @@ async def test_task_consumer_retries_after_unexpected_errors(monkeypatch: pytest
     async def handler(task: Any, context: TaskContext) -> None:
         return None
 
-    monkeypatch.setattr("relayna.consumer.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("relayna.consumer.task_consumer.asyncio.sleep", fake_sleep)
     consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, idle_retry_seconds=0.25)
 
     await run_consumer_until_message_done(consumer, message)
@@ -1261,7 +1261,7 @@ async def test_task_consumer_emits_loop_error_observation(monkeypatch: pytest.Mo
     async def handler(task: Any, context: TaskContext) -> None:
         return None
 
-    monkeypatch.setattr("relayna.consumer.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr("relayna.consumer.task_consumer.asyncio.sleep", fake_sleep)
     consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, idle_retry_seconds=0.25, observation_sink=sink)
 
     await run_consumer_until_message_done(consumer, message)
@@ -1866,7 +1866,7 @@ async def test_aggregation_worker_runtime_stop_cancels_stuck_tasks(monkeypatch: 
         del awaitable, timeout
         raise TimeoutError
 
-    monkeypatch.setattr("relayna.consumer.asyncio.wait_for", fake_wait_for)
+    monkeypatch.setattr("relayna.consumer.lifecycle.asyncio.wait_for", fake_wait_for)
 
     await runtime.stop()
 

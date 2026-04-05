@@ -4,9 +4,26 @@ site_url: https://sarattha.github.io/relayna/
 repo_url: https://github.com/sarattha/relayna
 repo_name: sarattha/relayna
 theme:
-  name: readthedocs
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+  palette:
+    scheme: default
+    primary: white
+    accent: teal
+  font:
+    text: Manrope
+    code: JetBrains Mono
 nav:
   - Overview: index.md
+  - Migration v1 to v2: migration-v1-to-v2.md
   - Getting Started: getting-started.md
   - Components: components.md
   - Observability: observability.md
@@ -20,3 +37,5 @@ markdown_extensions:
 extra_javascript:
   - https://unpkg.com/mermaid@11/dist/mermaid.min.js
   - assets/mermaid-init.js
+extra_css:
+  - assets/stylesheets/extra.css

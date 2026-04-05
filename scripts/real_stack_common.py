@@ -8,9 +8,9 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI
 
+from relayna.api import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.contracts import ContractAliasConfig, TerminalStatusSet
 from relayna.dlq import DLQService
-from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.topology import (
     RelaynaTopology,
     SharedStatusWorkflowTopology,

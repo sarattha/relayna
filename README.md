@@ -49,7 +49,7 @@ uv sync --extra dev
 ```python
 from fastapi import FastAPI
 
-from relayna.fastapi import create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.api import create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.topology import SharedTasksSharedStatusTopology
 
 topology = SharedTasksSharedStatusTopology(
@@ -83,6 +83,50 @@ This setup gives you:
 - `GET /events/{task_id}` for SSE status updates
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
+
+## Package ownership
+
+Relayna v2 is organized around package roots with explicit responsibility
+boundaries:
+
+- `relayna.topology`
+  Owns topology declarations, routing strategies, workflow topology shapes, and
+  topology graph helpers.
+- `relayna.contracts`
+  Owns canonical task, status, and workflow envelopes plus alias and
+  compatibility helpers.
+- `relayna.rabbitmq`
+  Owns RabbitMQ transport behavior: client lifecycle, declarations, publish
+  helpers, routing resolution, and retry infrastructure.
+- `relayna.consumer`
+  Owns worker runtimes, handler contexts, lifecycle helpers, middleware, and
+  idempotency support.
+- `relayna.status`
+  Owns user-visible status state: Redis latest/history storage, the
+  RabbitMQ-to-Redis `StatusHub`, SSE delivery, and bounded stream replay.
+- `relayna.api`
+  Owns FastAPI runtime wiring and route factories. It composes `relayna.status`,
+  `relayna.rabbitmq`, and optional `relayna.dlq`; it does not own transport or
+  storage primitives itself.
+- `relayna.dlq`
+  Owns DLQ models, Redis-backed indexing, replay orchestration, and queue
+  summary helpers.
+- `relayna.observability`
+  Owns typed runtime observation events plus collector and exporter helpers.
+- `relayna.workflow`
+  Owns workflow control-plane concepts such as policies, transitions, fan-in,
+  lineage, replay, and diagnostics.
+- `relayna.mcp`
+  Owns MCP-facing resources, adapters, and operator tools built on top of the
+  runtime packages.
+- `relayna.studio`
+  Owns backend view-builders for the Studio frontend payloads.
+
+`relayna.storage` exists as an internal package for Redis models, repository
+helpers, and retention behavior. It is not part of the documented public API.
+
+If you are migrating an existing v1 codebase, use the dedicated guide:
+[docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
 
 ## Contract Aliases And Batch Tasks
 
@@ -190,7 +234,7 @@ classic queues do not support a read-only payload peek over AMQP.
 from fastapi import FastAPI
 
 from relayna.dlq import DLQService
-from relayna.fastapi import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
+from relayna.api import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
 
 app = FastAPI(
     lifespan=create_relayna_lifespan(
@@ -435,21 +479,23 @@ PYTHONPATH=src ./.venv/bin/python scripts/real_manual_retry_routed_smoke.py
 
 ## Public API
 
-The v1 semver-stable API is the documented surface of these submodules:
+The v2 public package roots are:
 
 - `relayna.topology`
 - `relayna.contracts`
+- `relayna.workflow`
 - `relayna.rabbitmq`
 - `relayna.consumer`
-- `relayna.status_store`
-- `relayna.status_hub`
-- `relayna.sse`
-- `relayna.history`
-- `relayna.fastapi`
-- `relayna.dlq`
+- `relayna.status`
 - `relayna.observability`
+- `relayna.api`
+- `relayna.mcp`
+- `relayna.studio`
+- `relayna.dlq`
 
 The package root is intentionally minimal and only exports `relayna.__version__`.
+Import concrete functionality from the package roots above rather than from
+`relayna` itself.
 
 ## Docs and releases
 

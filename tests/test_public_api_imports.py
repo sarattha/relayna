@@ -4,13 +4,13 @@ PUBLIC_MODULES = [
     "relayna.contracts",
     "relayna.rabbitmq",
     "relayna.consumer",
-    "relayna.status_store",
-    "relayna.status_hub",
-    "relayna.sse",
-    "relayna.history",
-    "relayna.fastapi",
+    "relayna.status",
+    "relayna.api",
+    "relayna.workflow",
     "relayna.observability",
     "relayna.topology",
+    "relayna.mcp",
+    "relayna.studio",
     "relayna.dlq",
 ]
 
