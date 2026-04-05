@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, is_dataclass
-from typing import Any, cast
+from typing import Any
 
 
 def event_to_dict(event: object) -> dict[str, Any]:
     if not isinstance(event, type) and is_dataclass(event):
-        return cast(dict[str, Any], asdict(event))
+        return asdict(event)
     return dict(vars(event))
 
 
