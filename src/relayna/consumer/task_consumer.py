@@ -10,6 +10,11 @@ from pydantic import ValidationError
 from ..contracts import BatchTaskEnvelope, ContractAliasConfig, StatusEventEnvelope, TaskEnvelope, is_batch_task_payload
 from ..dlq import DLQRecorder
 from ..observability import (
+    AggregationDeadLetterPublished,
+    AggregationHandlerFailed,
+    AggregationMessageAcked,
+    AggregationMessageReceived,
+    AggregationRetryScheduled,
     ConsumerDeadLetterPublished,
     ConsumerRetryScheduled,
     ObservationSink,
@@ -167,7 +172,10 @@ class TaskConsumer:
                     self._observation_sink,
                     TaskMessageRejected(
                         consumer_name=self._consumer_name,
+                        queue_name=source_queue_name,
                         task_id=None,
+                        correlation_id=getattr(message, "correlation_id", None),
+                        retry_attempt=_retry_attempt(message),
                         requeue=False,
                         reason="malformed_json",
                     ),
@@ -190,7 +198,11 @@ class TaskConsumer:
             self._observation_sink,
             TaskMessageReceived(
                 consumer_name=self._consumer_name,
+                queue_name=source_queue_name,
                 task_id=_coerce_task_id(normalized_payload),
+                correlation_id=getattr(message, "correlation_id", None),
+                retry_attempt=_retry_attempt(message),
+                task_type=_coerce_task_type(normalized_payload),
                 delivery_tag=getattr(message, "delivery_tag", None),
                 redelivered=bool(getattr(message, "redelivered", False)),
             ),
@@ -203,7 +215,10 @@ class TaskConsumer:
                     self._observation_sink,
                     TaskMessageRejected(
                         consumer_name=self._consumer_name,
+                        queue_name=source_queue_name,
                         task_id=None,
+                        correlation_id=getattr(message, "correlation_id", None),
+                        retry_attempt=_retry_attempt(message),
                         requeue=False,
                         reason="unsupported_batch_envelope",
                     ),
@@ -226,7 +241,11 @@ class TaskConsumer:
                     self._observation_sink,
                     TaskMessageRejected(
                         consumer_name=self._consumer_name,
+                        queue_name=source_queue_name,
                         task_id=_coerce_task_id(normalized_payload),
+                        correlation_id=getattr(message, "correlation_id", None),
+                        retry_attempt=_retry_attempt(message),
+                        task_type=_coerce_task_type(normalized_payload),
                         requeue=False,
                         reason="invalid_envelope",
                     ),
@@ -258,7 +277,14 @@ class TaskConsumer:
             await message.ack()
             await emit_observation(
                 self._observation_sink,
-                TaskMessageAcked(consumer_name=self._consumer_name, task_id=task.task_id),
+                TaskMessageAcked(
+                    consumer_name=self._consumer_name,
+                    queue_name=source_queue_name,
+                    task_id=task.task_id,
+                    correlation_id=context.correlation_id,
+                    retry_attempt=context.retry_attempt,
+                    task_type=task.task_type,
+                ),
             )
 
     async def _handle_batch_message(
@@ -316,7 +342,13 @@ class TaskConsumer:
 
         await message.ack()
         await emit_observation(
-            self._observation_sink, TaskMessageAcked(consumer_name=self._consumer_name, task_id=None)
+            self._observation_sink,
+            TaskMessageAcked(
+                consumer_name=self._consumer_name,
+                queue_name=source_queue_name,
+                task_id=None,
+                retry_attempt=_retry_attempt(message),
+            ),
         )
 
     def _make_task_context(
@@ -389,7 +421,11 @@ class TaskConsumer:
                 self._observation_sink,
                 TaskHandlerFailed(
                     consumer_name=self._consumer_name,
+                    queue_name=source_queue_name,
                     task_id=task.task_id,
+                    correlation_id=context.correlation_id,
+                    retry_attempt=context.retry_attempt,
+                    task_type=task.task_type,
                     exception_type=type(exc).__name__,
                     requeue=self._retry_policy is None and self._failure_action is FailureAction.REQUEUE,
                 ),
@@ -408,7 +444,11 @@ class TaskConsumer:
                         self._observation_sink,
                         TaskMessageRejected(
                             consumer_name=self._consumer_name,
+                            queue_name=source_queue_name,
                             task_id=task.task_id,
+                            correlation_id=context.correlation_id,
+                            retry_attempt=context.retry_attempt,
+                            task_type=task.task_type,
                             requeue=requeue,
                             reason="handler_error",
                         ),
@@ -472,7 +512,13 @@ class TaskConsumer:
             await emit_observation(
                 self._observation_sink,
                 TaskLifecycleStatusPublished(
-                    consumer_name=self._consumer_name, task_id=context._task_id, status=status
+                    consumer_name=self._consumer_name,
+                    queue_name=context.source_queue_name,
+                    task_id=context._task_id,
+                    correlation_id=context.correlation_id,
+                    retry_attempt=context.retry_attempt,
+                    task_type=_coerce_task_type(context.raw_payload),
+                    status=status,
                 ),
             )
         except asyncio.CancelledError:
@@ -552,6 +598,9 @@ class TaskConsumer:
                 consumer_name=self._consumer_name,
                 task_id=task_id,
                 queue_name=retry_infrastructure.retry_queue_name,
+                source_queue_name=source_queue_name,
+                correlation_id=correlation_id or getattr(message, "correlation_id", None),
+                task_type=_task_type_from_body(body or message.body, alias_config=self._alias_config),
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
                 reason=reason,
@@ -596,6 +645,9 @@ class TaskConsumer:
                 consumer_name=self._consumer_name,
                 task_id=task_id,
                 queue_name=retry_infrastructure.dead_letter_queue_name,
+                source_queue_name=source_queue_name,
+                correlation_id=correlation_id or getattr(message, "correlation_id", None),
+                task_type=_task_type_from_body(body or message.body, alias_config=self._alias_config),
                 retry_attempt=retry_attempt,
                 max_retries=self._retry_policy.max_retries,
                 reason=reason,
@@ -726,6 +778,19 @@ class AggregationConsumer:
                         current_retry_attempt = _retry_attempt(message)
                         headers = _message_headers(message)
                         manual_retry_meta = _manual_retry_meta_from_status(event.meta)
+                        await emit_observation(
+                            self._observation_sink,
+                            AggregationMessageReceived(
+                                consumer_name=self._consumer_name,
+                                queue_name=queue_name,
+                                task_id=event.task_id,
+                                parent_task_id=_parent_task_id_from_meta(event.meta),
+                                correlation_id=event.correlation_id or getattr(message, "correlation_id", None),
+                                retry_attempt=current_retry_attempt,
+                                delivery_tag=getattr(message, "delivery_tag", None),
+                                redelivered=bool(getattr(message, "redelivered", False)),
+                            ),
+                        )
                         context = TaskContext(
                             rabbitmq=self._rabbitmq,
                             consumer_name=self._consumer_name,
@@ -756,6 +821,18 @@ class AggregationConsumer:
                         except asyncio.CancelledError:
                             raise
                         except Exception as exc:
+                            await emit_observation(
+                                self._observation_sink,
+                                AggregationHandlerFailed(
+                                    consumer_name=self._consumer_name,
+                                    queue_name=queue_name,
+                                    task_id=event.task_id,
+                                    parent_task_id=_parent_task_id_from_meta(event.meta),
+                                    correlation_id=context.correlation_id,
+                                    retry_attempt=current_retry_attempt,
+                                    exception_type=type(exc).__name__,
+                                ),
+                            )
                             if self._retry_policy is None:
                                 await message.reject(requeue=False)
                                 continue
@@ -767,6 +844,7 @@ class AggregationConsumer:
                                     retry_infrastructure=retry_infrastructure,
                                     source_queue_name=queue_name,
                                     task_id=event.task_id,
+                                    parent_task_id=_parent_task_id_from_meta(event.meta),
                                     retry_attempt=next_attempt,
                                     max_retries=max_retries,
                                     reason="handler_error",
@@ -782,6 +860,7 @@ class AggregationConsumer:
                                 retry_infrastructure=retry_infrastructure,
                                 source_queue_name=queue_name,
                                 task_id=event.task_id,
+                                parent_task_id=_parent_task_id_from_meta(event.meta),
                                 retry_attempt=current_retry_attempt,
                                 reason="handler_error",
                                 exception_type=type(exc).__name__,
@@ -790,6 +869,17 @@ class AggregationConsumer:
                             await message.ack()
                             continue
                         await message.ack()
+                        await emit_observation(
+                            self._observation_sink,
+                            AggregationMessageAcked(
+                                consumer_name=self._consumer_name,
+                                queue_name=queue_name,
+                                task_id=event.task_id,
+                                parent_task_id=_parent_task_id_from_meta(event.meta),
+                                correlation_id=context.correlation_id,
+                                retry_attempt=current_retry_attempt,
+                            ),
+                        )
                         if self._stop.is_set():
                             break
             except asyncio.CancelledError:
@@ -848,6 +938,7 @@ class AggregationConsumer:
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
+        parent_task_id: str | None = None,
         retry_attempt: int,
         max_retries: int,
         reason: str,
@@ -871,10 +962,13 @@ class AggregationConsumer:
         )
         await emit_observation(
             self._observation_sink,
-            ConsumerRetryScheduled(
+            AggregationRetryScheduled(
                 consumer_name=self._consumer_name,
                 task_id=task_id,
+                parent_task_id=parent_task_id,
                 queue_name=retry_infrastructure.retry_queue_name,
+                source_queue_name=source_queue_name,
+                correlation_id=getattr(message, "correlation_id", None),
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
                 reason=reason,
@@ -888,6 +982,7 @@ class AggregationConsumer:
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
+        parent_task_id: str | None = None,
         retry_attempt: int,
         reason: str,
         exception_type: str | None,
@@ -911,10 +1006,13 @@ class AggregationConsumer:
         )
         await emit_observation(
             self._observation_sink,
-            ConsumerDeadLetterPublished(
+            AggregationDeadLetterPublished(
                 consumer_name=self._consumer_name,
                 task_id=task_id,
+                parent_task_id=parent_task_id,
                 queue_name=retry_infrastructure.dead_letter_queue_name,
+                source_queue_name=source_queue_name,
+                correlation_id=getattr(message, "correlation_id", None),
                 retry_attempt=retry_attempt,
                 max_retries=self._retry_policy.max_retries,
                 reason=reason,
@@ -937,6 +1035,30 @@ class AggregationConsumer:
             body=message.body,
             observation_sink=self._observation_sink,
         )
+
+
+def _coerce_task_type(payload: Mapping[str, Any] | Any) -> str | None:
+    if not isinstance(payload, Mapping):
+        return None
+    task_type = str(payload.get("task_type") or "").strip()
+    return task_type or None
+
+
+def _task_type_from_body(body: bytes | None, *, alias_config: ContractAliasConfig | None) -> str | None:
+    if body is None:
+        return None
+    try:
+        payload = json.loads(body.decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+    return _coerce_task_type(_normalize_payload(payload, alias_config=alias_config))
+
+
+def _parent_task_id_from_meta(meta: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(meta, Mapping):
+        return None
+    parent_task_id = str(meta.get("parent_task_id") or "").strip()
+    return parent_task_id or None
 
 
 __all__ = [

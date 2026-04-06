@@ -11,7 +11,8 @@ from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
 
 from ..contracts import ContractAliasConfig, TerminalStatusSet, public_output_aliases
-from ..dlq import RedisDLQStore
+from ..dlq import DLQService, RedisDLQStore
+from ..observability import ExecutionGraphService, RedisObservationStore
 from ..rabbitmq import RelaynaRabbitClient
 from ..status.history import StreamHistoryReader
 from ..status.hub import StatusHub
@@ -30,9 +31,11 @@ class RelaynaRuntime:
     redis: Redis
     store: RedisStatusStore
     dlq_store: RedisDLQStore | None
+    observation_store: RedisObservationStore | None
     hub: StatusHub
     sse_stream: SSEStatusStream
     history_reader: StreamHistoryReader
+    execution_graph_service: ExecutionGraphService
     hub_task: asyncio.Task[None] | None = None
 
 
@@ -55,6 +58,9 @@ class _RelaynaLifespan:
         history_output_adapter: HistoryOutputAdapter | None,
         dlq_store_prefix: str | None,
         dlq_store_ttl_seconds: int | None,
+        observation_store_prefix: str | None,
+        observation_store_ttl_seconds: int | None,
+        observation_history_maxlen: int,
         app_state_key: str,
         alias_config: ContractAliasConfig | None,
     ) -> None:
@@ -73,6 +79,9 @@ class _RelaynaLifespan:
         self._history_output_adapter = history_output_adapter
         self._dlq_store_prefix = dlq_store_prefix
         self._dlq_store_ttl_seconds = dlq_store_ttl_seconds
+        self._observation_store_prefix = observation_store_prefix
+        self._observation_store_ttl_seconds = observation_store_ttl_seconds
+        self._observation_history_maxlen = observation_history_maxlen
         self._app_state_key = app_state_key
         self._alias_config = alias_config
         self._runtime: RelaynaRuntime | None = None
@@ -101,6 +110,18 @@ class _RelaynaLifespan:
                     prefix=self._dlq_store_prefix,
                     ttl_seconds=self._dlq_store_ttl_seconds,
                 )
+            observation_store = None
+            if self._observation_store_prefix is not None:
+                observation_store = RedisObservationStore(
+                    redis,
+                    prefix=self._observation_store_prefix,
+                    ttl_seconds=(
+                        self._observation_store_ttl_seconds
+                        if self._observation_store_ttl_seconds is not None
+                        else self._store_ttl_seconds
+                    ),
+                    history_maxlen=self._observation_history_maxlen,
+                )
             hub_kwargs: dict[str, Any] = {
                 "rabbitmq": rabbitmq,
                 "store": store,
@@ -125,14 +146,24 @@ class _RelaynaLifespan:
             hub = StatusHub(**hub_kwargs)
             sse_stream = SSEStatusStream(**sse_kwargs)
             history_reader = StreamHistoryReader(**history_kwargs)
+            execution_graph_service = ExecutionGraphService(
+                topology=self._topology,
+                status_store=store,
+                observation_store=observation_store,
+                dlq_service=DLQService(rabbitmq=rabbitmq, dlq_store=dlq_store, status_store=store)
+                if dlq_store is not None
+                else None,
+            )
             self._runtime = RelaynaRuntime(
                 rabbitmq=rabbitmq,
                 redis=redis,
                 store=store,
                 dlq_store=dlq_store,
+                observation_store=observation_store,
                 hub=hub,
                 sse_stream=sse_stream,
                 history_reader=history_reader,
+                execution_graph_service=execution_graph_service,
             )
         return self._runtime
 
@@ -192,6 +223,9 @@ def create_relayna_lifespan(
     history_output_adapter: HistoryOutputAdapter | None = None,
     dlq_store_prefix: str | None = None,
     dlq_store_ttl_seconds: int | None = None,
+    observation_store_prefix: str | None = "relayna-observations",
+    observation_store_ttl_seconds: int | None = None,
+    observation_history_maxlen: int = 500,
     app_state_key: str = "relayna",
     alias_config: ContractAliasConfig | None = None,
 ) -> _RelaynaLifespan:
@@ -211,6 +245,9 @@ def create_relayna_lifespan(
         history_output_adapter=history_output_adapter,
         dlq_store_prefix=dlq_store_prefix,
         dlq_store_ttl_seconds=dlq_store_ttl_seconds,
+        observation_store_prefix=observation_store_prefix,
+        observation_store_ttl_seconds=observation_store_ttl_seconds,
+        observation_history_maxlen=observation_history_maxlen,
         app_state_key=app_state_key,
         alias_config=alias_config,
     )
