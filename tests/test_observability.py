@@ -85,6 +85,13 @@ async def test_redis_observation_store_skips_events_without_task_id() -> None:
     assert redis.history == {}
 
 
+def test_redis_observation_store_uses_runtime_default_prefix() -> None:
+    redis = FakeRedis()
+    store = RedisObservationStore(redis)
+
+    assert store.prefix == "relayna-observations"
+
+
 @pytest.mark.asyncio
 async def test_make_redis_observation_sink_persists_and_dedupes_events() -> None:
     redis = FakeRedis()

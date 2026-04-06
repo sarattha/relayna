@@ -59,6 +59,13 @@ class ExecutionGraph(BaseModel):
 
 
 @dataclass(slots=True)
+class _PendingRetryLink:
+    task_id: str
+    retry_node_id: str
+    retry_timestamp: str | None
+
+
+@dataclass(slots=True)
 class ExecutionGraphService:
     topology: RelaynaTopology
     status_store: RedisStatusStore
@@ -119,6 +126,7 @@ def build_execution_graph(
     stage_attempts: list[ExecutionGraphNode] = []
     workflow_message_nodes: dict[str, ExecutionGraphNode] = {}
     task_types: set[str] = set()
+    pending_retry_links: list[_PendingRetryLink] = []
 
     def add_node(node: ExecutionGraphNode) -> ExecutionGraphNode:
         existing = node_map.get(node.id)
@@ -353,16 +361,13 @@ def build_execution_graph(
                             annotations={"task_id": current_task_id},
                         )
                     )
-                next_attempt = _next_attempt(attempts_by_task.get(current_task_id, []), event_timestamp)
-                if next_attempt is not None:
-                    add_edge(
-                        ExecutionGraphEdge(
-                            source=retry_node.id,
-                            target=next_attempt.id,
-                            kind="received_by",
-                            timestamp=next_attempt.timestamp,
-                        )
+                pending_retry_links.append(
+                    _PendingRetryLink(
+                        task_id=current_task_id,
+                        retry_node_id=retry_node.id,
+                        retry_timestamp=event_timestamp,
                     )
+                )
                 continue
 
             if event_type in {"ConsumerDeadLetterPublished", "AggregationDeadLetterPublished"}:
@@ -448,6 +453,22 @@ def build_execution_graph(
                             timestamp=status_timestamp,
                         )
                     )
+
+    for pending_retry in pending_retry_links:
+        next_attempt = _next_attempt(
+            attempts_by_task.get(pending_retry.task_id, []),
+            pending_retry.retry_timestamp,
+        )
+        if next_attempt is None:
+            continue
+        add_edge(
+            ExecutionGraphEdge(
+                source=pending_retry.retry_node_id,
+                target=next_attempt.id,
+                kind="received_by",
+                timestamp=next_attempt.timestamp,
+            )
+        )
 
     for current_task_id, records in dlq_records.items():
         for index, record in enumerate(records, start=1):

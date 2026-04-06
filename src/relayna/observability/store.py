@@ -24,7 +24,7 @@ class RedisObservationStore:
         self,
         redis: Redis,
         *,
-        prefix: str = "relayna-observation",
+        prefix: str = "relayna-observations",
         ttl_seconds: int | None = 86400,
         history_maxlen: int = 500,
     ) -> None:

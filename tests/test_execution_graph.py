@@ -77,6 +77,12 @@ def test_build_execution_graph_shared_task_includes_retry_and_dlq_nodes() -> Non
     assert graph.summary.graph_completeness == "full"
     assert {"task", "task_attempt", "retry", "dlq_record", "status_event"} <= node_kinds
     assert {"received_by", "retried_as", "dead_lettered_to", "published_status"} <= edge_kinds
+    assert any(
+        edge.kind == "received_by"
+        and edge.source == "retry:task-123:1"
+        and edge.target == "task-attempt:task-123:2"
+        for edge in graph.edges
+    )
 
 
 def test_build_execution_graph_workflow_tracks_stage_transitions() -> None:
