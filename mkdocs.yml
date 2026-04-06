@@ -27,6 +27,7 @@ nav:
   - Getting Started: getting-started.md
   - Components: components.md
   - Observability: observability.md
+  - Execution Graphs: execution-graphs.md
   - Workflow Topology: workflow-topology-plan.md
   - Releases: releases.md
   - Development: development.md

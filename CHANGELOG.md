@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.3.4 - 2026-04-06
+
+### Added
+
+- First-class runtime execution graph support for every Relayna topology through `ExecutionGraph`, `ExecutionGraphService`, `build_execution_graph(...)`, and `GET /executions/{task_id}/graph`.
+- Redis-backed observation persistence via `RedisObservationStore` plus `make_redis_observation_sink(...)` so workers can persist task-linked runtime observations for later graph reconstruction.
+- Mermaid export via `execution_graph_mermaid(...)` and Studio backend view support via `build_execution_view(...)` for app rendering and docs/debug workflows.
+
+### Changed
+
+- `create_relayna_lifespan(...)` now exposes `observation_store`, `execution_graph_service`, and new observation-store configuration fields for HTTP runtimes that want execution-graph fidelity.
+- Consumer and workflow observation events now carry the routing, retry, queue, and lineage metadata needed to reconstruct retries, DLQ edges, sharded aggregation children, and workflow stage transitions.
+- `RedisStatusStore` now indexes child task ids from `meta.parent_task_id`, which lets aggregation execution graphs stitch child task timelines back onto the parent task graph.
+- The README, observability guide, getting-started guide, component reference, and hosted docs now document execution graphs, Mermaid export, React Flow rendering, and the worker/runtime wiring required for full graphs.
+- Release-install examples now reference `1.3.4`.
+- Bumped the package version to `1.3.4`.
+
 ### Added
 
 - `WorkflowStage` execution-contract fields for stage metadata, action schemas, allowed downstream stages, stage-local timeout/retry/inflight policy, and dedup key selection.

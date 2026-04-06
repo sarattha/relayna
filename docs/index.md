@@ -15,6 +15,8 @@ streaming.
 - supports RabbitMQ stream replay for bounded operational history reads
 - supports named RabbitMQ topologies for shared queues and shard-aware
   aggregation workers
+- supports task execution graph reconstruction, Mermaid export, and Studio
+  graph rendering for task, aggregation, and workflow runs
 
 ## Requirements
 
@@ -95,6 +97,7 @@ packages but is not itself a documented public API root.
 - [Migration v1 to v2](migration-v1-to-v2.md)
 - [Getting started](getting-started.md)
 - [Observability](observability.md)
+- [Execution graphs](execution-graphs.md)
 - [Components](components.md)
 - [Release installation](releases.md)
 - [Development](development.md)

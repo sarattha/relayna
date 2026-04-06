@@ -13,13 +13,13 @@ You need:
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.4/relayna-1.3.4-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.4/relayna-1.3.4.tar.gz
 ```
 
 For local work in this repository:
@@ -272,6 +272,107 @@ This exposes:
 - `GET /status/{task_id}`
 
 For a detailed observability walkthrough, see [Observability](observability.md).
+
+## Execution graph API
+
+Relayna can reconstruct a runtime execution graph for a task from:
+
+- Redis status history
+- persisted observation events
+- persisted DLQ records
+- parent-child aggregation lineage indexed from status `meta.parent_task_id`
+
+The graph API is topology-aware:
+
+- shared-task topologies produce task-attempt graphs
+- sharded aggregation topologies attach child tasks and `aggregated_into` edges
+- workflow topologies add explicit `workflow_message` and `stage_attempt` nodes
+
+Wire it into FastAPI like this:
+
+```python
+from fastapi import FastAPI
+from redis.asyncio import Redis
+
+from relayna.api import create_execution_router, create_relayna_lifespan, get_relayna_runtime
+from relayna.consumer import RetryPolicy, TaskConsumer
+from relayna.observability import RedisObservationStore, make_redis_observation_sink
+
+observation_store_prefix = "relayna-observations"
+worker_observation_store = RedisObservationStore(
+    Redis.from_url("redis://localhost:6379/0"),
+    prefix=observation_store_prefix,
+    ttl_seconds=86400,
+    history_maxlen=500,
+)
+
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    observation_sink=make_redis_observation_sink(worker_observation_store),
+)
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        observation_store_prefix=observation_store_prefix,
+        observation_store_ttl_seconds=86400,
+        observation_history_maxlen=500,
+    )
+)
+runtime = get_relayna_runtime(app)
+app.include_router(create_execution_router(execution_graph_service=runtime.execution_graph_service))
+```
+
+This adds:
+
+- `GET /executions/{task_id}/graph`
+
+Route behavior:
+
+- returns `404` only when Relayna has no status history, no observations, and
+  no DLQ records for that task
+- returns `summary.graph_completeness="full"` when persisted observations were
+  available
+- returns `summary.graph_completeness="partial"` when it had to fall back to
+  status and DLQ data only
+
+The response contains:
+
+- `task_id`
+- `topology_kind`
+- `summary`
+- `nodes`
+- `edges`
+- `annotations`
+- `related_task_ids`
+
+Standard node kinds:
+
+- `task`
+- `task_attempt`
+- `workflow_message`
+- `stage_attempt`
+- `status_event`
+- `retry`
+- `dlq_record`
+- `aggregation_child`
+
+Standard edge kinds:
+
+- `received_by`
+- `published_status`
+- `retried_as`
+- `dead_lettered_to`
+- `manual_retry_to`
+- `entered_stage`
+- `stage_transitioned_to`
+- `aggregated_into`
+
+For full route examples, Mermaid output, and Studio rendering guidance, see
+[Execution graphs](execution-graphs.md).
 
 ### Contract aliases
 
