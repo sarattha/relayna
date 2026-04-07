@@ -120,6 +120,7 @@ FastAPI integration helpers:
 - `get_relayna_runtime`
 - `create_status_router`
 - `sse_response`
+- `create_execution_router`
 - `create_workflow_router`
 - `create_dlq_router`
 
@@ -154,9 +155,10 @@ than owning transport or storage primitives itself.
 
 ## `relayna.studio`
 
-Backend-side view builders for workflow topology, run detail, stage health, and
-DLQ explorer payloads consumed by the Studio frontend. This package is the
-backend presenter layer; the actual frontend app lives in `apps/studio/`.
+Backend-side view builders for workflow topology, run detail, stage health,
+execution graph, and DLQ explorer payloads consumed by the Studio frontend.
+This package is the backend presenter layer; the actual frontend app lives in
+`apps/studio/`.
 
 ## `relayna.dlq`
 
@@ -171,6 +173,18 @@ distinct concerns.
 Structured observation types and helper functions for feeding runtime events
 into logging, metrics, tracing, or debugging sinks. See
 [Observability](observability.md) for detailed event groups and usage examples.
+This package also owns persisted task-linked observation storage and execution
+graph reconstruction:
+
+- `RedisObservationStore`
+- `make_redis_observation_sink`
+- `ExecutionGraph`
+- `ExecutionGraphNode`
+- `ExecutionGraphEdge`
+- `ExecutionGraphSummary`
+- `ExecutionGraphService`
+- `build_execution_graph`
+- `execution_graph_mermaid`
 
 ## Internal packages
 

@@ -1,9 +1,10 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from relayna.api import create_replay_router, create_workflow_router
+from relayna.api import create_execution_router, create_replay_router, create_workflow_router
 from relayna.contracts import ActionSchema, PayloadSchema
 from relayna.mcp import RelaynaMCPServer, inspect_topology
+from relayna.observability import ExecutionGraph, build_execution_graph
 from relayna.studio import build_run_view, build_topology_view
 from relayna.topology import (
     SharedStatusWorkflowTopology,
@@ -141,8 +142,14 @@ def test_inspect_topology_includes_stage_contract_metadata() -> None:
 
 
 def test_api_exports_new_route_factories() -> None:
+    assert create_execution_router is not None
     assert create_workflow_router is not None
     assert create_replay_router is not None
+
+
+def test_observability_exports_execution_graph_models() -> None:
+    assert ExecutionGraph is not None
+    assert build_execution_graph is not None
 
 
 def test_studio_topology_view_counts_graph_items() -> None:

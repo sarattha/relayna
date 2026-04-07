@@ -96,9 +96,13 @@ class TaskConsumerStarted:
 @dataclass(slots=True)
 class TaskMessageReceived:
     consumer_name: str
+    queue_name: str
     task_id: str | None
-    delivery_tag: int | None
-    redelivered: bool
+    delivery_tag: int | None = None
+    redelivered: bool = False
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 
@@ -106,7 +110,11 @@ class TaskMessageReceived:
 @dataclass(slots=True)
 class TaskMessageAcked:
     consumer_name: str
+    queue_name: str | None
     task_id: str | None
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 
@@ -114,9 +122,13 @@ class TaskMessageAcked:
 @dataclass(slots=True)
 class TaskMessageRejected:
     consumer_name: str
+    queue_name: str | None
     task_id: str | None
-    requeue: bool
-    reason: str
+    requeue: bool = False
+    reason: str = ""
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 
@@ -124,9 +136,13 @@ class TaskMessageRejected:
 @dataclass(slots=True)
 class TaskHandlerFailed:
     consumer_name: str
+    queue_name: str | None
     task_id: str
-    exception_type: str
-    requeue: bool
+    exception_type: str = ""
+    requeue: bool = False
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 
@@ -134,8 +150,12 @@ class TaskHandlerFailed:
 @dataclass(slots=True)
 class TaskLifecycleStatusPublished:
     consumer_name: str
+    queue_name: str | None
     task_id: str
-    status: str
+    status: str = ""
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 
@@ -223,9 +243,12 @@ class ConsumerRetryScheduled:
     consumer_name: str
     task_id: str | None
     queue_name: str
-    retry_attempt: int
-    max_retries: int
-    reason: str
+    source_queue_name: str
+    retry_attempt: int = 0
+    max_retries: int = 0
+    reason: str = ""
+    correlation_id: str | None = None
+    task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 
@@ -235,9 +258,12 @@ class ConsumerDeadLetterPublished:
     consumer_name: str
     task_id: str | None
     queue_name: str
-    retry_attempt: int
-    max_retries: int
-    reason: str
+    source_queue_name: str
+    retry_attempt: int = 0
+    max_retries: int = 0
+    reason: str = ""
+    correlation_id: str | None = None
+    task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
 
@@ -247,12 +273,83 @@ class ConsumerDLQRecordPersistFailed:
     consumer_name: str
     task_id: str | None
     queue_name: str
-    retry_attempt: int
-    max_retries: int
-    reason: str
-    exception_type: str
+    source_queue_name: str
+    retry_attempt: int = 0
+    max_retries: int = 0
+    reason: str = ""
+    exception_type: str = ""
     timestamp: datetime = field(default_factory=_utcnow)
     component: Literal["consumer"] = field(init=False, default="consumer")
+
+
+@dataclass(slots=True)
+class AggregationMessageReceived:
+    consumer_name: str
+    queue_name: str
+    task_id: str | None
+    parent_task_id: str | None
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    delivery_tag: int | None = None
+    redelivered: bool = False
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["aggregation"] = field(init=False, default="aggregation")
+
+
+@dataclass(slots=True)
+class AggregationMessageAcked:
+    consumer_name: str
+    queue_name: str | None
+    task_id: str | None
+    parent_task_id: str | None
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["aggregation"] = field(init=False, default="aggregation")
+
+
+@dataclass(slots=True)
+class AggregationHandlerFailed:
+    consumer_name: str
+    queue_name: str | None
+    task_id: str
+    parent_task_id: str | None
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    exception_type: str = ""
+    requeue: bool = False
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["aggregation"] = field(init=False, default="aggregation")
+
+
+@dataclass(slots=True)
+class AggregationRetryScheduled:
+    consumer_name: str
+    task_id: str | None
+    parent_task_id: str | None
+    queue_name: str
+    source_queue_name: str
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    max_retries: int = 0
+    reason: str = ""
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["aggregation"] = field(init=False, default="aggregation")
+
+
+@dataclass(slots=True)
+class AggregationDeadLetterPublished:
+    consumer_name: str
+    task_id: str | None
+    parent_task_id: str | None
+    queue_name: str
+    source_queue_name: str
+    correlation_id: str | None = None
+    retry_attempt: int = 0
+    max_retries: int = 0
+    reason: str = ""
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["aggregation"] = field(init=False, default="aggregation")
 
 
 @dataclass(slots=True)
@@ -295,6 +392,11 @@ class StatusHubLoopError:
 
 
 __all__ = [
+    "AggregationDeadLetterPublished",
+    "AggregationHandlerFailed",
+    "AggregationMessageAcked",
+    "AggregationMessageReceived",
+    "AggregationRetryScheduled",
     "ConsumerDLQRecordPersistFailed",
     "ConsumerDeadLetterPublished",
     "ConsumerRetryScheduled",

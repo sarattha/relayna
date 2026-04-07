@@ -15,6 +15,7 @@ It provides:
 - RabbitMQ stream replay for history/debug endpoints
 - FastAPI lifecycle and route helpers
 - Best-effort runtime observability hooks
+- Task execution graph reconstruction with Mermaid and Studio rendering support
 
 ## Requirements
 
@@ -29,13 +30,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.4/relayna-1.3.4-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.4/relayna-1.3.4.tar.gz
 ```
 
 For local development in this repository:
@@ -84,6 +85,71 @@ This setup gives you:
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
 
+## Execution Graphs
+
+Relayna can reconstruct a per-task execution graph from persisted runtime
+observations, Redis status history, DLQ records, and aggregation lineage.
+
+The graph model is topology-aware:
+
+- shared-task topologies render task attempts, retries, DLQ edges, and status
+  publishes
+- sharded aggregation topologies attach child tasks with `aggregated_into`
+  edges
+- workflow topologies add explicit `workflow_message` and `stage_attempt`
+  nodes for stage-to-stage causality
+
+Wire the route into FastAPI:
+
+```python
+from fastapi import FastAPI
+from redis.asyncio import Redis
+
+from relayna.api import create_execution_router, create_relayna_lifespan, get_relayna_runtime
+from relayna.consumer import RetryPolicy, TaskConsumer
+from relayna.observability import RedisObservationStore, make_redis_observation_sink
+
+observation_store_prefix = "relayna-observations"
+worker_observation_store = RedisObservationStore(
+    Redis.from_url("redis://localhost:6379/0"),
+    prefix=observation_store_prefix,
+    ttl_seconds=86400,
+    history_maxlen=500,
+)
+
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    observation_sink=make_redis_observation_sink(worker_observation_store),
+)
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        observation_store_prefix=observation_store_prefix,
+        observation_store_ttl_seconds=86400,
+        observation_history_maxlen=500,
+    )
+)
+runtime = get_relayna_runtime(app)
+app.include_router(create_execution_router(execution_graph_service=runtime.execution_graph_service))
+```
+
+This adds `GET /executions/{task_id}/graph`. When observation history is
+available, `summary.graph_completeness` is `"full"`. When only status and DLQ
+history are available, the graph still returns but is marked `"partial"`.
+
+Relayna also ships:
+
+- `execution_graph_mermaid(graph)` for docs and debugging output
+- `build_execution_view(graph)` for Studio payloads and the React Flow app in
+  `apps/studio/`
+
+See [docs/execution-graphs.md](docs/execution-graphs.md) for the full response
+shape, node and edge kinds, topology-specific behavior, and rendering examples.
+
 ## Package ownership
 
 Relayna v2 is organized around package roots with explicit responsibility
@@ -112,7 +178,9 @@ boundaries:
   Owns DLQ models, Redis-backed indexing, replay orchestration, and queue
   summary helpers.
 - `relayna.observability`
-  Owns typed runtime observation events plus collector and exporter helpers.
+  Owns typed runtime observation events plus collector and exporter helpers,
+  execution graph contracts, Mermaid export, and Redis-backed observation
+  persistence for task-linked graph reconstruction.
 - `relayna.workflow`
   Owns workflow control-plane concepts such as policies, transitions, fan-in,
   lineage, replay, and diagnostics.
@@ -120,7 +188,8 @@ boundaries:
   Owns MCP-facing resources, adapters, and operator tools built on top of the
   runtime packages.
 - `relayna.studio`
-  Owns backend view-builders for the Studio frontend payloads.
+  Owns backend view-builders for the Studio frontend payloads, including
+  execution graph payloads used by the React Flow app.
 
 `relayna.storage` exists as an internal package for Redis models, repository
 helpers, and retention behavior. It is not part of the documented public API.
@@ -501,6 +570,7 @@ Import concrete functionality from the package roots above rather than from
 
 - Documentation: [sarattha.github.io/relayna](https://sarattha.github.io/relayna/)
 - Observability guide: [docs/observability.md](docs/observability.md)
+- Execution graph guide: [docs/execution-graphs.md](docs/execution-graphs.md)
 - GitHub Releases: [github.com/sarattha/relayna/releases](https://github.com/sarattha/relayna/releases)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)

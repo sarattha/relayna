@@ -711,6 +711,7 @@ async def _persist_dlq_record(
                 consumer_name=consumer_name,
                 task_id=task_id,
                 queue_name=queue_name,
+                source_queue_name=source_queue_name,
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
                 reason=reason,
