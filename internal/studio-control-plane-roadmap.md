@@ -6,7 +6,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 | # | Feature | Status | Last Updated |
 | --- | --- | --- | --- |
-| 1 | Service registry | planned | 2026-04-08 |
+| 1 | Service registry | partially_implemented | 2026-04-08 |
 | 2 | Capability discovery and version handshake | planned | 2026-04-08 |
 | 3 | Federated API aggregation layer | planned | 2026-04-08 |
 | 4 | Cross-service identity model | partially_implemented | 2026-04-08 |
@@ -32,11 +32,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 1. Service Registry
 
-- Status: planned
+- Status: partially_implemented
 - last_updated: 2026-04-08
 - Goal: Give Studio a canonical inventory of Relayna-enabled services across environments.
 - Why it exists: Studio cannot act as a control plane until it knows which services exist, where they live, and how to authenticate to them.
-- Current state in repo: Relayna runtime wiring assumes one FastAPI app owns one runtime and does not include any registry or multi-service catalog. See `src/relayna/api/fastapi_lifespan.py`.
+- Current state in repo: Relayna now ships a Redis-backed Studio service registry, CRUD router, and minimal Studio backend app in `src/relayna/studio/`. The frontend exposes service list and detail management in `apps/studio/src/App.tsx`. Capability refresh is wired as a dependency-gated `501` placeholder until feature 2 adds `GET /relayna/capabilities`.
 - Target end state: Studio owns a persistent service catalog and operators can register, inspect, enable, disable, and refresh Relayna service entries.
 - Planned API/interface additions:
   - Service registration model with fields `service_id`, `name`, `base_url`, `environment`, `tags`, `auth_mode`, `status`, `capabilities`, `last_seen_at`
@@ -58,13 +58,13 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Studio can list all registered services with current registry metadata
   - Studio can mark a service unavailable without deleting the record
 - Checklist:
-  - [ ] Define persistent service record schema
-  - [ ] Define service status lifecycle
-  - [ ] Add registry CRUD endpoints to Studio backend
-  - [ ] Add capability refresh endpoint
-  - [ ] Add service list UI
-  - [ ] Add service detail UI
-  - [ ] Add tests for registry CRUD and duplicate handling
+  - [x] Define persistent service record schema
+  - [x] Define service status lifecycle
+  - [x] Add registry CRUD endpoints to Studio backend
+  - [x] Add capability refresh endpoint
+  - [x] Add service list UI
+  - [x] Add service detail UI
+  - [x] Add tests for registry CRUD and duplicate handling
 
 ## 2. Capability Discovery And Version Handshake
 
@@ -111,7 +111,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-08
 - Goal: Make Studio backend the single read surface for multi-service Relayna operations.
 - Why it exists: Browsers should not coordinate direct calls to many services, normalize response shapes, or handle cross-service failures.
-- Current state in repo: Current Studio frontend only fetches a single execution graph from a manually entered base URL. See `apps/studio/src/App.tsx`. Relayna runtime services are local to one application runtime. See `src/relayna/api/fastapi_lifespan.py`.
+- Current state in repo: Studio now owns a backend service registry and same-origin `/studio/services` CRUD surface, but execution-graph reads still go directly from the browser to a manually entered Relayna base URL. Relayna runtime services remain local to one application runtime. See `apps/studio/src/App.tsx` and `src/relayna/api/fastapi_lifespan.py`.
 - Target end state: Studio backend exposes a normalized API that proxies and aggregates Relayna reads from registered services.
 - Planned API/interface additions:
   - Service-scoped read endpoints:
@@ -264,7 +264,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-08
 - Goal: Expand Studio from a single execution-graph page into a full operator console.
 - Why it exists: A control plane must show services, topology, DLQ, task search, task detail, live events, and graphs in one consistent UI.
-- Current state in repo: Backend presenter helpers exist for execution, run, stage, topology, and DLQ views in `src/relayna/studio/`, but the frontend app only renders a single execution graph view and manual base URL form in `apps/studio/src/App.tsx`.
+- Current state in repo: Backend presenter helpers exist for execution, run, stage, topology, and DLQ views in `src/relayna/studio/`. The frontend now includes service list and service detail management backed by the Studio registry, while execution-graph inspection remains a manual direct-to-service tool in `apps/studio/src/App.tsx`.
 - Target end state: Studio UI has service list, service detail, topology diagrams, task search, task detail, DLQ explorer, live event timeline, execution graph, and operator action surfaces.
 - Planned API/interface additions:
   - Frontend routes:
@@ -291,8 +291,8 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Topology and execution graph are both available in Studio
   - DLQ and task search are first-class screens, not ad hoc debug forms
 - Checklist:
-  - [ ] Add service list UI
-  - [ ] Add service detail UI
+  - [x] Add service list UI
+  - [x] Add service detail UI
   - [ ] Add topology visualization page
   - [ ] Add task search UI
   - [ ] Add task detail view with status, timeline, graph, and logs
@@ -452,3 +452,4 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 - 2026-04-08: Created the internal Studio control-plane roadmap as the single source of truth for the 10 control-plane features and their tracking statuses.
 - 2026-04-08: Refined the auth roadmap to start with simple username/password authentication for Studio users and rely on existing AKS trust boundaries for service-to-service communication in the initial phase.
+- 2026-04-08: Shipped the first service-registry slice with Redis-backed service records, Studio backend CRUD routes, a dependency-gated capability refresh placeholder, and Studio service list/detail UI.

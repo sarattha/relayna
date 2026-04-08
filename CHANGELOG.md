@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Redis-backed Studio service-registry primitives via `relayna.studio`, including `ServiceRecord`, `RedisServiceRegistryStore`, `create_service_registry_router(...)`, and `create_studio_app(...)`.
+- Studio backend CRUD routes at `/studio/services` plus a dependency-gated capability refresh placeholder at `POST /studio/services/{service_id}/refresh`.
+- Service-registry UI in `apps/studio/` for create, edit, inspect, enable, disable, mark-unavailable, and delete flows.
+
+### Changed
+
+- The Studio frontend now defaults to the control-plane service-registry surface while retaining the direct execution-graph inspector as a secondary tool until federated reads land.
+
 ## 1.3.4 - 2026-04-06
 
 ### Added
