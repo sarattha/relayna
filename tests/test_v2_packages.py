@@ -5,7 +5,7 @@ from relayna.api import create_execution_router, create_replay_router, create_wo
 from relayna.contracts import ActionSchema, PayloadSchema
 from relayna.mcp import RelaynaMCPServer, inspect_topology
 from relayna.observability import ExecutionGraph, build_execution_graph
-from relayna.studio import build_run_view, build_topology_view
+from relayna.studio import build_run_view, build_topology_view, create_service_registry_router, create_studio_app
 from relayna.topology import (
     SharedStatusWorkflowTopology,
     WorkflowEntryRoute,
@@ -145,6 +145,11 @@ def test_api_exports_new_route_factories() -> None:
     assert create_execution_router is not None
     assert create_workflow_router is not None
     assert create_replay_router is not None
+
+
+def test_studio_exports_registry_backend_surfaces() -> None:
+    assert create_service_registry_router is not None
+    assert create_studio_app is not None
 
 
 def test_observability_exports_execution_graph_models() -> None:

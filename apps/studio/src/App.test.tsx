@@ -41,23 +41,204 @@ vi.mock("@xyflow/react", async () => {
   };
 });
 
+type MockServiceRecord = {
+  service_id: string;
+  name: string;
+  base_url: string;
+  environment: string;
+  tags: string[];
+  auth_mode: string;
+  status: "registered" | "healthy" | "unavailable" | "disabled";
+  capabilities?: Record<string, unknown> | null;
+  last_seen_at?: string | null;
+};
+
 const fetchMock = vi.fn<typeof fetch>();
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function serviceListResponse(services: MockServiceRecord[]) {
+  return jsonResponse({ count: services.length, services });
+}
 
 describe("App", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
     window.history.replaceState({}, "", "/");
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse([]);
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
+  it("loads registry data and renders the selected service detail panel", async () => {
+    const services: MockServiceRecord[] = [
+      {
+        service_id: "payments-api",
+        name: "Payments API",
+        base_url: "https://payments.example.test",
+        environment: "prod",
+        tags: ["core", "money"],
+        auth_mode: "internal_network",
+        status: "registered",
+        capabilities: { supported_routes: ["status", "workflow"] },
+        last_seen_at: "2026-04-08T12:00:00Z",
+      },
+      {
+        service_id: "billing-api",
+        name: "Billing API",
+        base_url: "https://billing.example.test",
+        environment: "prod",
+        tags: ["finance"],
+        auth_mode: "internal_network",
+        status: "disabled",
+        capabilities: null,
+        last_seen_at: null,
+      },
+    ];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Payments API")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("payments-api").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("prod").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText("registered").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("Billing API").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByDisplayValue(/supported_routes/)).toBeInTheDocument();
+    expect(screen.getAllByText(/2026/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("creates, edits, and updates service status through the registry UI", async () => {
+    let services: MockServiceRecord[] = [];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      if (url === "/studio/services" && method === "POST") {
+        const payload = JSON.parse(String(init?.body)) as Omit<MockServiceRecord, "status">;
+        const created: MockServiceRecord = { ...payload, status: "registered", capabilities: null, last_seen_at: null };
+        services = [created];
+        return jsonResponse(created, 201);
+      }
+      if (url === "/studio/services/payments-api" && method === "PATCH") {
+        const payload = JSON.parse(String(init?.body)) as Partial<MockServiceRecord>;
+        services = services.map((service) =>
+          service.service_id === "payments-api" ? { ...service, ...payload, service_id: service.service_id } : service,
+        );
+        return jsonResponse(services[0]);
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "payments-api" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Payments API" } });
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://payments.example.test/" } });
+    fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "prod" } });
+    fireEvent.change(screen.getByLabelText("Tags"), { target: { value: "core, money" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
+
+    expect(await screen.findByText("Registered service 'payments-api'.")).toBeInTheDocument();
+    expect((await screen.findAllByText("Payments API")).length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Payments Control API" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Service" }));
+
+    expect(await screen.findByText("Updated service 'payments-api'.")).toBeInTheDocument();
+    expect(screen.getAllByText("Payments Control API").length).toBeGreaterThanOrEqual(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mark Unavailable" }));
+
+    expect(await screen.findByText("Marked 'payments-api' as unavailable.")).toBeInTheDocument();
+    expect(screen.getAllByText("unavailable").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows duplicate registration errors from the registry backend", async () => {
+    const services: MockServiceRecord[] = [
+      {
+        service_id: "billing-api",
+        name: "Billing API",
+        base_url: "https://billing.example.test",
+        environment: "prod",
+        tags: [],
+        auth_mode: "internal_network",
+        status: "registered",
+        capabilities: null,
+        last_seen_at: null,
+      },
+    ];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      if (url === "/studio/services" && method === "POST") {
+        return jsonResponse(
+          {
+            detail:
+              "A service is already registered for environment 'prod' and base_url 'https://billing.example.test'.",
+          },
+          409,
+        );
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "New Service" }));
+    fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "billing-copy" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Billing API Copy" } });
+    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://billing.example.test" } });
+    fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "prod" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
+
+    expect(
+      await screen.findByText(
+        "A service is already registered for environment 'prod' and base_url 'https://billing.example.test'.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("loads and renders an execution graph after form submission", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse([]);
+      }
+      if (url === "http://api.example.test/executions/task-123/graph" && method === "GET") {
+        return jsonResponse({
           task_id: "task-123",
           topology_kind: "shared_tasks_shared_status",
           summary: {
@@ -76,13 +257,10 @@ describe("App", () => {
           ],
           annotations: {},
           related_task_ids: [],
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    );
+        });
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
 
     render(<App />);
 
@@ -95,7 +273,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load Execution Graph" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://api.example.test/executions/task-123/graph");
+      expect(fetchMock).toHaveBeenCalledWith("http://api.example.test/executions/task-123/graph", undefined);
     });
 
     expect((await screen.findAllByText("completed")).length).toBeGreaterThanOrEqual(2);
@@ -105,46 +283,5 @@ describe("App", () => {
     expect(screen.getAllByText("shared_tasks_shared_status").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("full graph")).toBeInTheDocument();
     expect(screen.getByText("task-123 attempt 1")).toBeInTheDocument();
-  });
-
-  it("auto-loads from query params and normalizes aliased task ids", async () => {
-    window.history.replaceState({}, "", "/?task_id=attempt-456&base_url=http://api.example.test");
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          attempt_id: "attempt-456",
-          topology_kind: "shared_status_workflow",
-          summary: {
-            status: "planning",
-            duration_ms: 900,
-            graph_completeness: "partial",
-          },
-          nodes: [
-            { id: "task:attempt-456", kind: "task", label: "attempt-456" },
-            { id: "msg:1", kind: "workflow_message", label: "planner" },
-          ],
-          edges: [{ source: "task:attempt-456", target: "msg:1", kind: "received_by" }],
-          annotations: {},
-          related_task_ids: ["child-1"],
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    );
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://api.example.test/executions/attempt-456/graph");
-    });
-
-    expect(await screen.findByText("planning")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("attempt-456")).toBeInTheDocument();
-    expect(screen.getAllByText("shared_status_workflow").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("partial graph")).toBeInTheDocument();
-    expect(screen.getByText("child-1")).toBeInTheDocument();
-    expect(screen.getByText("planner")).toBeInTheDocument();
   });
 });

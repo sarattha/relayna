@@ -11,6 +11,34 @@ import {
   ReactFlowProvider,
 } from "@xyflow/react";
 
+type ServiceStatus = "registered" | "healthy" | "unavailable" | "disabled";
+
+type ServiceRecord = {
+  service_id: string;
+  name: string;
+  base_url: string;
+  environment: string;
+  tags: string[];
+  auth_mode: string;
+  status: ServiceStatus;
+  capabilities?: Record<string, unknown> | null;
+  last_seen_at?: string | null;
+};
+
+type ServiceListResponse = {
+  count: number;
+  services: ServiceRecord[];
+};
+
+type ServiceDraft = {
+  service_id: string;
+  name: string;
+  base_url: string;
+  environment: string;
+  tags: string;
+  auth_mode: string;
+};
+
 type ExecutionGraphNode = {
   id: string;
   kind: string;
@@ -53,6 +81,51 @@ const frameStyle = {
   boxShadow: "0 18px 44px rgba(55, 43, 26, 0.10)",
 };
 
+const inputStyle: CSSProperties = {
+  width: "100%",
+  borderRadius: 14,
+  border: "1px solid rgba(104, 88, 64, 0.25)",
+  padding: "12px 14px",
+  background: "#fffdfa",
+  color: "#2d2923",
+  fontSize: 14,
+};
+
+const mutedTextStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  lineHeight: 1.55,
+  color: "#5f564a",
+};
+
+const primaryButtonStyle: CSSProperties = {
+  border: "none",
+  borderRadius: 14,
+  background: "#2f3c53",
+  color: "#f8f3e9",
+  padding: "12px 16px",
+  fontSize: 14,
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const secondaryButtonStyle: CSSProperties = {
+  borderRadius: 14,
+  border: "1px solid rgba(79, 67, 48, 0.22)",
+  background: "rgba(255, 251, 244, 0.92)",
+  color: "#342b21",
+  padding: "10px 14px",
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: "pointer",
+};
+
+const destructiveButtonStyle: CSSProperties = {
+  ...secondaryButtonStyle,
+  borderColor: "rgba(139, 69, 69, 0.28)",
+  color: "#7a2424",
+};
+
 const kindPalette: Record<string, { background: string; border: string; color: string }> = {
   task: { background: "#f9f4df", border: "#8a7443", color: "#3f3320" },
   aggregation_child: { background: "#e9f0f7", border: "#6c88a8", color: "#233447" },
@@ -64,11 +137,68 @@ const kindPalette: Record<string, { background: string; border: string; color: s
   dlq_record: { background: "#2f1f1f", border: "#d68f8f", color: "#fff4f4" },
 };
 
+const statusPalette: Record<ServiceStatus, { background: string; border: string; color: string }> = {
+  registered: { background: "#f5ecda", border: "#aa8640", color: "#5f4312" },
+  healthy: { background: "#e9f5ea", border: "#5f8b62", color: "#214226" },
+  unavailable: { background: "#fff0e3", border: "#c47d38", color: "#68330d" },
+  disabled: { background: "#f3edf0", border: "#897183", color: "#47343f" },
+};
+
+const emptyServiceDraft: ServiceDraft = {
+  service_id: "",
+  name: "",
+  base_url: "http://localhost:8000",
+  environment: "dev",
+  tags: "",
+  auth_mode: "internal_network",
+};
+
 function defaultBaseUrl() {
   if (typeof window === "undefined") {
     return "http://localhost:8000";
   }
   return window.location.origin;
+}
+
+function serviceToDraft(service: ServiceRecord): ServiceDraft {
+  return {
+    service_id: service.service_id,
+    name: service.name,
+    base_url: service.base_url,
+    environment: service.environment,
+    tags: service.tags.join(", "),
+    auth_mode: service.auth_mode,
+  };
+}
+
+function buildServicePayload(draft: ServiceDraft) {
+  return {
+    service_id: draft.service_id.trim(),
+    name: draft.name.trim(),
+    base_url: draft.base_url.trim(),
+    environment: draft.environment.trim(),
+    tags: draft.tags
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    auth_mode: draft.auth_mode.trim(),
+  };
+}
+
+function formatTimestamp(value?: string | null) {
+  if (!value) {
+    return "Never";
+  }
+  return new Date(value).toLocaleString();
+}
+
+async function requestJson<T>(input: string, init?: RequestInit): Promise<T | null> {
+  const response = await fetch(input, init);
+  const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+  if (!response.ok) {
+    throw new Error(payload?.detail || `Request failed with status ${response.status}.`);
+  }
+  return payload as T | null;
 }
 
 function buildFlowNodes(graph: ExecutionGraph): Node[] {
@@ -228,6 +358,48 @@ function formatDuration(durationMs?: number | null) {
   return `${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 2)} s`;
 }
 
+function StatusBadge({ status }: { status: ServiceStatus }) {
+  const palette = statusPalette[status];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 999,
+        padding: "6px 10px",
+        border: `1px solid ${palette.border}`,
+        background: palette.background,
+        color: palette.color,
+        fontSize: 12,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: 0.9,
+      }}
+    >
+      {status}
+    </span>
+  );
+}
+
+function MetadataRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "grid", gap: 2 }}>
+      <dt style={{ fontWeight: 700 }}>{label}</dt>
+      <dd style={{ margin: 0, opacity: 0.85 }}>{value}</dd>
+    </div>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <article style={{ ...frameStyle, padding: 16 }}>
+      <p style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: 1.2 }}>{label}</p>
+      <strong style={{ display: "block", marginTop: 10, fontSize: 26 }}>{value}</strong>
+    </article>
+  );
+}
+
 function GraphSurface({ graph }: { graph: ExecutionGraph }) {
   const nodes = buildFlowNodes(graph);
   const edges = buildFlowEdges(graph);
@@ -263,11 +435,26 @@ function GraphSurface({ graph }: { graph: ExecutionGraph }) {
 
 export function App() {
   const search = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const [services, setServices] = useState<ServiceRecord[]>([]);
+  const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ServiceDraft>(emptyServiceDraft);
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
+  const [registryLoading, setRegistryLoading] = useState(true);
+  const [registrySaving, setRegistrySaving] = useState(false);
+  const [registryError, setRegistryError] = useState<string | null>(null);
+  const [registryNotice, setRegistryNotice] = useState<string | null>(null);
+
   const [baseUrl, setBaseUrl] = useState(search?.get("base_url") || defaultBaseUrl());
   const [taskId, setTaskId] = useState(search?.get("task_id") || "");
   const [graph, setGraph] = useState<ExecutionGraph | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loadingGraph, setLoadingGraph] = useState(false);
+  const [graphError, setGraphError] = useState<string | null>(null);
+
+  const selectedService = services.find((service) => service.service_id === selectedServiceId) ?? null;
+
+  useEffect(() => {
+    void loadServices();
+  }, []);
 
   useEffect(() => {
     if (!search) {
@@ -281,28 +468,55 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function loadServices(preferredServiceId?: string | null) {
+    setRegistryLoading(true);
+    try {
+      const payload = await requestJson<ServiceListResponse>("/studio/services");
+      const nextServices = payload?.services || [];
+      startTransition(() => {
+        setServices(nextServices);
+        const requestedId = preferredServiceId ?? selectedServiceId;
+        const nextSelected =
+          nextServices.find((service) => service.service_id === requestedId) ||
+          nextServices.find((service) => service.service_id === editingServiceId) ||
+          nextServices[0] ||
+          null;
+        setSelectedServiceId(nextSelected?.service_id || null);
+        if (editingServiceId) {
+          const editing = nextServices.find((service) => service.service_id === editingServiceId);
+          if (editing) {
+            setDraft(serviceToDraft(editing));
+          } else {
+            setEditingServiceId(null);
+            setDraft(emptyServiceDraft);
+          }
+        }
+      });
+      setRegistryError(null);
+    } catch (fetchError) {
+      setRegistryError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
+    } finally {
+      setRegistryLoading(false);
+    }
+  }
+
   async function loadGraph(nextTaskId: string, nextBaseUrl: string) {
     const normalizedTaskId = nextTaskId.trim();
     const normalizedBaseUrl = nextBaseUrl.trim().replace(/\/+$/, "");
     if (!normalizedTaskId) {
-      setError("Enter a task id to load an execution graph.");
+      setGraphError("Enter a task id to load an execution graph.");
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    setLoadingGraph(true);
+    setGraphError(null);
     try {
-      const response = await fetch(
+      const payload = await requestJson<(ExecutionGraph & { attempt_id?: string })>(
         `${normalizedBaseUrl}/executions/${encodeURIComponent(normalizedTaskId)}/graph`,
       );
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(payload?.detail || `Request failed with status ${response.status}.`);
-      }
-      const payload = (await response.json()) as ExecutionGraph & { attempt_id?: string };
       const normalizedGraph: ExecutionGraph = {
-        ...payload,
-        task_id: payload.task_id || payload.attempt_id || normalizedTaskId,
+        ...(payload as ExecutionGraph & { attempt_id?: string }),
+        task_id: payload?.task_id || payload?.attempt_id || normalizedTaskId,
       };
       startTransition(() => {
         setGraph(normalizedGraph);
@@ -315,18 +529,139 @@ export function App() {
       }
     } catch (fetchError) {
       setGraph(null);
-      setError(fetchError instanceof Error ? fetchError.message : "Unable to load execution graph.");
+      setGraphError(fetchError instanceof Error ? fetchError.message : "Unable to load execution graph.");
     } finally {
-      setLoading(false);
+      setLoadingGraph(false);
     }
   }
 
-  const mermaid = graph ? buildMermaid(graph) : "";
+  async function handleRegistrySubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const payload = buildServicePayload(draft);
+    const isEditing = Boolean(editingServiceId);
+    const url = isEditing ? `/studio/services/${encodeURIComponent(editingServiceId || "")}` : "/studio/services";
+    const body = isEditing
+      ? JSON.stringify({
+          name: payload.name,
+          base_url: payload.base_url,
+          environment: payload.environment,
+          tags: payload.tags,
+          auth_mode: payload.auth_mode,
+        })
+      : JSON.stringify(payload);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    setRegistrySaving(true);
+    setRegistryNotice(null);
+    try {
+      const saved = await requestJson<ServiceRecord>(url, {
+        method: isEditing ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      setEditingServiceId(saved?.service_id || editingServiceId);
+      if (saved) {
+        setDraft(serviceToDraft(saved));
+      }
+      setRegistryError(null);
+      setRegistryNotice(
+        isEditing
+          ? `Updated service '${saved?.service_id || editingServiceId}'.`
+          : `Registered service '${saved?.service_id || payload.service_id}'.`,
+      );
+      await loadServices(saved?.service_id || editingServiceId || payload.service_id);
+    } catch (fetchError) {
+      setRegistryError(fetchError instanceof Error ? fetchError.message : "Unable to save the service.");
+    } finally {
+      setRegistrySaving(false);
+    }
+  }
+
+  async function updateSelectedStatus(nextStatus: ServiceStatus) {
+    if (!selectedService) {
+      return;
+    }
+    setRegistrySaving(true);
+    setRegistryNotice(null);
+    try {
+      await requestJson<ServiceRecord>(`/studio/services/${encodeURIComponent(selectedService.service_id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      setRegistryError(null);
+      setRegistryNotice(`Marked '${selectedService.service_id}' as ${nextStatus}.`);
+      await loadServices(selectedService.service_id);
+    } catch (fetchError) {
+      setRegistryError(fetchError instanceof Error ? fetchError.message : "Unable to update service status.");
+    } finally {
+      setRegistrySaving(false);
+    }
+  }
+
+  async function refreshSelectedService() {
+    if (!selectedService) {
+      return;
+    }
+    setRegistrySaving(true);
+    setRegistryNotice(null);
+    try {
+      await requestJson(`/studio/services/${encodeURIComponent(selectedService.service_id)}/refresh`, {
+        method: "POST",
+      });
+      setRegistryError(null);
+      setRegistryNotice(`Refreshed '${selectedService.service_id}'.`);
+      await loadServices(selectedService.service_id);
+    } catch (fetchError) {
+      setRegistryError(fetchError instanceof Error ? fetchError.message : "Unable to refresh service.");
+    } finally {
+      setRegistrySaving(false);
+    }
+  }
+
+  async function deleteSelectedService() {
+    if (!selectedService) {
+      return;
+    }
+    setRegistrySaving(true);
+    setRegistryNotice(null);
+    try {
+      await requestJson(`/studio/services/${encodeURIComponent(selectedService.service_id)}`, {
+        method: "DELETE",
+      });
+      const deletedServiceId = selectedService.service_id;
+      setEditingServiceId((current) => (current === deletedServiceId ? null : current));
+      setDraft((current) => (editingServiceId === deletedServiceId ? emptyServiceDraft : current));
+      setRegistryError(null);
+      setRegistryNotice(`Deleted service '${deletedServiceId}'.`);
+      await loadServices(null);
+    } catch (fetchError) {
+      setRegistryError(fetchError instanceof Error ? fetchError.message : "Unable to delete service.");
+    } finally {
+      setRegistrySaving(false);
+    }
+  }
+
+  function startCreateService() {
+    setEditingServiceId(null);
+    setDraft(emptyServiceDraft);
+    setRegistryNotice(null);
+    setRegistryError(null);
+  }
+
+  function startEditService(service: ServiceRecord) {
+    setSelectedServiceId(service.service_id);
+    setEditingServiceId(service.service_id);
+    setDraft(serviceToDraft(service));
+    setRegistryNotice(null);
+    setRegistryError(null);
+  }
+
+  function handleExecutionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void loadGraph(taskId, baseUrl);
   }
+
+  const mermaid = graph ? buildMermaid(graph) : "";
 
   return (
     <ReactFlowProvider>
@@ -334,8 +669,7 @@ export function App() {
         style={{
           minHeight: "100vh",
           padding: "36px 22px 48px",
-          background:
-            "linear-gradient(180deg, #f3dd9a 0%, #f5f1e9 34%, #d8e4ed 100%)",
+          background: "linear-gradient(180deg, #f3dd9a 0%, #f5f1e9 34%, #d8e4ed 100%)",
           color: "#2f271f",
           fontFamily: "Georgia, 'Iowan Old Style', serif",
         }}
@@ -344,8 +678,8 @@ export function App() {
           <header
             style={{
               display: "grid",
-              gap: 10,
-              gridTemplateColumns: "minmax(0, 1.2fr) minmax(320px, 0.8fr)",
+              gap: 14,
+              gridTemplateColumns: "minmax(0, 1.3fr) minmax(280px, 0.7fr)",
               alignItems: "end",
             }}
           >
@@ -354,63 +688,46 @@ export function App() {
                 Relayna Studio
               </p>
               <h1 style={{ margin: "6px 0 10px", fontSize: "clamp(2.6rem, 6vw, 4.8rem)", lineHeight: 0.95 }}>
-                Execution Graph
+                Service Registry
               </h1>
-              <p style={{ margin: 0, maxWidth: 740, fontSize: 18, lineHeight: 1.5 }}>
-                Render live execution graphs with React Flow in the app and keep a Mermaid export on hand
-                for docs, issue threads, and operator debugging.
+              <p style={{ margin: 0, maxWidth: 760, fontSize: 18, lineHeight: 1.5 }}>
+                Keep a canonical inventory of Relayna services across environments, manage operator-visible
+                status, and store the capability document once discovery lands.
               </p>
             </div>
-            <form
-              onSubmit={handleSubmit}
-              style={{
-                ...frameStyle,
-                padding: 18,
-                display: "grid",
-                gap: 12,
-                alignSelf: "stretch",
-              }}
-            >
-              <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                API base URL
-                <input
-                  value={baseUrl}
-                  onChange={(event) => setBaseUrl(event.target.value)}
-                  placeholder="http://localhost:8000"
-                  style={inputStyle}
+            <section style={{ ...frameStyle, padding: 18, display: "grid", gap: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: 20 }}>Registry Overview</h2>
+                  <p style={mutedTextStyle}>The Studio backend serves the registry from `/studio/services`.</p>
+                </div>
+                <button type="button" onClick={() => void loadServices()} style={secondaryButtonStyle}>
+                  Reload List
+                </button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                <MetricCard label="Services" value={String(services.length)} />
+                <MetricCard
+                  label="Unavailable"
+                  value={String(services.filter((service) => service.status === "unavailable").length)}
                 />
-              </label>
-              <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                Task id
-                <input
-                  value={taskId}
-                  onChange={(event) => setTaskId(event.target.value)}
-                  placeholder="task-123"
-                  style={inputStyle}
+                <MetricCard
+                  label="Disabled"
+                  value={String(services.filter((service) => service.status === "disabled").length)}
                 />
-              </label>
-              <button
-                type="submit"
-                disabled={loading}
-                style={{
-                  border: "none",
-                  borderRadius: 14,
-                  background: loading ? "#8f8a80" : "#2f3c53",
-                  color: "#f8f3e9",
-                  padding: "12px 16px",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: loading ? "wait" : "pointer",
-                }}
-              >
-                {loading ? "Loading Graph..." : "Load Execution Graph"}
-              </button>
-            </form>
+              </div>
+            </section>
           </header>
 
-          {error ? (
+          {registryError ? (
             <section style={{ ...frameStyle, padding: 16, borderColor: "rgba(152, 66, 66, 0.34)", color: "#6f2525" }}>
-              {error}
+              {registryError}
+            </section>
+          ) : null}
+
+          {registryNotice ? (
+            <section style={{ ...frameStyle, padding: 16, borderColor: "rgba(79, 133, 85, 0.28)", color: "#224a28" }}>
+              {registryNotice}
             </section>
           ) : null}
 
@@ -418,129 +735,411 @@ export function App() {
             style={{
               display: "grid",
               gap: 20,
-              gridTemplateColumns: graph ? "minmax(0, 1.8fr) minmax(320px, 0.9fr)" : "1fr",
+              gridTemplateColumns: "minmax(0, 1.35fr) minmax(360px, 0.95fr)",
+              alignItems: "start",
             }}
           >
-            <div style={{ display: "grid", gap: 18 }}>
-              {graph ? (
-                <>
-                  <div
-                    style={{
-                      display: "grid",
-                      gap: 14,
-                      gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    }}
-                  >
-                    <MetricCard label="Status" value={graph.summary.status || "unknown"} />
-                    <MetricCard label="Duration" value={formatDuration(graph.summary.duration_ms)} />
-                    <MetricCard label="Nodes" value={String(graph.nodes.length)} />
-                    <MetricCard label="Edges" value={String(graph.edges.length)} />
-                  </div>
-                  <GraphSurface graph={graph} />
-                </>
-              ) : (
-                <section style={{ ...frameStyle, padding: 28 }}>
-                  <h2 style={{ marginTop: 0 }}>No Graph Loaded</h2>
-                  <p style={{ marginBottom: 0, lineHeight: 1.6 }}>
-                    Point Studio at a Relayna API and load a task id. The app will call
-                    <code> /executions/&lt;task_id&gt;/graph</code> and render the returned execution graph with
-                    React Flow.
+            <section style={{ ...frameStyle, padding: 18, display: "grid", gap: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>Registered Services</h2>
+                  <p style={mutedTextStyle}>Select a row to inspect details or start editing an existing entry.</p>
+                </div>
+                <button type="button" onClick={startCreateService} style={secondaryButtonStyle}>
+                  New Service
+                </button>
+              </div>
+
+              {registryLoading ? <p style={mutedTextStyle}>Loading services...</p> : null}
+
+              {!registryLoading && services.length === 0 ? (
+                <section style={{ ...frameStyle, padding: 24, background: "rgba(255,250,243,0.72)" }}>
+                  <h3 style={{ marginTop: 0 }}>No services registered</h3>
+                  <p style={{ ...mutedTextStyle, marginBottom: 0 }}>
+                    Create the first service entry to give Studio a control-plane inventory.
                   </p>
                 </section>
-              )}
-            </div>
+              ) : null}
+
+              {services.length > 0 ? (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                    <thead>
+                      <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(97, 84, 62, 0.16)" }}>
+                        <th style={{ padding: "0 0 10px" }}>Service</th>
+                        <th style={{ padding: "0 0 10px" }}>Environment</th>
+                        <th style={{ padding: "0 0 10px" }}>Status</th>
+                        <th style={{ padding: "0 0 10px" }}>Base URL</th>
+                        <th style={{ padding: "0 0 10px", textAlign: "right" }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {services.map((service) => {
+                        const selected = service.service_id === selectedServiceId;
+                        return (
+                          <tr
+                            key={service.service_id}
+                            style={{
+                              borderBottom: "1px solid rgba(97, 84, 62, 0.12)",
+                              background: selected ? "rgba(247, 239, 222, 0.54)" : "transparent",
+                            }}
+                          >
+                            <td style={{ padding: "14px 8px 14px 0" }}>
+                              <div style={{ display: "grid", gap: 4 }}>
+                                <strong>{service.name}</strong>
+                                <span style={{ fontSize: 12, color: "#62584b" }}>{service.service_id}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: "14px 8px" }}>{service.environment}</td>
+                            <td style={{ padding: "14px 8px" }}>
+                              <StatusBadge status={service.status} />
+                            </td>
+                            <td style={{ padding: "14px 8px", color: "#514739" }}>{service.base_url}</td>
+                            <td style={{ padding: "14px 0 14px 8px", textAlign: "right" }}>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedServiceId(service.service_id)}
+                                style={secondaryButtonStyle}
+                              >
+                                View
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </section>
 
             <aside style={{ display: "grid", gap: 18 }}>
-              <section style={{ ...frameStyle, padding: 18 }}>
-                <h2 style={{ marginTop: 0, marginBottom: 12 }}>Legend</h2>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {Object.entries(kindPalette).map(([kind, palette]) => (
-                    <div key={kind} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span
-                        style={{
-                          width: 16,
-                          height: 16,
-                          borderRadius: 999,
-                          background: palette.background,
-                          border: `1px solid ${palette.border}`,
-                          display: "inline-block",
-                        }}
-                      />
-                      <span style={{ fontSize: 13 }}>{kind}</span>
-                    </div>
-                  ))}
+              <section style={{ ...frameStyle, padding: 18, display: "grid", gap: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                  <div>
+                    <h2 style={{ margin: 0 }}>{editingServiceId ? "Edit Service" : "Register Service"}</h2>
+                    <p style={mutedTextStyle}>
+                      {editingServiceId
+                        ? "Update operator-managed metadata or move the service to a different environment."
+                        : "Create a durable service entry in the Studio registry."}
+                    </p>
+                  </div>
+                  {editingServiceId ? (
+                    <button type="button" onClick={startCreateService} style={secondaryButtonStyle}>
+                      Clear Form
+                    </button>
+                  ) : null}
                 </div>
-              </section>
 
-              <section style={{ ...frameStyle, padding: 18 }}>
-                <h2 style={{ marginTop: 0, marginBottom: 12 }}>Mermaid Export</h2>
-                <p style={{ marginTop: 0, fontSize: 13, lineHeight: 1.55 }}>
-                  Use this in docs, bug reports, or review comments when you need a lightweight debug artifact.
-                </p>
-                <textarea
-                  value={mermaid}
-                  readOnly
-                  spellCheck={false}
-                  style={{
-                    width: "100%",
-                    minHeight: 260,
-                    resize: "vertical",
-                    borderRadius: 14,
-                    border: "1px solid rgba(104, 88, 64, 0.25)",
-                    padding: 12,
-                    fontFamily: "'SFMono-Regular', Menlo, monospace",
-                    fontSize: 12,
-                    background: "#fffdfa",
-                    color: "#2d2923",
-                  }}
-                />
-              </section>
-
-              {graph ? (
-                <section style={{ ...frameStyle, padding: 18 }}>
-                  <h2 style={{ marginTop: 0, marginBottom: 12 }}>Graph Metadata</h2>
-                  <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
-                    <MetadataRow label="Task id" value={graph.task_id} />
-                    <MetadataRow label="Topology" value={graph.topology_kind} />
-                    <MetadataRow label="Completeness" value={graph.summary.graph_completeness} />
-                    <MetadataRow
-                      label="Related tasks"
-                      value={graph.related_task_ids.length ? graph.related_task_ids.join(", ") : "none"}
+                <form onSubmit={handleRegistrySubmit} style={{ display: "grid", gap: 12 }}>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Service id
+                    <input
+                      value={draft.service_id}
+                      onChange={(event) => setDraft((current) => ({ ...current, service_id: event.target.value }))}
+                      placeholder="payments-api"
+                      style={inputStyle}
+                      disabled={Boolean(editingServiceId)}
                     />
-                  </dl>
-                </section>
-              ) : null}
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Name
+                    <input
+                      value={draft.name}
+                      onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="Payments API"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Base URL
+                    <input
+                      value={draft.base_url}
+                      onChange={(event) => setDraft((current) => ({ ...current, base_url: event.target.value }))}
+                      placeholder="https://payments.internal"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Environment
+                    <input
+                      value={draft.environment}
+                      onChange={(event) => setDraft((current) => ({ ...current, environment: event.target.value }))}
+                      placeholder="prod"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Tags
+                    <input
+                      value={draft.tags}
+                      onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))}
+                      placeholder="core, edge, latency-sensitive"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Auth mode
+                    <input
+                      value={draft.auth_mode}
+                      onChange={(event) => setDraft((current) => ({ ...current, auth_mode: event.target.value }))}
+                      placeholder="internal_network"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <button type="submit" disabled={registrySaving} style={primaryButtonStyle}>
+                    {registrySaving ? "Saving..." : editingServiceId ? "Save Service" : "Register Service"}
+                  </button>
+                </form>
+              </section>
+
+              <section style={{ ...frameStyle, padding: 18, display: "grid", gap: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                  <div>
+                    <h2 style={{ margin: 0 }}>Service Detail</h2>
+                    <p style={mutedTextStyle}>Inspect the stored registry metadata and operator actions.</p>
+                  </div>
+                  {selectedService ? <StatusBadge status={selectedService.status} /> : null}
+                </div>
+
+                {!selectedService ? (
+                  <p style={mutedTextStyle}>Select a registered service to inspect metadata.</p>
+                ) : (
+                  <>
+                    <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
+                      <MetadataRow label="Service id" value={selectedService.service_id} />
+                      <MetadataRow label="Name" value={selectedService.name} />
+                      <MetadataRow label="Environment" value={selectedService.environment} />
+                      <MetadataRow label="Base URL" value={selectedService.base_url} />
+                      <MetadataRow label="Auth mode" value={selectedService.auth_mode} />
+                      <MetadataRow
+                        label="Tags"
+                        value={selectedService.tags.length ? selectedService.tags.join(", ") : "none"}
+                      />
+                      <MetadataRow label="Last refresh" value={formatTimestamp(selectedService.last_seen_at)} />
+                    </dl>
+
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                      <button type="button" onClick={() => startEditService(selectedService)} style={secondaryButtonStyle}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void updateSelectedStatus("registered")}
+                        style={secondaryButtonStyle}
+                      >
+                        Enable
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void updateSelectedStatus("unavailable")}
+                        style={secondaryButtonStyle}
+                      >
+                        Mark Unavailable
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void updateSelectedStatus("disabled")}
+                        style={secondaryButtonStyle}
+                      >
+                        Disable
+                      </button>
+                      <button type="button" onClick={() => void refreshSelectedService()} style={secondaryButtonStyle}>
+                        Refresh Capabilities
+                      </button>
+                      <button type="button" onClick={() => void deleteSelectedService()} style={destructiveButtonStyle}>
+                        Delete
+                      </button>
+                    </div>
+
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <h3 style={{ margin: 0 }}>Stored Capability Document</h3>
+                      {selectedService.capabilities ? (
+                        <textarea
+                          value={JSON.stringify(selectedService.capabilities, null, 2)}
+                          readOnly
+                          spellCheck={false}
+                          style={{
+                            ...inputStyle,
+                            minHeight: 180,
+                            resize: "vertical",
+                            fontFamily: "'SFMono-Regular', Menlo, monospace",
+                            fontSize: 12,
+                          }}
+                        />
+                      ) : (
+                        <p style={mutedTextStyle}>No capability document stored yet.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </section>
             </aside>
+          </section>
+
+          <section style={{ ...frameStyle, padding: 20, display: "grid", gap: 18 }}>
+            <div
+              style={{
+                display: "grid",
+                gap: 12,
+                gridTemplateColumns: "minmax(0, 1.15fr) minmax(320px, 0.85fr)",
+                alignItems: "end",
+              }}
+            >
+              <div>
+                <p style={{ letterSpacing: 1.7, textTransform: "uppercase", fontSize: 12, margin: 0 }}>
+                  Secondary Tool
+                </p>
+                <h2 style={{ margin: "6px 0 10px", fontSize: "clamp(2rem, 4vw, 3rem)", lineHeight: 1.02 }}>
+                  Execution Graph Inspector
+                </h2>
+                <p style={{ margin: 0, fontSize: 17, lineHeight: 1.55, maxWidth: 760 }}>
+                  Feature 3 will move execution reads behind the Studio backend. Until then, the manual
+                  inspector still loads a task graph directly from a Relayna service endpoint.
+                </p>
+              </div>
+              <form
+                onSubmit={handleExecutionSubmit}
+                style={{
+                  ...frameStyle,
+                  padding: 18,
+                  display: "grid",
+                  gap: 12,
+                  alignSelf: "stretch",
+                  background: "rgba(255, 248, 235, 0.9)",
+                }}
+              >
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  API base URL
+                  <input
+                    value={baseUrl}
+                    onChange={(event) => setBaseUrl(event.target.value)}
+                    placeholder="http://localhost:8000"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Task id
+                  <input
+                    value={taskId}
+                    onChange={(event) => setTaskId(event.target.value)}
+                    placeholder="task-123"
+                    style={inputStyle}
+                  />
+                </label>
+                <button type="submit" disabled={loadingGraph} style={primaryButtonStyle}>
+                  {loadingGraph ? "Loading Graph..." : "Load Execution Graph"}
+                </button>
+              </form>
+            </div>
+
+            {graphError ? (
+              <section style={{ ...frameStyle, padding: 16, borderColor: "rgba(152, 66, 66, 0.34)", color: "#6f2525" }}>
+                {graphError}
+              </section>
+            ) : null}
+
+            <section
+              style={{
+                display: "grid",
+                gap: 20,
+                gridTemplateColumns: graph ? "minmax(0, 1.8fr) minmax(320px, 0.9fr)" : "1fr",
+              }}
+            >
+              <div style={{ display: "grid", gap: 18 }}>
+                {graph ? (
+                  <>
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 14,
+                        gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                      }}
+                    >
+                      <MetricCard label="Status" value={graph.summary.status || "unknown"} />
+                      <MetricCard label="Duration" value={formatDuration(graph.summary.duration_ms)} />
+                      <MetricCard label="Nodes" value={String(graph.nodes.length)} />
+                      <MetricCard label="Edges" value={String(graph.edges.length)} />
+                    </div>
+                    <GraphSurface graph={graph} />
+                  </>
+                ) : (
+                  <section style={{ ...frameStyle, padding: 28 }}>
+                    <h3 style={{ marginTop: 0 }}>No Graph Loaded</h3>
+                    <p style={{ marginBottom: 0, lineHeight: 1.6 }}>
+                      Point Studio at a Relayna API and load a task id. The app will call
+                      <code> /executions/&lt;task_id&gt;/graph</code> and render the returned execution graph with
+                      React Flow.
+                    </p>
+                  </section>
+                )}
+              </div>
+
+              <aside style={{ display: "grid", gap: 18 }}>
+                <section style={{ ...frameStyle, padding: 18 }}>
+                  <h3 style={{ marginTop: 0, marginBottom: 12 }}>Legend</h3>
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {Object.entries(kindPalette).map(([kind, palette]) => (
+                      <div key={kind} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span
+                          style={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: 999,
+                            background: palette.background,
+                            border: `1px solid ${palette.border}`,
+                            display: "inline-block",
+                          }}
+                        />
+                        <span style={{ fontSize: 13 }}>{kind}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section style={{ ...frameStyle, padding: 18 }}>
+                  <h3 style={{ marginTop: 0, marginBottom: 12 }}>Mermaid Export</h3>
+                  <p style={{ marginTop: 0, fontSize: 13, lineHeight: 1.55 }}>
+                    Use this in docs, bug reports, or review comments when you need a lightweight debug artifact.
+                  </p>
+                  <textarea
+                    value={mermaid}
+                    readOnly
+                    spellCheck={false}
+                    style={{
+                      width: "100%",
+                      minHeight: 260,
+                      resize: "vertical",
+                      borderRadius: 14,
+                      border: "1px solid rgba(104, 88, 64, 0.25)",
+                      padding: 12,
+                      fontFamily: "'SFMono-Regular', Menlo, monospace",
+                      fontSize: 12,
+                      background: "#fffdfa",
+                      color: "#2d2923",
+                    }}
+                  />
+                </section>
+
+                {graph ? (
+                  <section style={{ ...frameStyle, padding: 18 }}>
+                    <h3 style={{ marginTop: 0, marginBottom: 12 }}>Graph Metadata</h3>
+                    <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
+                      <MetadataRow label="Task id" value={graph.task_id} />
+                      <MetadataRow label="Topology" value={graph.topology_kind} />
+                      <MetadataRow label="Completeness" value={graph.summary.graph_completeness} />
+                      <MetadataRow
+                        label="Related tasks"
+                        value={graph.related_task_ids.length ? graph.related_task_ids.join(", ") : "none"}
+                      />
+                    </dl>
+                  </section>
+                ) : null}
+              </aside>
+            </section>
           </section>
         </div>
       </main>
     </ReactFlowProvider>
   );
 }
-
-function MetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <section style={{ ...frameStyle, padding: 18 }}>
-      <div style={{ fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", opacity: 0.72 }}>{label}</div>
-      <div style={{ marginTop: 8, fontSize: 26, lineHeight: 1.05 }}>{value}</div>
-    </section>
-  );
-}
-
-function MetadataRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: "grid", gap: 4 }}>
-      <dt style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 1.1, opacity: 0.7 }}>{label}</dt>
-      <dd style={{ margin: 0 }}>{value}</dd>
-    </div>
-  );
-}
-
-const inputStyle = {
-  borderRadius: 12,
-  border: "1px solid rgba(95, 81, 59, 0.24)",
-  background: "#fffdf9",
-  color: "#2f271f",
-  padding: "11px 12px",
-  fontSize: 14,
-} satisfies CSSProperties;
