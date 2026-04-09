@@ -468,8 +468,7 @@ class StudioFederationService:
             raise StudioFederationError(
                 status_code=502,
                 detail=(
-                    f"Relayna service '{service.service_id}' returned an invalid response shape "
-                    f"for '{capability_id}'."
+                    f"Relayna service '{service.service_id}' returned an invalid response shape for '{capability_id}'."
                 ),
                 code="invalid_response_shape",
                 service_id=service.service_id,
