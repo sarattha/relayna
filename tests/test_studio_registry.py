@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
+import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import relayna.studio.app as studio_app
+from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
 from relayna.studio import (
     CreateServiceRequest,
+    HttpCapabilityFetcher,
     RedisServiceRegistryStore,
     ServiceRecord,
     ServiceRegistryService,
@@ -70,7 +75,66 @@ class FakeRedis:
         self.close_calls += 1
 
 
-def make_record(*, service_id: str = "payments-api", base_url: str = "https://payments.example.test") -> ServiceRecord:
+class FakeCapabilityFetcher:
+    def __init__(self, result: CapabilityDocument | Exception) -> None:
+        self.result = result
+        self.calls: list[str] = []
+
+    async def fetch(self, base_url: str) -> CapabilityDocument:
+        self.calls.append(base_url)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+class FakeAsyncClient:
+    def __init__(self, result: httpx.Response | Exception) -> None:
+        self.result = result
+        self.requested_urls: list[str] = []
+
+    async def __aenter__(self) -> FakeAsyncClient:
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        del exc_type, exc, tb
+
+    async def get(self, url: str) -> httpx.Response:
+        self.requested_urls.append(url)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def make_capability_document(
+    *,
+    discovery_source: str = "live",
+    compatibility: str = "capabilities_v1",
+    supported_routes: list[str] | None = None,
+    service_title: str | None = "Payments API",
+) -> CapabilityDocument:
+    return CapabilityDocument(
+        relayna_version="1.3.4",
+        topology_kind="shared_tasks_shared_status",
+        alias_config_summary=AliasConfigSummary(),
+        supported_routes=["status.latest"] if supported_routes is None else supported_routes,
+        feature_flags=[],
+        service_metadata=CapabilityServiceMetadata(
+            service_title=service_title,
+            capability_path="/relayna/capabilities",
+            discovery_source=discovery_source,
+            compatibility=compatibility,
+        ),
+    )
+
+
+def make_record(
+    *,
+    service_id: str = "payments-api",
+    base_url: str = "https://payments.example.test",
+    status: ServiceStatus = ServiceStatus.REGISTERED,
+    capabilities: dict[str, object] | None = None,
+    last_seen_at: datetime | None = None,
+) -> ServiceRecord:
     return ServiceRecord(
         service_id=service_id,
         name="Payments API",
@@ -78,7 +142,9 @@ def make_record(*, service_id: str = "payments-api", base_url: str = "https://pa
         environment="prod",
         tags=["core"],
         auth_mode="internal_network",
-        status=ServiceStatus.REGISTERED,
+        status=status,
+        capabilities=capabilities,
+        last_seen_at=last_seen_at,
     )
 
 
@@ -154,9 +220,60 @@ def test_service_registry_service_rejects_healthy_status_patch_and_preserves_dis
     asyncio.run(scenario())
 
 
-def test_service_registry_router_supports_crud_duplicate_handling_and_refresh_placeholder() -> None:
+def test_service_registry_service_refresh_stores_capabilities_and_sets_healthy_status() -> None:
+    async def scenario() -> None:
+        store = RedisServiceRegistryStore(FakeRedis())
+        fetcher = FakeCapabilityFetcher(
+            make_capability_document(supported_routes=["status.latest", "workflow.topology"])
+        )
+        service = ServiceRegistryService(store=store, capability_fetcher=fetcher)
+
+        await service.create_service(
+            CreateServiceRequest(
+                service_id="payments-api",
+                name="Payments API",
+                base_url="https://payments.example.test",
+                environment="prod",
+                tags=["core"],
+                auth_mode="internal_network",
+            )
+        )
+
+        refreshed = await service.refresh_service("payments-api")
+
+        assert fetcher.calls == ["https://payments.example.test"]
+        assert refreshed.status == ServiceStatus.HEALTHY
+        assert refreshed.capabilities == make_capability_document(
+            supported_routes=["status.latest", "workflow.topology"]
+        ).model_dump(mode="json")
+        assert refreshed.last_seen_at is not None
+
+    asyncio.run(scenario())
+
+
+def test_service_registry_service_refresh_preserves_disabled_status() -> None:
+    async def scenario() -> None:
+        store = RedisServiceRegistryStore(FakeRedis())
+        fetcher = FakeCapabilityFetcher(make_capability_document())
+        service = ServiceRegistryService(store=store, capability_fetcher=fetcher)
+
+        await store.create(make_record(status=ServiceStatus.DISABLED))
+
+        refreshed = await service.refresh_service("payments-api")
+
+        assert refreshed.status == ServiceStatus.DISABLED
+        assert refreshed.capabilities == make_capability_document().model_dump(mode="json")
+        assert refreshed.last_seen_at is not None
+
+    asyncio.run(scenario())
+
+
+def test_service_registry_router_supports_crud_duplicate_handling_and_live_refresh() -> None:
     store = RedisServiceRegistryStore(FakeRedis())
-    registry_service = ServiceRegistryService(store=store)
+    registry_service = ServiceRegistryService(
+        store=store,
+        capability_fetcher=FakeCapabilityFetcher(make_capability_document(supported_routes=["status.latest"])),
+    )
     app = FastAPI()
     app.include_router(create_service_registry_router(service_registry=registry_service))
     client = TestClient(app)
@@ -198,11 +315,10 @@ def test_service_registry_router_supports_crud_duplicate_handling_and_refresh_pl
     assert patch_response.json()["status"] == "unavailable"
 
     refresh_response = client.post("/studio/services/payments-api/refresh")
-    assert refresh_response.status_code == 501
-    assert refresh_response.json() == {
-        "detail": "Capability refresh is blocked until feature 2 adds GET /relayna/capabilities.",
-        "blocked_by": "capability_discovery",
-    }
+    assert refresh_response.status_code == 200
+    assert refresh_response.json()["status"] == "healthy"
+    assert refresh_response.json()["capabilities"]["supported_routes"] == ["status.latest"]
+    assert refresh_response.json()["last_seen_at"] is not None
 
     delete_response = client.delete("/studio/services/payments-api")
     assert delete_response.status_code == 204
@@ -219,6 +335,71 @@ def test_service_registry_router_supports_crud_duplicate_handling_and_refresh_pl
         },
     )
     assert recreate_response.status_code == 201
+
+
+@pytest.mark.parametrize("status_code", [404, 405, 501])
+def test_http_capability_fetcher_treats_legacy_statuses_as_fallback(status_code: int) -> None:
+    async def scenario() -> None:
+        fake_client = FakeAsyncClient(httpx.Response(status_code=status_code))
+        fetcher = HttpCapabilityFetcher(client_factory=lambda timeout_seconds: fake_client)
+
+        document = await fetcher.fetch("https://payments.example.test")
+
+        assert fake_client.requested_urls == ["https://payments.example.test/relayna/capabilities"]
+        assert document.model_dump(mode="json") == make_capability_document(
+            discovery_source="fallback",
+            compatibility="legacy_no_capabilities_endpoint",
+            supported_routes=[],
+            service_title=None,
+        ).model_dump(mode="json") | {"relayna_version": "unknown", "topology_kind": "unknown"}
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("response_or_error", "expected_detail"),
+    [
+        (httpx.ReadTimeout("timed out"), "timed out"),
+        (httpx.ConnectError("connect failed"), "failed"),
+        (httpx.Response(status_code=200, text="not-json"), "invalid JSON"),
+        (httpx.Response(status_code=200, json={"relayna_version": "1.3.4"}), "invalid capability document"),
+    ],
+)
+def test_service_registry_refresh_returns_502_and_preserves_existing_data_on_fetch_failures(
+    response_or_error: httpx.Response | Exception,
+    expected_detail: str,
+) -> None:
+    initial_seen_at = datetime(2026, 4, 8, 12, 0, tzinfo=UTC)
+    store = RedisServiceRegistryStore(FakeRedis())
+    fake_client = FakeAsyncClient(response_or_error)
+    registry_service = ServiceRegistryService(
+        store=store,
+        capability_fetcher=HttpCapabilityFetcher(client_factory=lambda timeout_seconds: fake_client),
+    )
+    app = FastAPI()
+    app.include_router(create_service_registry_router(service_registry=registry_service))
+    client = TestClient(app)
+
+    asyncio.run(
+        store.create(
+            make_record(
+                status=ServiceStatus.UNAVAILABLE,
+                capabilities={"supported_routes": ["status.latest"]},
+                last_seen_at=initial_seen_at,
+            )
+        )
+    )
+
+    refresh_response = client.post("/studio/services/payments-api/refresh")
+
+    assert refresh_response.status_code == 502
+    assert expected_detail in refresh_response.json()["detail"]
+
+    stored = asyncio.run(store.get("payments-api"))
+    assert stored is not None
+    assert stored.status == ServiceStatus.UNAVAILABLE
+    assert stored.capabilities == {"supported_routes": ["status.latest"]}
+    assert stored.last_seen_at == initial_seen_at
 
 
 def test_service_registry_router_returns_422_for_invalid_payload_types() -> None:

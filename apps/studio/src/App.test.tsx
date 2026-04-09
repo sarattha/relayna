@@ -181,6 +181,100 @@ describe("App", () => {
     expect(screen.getAllByText("unavailable").length).toBeGreaterThanOrEqual(2);
   });
 
+  it("refreshes a service and renders the returned capability document", async () => {
+    let services: MockServiceRecord[] = [
+      {
+        service_id: "payments-api",
+        name: "Payments API",
+        base_url: "https://payments.example.test",
+        environment: "prod",
+        tags: ["core"],
+        auth_mode: "internal_network",
+        status: "registered",
+        capabilities: null,
+        last_seen_at: null,
+      },
+    ];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      if (url === "/studio/services/payments-api/refresh" && method === "POST") {
+        services = [
+          {
+            ...services[0],
+            status: "healthy",
+            capabilities: {
+              relayna_version: "1.3.4",
+              topology_kind: "shared_tasks_shared_status",
+              alias_config_summary: {
+                aliasing_enabled: false,
+                payload_aliases: {},
+                http_aliases: {},
+              },
+              supported_routes: ["status.latest"],
+              feature_flags: [],
+              service_metadata: {
+                service_title: "Payments API",
+                capability_path: "/relayna/capabilities",
+                discovery_source: "fallback",
+                compatibility: "legacy_no_capabilities_endpoint",
+              },
+            },
+            last_seen_at: "2026-04-09T10:00:00Z",
+          },
+        ];
+        return jsonResponse(services[0]);
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh Capabilities" }));
+
+    expect(await screen.findByText("Refreshed 'payments-api'.")).toBeInTheDocument();
+    expect(screen.getAllByText("healthy").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByDisplayValue(/legacy_no_capabilities_endpoint/)).toBeInTheDocument();
+  });
+
+  it("surfaces refresh failures from the registry backend", async () => {
+    const services: MockServiceRecord[] = [
+      {
+        service_id: "payments-api",
+        name: "Payments API",
+        base_url: "https://payments.example.test",
+        environment: "prod",
+        tags: ["core"],
+        auth_mode: "internal_network",
+        status: "registered",
+        capabilities: null,
+        last_seen_at: null,
+      },
+    ];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      if (url === "/studio/services/payments-api/refresh" && method === "POST") {
+        return jsonResponse({ detail: "Capability endpoint returned invalid JSON." }, 502);
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh Capabilities" }));
+
+    expect(await screen.findByText("Capability endpoint returned invalid JSON.")).toBeInTheDocument();
+  });
+
   it("shows duplicate registration errors from the registry backend", async () => {
     const services: MockServiceRecord[] = [
       {

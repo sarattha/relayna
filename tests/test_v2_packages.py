@@ -1,7 +1,12 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from relayna.api import create_execution_router, create_replay_router, create_workflow_router
+from relayna.api import (
+    create_capabilities_router,
+    create_execution_router,
+    create_replay_router,
+    create_workflow_router,
+)
 from relayna.contracts import ActionSchema, PayloadSchema
 from relayna.mcp import RelaynaMCPServer, inspect_topology
 from relayna.observability import ExecutionGraph, build_execution_graph
@@ -142,6 +147,7 @@ def test_inspect_topology_includes_stage_contract_metadata() -> None:
 
 
 def test_api_exports_new_route_factories() -> None:
+    assert create_capabilities_router is not None
     assert create_execution_router is not None
     assert create_workflow_router is not None
     assert create_replay_router is not None

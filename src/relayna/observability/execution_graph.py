@@ -8,14 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from ..topology import (
-    RelaynaTopology,
-    RoutedTasksSharedStatusShardedAggregationTopology,
-    RoutedTasksSharedStatusTopology,
-    SharedStatusWorkflowTopology,
-    SharedTasksSharedStatusShardedAggregationTopology,
-    SharedTasksSharedStatusTopology,
-)
+from ..topology import RelaynaTopology, SharedStatusWorkflowTopology, topology_kind
 from .store import RedisObservationStore
 
 if TYPE_CHECKING:
@@ -116,7 +109,7 @@ def build_execution_graph(
     dlq_records: dict[str, list[dict[str, Any]]],
     related_task_ids: list[str] | tuple[str, ...] = (),
 ) -> ExecutionGraph:
-    topology_kind = _topology_kind(topology)
+    current_topology_kind = topology_kind(topology)
     node_map: dict[str, ExecutionGraphNode] = {}
     edges: list[ExecutionGraphEdge] = []
     all_timestamps: list[str] = []
@@ -507,7 +500,7 @@ def build_execution_graph(
 
     return ExecutionGraph(
         task_id=task_id,
-        topology_kind=topology_kind,
+        topology_kind=current_topology_kind,
         summary=summary,
         nodes=sorted(node_map.values(), key=lambda item: (_coerce_timestamp(item.timestamp), item.id)),
         edges=sorted(edges, key=lambda item: (_coerce_timestamp(item.timestamp), item.kind, item.source, item.target)),
@@ -618,20 +611,6 @@ def _coerce_timestamp(value: Any) -> str:
 def _parse_timestamp(value: str) -> datetime:
     normalized = value.replace("Z", "+00:00")
     return datetime.fromisoformat(normalized)
-
-
-def _topology_kind(topology: RelaynaTopology) -> str:
-    if isinstance(topology, SharedStatusWorkflowTopology):
-        return "shared_status_workflow"
-    if isinstance(topology, RoutedTasksSharedStatusShardedAggregationTopology):
-        return "routed_tasks_shared_status_sharded_aggregation"
-    if isinstance(topology, SharedTasksSharedStatusShardedAggregationTopology):
-        return "shared_tasks_shared_status_sharded_aggregation"
-    if isinstance(topology, RoutedTasksSharedStatusTopology):
-        return "routed_tasks_shared_status"
-    if isinstance(topology, SharedTasksSharedStatusTopology):
-        return "shared_tasks_shared_status"
-    return type(topology).__name__
 
 
 def _build_mermaid_node_ids(names: Iterable[str], *, prefix: str) -> dict[str, str]:

@@ -1,16 +1,65 @@
+from .capabilities_routes import (
+    ALL_CAPABILITY_ROUTE_IDS,
+    DLQ_CAPABILITY_ROUTE_IDS,
+    DLQ_MESSAGE_DETAIL_ROUTE_ID,
+    DLQ_MESSAGES_ROUTE_ID,
+    DLQ_QUEUES_ROUTE_ID,
+    DLQ_REPLAY_ROUTE_ID,
+    EXECUTION_CAPABILITY_ROUTE_IDS,
+    EXECUTION_GRAPH_ROUTE_ID,
+    STATUS_CAPABILITY_ROUTE_IDS,
+    STATUS_EVENTS_ROUTE_ID,
+    STATUS_HISTORY_ROUTE_ID,
+    STATUS_LATEST_ROUTE_ID,
+    WORKFLOW_CAPABILITY_ROUTE_IDS,
+    WORKFLOW_STAGES_ROUTE_ID,
+    WORKFLOW_TOPOLOGY_ROUTE_ID,
+    build_capability_document,
+    build_legacy_fallback_capability_document,
+    create_capabilities_router,
+    merge_capability_route_ids,
+)
 from .execution_routes import create_execution_router
 from .fastapi_lifespan import HistoryOutputAdapter, RelaynaRuntime, create_relayna_lifespan, get_relayna_runtime
 from .replay_routes import create_dlq_router, create_replay_router
-from .schemas import StageSummaryResponse, TopologyGraphResponse, WorkflowRouteSummary
+from .schemas import (
+    AliasConfigSummary,
+    CapabilityDocument,
+    CapabilityServiceMetadata,
+    StageSummaryResponse,
+    TopologyGraphResponse,
+    WorkflowRouteSummary,
+)
 from .status_routes import create_status_router, sse_response
 from .workflow_routes import create_workflow_router
 
 __all__ = [
+    "ALL_CAPABILITY_ROUTE_IDS",
+    "DLQ_CAPABILITY_ROUTE_IDS",
+    "DLQ_MESSAGES_ROUTE_ID",
+    "DLQ_MESSAGE_DETAIL_ROUTE_ID",
+    "DLQ_QUEUES_ROUTE_ID",
+    "DLQ_REPLAY_ROUTE_ID",
+    "EXECUTION_CAPABILITY_ROUTE_IDS",
+    "EXECUTION_GRAPH_ROUTE_ID",
+    "AliasConfigSummary",
+    "CapabilityDocument",
+    "CapabilityServiceMetadata",
     "HistoryOutputAdapter",
     "RelaynaRuntime",
+    "STATUS_CAPABILITY_ROUTE_IDS",
+    "STATUS_EVENTS_ROUTE_ID",
+    "STATUS_HISTORY_ROUTE_ID",
+    "STATUS_LATEST_ROUTE_ID",
     "StageSummaryResponse",
     "TopologyGraphResponse",
     "WorkflowRouteSummary",
+    "WORKFLOW_CAPABILITY_ROUTE_IDS",
+    "WORKFLOW_STAGES_ROUTE_ID",
+    "WORKFLOW_TOPOLOGY_ROUTE_ID",
+    "build_capability_document",
+    "build_legacy_fallback_capability_document",
+    "create_capabilities_router",
     "create_dlq_router",
     "create_execution_router",
     "create_relayna_lifespan",
@@ -18,5 +67,6 @@ __all__ = [
     "create_status_router",
     "create_workflow_router",
     "get_relayna_runtime",
+    "merge_capability_route_ids",
     "sse_response",
 ]

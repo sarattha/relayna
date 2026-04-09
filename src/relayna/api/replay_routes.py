@@ -7,6 +7,13 @@ from fastapi.responses import JSONResponse
 
 from ..contracts import ContractAliasConfig
 from ..dlq import DLQRecordState, DLQReplayConflict, DLQService
+from .capabilities_routes import (
+    DLQ_CAPABILITY_ROUTE_IDS,
+    DLQ_MESSAGE_DETAIL_ROUTE_ID,
+    DLQ_MESSAGES_ROUTE_ID,
+    DLQ_QUEUES_ROUTE_ID,
+    DLQ_REPLAY_ROUTE_ID,
+)
 from .fastapi_lifespan import http_field_name, public_dlq_payload
 
 
@@ -81,4 +88,12 @@ def create_replay_router(*args, **kwargs):
     return create_dlq_router(*args, **kwargs)
 
 
-__all__ = ["create_dlq_router", "create_replay_router"]
+__all__ = [
+    "DLQ_CAPABILITY_ROUTE_IDS",
+    "DLQ_MESSAGES_ROUTE_ID",
+    "DLQ_MESSAGE_DETAIL_ROUTE_ID",
+    "DLQ_QUEUES_ROUTE_ID",
+    "DLQ_REPLAY_ROUTE_ID",
+    "create_dlq_router",
+    "create_replay_router",
+]

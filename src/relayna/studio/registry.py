@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from datetime import datetime
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Protocol
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+import httpx
 from fastapi import APIRouter, HTTPException, Response, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+
+from ..api import CapabilityDocument, build_legacy_fallback_capability_document
 
 
 class ServiceStatus(StrEnum):
@@ -135,11 +137,6 @@ class ServiceListResponse(BaseModel):
     services: list[ServiceRecord] = Field(default_factory=list)
 
 
-class RefreshBlockedResponse(BaseModel):
-    detail: str
-    blocked_by: str = "capability_discovery"
-
-
 def normalize_base_url(url: str) -> str:
     stripped = url.strip()
     if not stripped:
@@ -181,12 +178,61 @@ class ServiceNotFoundError(Exception):
     pass
 
 
-class CapabilityRefreshBlockedError(Exception):
-    detail = "Capability refresh is blocked until feature 2 adds GET /relayna/capabilities."
-    blocked_by = "capability_discovery"
+class CapabilityRefreshError(Exception):
+    pass
 
-    def to_response(self) -> RefreshBlockedResponse:
-        return RefreshBlockedResponse(detail=self.detail, blocked_by=self.blocked_by)
+
+class CapabilityFetcher(Protocol):
+    async def fetch(self, base_url: str) -> CapabilityDocument: ...
+
+
+def _default_async_client_factory(timeout_seconds: float) -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=timeout_seconds)
+
+
+class HttpCapabilityFetcher:
+    def __init__(
+        self,
+        *,
+        capability_path: str = "/relayna/capabilities",
+        timeout_seconds: float = 5.0,
+        client_factory: Callable[[float], httpx.AsyncClient] = _default_async_client_factory,
+    ) -> None:
+        normalized_path = capability_path.strip() or "/relayna/capabilities"
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
+        self._capability_path = normalized_path
+        self._timeout_seconds = timeout_seconds
+        self._client_factory = client_factory
+
+    async def fetch(self, base_url: str) -> CapabilityDocument:
+        url = f"{base_url.rstrip('/')}{self._capability_path}"
+        try:
+            async with self._client_factory(self._timeout_seconds) as client:
+                response = await client.get(url)
+        except httpx.TimeoutException as exc:
+            raise CapabilityRefreshError(f"Capability refresh timed out for '{base_url}'.") from exc
+        except httpx.HTTPError as exc:
+            raise CapabilityRefreshError(f"Capability refresh failed for '{base_url}'.") from exc
+
+        if response.status_code in {404, 405, 501}:
+            return build_legacy_fallback_capability_document(capability_path=self._capability_path)
+        if response.status_code != 200:
+            raise CapabilityRefreshError(
+                f"Capability endpoint for '{base_url}' returned unexpected status {response.status_code}."
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise CapabilityRefreshError(f"Capability endpoint for '{base_url}' returned invalid JSON.") from exc
+
+        try:
+            return CapabilityDocument.model_validate(payload)
+        except ValidationError as exc:
+            raise CapabilityRefreshError(
+                f"Capability endpoint for '{base_url}' returned an invalid capability document."
+            ) from exc
 
 
 class ServiceRegistryStore(Protocol):
@@ -305,8 +351,9 @@ class RedisServiceRegistryStore:
 
 
 class ServiceRegistryService:
-    def __init__(self, *, store: ServiceRegistryStore) -> None:
+    def __init__(self, *, store: ServiceRegistryStore, capability_fetcher: CapabilityFetcher | None = None) -> None:
         self._store = store
+        self._capability_fetcher = capability_fetcher or HttpCapabilityFetcher()
 
     async def create_service(self, request: CreateServiceRequest) -> ServiceRecord:
         return await self._store.create(request.to_record())
@@ -340,10 +387,20 @@ class ServiceRegistryService:
         normalized_service_id = service_id.strip()
         await self._store.delete(normalized_service_id)
 
-    async def refresh_service(self, service_id: str) -> None:
+    async def refresh_service(self, service_id: str) -> ServiceRecord:
         normalized_service_id = service_id.strip()
-        await self.get_service(normalized_service_id)
-        raise CapabilityRefreshBlockedError
+        existing = await self.get_service(normalized_service_id)
+        capability_document = await self._capability_fetcher.fetch(existing.base_url)
+        refreshed = existing.model_copy(
+            update={
+                "capabilities": capability_document.model_dump(mode="json"),
+                "last_seen_at": datetime.now(UTC),
+                "status": (
+                    ServiceStatus.DISABLED if existing.status == ServiceStatus.DISABLED else ServiceStatus.HEALTHY
+                ),
+            }
+        )
+        return await self._store.update(normalized_service_id, refreshed)
 
 
 def create_service_registry_router(
@@ -391,15 +448,14 @@ def create_service_registry_router(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    @router.post(f"{prefix}" + "/{service_id}/refresh", response_model=None)
-    async def refresh_service(service_id: str) -> JSONResponse:
+    @router.post(f"{prefix}" + "/{service_id}/refresh", response_model=ServiceRecord)
+    async def refresh_service(service_id: str) -> ServiceRecord:
         try:
-            await service_registry.refresh_service(service_id)
+            return await service_registry.refresh_service(service_id)
         except ServiceNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except CapabilityRefreshBlockedError as exc:
-            return JSONResponse(status_code=501, content=exc.to_response().model_dump(mode="json"))
-        raise AssertionError("refresh_service should either raise or return a payload")
+        except CapabilityRefreshError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return router
 
@@ -410,11 +466,12 @@ def service_record_from_mapping(data: Mapping[str, Any]) -> ServiceRecord:
 
 
 __all__ = [
-    "CapabilityRefreshBlockedError",
+    "CapabilityFetcher",
+    "CapabilityRefreshError",
     "CreateServiceRequest",
     "DuplicateServiceError",
+    "HttpCapabilityFetcher",
     "RedisServiceRegistryStore",
-    "RefreshBlockedResponse",
     "ServiceListResponse",
     "ServiceNotFoundError",
     "ServiceRecord",
