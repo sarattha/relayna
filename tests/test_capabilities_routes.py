@@ -99,3 +99,33 @@ def test_capabilities_route_support_is_explicit_and_defaults_feature_flags_to_em
         "payload_aliases": {},
         "http_aliases": {},
     }
+
+
+def test_capabilities_route_snapshots_one_shot_iterables() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    app = FastAPI()
+    app.include_router(
+        create_capabilities_router(
+            topology=topology,
+            supported_routes=iter(STATUS_CAPABILITY_ROUTE_IDS),
+            feature_flags=iter(["federated_reads"]),
+        )
+    )
+    client = TestClient(app)
+
+    first = client.get("/relayna/capabilities")
+    second = client.get("/relayna/capabilities")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["supported_routes"] == list(STATUS_CAPABILITY_ROUTE_IDS)
+    assert second.json()["supported_routes"] == list(STATUS_CAPABILITY_ROUTE_IDS)
+    assert first.json()["feature_flags"] == ["federated_reads"]
+    assert second.json()["feature_flags"] == ["federated_reads"]

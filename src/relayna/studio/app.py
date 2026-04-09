@@ -15,6 +15,7 @@ from .federation import (
 )
 from .registry import (
     CapabilityFetcher,
+    HttpCapabilityFetcher,
     RedisServiceRegistryStore,
     ServiceRegistryService,
     create_service_registry_router,
@@ -98,14 +99,20 @@ def create_studio_app(
     app_state_key: str = "studio",
     registry_prefix: str = "studio:services",
     capability_fetcher: CapabilityFetcher | None = None,
+    capability_refresh_allowed_hosts: tuple[str, ...] | None = None,
+    capability_refresh_allowed_networks: tuple[str, ...] | None = None,
     federation_client_factory=None,
     federation_timeout_seconds: float = 5.0,
 ) -> FastAPI:
+    resolved_capability_fetcher = capability_fetcher or HttpCapabilityFetcher(
+        allowed_hosts=capability_refresh_allowed_hosts,
+        allowed_networks=capability_refresh_allowed_networks,
+    )
     lifespan_factory = _StudioLifespan(
         redis_url=redis_url,
         app_state_key=app_state_key,
         registry_prefix=registry_prefix,
-        capability_fetcher=capability_fetcher,
+        capability_fetcher=resolved_capability_fetcher,
         federation_client_factory=federation_client_factory or _default_async_client_factory,
         federation_timeout_seconds=federation_timeout_seconds,
     )

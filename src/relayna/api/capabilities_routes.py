@@ -132,14 +132,16 @@ def create_capabilities_router(
     capability_path: str = "/relayna/capabilities",
 ) -> APIRouter:
     router = APIRouter()
+    supported_routes_snapshot = tuple(supported_routes)
+    feature_flags_snapshot = tuple(feature_flags or ())
 
     @router.get(capability_path, response_model=CapabilityDocument)
     async def capabilities() -> CapabilityDocument:
         return build_capability_document(
             topology=topology,
-            supported_routes=supported_routes,
+            supported_routes=supported_routes_snapshot,
             alias_config=alias_config,
-            feature_flags=feature_flags,
+            feature_flags=feature_flags_snapshot,
             service_title=service_title,
             capability_path=capability_path,
         )

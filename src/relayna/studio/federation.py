@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Query
@@ -228,7 +229,7 @@ class StudioFederationService:
                 latest_status = {
                     "service_id": service.service_id,
                     "task_id": normalized_task_id,
-                    "event": events[0],
+                    "event": _latest_history_event(events),
                 }
             else:
                 errors.append(latest_error.to_model())
@@ -256,18 +257,18 @@ class StudioFederationService:
         except StudioFederationError as exc:
             if exc.code != "unsupported_route":
                 raise
-        history = await self._fetch_history(service, task_id=task_id, max_scan=1)
+        history = await self._fetch_history(service, task_id=task_id, start_offset="last", max_scan=1)
         events = history.get("events")
         if not isinstance(events, list) or not events:
             return None
         return {
             "service_id": service.service_id,
             "task_id": task_id,
-            "event": events[0],
+            "event": _latest_history_event(events),
         }
 
     async def _fetch_status(self, service: ServiceRecord, task_id: str) -> dict[str, Any]:
-        path = SERVICE_STATUS_PATH.format(task_id=task_id.strip())
+        path = SERVICE_STATUS_PATH.format(task_id=_quote_path_segment(task_id))
         return await self._request_json(
             service,
             capability_id=STATUS_LATEST_ROUTE_ID,
@@ -334,7 +335,7 @@ class StudioFederationService:
         )
 
     async def _fetch_execution_graph(self, service: ServiceRecord, task_id: str) -> dict[str, Any]:
-        path = SERVICE_EXECUTION_GRAPH_PATH.format(task_id=task_id.strip())
+        path = SERVICE_EXECUTION_GRAPH_PATH.format(task_id=_quote_path_segment(task_id))
         return await self._request_json(
             service,
             capability_id=EXECUTION_GRAPH_ROUTE_ID,
@@ -635,6 +636,22 @@ def create_federation_router(
             return exc.to_response()
 
     return router
+
+
+def _latest_history_event(events: list[Any]) -> dict[str, Any]:
+    latest = events[-1]
+    if not isinstance(latest, dict):
+        raise StudioFederationError(
+            status_code=502,
+            detail="Relayna history response returned an invalid event shape.",
+            code="invalid_response_shape",
+            retryable=False,
+        )
+    return latest
+
+
+def _quote_path_segment(value: str) -> str:
+    return quote(value.strip(), safe="")
 
 
 __all__ = [

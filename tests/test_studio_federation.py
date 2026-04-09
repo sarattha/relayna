@@ -205,6 +205,7 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
 
 def test_task_search_fans_out_and_falls_back_to_history(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed_queries: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "payments.example.test" and request.url.path == "/status/task-123":
@@ -212,9 +213,10 @@ def test_task_search_fans_out_and_falls_back_to_history(monkeypatch) -> None:
         if request.url.host == "legacy.example.test" and request.url.path == "/status/task-123":
             return httpx.Response(405, json={"detail": "Method Not Allowed"})
         if request.url.host == "legacy.example.test" and request.url.path == "/history":
+            observed_queries.append(str(request.url.query))
             return httpx.Response(
                 200,
-                json={"count": 1, "events": [{"task_id": "task-123", "status": "processing"}]},
+                json={"count": 1, "events": [{"task_id": "task-123", "status": "completed"}]},
             )
         if request.url.host == "broken.example.test" and request.url.path == "/status/task-123":
             return httpx.Response(401, json={"detail": "Unauthorized"})
@@ -274,6 +276,10 @@ def test_task_search_fans_out_and_falls_back_to_history(monkeypatch) -> None:
         assert {item["service_id"] for item in payload["items"]} == {"payments-api", "legacy-api"}
         assert set(payload["scanned_services"]) == {"payments-api", "legacy-api", "broken-api"}
         assert payload["items"][0]["detail_path"].startswith("/studio/tasks/")
+        legacy_item = next(item for item in payload["items"] if item["service_id"] == "legacy-api")
+        assert legacy_item["latest_status"]["event"]["status"] == "completed"
+        assert "start_offset=last" in observed_queries[0]
+        assert "max_scan=1" in observed_queries[0]
         assert payload["errors"] == [
             {
                 "detail": "Relayna service 'broken-api' rejected Studio credentials for 'status.latest'.",
@@ -297,8 +303,8 @@ def test_task_detail_tolerates_partial_failures_and_derives_latest_from_history(
                 json={
                     "count": 2,
                     "events": [
-                        {"task_id": "task-123", "status": "completed"},
                         {"task_id": "task-123", "status": "processing"},
+                        {"task_id": "task-123", "status": "completed"},
                     ],
                 },
             )
@@ -345,6 +351,58 @@ def test_task_detail_tolerates_partial_failures_and_derives_latest_from_history(
                 "upstream_status": 404,
                 "retryable": False,
             }
+        ]
+
+
+def test_service_scoped_status_and_graph_encode_reserved_task_id_characters(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_urls.append(str(request.url))
+        if str(request.url) == "https://payments.example.test/status/task%3F123%23frag":
+            return httpx.Response(200, json={"task_id": "task?123#frag", "event": {"status": "completed"}})
+        if str(request.url) == "https://payments.example.test/executions/task%3F123%23frag/graph":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "task?123#frag",
+                    "topology_kind": "shared_tasks_shared_status",
+                    "summary": {"status": "completed", "graph_completeness": "partial"},
+                    "nodes": [],
+                    "edges": [],
+                    "annotations": {},
+                    "related_task_ids": [],
+                },
+            )
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=["status.latest", "execution.graph"]),
+            ),
+        )
+
+        status_response = client.get("/studio/services/payments-api/status/task%3F123%23frag")
+        graph_response = client.get("/studio/services/payments-api/executions/task%3F123%23frag/graph")
+
+        assert status_response.status_code == 200
+        assert graph_response.status_code == 200
+        assert observed_urls == [
+            "https://payments.example.test/status/task%3F123%23frag",
+            "https://payments.example.test/executions/task%3F123%23frag/graph",
         ]
 
 

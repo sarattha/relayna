@@ -337,6 +337,50 @@ def test_service_registry_router_supports_crud_duplicate_handling_and_live_refre
     assert recreate_response.status_code == 201
 
 
+def test_http_capability_fetcher_rejects_untrusted_refresh_target_before_request() -> None:
+    async def scenario() -> None:
+        fake_client = FakeAsyncClient(httpx.Response(status_code=200, json={"relayna_version": "1.3.4"}))
+        fetcher = HttpCapabilityFetcher(client_factory=lambda timeout_seconds: fake_client)
+
+        with pytest.raises(Exception, match="trusted host/network allowlist"):
+            await fetcher.fetch("https://api.production.internal")
+
+        assert fake_client.requested_urls == []
+
+    asyncio.run(scenario())
+
+
+def test_http_capability_fetcher_allows_explicit_trusted_host_patterns() -> None:
+    async def scenario() -> None:
+        fake_client = FakeAsyncClient(httpx.Response(status_code=404))
+        fetcher = HttpCapabilityFetcher(
+            client_factory=lambda timeout_seconds: fake_client,
+            allowed_hosts=("*.cluster.local",),
+        )
+
+        await fetcher.fetch("https://studio-api.prod.cluster.local")
+
+        assert fake_client.requested_urls == ["https://studio-api.prod.cluster.local/relayna/capabilities"]
+
+    asyncio.run(scenario())
+
+
+def test_http_capability_fetcher_allows_default_kubernetes_service_suffixes() -> None:
+    async def scenario() -> None:
+        fake_client = FakeAsyncClient(httpx.Response(status_code=404))
+        fetcher = HttpCapabilityFetcher(client_factory=lambda timeout_seconds: fake_client)
+
+        await fetcher.fetch("http://studio-api.default.svc.local:8000")
+        await fetcher.fetch("http://studio-api.default.svc.cluster.local:8000")
+
+        assert fake_client.requested_urls == [
+            "http://studio-api.default.svc.local:8000/relayna/capabilities",
+            "http://studio-api.default.svc.cluster.local:8000/relayna/capabilities",
+        ]
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("status_code", [404, 405, 501])
 def test_http_capability_fetcher_treats_legacy_statuses_as_fallback(status_code: int) -> None:
     async def scenario() -> None:
