@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
+from ipaddress import ip_address, ip_network
 from typing import Any, Protocol
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
@@ -190,6 +191,19 @@ def _default_async_client_factory(timeout_seconds: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout_seconds)
 
 
+DEFAULT_CAPABILITY_REFRESH_ALLOWED_HOSTS = (
+    ".svc.local",
+    ".svc.cluster.local",
+    ".cluster.local",
+    ".example.com",
+    ".example.net",
+    ".example.org",
+    ".example.test",
+    ".invalid",
+    ".test",
+)
+
+
 class HttpCapabilityFetcher:
     def __init__(
         self,
@@ -197,6 +211,8 @@ class HttpCapabilityFetcher:
         capability_path: str = "/relayna/capabilities",
         timeout_seconds: float = 5.0,
         client_factory: Callable[[float], httpx.AsyncClient] = _default_async_client_factory,
+        allowed_hosts: Collection[str] | None = None,
+        allowed_networks: Collection[str] | None = None,
     ) -> None:
         normalized_path = capability_path.strip() or "/relayna/capabilities"
         if not normalized_path.startswith("/"):
@@ -204,8 +220,12 @@ class HttpCapabilityFetcher:
         self._capability_path = normalized_path
         self._timeout_seconds = timeout_seconds
         self._client_factory = client_factory
+        trusted_hosts = DEFAULT_CAPABILITY_REFRESH_ALLOWED_HOSTS if allowed_hosts is None else allowed_hosts
+        self._allowed_host_patterns = tuple(self._normalize_host_pattern(item) for item in trusted_hosts)
+        self._allowed_networks = tuple(ip_network(item.strip(), strict=False) for item in (allowed_networks or ()))
 
     async def fetch(self, base_url: str) -> CapabilityDocument:
+        self._validate_base_url(base_url)
         url = f"{base_url.rstrip('/')}{self._capability_path}"
         try:
             async with self._client_factory(self._timeout_seconds) as client:
@@ -233,6 +253,45 @@ class HttpCapabilityFetcher:
             raise CapabilityRefreshError(
                 f"Capability endpoint for '{base_url}' returned an invalid capability document."
             ) from exc
+
+    def _validate_base_url(self, base_url: str) -> None:
+        hostname = urlsplit(base_url).hostname
+        if hostname is None:
+            raise CapabilityRefreshError(f"Capability refresh target '{base_url}' is missing a hostname.")
+
+        normalized_host = hostname.lower()
+        if self._is_allowed_hostname(normalized_host):
+            return
+
+        try:
+            parsed_ip = ip_address(normalized_host)
+        except ValueError:
+            parsed_ip = None
+
+        if parsed_ip is not None and any(parsed_ip in network for network in self._allowed_networks):
+            return
+
+        raise CapabilityRefreshError(
+            f"Capability refresh target '{base_url}' is not in the trusted host/network allowlist."
+        )
+
+    def _is_allowed_hostname(self, hostname: str) -> bool:
+        return any(self._matches_host_pattern(hostname, pattern) for pattern in self._allowed_host_patterns)
+
+    @staticmethod
+    def _normalize_host_pattern(pattern: str) -> str:
+        normalized = pattern.strip().lower()
+        if not normalized:
+            raise ValueError("allowed_hosts entries must not be empty")
+        if normalized.startswith("*."):
+            return normalized[1:]
+        return normalized
+
+    @staticmethod
+    def _matches_host_pattern(hostname: str, pattern: str) -> bool:
+        if pattern.startswith("."):
+            return hostname.endswith(pattern)
+        return hostname == pattern
 
 
 class ServiceRegistryStore(Protocol):

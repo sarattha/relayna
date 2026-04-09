@@ -325,32 +325,68 @@ describe("App", () => {
   });
 
   it("loads and renders an execution graph after form submission", async () => {
+    const services: MockServiceRecord[] = [
+      {
+        service_id: "payments-api",
+        name: "Payments API",
+        base_url: "https://payments.example.test",
+        environment: "prod",
+        tags: ["core"],
+        auth_mode: "internal_network",
+        status: "healthy",
+        capabilities: { supported_routes: ["status.latest", "execution.graph"] },
+        last_seen_at: "2026-04-09T10:00:00Z",
+      },
+    ];
+
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || "GET";
       if (url === "/studio/services" && method === "GET") {
-        return serviceListResponse([]);
+        return serviceListResponse(services);
       }
-      if (url === "http://api.example.test/executions/task-123/graph" && method === "GET") {
+      if (url === "/studio/tasks/payments-api/task-123" && method === "GET") {
         return jsonResponse({
+          service: services[0],
+          service_id: "payments-api",
           task_id: "task-123",
-          topology_kind: "shared_tasks_shared_status",
-          summary: {
-            status: "completed",
-            duration_ms: 1250,
-            graph_completeness: "full",
+          latest_status: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            event: { status: "completed" },
           },
-          nodes: [
-            { id: "task:task-123", kind: "task", label: "task-123" },
-            { id: "attempt:1", kind: "task_attempt", label: "task-123 attempt 1" },
-            { id: "status:1", kind: "status_event", label: "completed" },
-          ],
-          edges: [
-            { source: "task:task-123", target: "attempt:1", kind: "received_by" },
-            { source: "attempt:1", target: "status:1", kind: "published_status" },
-          ],
-          annotations: {},
-          related_task_ids: [],
+          history: {
+            service_id: "payments-api",
+            count: 1,
+            events: [{ task_id: "task-123", status: "completed" }],
+          },
+          dlq_messages: {
+            service_id: "payments-api",
+            items: [],
+            next_cursor: null,
+          },
+          execution_graph: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            topology_kind: "shared_tasks_shared_status",
+            summary: {
+              status: "completed",
+              duration_ms: 1250,
+              graph_completeness: "full",
+            },
+            nodes: [
+              { id: "task:task-123", kind: "task", label: "task-123" },
+              { id: "attempt:1", kind: "task_attempt", label: "task-123 attempt 1" },
+              { id: "status:1", kind: "status_event", label: "completed" },
+            ],
+            edges: [
+              { source: "task:task-123", target: "attempt:1", kind: "received_by" },
+              { source: "attempt:1", target: "status:1", kind: "published_status" },
+            ],
+            annotations: {},
+            related_task_ids: [],
+          },
+          errors: [],
         });
       }
       throw new Error(`Unhandled fetch: ${method} ${url}`);
@@ -358,24 +394,98 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.change(screen.getByLabelText("API base URL"), {
-      target: { value: "http://api.example.test" },
-    });
+    expect((await screen.findAllByText("Payments API")).length).toBeGreaterThanOrEqual(1);
     fireEvent.change(screen.getByLabelText("Task id"), {
       target: { value: "task-123" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Load Execution Graph" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://api.example.test/executions/task-123/graph", undefined);
+      expect(fetchMock).toHaveBeenCalledWith("/studio/tasks/payments-api/task-123", undefined);
     });
 
     expect((await screen.findAllByText("completed")).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("1.25 s")).toBeInTheDocument();
     expect(screen.getByDisplayValue(/flowchart LR/)).toBeInTheDocument();
     expect(screen.getByDisplayValue(/published_status/)).toBeInTheDocument();
     expect(screen.getAllByText("shared_tasks_shared_status").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("full graph")).toBeInTheDocument();
     expect(screen.getByText("task-123 attempt 1")).toBeInTheDocument();
+    expect(window.location.search).toContain("service_id=payments-api");
+    expect(window.location.search).toContain("task_id=task-123");
+  });
+
+  it("renders section-level task detail errors without dropping successful task data", async () => {
+    const services: MockServiceRecord[] = [
+      {
+        service_id: "payments-api",
+        name: "Payments API",
+        base_url: "https://payments.example.test",
+        environment: "prod",
+        tags: ["core"],
+        auth_mode: "internal_network",
+        status: "healthy",
+        capabilities: { supported_routes: ["status.latest", "status.history"] },
+        last_seen_at: "2026-04-09T10:00:00Z",
+      },
+    ];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      if (url === "/studio/tasks/payments-api/task-123" && method === "GET") {
+        return jsonResponse({
+          service: services[0],
+          service_id: "payments-api",
+          task_id: "task-123",
+          latest_status: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            event: { status: "completed" },
+          },
+          history: {
+            service_id: "payments-api",
+            count: 2,
+            events: [
+              { task_id: "task-123", status: "completed" },
+              { task_id: "task-123", status: "processing" },
+            ],
+          },
+          dlq_messages: {
+            service_id: "payments-api",
+            items: [{ dlq_id: "dlq-1" }],
+            next_cursor: null,
+          },
+          execution_graph: null,
+          errors: [
+            {
+              detail: "No execution graph found for task_id 'task-123'.",
+              code: "upstream_not_found",
+              service_id: "payments-api",
+              upstream_status: 404,
+              retryable: false,
+            },
+          ],
+        });
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect((await screen.findAllByText("Payments API")).length).toBeGreaterThanOrEqual(1);
+    fireEvent.change(screen.getByLabelText("Task id"), {
+      target: { value: "task-123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load Execution Graph" }));
+
+    expect(await screen.findByText("Execution Graph Unavailable")).toBeInTheDocument();
+    expect(screen.getByText("History events")).toBeInTheDocument();
+    expect(screen.getByText("DLQ messages")).toBeInTheDocument();
+    expect(screen.getByText("upstream_not_found")).toBeInTheDocument();
+    expect(screen.getByText("No execution graph found for task_id 'task-123'.")).toBeInTheDocument();
+    expect(screen.getAllByText("Payments API (payments-api)").length).toBeGreaterThanOrEqual(1);
   });
 });

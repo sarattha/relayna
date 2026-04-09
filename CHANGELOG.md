@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.3.6 - 2026-04-09
+
+### Added
+
+- Federated Studio control-plane reads via `relayna.studio.create_federation_router(...)` and `StudioFederationService`, including service-scoped proxy routes for status, history, workflow topology, DLQ messages, and execution graphs.
+- Cross-service exact-`task_id` search at `GET /studio/tasks/search` plus composite task detail reads at `GET /studio/tasks/{service_id}/{task_id}`.
+- Normalized Studio federation error responses and backend coverage for timeout, auth failure, unsupported route, and upstream not-found handling.
+
+### Changed
+
+- `create_studio_app(...)` now mounts the federated Studio read surface and manages one shared `httpx.AsyncClient` for upstream Relayna service reads.
+- The Studio frontend task inspector now reads task details and execution graphs through `/studio/tasks/{service_id}/{task_id}` and no longer calls arbitrary Relayna service base URLs from the browser.
+- The internal Studio roadmap now marks feature 3, Federated API aggregation layer, as implemented.
+- Bumped the package version to `1.3.6`.
+
 ## 1.3.5 - 2026-04-09
 
 ### Added

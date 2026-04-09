@@ -1,6 +1,15 @@
 from .app import StudioRuntime, create_studio_app, get_studio_runtime
 from .dlq_view import build_dlq_view
 from .execution_view import build_execution_view
+from .federation import (
+    FederatedError,
+    StudioFederationError,
+    StudioFederationService,
+    StudioTaskDetailResponse,
+    StudioTaskSearchItem,
+    StudioTaskSearchResponse,
+    create_federation_router,
+)
 from .registry import (
     CapabilityRefreshError,
     CreateServiceRequest,
@@ -21,19 +30,26 @@ from .topology_view import build_topology_view
 __all__ = [
     "CapabilityRefreshError",
     "CreateServiceRequest",
+    "FederatedError",
     "HttpCapabilityFetcher",
     "RedisServiceRegistryStore",
     "ServiceListResponse",
     "ServiceRecord",
+    "StudioFederationError",
+    "StudioFederationService",
     "ServiceRegistryService",
     "ServiceStatus",
     "StudioRuntime",
+    "StudioTaskDetailResponse",
+    "StudioTaskSearchItem",
+    "StudioTaskSearchResponse",
     "UpdateServiceRequest",
     "build_dlq_view",
     "build_execution_view",
     "build_run_view",
     "build_stage_view",
     "build_topology_view",
+    "create_federation_router",
     "create_service_registry_router",
     "create_studio_app",
     "get_studio_runtime",
