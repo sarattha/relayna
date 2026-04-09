@@ -34,7 +34,7 @@ class ServiceRecord(BaseModel):
     @classmethod
     def _strip_required_strings(cls, value: Any) -> str:
         if not isinstance(value, str):
-            raise TypeError("value must be a string")
+            raise ValueError("value must be a string")
         normalized = value.strip()
         if not normalized:
             raise ValueError("value must not be empty")
@@ -44,7 +44,7 @@ class ServiceRecord(BaseModel):
     @classmethod
     def _normalize_base_url(cls, value: Any) -> str:
         if not isinstance(value, str):
-            raise TypeError("base_url must be a string")
+            raise ValueError("base_url must be a string")
         return normalize_base_url(value)
 
     @field_validator("tags", mode="before")
@@ -53,12 +53,12 @@ class ServiceRecord(BaseModel):
         if value is None:
             return []
         if not isinstance(value, list):
-            raise TypeError("tags must be a list")
+            raise ValueError("tags must be a list")
         normalized: list[str] = []
         seen: set[str] = set()
         for item in value:
             if not isinstance(item, str):
-                raise TypeError("tags must contain strings")
+                raise ValueError("tags must contain strings")
             stripped = item.strip()
             if not stripped or stripped in seen:
                 continue
@@ -207,17 +207,7 @@ class RedisServiceRegistryStore:
         self._prefix = prefix
 
     async def create(self, record: ServiceRecord) -> ServiceRecord:
-        if await self.get(record.service_id) is not None:
-            raise DuplicateServiceError(f"Service '{record.service_id}' is already registered.")
-
-        conflict_service_id = await self._get_env_url_owner(record.environment, record.base_url)
-        if conflict_service_id is not None:
-            raise DuplicateServiceError(
-                "A service is already registered for "
-                f"environment '{record.environment}' and base_url '{record.base_url}'."
-            )
-
-        await self._write_record(record)
+        await self._create_record(record)
         return record
 
     async def list_records(self) -> list[ServiceRecord]:
@@ -270,6 +260,27 @@ class RedisServiceRegistryStore:
         await self._redis.sadd(self._all_key(), record.service_id)
         await self._redis.set(self._env_url_key(record.environment, record.base_url), record.service_id)
 
+    async def _create_record(self, record: ServiceRecord) -> None:
+        record_key = self._record_key(record.service_id)
+        env_url_key = self._env_url_key(record.environment, record.base_url)
+        record_reserved = await self._redis.set(record_key, record.model_dump_json(), nx=True)
+        if not record_reserved:
+            raise DuplicateServiceError(f"Service '{record.service_id}' is already registered.")
+
+        env_url_reserved = await self._redis.set(env_url_key, record.service_id, nx=True)
+        if not env_url_reserved:
+            await self._redis.delete(record_key)
+            raise DuplicateServiceError(
+                "A service is already registered for "
+                f"environment '{record.environment}' and base_url '{record.base_url}'."
+            )
+
+        try:
+            await self._redis.sadd(self._all_key(), record.service_id)
+        except Exception:
+            await self._redis.delete(record_key, env_url_key)
+            raise
+
     async def _get_env_url_owner(self, environment: str, normalized_base_url: str) -> str | None:
         raw = await self._redis.get(self._env_url_key(environment, normalized_base_url))
         if raw is None:
@@ -304,13 +315,15 @@ class ServiceRegistryService:
         return await self._store.list_records()
 
     async def get_service(self, service_id: str) -> ServiceRecord:
-        record = await self._store.get(service_id.strip())
+        normalized_service_id = service_id.strip()
+        record = await self._store.get(normalized_service_id)
         if record is None:
             raise ServiceNotFoundError(f"Service '{service_id}' was not found.")
         return record
 
     async def update_service(self, service_id: str, request: UpdateServiceRequest) -> ServiceRecord:
-        existing = await self.get_service(service_id)
+        normalized_service_id = service_id.strip()
+        existing = await self.get_service(normalized_service_id)
         changes = request.model_dump(exclude_unset=True)
         next_status = changes.pop("status", None)
         if next_status == ServiceStatus.HEALTHY:
@@ -321,13 +334,15 @@ class ServiceRegistryService:
         if next_status is not None:
             data["status"] = next_status
         updated = ServiceRecord.model_validate(data)
-        return await self._store.update(service_id, updated)
+        return await self._store.update(normalized_service_id, updated)
 
     async def delete_service(self, service_id: str) -> None:
-        await self._store.delete(service_id.strip())
+        normalized_service_id = service_id.strip()
+        await self._store.delete(normalized_service_id)
 
     async def refresh_service(self, service_id: str) -> None:
-        await self.get_service(service_id)
+        normalized_service_id = service_id.strip()
+        await self.get_service(normalized_service_id)
         raise CapabilityRefreshBlockedError
 
 

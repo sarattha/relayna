@@ -36,7 +36,9 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
-    async def set(self, key: str, value: str) -> bool:
+    async def set(self, key: str, value: str, *, nx: bool = False) -> bool:
+        if nx and key in self.values:
+            return False
         self.values[key] = value
         return True
 
@@ -217,6 +219,54 @@ def test_service_registry_router_supports_crud_duplicate_handling_and_refresh_pl
         },
     )
     assert recreate_response.status_code == 201
+
+
+def test_service_registry_router_returns_422_for_invalid_payload_types() -> None:
+    store = RedisServiceRegistryStore(FakeRedis())
+    registry_service = ServiceRegistryService(store=store)
+    app = FastAPI()
+    app.include_router(create_service_registry_router(service_registry=registry_service))
+    client = TestClient(app)
+
+    response = client.post(
+        "/studio/services",
+        json={
+            "service_id": 123,
+            "name": "Payments API",
+            "base_url": "https://payments.example.test",
+            "environment": "prod",
+            "tags": ["core"],
+            "auth_mode": "internal_network",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_service_registry_router_patch_accepts_service_id_with_surrounding_spaces() -> None:
+    store = RedisServiceRegistryStore(FakeRedis())
+    registry_service = ServiceRegistryService(store=store)
+    app = FastAPI()
+    app.include_router(create_service_registry_router(service_registry=registry_service))
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/studio/services",
+        json={
+            "service_id": "payments-api",
+            "name": "Payments API",
+            "base_url": "https://payments.example.test",
+            "environment": "prod",
+            "tags": [],
+            "auth_mode": "internal_network",
+        },
+    )
+    assert create_response.status_code == 201
+
+    patch_response = client.patch("/studio/services/%20payments-api%20", json={"name": "Payments Control API"})
+
+    assert patch_response.status_code == 200
+    assert patch_response.json()["name"] == "Payments Control API"
 
 
 def test_create_studio_app_mounts_registry_routes_and_closes_redis(monkeypatch) -> None:
