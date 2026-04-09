@@ -8,7 +8,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | --- | --- | --- | --- |
 | 1 | Service registry | partially_implemented | 2026-04-08 |
 | 2 | Capability discovery and version handshake | implemented | 2026-04-09 |
-| 3 | Federated API aggregation layer | planned | 2026-04-08 |
+| 3 | Federated API aggregation layer | implemented | 2026-04-09 |
 | 4 | Cross-service identity model | partially_implemented | 2026-04-08 |
 | 5 | Aggregated event and observation ingestion | partially_implemented | 2026-04-08 |
 | 6 | Log pipeline | partially_implemented | 2026-04-08 |
@@ -107,11 +107,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 3. Federated API Aggregation Layer
 
-- Status: planned
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-09
 - Goal: Make Studio backend the single read surface for multi-service Relayna operations.
 - Why it exists: Browsers should not coordinate direct calls to many services, normalize response shapes, or handle cross-service failures.
-- Current state in repo: Studio now owns a backend service registry and same-origin `/studio/services` CRUD surface, but execution-graph reads still go directly from the browser to a manually entered Relayna base URL. Relayna runtime services remain local to one application runtime. See `apps/studio/src/App.tsx` and `src/relayna/api/fastapi_lifespan.py`.
+- Current state in repo: Studio now exposes a federated backend read surface for registered Relayna services, including service-scoped status/history/workflow/DLQ/execution-graph reads, exact-`task_id` cross-service search, and a composite task detail endpoint. The Studio frontend task inspector now reads via `/studio/tasks/{service_id}/{task_id}` instead of calling service base URLs directly. See `src/relayna/studio/federation.py`, `src/relayna/studio/app.py`, and `apps/studio/src/App.tsx`.
 - Target end state: Studio backend exposes a normalized API that proxies and aggregates Relayna reads from registered services.
 - Planned API/interface additions:
   - Service-scoped read endpoints:
@@ -140,11 +140,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Studio backend can proxy Relayna endpoints for any registered service
   - Cross-service search returns normalized response items with `service_id`
 - Checklist:
-  - [ ] Define Studio backend service client abstraction
-  - [ ] Define normalized error shape
-  - [ ] Add service-scoped proxy routes
-  - [ ] Add cross-service task search route
-  - [ ] Add tests for timeout, 404, and auth failure normalization
+  - [x] Define Studio backend service client abstraction
+  - [x] Define normalized error shape
+  - [x] Add service-scoped proxy routes
+  - [x] Add cross-service task search route
+  - [x] Add tests for timeout, 404, and auth failure normalization
 
 ## 4. Cross-Service Identity Model
 

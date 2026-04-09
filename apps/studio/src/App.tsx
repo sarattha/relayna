@@ -65,6 +65,7 @@ type ExecutionGraphSummary = {
 };
 
 type ExecutionGraph = {
+  service_id?: string;
   task_id: string;
   topology_kind: string;
   summary: ExecutionGraphSummary;
@@ -72,6 +73,43 @@ type ExecutionGraph = {
   edges: ExecutionGraphEdge[];
   annotations: Record<string, unknown>;
   related_task_ids: string[];
+};
+
+type FederatedError = {
+  detail: string;
+  code: string;
+  service_id?: string | null;
+  upstream_status?: number | null;
+  retryable: boolean;
+};
+
+type StatusPayload = {
+  service_id: string;
+  task_id: string;
+  event: Record<string, unknown>;
+};
+
+type HistoryPayload = {
+  service_id: string;
+  count: number;
+  events: Array<Record<string, unknown>>;
+};
+
+type DlqMessagesPayload = {
+  service_id: string;
+  items: Array<Record<string, unknown>>;
+  next_cursor?: string | null;
+};
+
+type StudioTaskDetail = {
+  service: ServiceRecord;
+  service_id: string;
+  task_id: string;
+  latest_status?: StatusPayload | null;
+  history?: HistoryPayload | null;
+  dlq_messages?: DlqMessagesPayload | null;
+  execution_graph?: ExecutionGraph | null;
+  errors: FederatedError[];
 };
 
 const frameStyle = {
@@ -152,13 +190,6 @@ const emptyServiceDraft: ServiceDraft = {
   tags: "",
   auth_mode: "internal_network",
 };
-
-function defaultBaseUrl() {
-  if (typeof window === "undefined") {
-    return "http://localhost:8000";
-  }
-  return window.location.origin;
-}
 
 function serviceToDraft(service: ServiceRecord): ServiceDraft {
   return {
@@ -437,6 +468,7 @@ export function App() {
   const search = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
+  const [inspectorServiceId, setInspectorServiceId] = useState<string | null>(search?.get("service_id") || null);
   const [draft, setDraft] = useState<ServiceDraft>(emptyServiceDraft);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [registryLoading, setRegistryLoading] = useState(true);
@@ -444,13 +476,13 @@ export function App() {
   const [registryError, setRegistryError] = useState<string | null>(null);
   const [registryNotice, setRegistryNotice] = useState<string | null>(null);
 
-  const [baseUrl, setBaseUrl] = useState(search?.get("base_url") || defaultBaseUrl());
   const [taskId, setTaskId] = useState(search?.get("task_id") || "");
-  const [graph, setGraph] = useState<ExecutionGraph | null>(null);
+  const [taskDetail, setTaskDetail] = useState<StudioTaskDetail | null>(null);
   const [loadingGraph, setLoadingGraph] = useState(false);
   const [graphError, setGraphError] = useState<string | null>(null);
 
   const selectedService = services.find((service) => service.service_id === selectedServiceId) ?? null;
+  const graph = taskDetail?.execution_graph || null;
 
   useEffect(() => {
     void loadServices();
@@ -461,10 +493,11 @@ export function App() {
       return;
     }
     const initialTaskId = search.get("task_id");
-    if (!initialTaskId) {
+    const initialServiceId = search.get("service_id");
+    if (!initialTaskId || !initialServiceId) {
       return;
     }
-    void loadGraph(initialTaskId, search.get("base_url") || defaultBaseUrl());
+    void loadTaskDetail(initialTaskId, initialServiceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -482,6 +515,12 @@ export function App() {
           nextServices[0] ||
           null;
         setSelectedServiceId(nextSelected?.service_id || null);
+        setInspectorServiceId((current) => {
+          if (current && nextServices.some((service) => service.service_id === current)) {
+            return current;
+          }
+          return nextSelected?.service_id || null;
+        });
         if (editingServiceId) {
           const editing = nextServices.find((service) => service.service_id === editingServiceId);
           if (editing) {
@@ -500,35 +539,38 @@ export function App() {
     }
   }
 
-  async function loadGraph(nextTaskId: string, nextBaseUrl: string) {
+  async function loadTaskDetail(nextTaskId: string, nextServiceId: string | null) {
     const normalizedTaskId = nextTaskId.trim();
-    const normalizedBaseUrl = nextBaseUrl.trim().replace(/\/+$/, "");
+    const normalizedServiceId = (nextServiceId || "").trim();
     if (!normalizedTaskId) {
       setGraphError("Enter a task id to load an execution graph.");
+      return;
+    }
+    if (!normalizedServiceId) {
+      setGraphError("Select a registered service to inspect task details.");
       return;
     }
 
     setLoadingGraph(true);
     setGraphError(null);
     try {
-      const payload = await requestJson<(ExecutionGraph & { attempt_id?: string })>(
-        `${normalizedBaseUrl}/executions/${encodeURIComponent(normalizedTaskId)}/graph`,
+      const payload = await requestJson<StudioTaskDetail>(
+        `/studio/tasks/${encodeURIComponent(normalizedServiceId)}/${encodeURIComponent(normalizedTaskId)}`,
       );
-      const normalizedGraph: ExecutionGraph = {
-        ...(payload as ExecutionGraph & { attempt_id?: string }),
-        task_id: payload?.task_id || payload?.attempt_id || normalizedTaskId,
-      };
       startTransition(() => {
-        setGraph(normalizedGraph);
+        setTaskDetail(payload);
+        setSelectedServiceId(payload?.service_id || normalizedServiceId);
+        setInspectorServiceId(payload?.service_id || normalizedServiceId);
       });
       if (typeof window !== "undefined") {
         const params = new URLSearchParams(window.location.search);
         params.set("task_id", normalizedTaskId);
-        params.set("base_url", normalizedBaseUrl);
+        params.set("service_id", normalizedServiceId);
+        params.delete("base_url");
         window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
       }
     } catch (fetchError) {
-      setGraph(null);
+      setTaskDetail(null);
       setGraphError(fetchError instanceof Error ? fetchError.message : "Unable to load execution graph.");
     } finally {
       setLoadingGraph(false);
@@ -661,10 +703,13 @@ export function App() {
 
   function handleExecutionSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void loadGraph(taskId, baseUrl);
+    void loadTaskDetail(taskId, inspectorServiceId);
   }
 
   const mermaid = graph ? buildMermaid(graph) : "";
+  const latestStatusValue = String(taskDetail?.latest_status?.event?.status || graph?.summary.status || "unknown");
+  const historyCount = taskDetail?.history?.count ?? 0;
+  const dlqCount = taskDetail?.dlq_messages?.items.length ?? 0;
 
   return (
     <ReactFlowProvider>
@@ -801,7 +846,10 @@ export function App() {
                             <td style={{ padding: "14px 0 14px 8px", textAlign: "right" }}>
                               <button
                                 type="button"
-                                onClick={() => setSelectedServiceId(service.service_id)}
+                                onClick={() => {
+                                  setSelectedServiceId(service.service_id);
+                                  setInspectorServiceId(service.service_id);
+                                }}
                                 style={secondaryButtonStyle}
                               >
                                 View
@@ -997,8 +1045,8 @@ export function App() {
                   Execution Graph Inspector
                 </h2>
                 <p style={{ margin: 0, fontSize: 17, lineHeight: 1.55, maxWidth: 760 }}>
-                  Feature 3 will move execution reads behind the Studio backend. Until then, the manual
-                  inspector still loads a task graph directly from a Relayna service endpoint.
+                  Studio now reads task details and execution graphs through the federated backend surface, so the
+                  browser only talks to `/studio/*` control-plane routes.
                 </p>
               </div>
               <form
@@ -1013,13 +1061,19 @@ export function App() {
                 }}
               >
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                  API base URL
-                  <input
-                    value={baseUrl}
-                    onChange={(event) => setBaseUrl(event.target.value)}
-                    placeholder="http://localhost:8000"
+                  Registered service
+                  <select
+                    value={inspectorServiceId || ""}
+                    onChange={(event) => setInspectorServiceId(event.target.value || null)}
                     style={inputStyle}
-                  />
+                  >
+                    <option value="">Select a service</option>
+                    {services.map((service) => (
+                      <option key={service.service_id} value={service.service_id}>
+                        {service.name} ({service.service_id})
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Task id
@@ -1050,7 +1104,7 @@ export function App() {
               }}
             >
               <div style={{ display: "grid", gap: 18 }}>
-                {graph ? (
+                {taskDetail ? (
                   <>
                     <div
                       style={{
@@ -1059,20 +1113,32 @@ export function App() {
                         gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
                       }}
                     >
-                      <MetricCard label="Status" value={graph.summary.status || "unknown"} />
-                      <MetricCard label="Duration" value={formatDuration(graph.summary.duration_ms)} />
-                      <MetricCard label="Nodes" value={String(graph.nodes.length)} />
-                      <MetricCard label="Edges" value={String(graph.edges.length)} />
+                      <MetricCard label="Status" value={latestStatusValue} />
+                      <MetricCard label="History Events" value={String(historyCount)} />
+                      <MetricCard label="DLQ Messages" value={String(dlqCount)} />
+                      <MetricCard
+                        label="Graph"
+                        value={graph ? `${graph.nodes.length} nodes` : "Unavailable"}
+                      />
                     </div>
-                    <GraphSurface graph={graph} />
+                    {graph ? (
+                      <GraphSurface graph={graph} />
+                    ) : (
+                      <section style={{ ...frameStyle, padding: 28 }}>
+                        <h3 style={{ marginTop: 0 }}>Execution Graph Unavailable</h3>
+                        <p style={{ marginBottom: 0, lineHeight: 1.6 }}>
+                          Studio loaded task detail successfully, but the federated execution-graph read did not
+                          return a graph for this task.
+                        </p>
+                      </section>
+                    )}
                   </>
                 ) : (
                   <section style={{ ...frameStyle, padding: 28 }}>
-                    <h3 style={{ marginTop: 0 }}>No Graph Loaded</h3>
+                    <h3 style={{ marginTop: 0 }}>No Task Loaded</h3>
                     <p style={{ marginBottom: 0, lineHeight: 1.6 }}>
-                      Point Studio at a Relayna API and load a task id. The app will call
-                      <code> /executions/&lt;task_id&gt;/graph</code> and render the returned execution graph with
-                      React Flow.
+                      Select a registered service and load a task id. Studio will call
+                      <code> /studio/tasks/&lt;service_id&gt;/&lt;task_id&gt;</code> and render the federated task view.
                     </p>
                   </section>
                 )}
@@ -1136,6 +1202,37 @@ export function App() {
                         value={graph.related_task_ids.length ? graph.related_task_ids.join(", ") : "none"}
                       />
                     </dl>
+                  </section>
+                ) : null}
+
+                {taskDetail ? (
+                  <section style={{ ...frameStyle, padding: 18 }}>
+                    <h3 style={{ marginTop: 0, marginBottom: 12 }}>Task Detail</h3>
+                    <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
+                      <MetadataRow label="Service" value={`${taskDetail.service.name} (${taskDetail.service_id})`} />
+                      <MetadataRow label="Task id" value={taskDetail.task_id} />
+                      <MetadataRow label="Latest status" value={latestStatusValue} />
+                      <MetadataRow label="History events" value={String(historyCount)} />
+                      <MetadataRow label="DLQ messages" value={String(dlqCount)} />
+                      <MetadataRow
+                        label="Related tasks"
+                        value={graph?.related_task_ids.length ? graph.related_task_ids.join(", ") : "none"}
+                      />
+                    </dl>
+                  </section>
+                ) : null}
+
+                {taskDetail?.errors.length ? (
+                  <section style={{ ...frameStyle, padding: 18, borderColor: "rgba(152, 66, 66, 0.24)" }}>
+                    <h3 style={{ marginTop: 0, marginBottom: 12 }}>Section Errors</h3>
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {taskDetail.errors.map((error, index) => (
+                        <div key={`${error.code}-${index}`} style={{ display: "grid", gap: 4 }}>
+                          <strong style={{ fontSize: 13 }}>{error.code}</strong>
+                          <span style={{ fontSize: 13, lineHeight: 1.5 }}>{error.detail}</span>
+                        </div>
+                      ))}
+                    </div>
                   </section>
                 ) : null}
               </aside>
