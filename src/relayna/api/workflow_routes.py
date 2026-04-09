@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from ..topology.workflow import SharedStatusWorkflowTopology
 from ..topology.workflow_contract import serialize_workflow_stage
 from ..topology.workflow_graph import export_workflow_graph
+from .capabilities_routes import WORKFLOW_CAPABILITY_ROUTE_IDS, WORKFLOW_STAGES_ROUTE_ID, WORKFLOW_TOPOLOGY_ROUTE_ID
 
 
 def create_workflow_router(
@@ -36,4 +37,9 @@ def create_workflow_router(
     return router
 
 
-__all__ = ["create_workflow_router"]
+__all__ = [
+    "WORKFLOW_CAPABILITY_ROUTE_IDS",
+    "WORKFLOW_STAGES_ROUTE_ID",
+    "WORKFLOW_TOPOLOGY_ROUTE_ID",
+    "create_workflow_router",
+]

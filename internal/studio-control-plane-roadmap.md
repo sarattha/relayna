@@ -7,7 +7,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | # | Feature | Status | Last Updated |
 | --- | --- | --- | --- |
 | 1 | Service registry | partially_implemented | 2026-04-08 |
-| 2 | Capability discovery and version handshake | planned | 2026-04-08 |
+| 2 | Capability discovery and version handshake | implemented | 2026-04-09 |
 | 3 | Federated API aggregation layer | planned | 2026-04-08 |
 | 4 | Cross-service identity model | partially_implemented | 2026-04-08 |
 | 5 | Aggregated event and observation ingestion | partially_implemented | 2026-04-08 |
@@ -68,8 +68,8 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 2. Capability Discovery And Version Handshake
 
-- Status: planned
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-09
 - Goal: Let Studio discover what each registered service can do before it tries to call service-specific Relayna endpoints.
 - Why it exists: Not every service will expose the same Relayna endpoints, and Studio needs a stable compatibility contract.
 - Current state in repo: Relayna exposes status, DLQ, workflow, and execution routes, but there is no single discovery endpoint or version handshake. See `src/relayna/api/execution_routes.py` and `src/relayna/api/workflow_routes.py`.
@@ -98,12 +98,12 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Studio can reject unsupported actions without trial-and-error HTTP calls
   - Services without capability endpoint degrade predictably
 - Checklist:
-  - [ ] Define capability response schema
-  - [ ] Add reusable capabilities route
-  - [ ] Include route support and topology kind in response
-  - [ ] Include alias config summary in response
-  - [ ] Add Studio-side fallback behavior for older services
-  - [ ] Add tests for capability route and backward compatibility
+  - [x] Define capability response schema
+  - [x] Add reusable capabilities route
+  - [x] Include route support and topology kind in response
+  - [x] Include alias config summary in response
+  - [x] Add Studio-side fallback behavior for older services
+  - [x] Add tests for capability route and backward compatibility
 
 ## 3. Federated API Aggregation Layer
 
@@ -453,3 +453,4 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - 2026-04-08: Created the internal Studio control-plane roadmap as the single source of truth for the 10 control-plane features and their tracking statuses.
 - 2026-04-08: Refined the auth roadmap to start with simple username/password authentication for Studio users and rely on existing AKS trust boundaries for service-to-service communication in the initial phase.
 - 2026-04-08: Shipped the first service-registry slice with Redis-backed service records, Studio backend CRUD routes, a dependency-gated capability refresh placeholder, and Studio service list/detail UI.
+- 2026-04-09: Shipped feature 2 with `GET /relayna/capabilities`, typed capability documents, Studio-backed capability refresh storage, and deterministic legacy fallback handling for older services.

@@ -605,12 +605,15 @@ export function App() {
     setRegistrySaving(true);
     setRegistryNotice(null);
     try {
-      await requestJson(`/studio/services/${encodeURIComponent(selectedService.service_id)}/refresh`, {
+      const refreshed = await requestJson<ServiceRecord>(
+        `/studio/services/${encodeURIComponent(selectedService.service_id)}/refresh`,
+        {
         method: "POST",
-      });
+      },
+      );
       setRegistryError(null);
-      setRegistryNotice(`Refreshed '${selectedService.service_id}'.`);
-      await loadServices(selectedService.service_id);
+      setRegistryNotice(`Refreshed '${refreshed?.service_id || selectedService.service_id}'.`);
+      await loadServices(refreshed?.service_id || selectedService.service_id);
     } catch (fetchError) {
       setRegistryError(fetchError instanceof Error ? fetchError.message : "Unable to refresh service.");
     } finally {

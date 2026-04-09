@@ -10,6 +10,12 @@ from ..contracts import ContractAliasConfig, public_output_aliases
 from ..status.history import StreamHistoryReader, StreamOffset
 from ..status.store import RedisStatusStore
 from ..status.stream import EventAdapter, SSEStatusStream
+from .capabilities_routes import (
+    STATUS_CAPABILITY_ROUTE_IDS,
+    STATUS_EVENTS_ROUTE_ID,
+    STATUS_HISTORY_ROUTE_ID,
+    STATUS_LATEST_ROUTE_ID,
+)
 from .fastapi_lifespan import http_field_name, payload_field_name, sse_response
 
 HISTORY_START_OFFSET_QUERY = Query(default="first")
@@ -111,4 +117,11 @@ def _status_value(data: dict[str, Any]) -> str | None:
     return str(status).lower()
 
 
-__all__ = ["create_status_router", "sse_response"]
+__all__ = [
+    "STATUS_CAPABILITY_ROUTE_IDS",
+    "STATUS_EVENTS_ROUTE_ID",
+    "STATUS_HISTORY_ROUTE_ID",
+    "STATUS_LATEST_ROUTE_ID",
+    "create_status_router",
+    "sse_response",
+]

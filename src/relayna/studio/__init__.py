@@ -2,7 +2,9 @@ from .app import StudioRuntime, create_studio_app, get_studio_runtime
 from .dlq_view import build_dlq_view
 from .execution_view import build_execution_view
 from .registry import (
+    CapabilityRefreshError,
     CreateServiceRequest,
+    HttpCapabilityFetcher,
     RedisServiceRegistryStore,
     ServiceListResponse,
     ServiceRecord,
@@ -17,7 +19,9 @@ from .stage_view import build_stage_view
 from .topology_view import build_topology_view
 
 __all__ = [
+    "CapabilityRefreshError",
     "CreateServiceRequest",
+    "HttpCapabilityFetcher",
     "RedisServiceRegistryStore",
     "ServiceListResponse",
     "ServiceRecord",

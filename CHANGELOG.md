@@ -4,15 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.3.5 - 2026-04-09
+
 ### Added
 
 - Redis-backed Studio service-registry primitives via `relayna.studio`, including `ServiceRecord`, `RedisServiceRegistryStore`, `create_service_registry_router(...)`, and `create_studio_app(...)`.
-- Studio backend CRUD routes at `/studio/services` plus a dependency-gated capability refresh placeholder at `POST /studio/services/{service_id}/refresh`.
+- Studio backend CRUD routes at `/studio/services` plus live capability refresh at `POST /studio/services/{service_id}/refresh`.
 - Service-registry UI in `apps/studio/` for create, edit, inspect, enable, disable, mark-unavailable, and delete flows.
+- Typed capability discovery via `CapabilityDocument`, `create_capabilities_router(...)`, and `GET /relayna/capabilities`.
+- Explicit capability route-id exports and merge helpers so Relayna runtimes can declare supported status, DLQ, workflow, and execution routes without introspecting mounted FastAPI routes.
 
 ### Changed
 
 - The Studio frontend now defaults to the control-plane service-registry surface while retaining the direct execution-graph inspector as a secondary tool until federated reads land.
+- Studio capability refresh now stores live capability documents, synthesizes a deterministic legacy fallback document for services that return `404`/`405`/`501` on `/relayna/capabilities`, and returns `502` without overwriting stored data on network or schema failures.
+- Shared topology-kind detection now lives in a reusable helper used by both execution-graph generation and the capability discovery route.
+- `httpx` is now a runtime dependency because Studio capability refresh performs backend HTTP fetches in production.
+- Release-install examples now reference `1.3.5`.
+- Bumped the package version to `1.3.5`.
 
 ## 1.3.4 - 2026-04-06
 

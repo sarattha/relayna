@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from fastapi import FastAPI
 from redis.asyncio import Redis
 
-from .registry import RedisServiceRegistryStore, ServiceRegistryService, create_service_registry_router
+from .registry import (
+    CapabilityFetcher,
+    RedisServiceRegistryStore,
+    ServiceRegistryService,
+    create_service_registry_router,
+)
 
 
 @dataclass(slots=True)
@@ -24,10 +29,12 @@ class _StudioLifespan:
         redis_url: str,
         app_state_key: str,
         registry_prefix: str,
+        capability_fetcher: CapabilityFetcher | None,
     ) -> None:
         self._redis_url = redis_url
         self._app_state_key = app_state_key
         self._registry_prefix = registry_prefix
+        self._capability_fetcher = capability_fetcher
         self._runtime: StudioRuntime | None = None
 
     @property
@@ -38,7 +45,10 @@ class _StudioLifespan:
         if self._runtime is None:
             redis = Redis.from_url(self._redis_url)
             registry_store = RedisServiceRegistryStore(redis, prefix=self._registry_prefix)
-            registry_service = ServiceRegistryService(store=registry_store)
+            registry_service = ServiceRegistryService(
+                store=registry_store,
+                capability_fetcher=self._capability_fetcher,
+            )
             self._runtime = StudioRuntime(
                 redis=redis,
                 registry_store=registry_store,
@@ -67,11 +77,13 @@ def create_studio_app(
     title: str = "Relayna Studio Backend",
     app_state_key: str = "studio",
     registry_prefix: str = "studio:services",
+    capability_fetcher: CapabilityFetcher | None = None,
 ) -> FastAPI:
     lifespan_factory = _StudioLifespan(
         redis_url=redis_url,
         app_state_key=app_state_key,
         registry_prefix=registry_prefix,
+        capability_fetcher=capability_fetcher,
     )
     runtime = lifespan_factory.ensure_runtime()
     app = FastAPI(title=title, lifespan=lifespan_factory)
