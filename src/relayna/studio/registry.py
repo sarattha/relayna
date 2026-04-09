@@ -192,7 +192,7 @@ class CapabilityRefreshBlockedError(Exception):
 class ServiceRegistryStore(Protocol):
     async def create(self, record: ServiceRecord) -> ServiceRecord: ...
 
-    async def list(self) -> list[ServiceRecord]: ...
+    async def list_records(self) -> list[ServiceRecord]: ...
 
     async def get(self, service_id: str) -> ServiceRecord | None: ...
 
@@ -220,7 +220,7 @@ class RedisServiceRegistryStore:
         await self._write_record(record)
         return record
 
-    async def list(self) -> list[ServiceRecord]:
+    async def list_records(self) -> list[ServiceRecord]:
         service_ids = sorted(self._decode_members(await self._redis.smembers(self._all_key())))
         items: list[ServiceRecord] = []
         for service_id in service_ids:
@@ -301,7 +301,7 @@ class ServiceRegistryService:
         return await self._store.create(request.to_record())
 
     async def list_services(self) -> list[ServiceRecord]:
-        return await self._store.list()
+        return await self._store.list_records()
 
     async def get_service(self, service_id: str) -> ServiceRecord:
         record = await self._store.get(service_id.strip())

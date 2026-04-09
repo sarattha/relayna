@@ -100,7 +100,7 @@ def test_registry_store_enforces_duplicate_env_url_and_cleans_indexes_after_dele
 
         await store.create(record)
 
-        listed = await store.list()
+        listed = await store.list_records()
         assert [item.service_id for item in listed] == ["payments-api"]
 
         try:
