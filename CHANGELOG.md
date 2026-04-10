@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.3.7 - 2026-04-10
+
+### Added
+
+- Cross-service Studio identity primitives via `StudioTaskPointer`, `StudioTaskRef`, `StudioTaskJoin`, `StudioJoinWarning`, and `JoinMode`.
+- Additive `task_ref` normalization across federated Studio task-bearing responses, including status, history, DLQ message lists, execution graphs, task search, and task detail payloads.
+- Opt-in cross-service join support on `GET /studio/tasks/search` and `GET /studio/tasks/{service_id}/{task_id}` through `join=none|correlation|lineage|all`.
+- Studio task-detail UI panels for correlation id, parent refs, child refs, joined refs, and join warnings.
+
+### Changed
+
+- Studio federation now treats non-`capabilities_v1` services as legacy for route-level `404` detection, so legacy services fall back to history reads instead of being misclassified as missing tasks.
+- Cross-service join resolution now skips emitting joins when candidate scans are incomplete and returns an explicit warning instead of treating partial scans as uniquely resolved.
+- The internal Studio roadmap now marks feature 4, Cross-service identity model, as implemented.
+- Bumped the package version to `1.3.7`.
+
 ## 1.3.6 - 2026-04-09
 
 ### Added
