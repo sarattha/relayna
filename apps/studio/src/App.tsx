@@ -39,10 +39,38 @@ type ServiceDraft = {
   auth_mode: string;
 };
 
+type StudioTaskPointer = {
+  service_id: string;
+  task_id: string;
+};
+
+type StudioTaskRef = {
+  service_id: string;
+  task_id: string;
+  correlation_id?: string | null;
+  parent_refs: StudioTaskPointer[];
+  child_refs: StudioTaskPointer[];
+};
+
+type StudioTaskJoin = {
+  task_ref: StudioTaskRef;
+  join_kind: "correlation_id" | "parent_task_id" | "workflow_lineage";
+  matched_value: string;
+};
+
+type StudioJoinWarning = {
+  code: string;
+  detail: string;
+  join_kind?: "correlation_id" | "parent_task_id" | "workflow_lineage" | null;
+  matched_value?: string | null;
+};
+
 type ExecutionGraphNode = {
   id: string;
   kind: string;
   task_id?: string | null;
+  service_id?: string | null;
+  task_ref?: StudioTaskRef | null;
   label?: string | null;
   timestamp?: string | null;
   annotations?: Record<string, unknown>;
@@ -67,6 +95,7 @@ type ExecutionGraphSummary = {
 type ExecutionGraph = {
   service_id?: string;
   task_id: string;
+  task_ref?: StudioTaskRef | null;
   topology_kind: string;
   summary: ExecutionGraphSummary;
   nodes: ExecutionGraphNode[];
@@ -86,11 +115,14 @@ type FederatedError = {
 type StatusPayload = {
   service_id: string;
   task_id: string;
+  task_ref?: StudioTaskRef | null;
   event: Record<string, unknown>;
 };
 
 type HistoryPayload = {
   service_id: string;
+  task_id?: string | null;
+  task_ref?: StudioTaskRef | null;
   count: number;
   events: Array<Record<string, unknown>>;
 };
@@ -105,10 +137,13 @@ type StudioTaskDetail = {
   service: ServiceRecord;
   service_id: string;
   task_id: string;
+  task_ref: StudioTaskRef;
   latest_status?: StatusPayload | null;
   history?: HistoryPayload | null;
   dlq_messages?: DlqMessagesPayload | null;
   execution_graph?: ExecutionGraph | null;
+  joined_refs: StudioTaskJoin[];
+  join_warnings: StudioJoinWarning[];
   errors: FederatedError[];
 };
 
@@ -389,6 +424,24 @@ function formatDuration(durationMs?: number | null) {
   return `${(durationMs / 1000).toFixed(durationMs >= 10_000 ? 0 : 2)} s`;
 }
 
+function formatTaskPointer(pointer: StudioTaskPointer) {
+  return `${pointer.service_id}/${pointer.task_id}`;
+}
+
+function formatTaskPointerList(pointers: StudioTaskPointer[]) {
+  if (!pointers.length) {
+    return "none";
+  }
+  return pointers.map(formatTaskPointer).join(", ");
+}
+
+function formatJoinKind(joinKind: StudioTaskJoin["join_kind"] | StudioJoinWarning["join_kind"]) {
+  if (!joinKind) {
+    return "join";
+  }
+  return joinKind.replace(/_/g, " ");
+}
+
 function StatusBadge({ status }: { status: ServiceStatus }) {
   const palette = statusPalette[status];
   return (
@@ -554,8 +607,9 @@ export function App() {
     setLoadingGraph(true);
     setGraphError(null);
     try {
+      const detailParams = new URLSearchParams({ join: "all" });
       const payload = await requestJson<StudioTaskDetail>(
-        `/studio/tasks/${encodeURIComponent(normalizedServiceId)}/${encodeURIComponent(normalizedTaskId)}`,
+        `/studio/tasks/${encodeURIComponent(normalizedServiceId)}/${encodeURIComponent(normalizedTaskId)}?${detailParams.toString()}`,
       );
       startTransition(() => {
         setTaskDetail(payload);
@@ -710,6 +764,7 @@ export function App() {
   const latestStatusValue = String(taskDetail?.latest_status?.event?.status || graph?.summary.status || "unknown");
   const historyCount = taskDetail?.history?.count ?? 0;
   const dlqCount = taskDetail?.dlq_messages?.items.length ?? 0;
+  const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
 
   return (
     <ReactFlowProvider>
@@ -1211,6 +1266,15 @@ export function App() {
                     <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
                       <MetadataRow label="Service" value={`${taskDetail.service.name} (${taskDetail.service_id})`} />
                       <MetadataRow label="Task id" value={taskDetail.task_id} />
+                      <MetadataRow label="Correlation id" value={identityRef?.correlation_id || "none"} />
+                      <MetadataRow
+                        label="Parent refs"
+                        value={formatTaskPointerList(identityRef?.parent_refs || [])}
+                      />
+                      <MetadataRow
+                        label="Child refs"
+                        value={formatTaskPointerList(identityRef?.child_refs || [])}
+                      />
                       <MetadataRow label="Latest status" value={latestStatusValue} />
                       <MetadataRow label="History events" value={String(historyCount)} />
                       <MetadataRow label="DLQ messages" value={String(dlqCount)} />
@@ -1219,6 +1283,40 @@ export function App() {
                         value={graph?.related_task_ids.length ? graph.related_task_ids.join(", ") : "none"}
                       />
                     </dl>
+                  </section>
+                ) : null}
+
+                {taskDetail?.joined_refs.length ? (
+                  <section style={{ ...frameStyle, padding: 18 }}>
+                    <h3 style={{ marginTop: 0, marginBottom: 12 }}>Joined Refs</h3>
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {taskDetail.joined_refs.map((joinRef, index) => (
+                        <div key={`${joinRef.task_ref.service_id}-${joinRef.task_ref.task_id}-${index}`} style={{ display: "grid", gap: 4 }}>
+                          <strong style={{ fontSize: 13 }}>
+                            {formatTaskPointer(joinRef.task_ref)} via {formatJoinKind(joinRef.join_kind)}
+                          </strong>
+                          <span style={{ fontSize: 13, lineHeight: 1.5 }}>
+                            matched value: <code>{joinRef.matched_value}</code>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
+                {taskDetail?.join_warnings.length ? (
+                  <section style={{ ...frameStyle, padding: 18, borderColor: "rgba(179, 136, 56, 0.28)" }}>
+                    <h3 style={{ marginTop: 0, marginBottom: 12 }}>Join Warnings</h3>
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {taskDetail.join_warnings.map((warning, index) => (
+                        <div key={`${warning.code}-${index}`} style={{ display: "grid", gap: 4 }}>
+                          <strong style={{ fontSize: 13 }}>
+                            {warning.join_kind ? formatJoinKind(warning.join_kind) : warning.code}
+                          </strong>
+                          <span style={{ fontSize: 13, lineHeight: 1.5 }}>{warning.detail}</span>
+                        </div>
+                      ))}
+                    </div>
                   </section>
                 ) : null}
 

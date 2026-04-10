@@ -9,7 +9,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 1 | Service registry | partially_implemented | 2026-04-08 |
 | 2 | Capability discovery and version handshake | implemented | 2026-04-09 |
 | 3 | Federated API aggregation layer | implemented | 2026-04-09 |
-| 4 | Cross-service identity model | partially_implemented | 2026-04-08 |
+| 4 | Cross-service identity model | implemented | 2026-04-10 |
 | 5 | Aggregated event and observation ingestion | partially_implemented | 2026-04-08 |
 | 6 | Log pipeline | partially_implemented | 2026-04-08 |
 | 7 | Control-plane UI expansion | partially_implemented | 2026-04-08 |
@@ -32,8 +32,8 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 1. Service Registry
 
-- Status: partially_implemented
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-10
 - Goal: Give Studio a canonical inventory of Relayna-enabled services across environments.
 - Why it exists: Studio cannot act as a control plane until it knows which services exist, where they live, and how to authenticate to them.
 - Current state in repo: Relayna now ships a Redis-backed Studio service registry, CRUD router, and minimal Studio backend app in `src/relayna/studio/`. The frontend exposes service list and detail management in `apps/studio/src/App.tsx`. Capability refresh is wired as a dependency-gated `501` placeholder until feature 2 adds `GET /relayna/capabilities`.
@@ -152,7 +152,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-08
 - Goal: Establish the identity rules Studio uses to connect task status, lineage, retries, and graphs across services.
 - Why it exists: Per-service `task_id` alone is not enough for a federated control plane.
-- Current state in repo: Relayna already has local `task_id`, `correlation_id`, parent-child lineage, workflow message IDs, and related task IDs. See `src/relayna/status/store.py` and `src/relayna/observability/execution_graph.py`. This is local-runtime lineage, not global control-plane identity.
+- Current state in repo: Studio now exposes additive task identity models and normalized `task_ref` payloads across federated status/history/DLQ/execution-graph/task-search/task-detail responses. Cross-service joins are opt-in on `/studio/tasks/search` and `/studio/tasks/{service_id}/{task_id}` via `join=none|correlation|lineage|all`, with conservative request-time matching, ambiguity warnings, and frontend rendering in `apps/studio/src/App.tsx`.
 - Target end state: Studio uses `service_id + task_id` as the default global key and can optionally join tasks by `correlation_id`, `meta.parent_task_id`, and workflow lineage metadata when available.
 - Planned API/interface additions:
   - Normalized Studio task reference:
@@ -177,10 +177,10 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Cross-service views never lose the owning service identity
   - Optional lineage joins are explicit and auditable
 - Checklist:
-  - [ ] Define normalized task reference schema
-  - [ ] Add `service_id` to all Studio backend task-bearing responses
-  - [ ] Define correlation and lineage join rules
-  - [ ] Add tests for same-`task_id` collisions across services
+  - [x] Define normalized task reference schema
+  - [x] Add `service_id` to all Studio backend task-bearing responses
+  - [x] Define correlation and lineage join rules
+  - [x] Add tests for same-`task_id` collisions across services
 
 ## 5. Aggregated Event And Observation Ingestion
 
@@ -454,3 +454,4 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - 2026-04-08: Refined the auth roadmap to start with simple username/password authentication for Studio users and rely on existing AKS trust boundaries for service-to-service communication in the initial phase.
 - 2026-04-08: Shipped the first service-registry slice with Redis-backed service records, Studio backend CRUD routes, a dependency-gated capability refresh placeholder, and Studio service list/detail UI.
 - 2026-04-09: Shipped feature 2 with `GET /relayna/capabilities`, typed capability documents, Studio-backed capability refresh storage, and deterministic legacy fallback handling for older services.
+- 2026-04-10: Shipped feature 4 with normalized Studio task references, additive `task_ref` identity metadata across federated task-bearing responses, opt-in cross-service joins for correlation and lineage, ambiguity warnings, and Studio UI panels for identity context.
