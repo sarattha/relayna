@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.3.8 - 2026-04-10
+
+### Added
+
+- Merged Relayna service event-feed primitives via `RedisServiceEventFeedStore`, `GET /events/feed`, and the `events.feed` capability route id.
+- Studio control-plane event ingestion via `POST /studio/ingest/events`, Redis-backed Studio event storage, service/task event query routes, and live SSE event streams.
+- Studio pull-sync support for healthy registered services that advertise `events.feed`, plus a best-effort observation forwarder helper for services that want push ingestion.
+- Studio UI panels for service recent activity and task-level merged timelines, including live updates from Studio-owned SSE routes.
+
+### Changed
+
+- `create_relayna_lifespan(...)` now wires an optional merged service event feed alongside status and observation persistence.
+- `create_studio_app(...)` now mounts Studio event ingest/query/SSE routes and manages a background pull-sync worker.
+- The internal Studio roadmap now marks feature 5, Aggregated event and observation ingestion, as implemented.
+
 ## 1.3.7 - 2026-04-10
 
 ### Added

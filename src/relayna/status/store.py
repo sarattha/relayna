@@ -7,6 +7,8 @@ from typing import Any, cast
 
 from redis.asyncio import Redis
 
+from ..observability.feed import RedisServiceEventFeedStore
+
 
 class RedisStatusStore:
     """Redis-backed task history + pubsub fanout store."""
@@ -18,11 +20,13 @@ class RedisStatusStore:
         prefix: str = "task",
         ttl_seconds: int | None = 86400,
         history_maxlen: int = 50,
+        service_event_store: RedisServiceEventFeedStore | None = None,
     ) -> None:
         self.redis = redis
         self.prefix = prefix
         self.ttl_seconds = ttl_seconds
         self.history_maxlen = history_maxlen
+        self.service_event_store = service_event_store
 
     def history_key(self, task_id: str) -> str:
         return f"{self.prefix}:history:{task_id}"
@@ -65,6 +69,8 @@ class RedisStatusStore:
                 pipe.expire(child_tasks_key, self.ttl_seconds)
         pipe.publish(self.channel_name(task_id), payload)
         await pipe.execute()
+        if self.service_event_store is not None:
+            await self.service_event_store.add_status_event(event)
 
     async def get_history(self, task_id: str, limit: int | None = None) -> list[dict[str, Any]]:
         if limit is None:

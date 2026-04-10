@@ -9,6 +9,7 @@ from typing import Any, cast
 from redis.asyncio import Redis
 
 from .exporters import event_to_dict
+from .feed import RedisServiceEventFeedStore
 
 
 def _json_default(value: Any) -> str:
@@ -27,11 +28,13 @@ class RedisObservationStore:
         prefix: str = "relayna-observations",
         ttl_seconds: int | None = 86400,
         history_maxlen: int = 500,
+        service_event_store: RedisServiceEventFeedStore | None = None,
     ) -> None:
         self.redis = redis
         self.prefix = prefix
         self.ttl_seconds = ttl_seconds
         self.history_maxlen = history_maxlen
+        self.service_event_store = service_event_store
 
     def history_key(self, task_id: str) -> str:
         return f"{self.prefix}:history:{task_id}"
@@ -63,6 +66,8 @@ class RedisObservationStore:
         if self.ttl_seconds:
             pipe.expire(history_key, self.ttl_seconds)
         await pipe.execute()
+        if self.service_event_store is not None:
+            await self.service_event_store.add_observation_event(event)
         return True
 
     async def get_history(self, task_id: str, limit: int | None = None) -> list[dict[str, Any]]:

@@ -5,6 +5,8 @@ from .capabilities_routes import (
     DLQ_MESSAGES_ROUTE_ID,
     DLQ_QUEUES_ROUTE_ID,
     DLQ_REPLAY_ROUTE_ID,
+    EVENTS_CAPABILITY_ROUTE_IDS,
+    EVENTS_FEED_ROUTE_ID,
     EXECUTION_CAPABILITY_ROUTE_IDS,
     EXECUTION_GRAPH_ROUTE_ID,
     STATUS_CAPABILITY_ROUTE_IDS,
@@ -19,6 +21,7 @@ from .capabilities_routes import (
     create_capabilities_router,
     merge_capability_route_ids,
 )
+from .events_routes import create_events_router
 from .execution_routes import create_execution_router
 from .fastapi_lifespan import HistoryOutputAdapter, RelaynaRuntime, create_relayna_lifespan, get_relayna_runtime
 from .replay_routes import create_dlq_router, create_replay_router
@@ -40,6 +43,8 @@ __all__ = [
     "DLQ_MESSAGE_DETAIL_ROUTE_ID",
     "DLQ_QUEUES_ROUTE_ID",
     "DLQ_REPLAY_ROUTE_ID",
+    "EVENTS_CAPABILITY_ROUTE_IDS",
+    "EVENTS_FEED_ROUTE_ID",
     "EXECUTION_CAPABILITY_ROUTE_IDS",
     "EXECUTION_GRAPH_ROUTE_ID",
     "AliasConfigSummary",
@@ -61,6 +66,7 @@ __all__ = [
     "build_legacy_fallback_capability_document",
     "create_capabilities_router",
     "create_dlq_router",
+    "create_events_router",
     "create_execution_router",
     "create_relayna_lifespan",
     "create_replay_router",

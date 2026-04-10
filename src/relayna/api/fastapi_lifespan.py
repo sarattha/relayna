@@ -12,7 +12,7 @@ from redis.asyncio import Redis
 
 from ..contracts import ContractAliasConfig, TerminalStatusSet, public_output_aliases
 from ..dlq import DLQService, RedisDLQStore
-from ..observability import ExecutionGraphService, RedisObservationStore
+from ..observability import ExecutionGraphService, RedisObservationStore, RedisServiceEventFeedStore
 from ..rabbitmq import RelaynaRabbitClient
 from ..status.history import StreamHistoryReader
 from ..status.hub import StatusHub
@@ -32,6 +32,7 @@ class RelaynaRuntime:
     store: RedisStatusStore
     dlq_store: RedisDLQStore | None
     observation_store: RedisObservationStore | None
+    service_event_store: RedisServiceEventFeedStore | None
     hub: StatusHub
     sse_stream: SSEStatusStream
     history_reader: StreamHistoryReader
@@ -61,6 +62,9 @@ class _RelaynaLifespan:
         observation_store_prefix: str | None,
         observation_store_ttl_seconds: int | None,
         observation_history_maxlen: int,
+        service_event_store_prefix: str | None,
+        service_event_store_ttl_seconds: int | None,
+        service_event_feed_maxlen: int,
         app_state_key: str,
         alias_config: ContractAliasConfig | None,
     ) -> None:
@@ -82,6 +86,9 @@ class _RelaynaLifespan:
         self._observation_store_prefix = observation_store_prefix
         self._observation_store_ttl_seconds = observation_store_ttl_seconds
         self._observation_history_maxlen = observation_history_maxlen
+        self._service_event_store_prefix = service_event_store_prefix
+        self._service_event_store_ttl_seconds = service_event_store_ttl_seconds
+        self._service_event_feed_maxlen = service_event_feed_maxlen
         self._app_state_key = app_state_key
         self._alias_config = alias_config
         self._runtime: RelaynaRuntime | None = None
@@ -97,12 +104,32 @@ class _RelaynaLifespan:
                 rabbit_kwargs["alias_config"] = self._alias_config
             rabbitmq = RelaynaRabbitClient(self._topology, **rabbit_kwargs)
             redis = Redis.from_url(self._redis_url)
-            store = RedisStatusStore(
-                redis,
-                prefix=self._store_prefix,
-                ttl_seconds=self._store_ttl_seconds,
-                history_maxlen=self._store_history_maxlen,
-            )
+            service_event_store = None
+            if self._service_event_store_prefix is not None:
+                service_event_store = RedisServiceEventFeedStore(
+                    redis,
+                    prefix=self._service_event_store_prefix,
+                    ttl_seconds=(
+                        self._service_event_store_ttl_seconds
+                        if self._service_event_store_ttl_seconds is not None
+                        else self._store_ttl_seconds
+                    ),
+                    feed_maxlen=self._service_event_feed_maxlen,
+                )
+            status_store_kwargs: dict[str, Any] = {
+                "prefix": self._store_prefix,
+                "ttl_seconds": self._store_ttl_seconds,
+                "history_maxlen": self._store_history_maxlen,
+            }
+            if service_event_store is not None:
+                status_store_kwargs["service_event_store"] = service_event_store
+            try:
+                store = RedisStatusStore(redis, **status_store_kwargs)
+            except TypeError as exc:
+                if "service_event_store" not in str(exc):
+                    raise
+                status_store_kwargs.pop("service_event_store", None)
+                store = RedisStatusStore(redis, **status_store_kwargs)
             dlq_store = None
             if self._dlq_store_prefix is not None:
                 dlq_store = RedisDLQStore(
@@ -112,16 +139,24 @@ class _RelaynaLifespan:
                 )
             observation_store = None
             if self._observation_store_prefix is not None:
-                observation_store = RedisObservationStore(
-                    redis,
-                    prefix=self._observation_store_prefix,
-                    ttl_seconds=(
+                observation_store_kwargs: dict[str, Any] = {
+                    "prefix": self._observation_store_prefix,
+                    "ttl_seconds": (
                         self._observation_store_ttl_seconds
                         if self._observation_store_ttl_seconds is not None
                         else self._store_ttl_seconds
                     ),
-                    history_maxlen=self._observation_history_maxlen,
-                )
+                    "history_maxlen": self._observation_history_maxlen,
+                }
+                if service_event_store is not None:
+                    observation_store_kwargs["service_event_store"] = service_event_store
+                try:
+                    observation_store = RedisObservationStore(redis, **observation_store_kwargs)
+                except TypeError as exc:
+                    if "service_event_store" not in str(exc):
+                        raise
+                    observation_store_kwargs.pop("service_event_store", None)
+                    observation_store = RedisObservationStore(redis, **observation_store_kwargs)
             hub_kwargs: dict[str, Any] = {
                 "rabbitmq": rabbitmq,
                 "store": store,
@@ -160,6 +195,7 @@ class _RelaynaLifespan:
                 store=store,
                 dlq_store=dlq_store,
                 observation_store=observation_store,
+                service_event_store=service_event_store,
                 hub=hub,
                 sse_stream=sse_stream,
                 history_reader=history_reader,
@@ -226,6 +262,9 @@ def create_relayna_lifespan(
     observation_store_prefix: str | None = "relayna-observations",
     observation_store_ttl_seconds: int | None = None,
     observation_history_maxlen: int = 500,
+    service_event_store_prefix: str | None = "relayna-service-events",
+    service_event_store_ttl_seconds: int | None = None,
+    service_event_feed_maxlen: int = 5000,
     app_state_key: str = "relayna",
     alias_config: ContractAliasConfig | None = None,
 ) -> _RelaynaLifespan:
@@ -248,6 +287,9 @@ def create_relayna_lifespan(
         observation_store_prefix=observation_store_prefix,
         observation_store_ttl_seconds=observation_store_ttl_seconds,
         observation_history_maxlen=observation_history_maxlen,
+        service_event_store_prefix=service_event_store_prefix,
+        service_event_store_ttl_seconds=service_event_store_ttl_seconds,
+        service_event_feed_maxlen=service_event_feed_maxlen,
         app_state_key=app_state_key,
         alias_config=alias_config,
     )

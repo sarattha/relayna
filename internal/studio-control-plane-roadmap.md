@@ -10,7 +10,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 2 | Capability discovery and version handshake | implemented | 2026-04-09 |
 | 3 | Federated API aggregation layer | implemented | 2026-04-09 |
 | 4 | Cross-service identity model | implemented | 2026-04-10 |
-| 5 | Aggregated event and observation ingestion | partially_implemented | 2026-04-08 |
+| 5 | Aggregated event and observation ingestion | implemented | 2026-04-10 |
 | 6 | Log pipeline | partially_implemented | 2026-04-08 |
 | 7 | Control-plane UI expansion | partially_implemented | 2026-04-08 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
@@ -184,11 +184,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 5. Aggregated Event And Observation Ingestion
 
-- Status: partially_implemented
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-10
 - Goal: Aggregate task movement and Relayna observations across services into Studio.
 - Why it exists: Studio cannot show multi-service task movement from ad hoc polling alone.
-- Current state in repo: Relayna already emits typed observations and can persist them locally in Redis via `RedisObservationStore`. See `src/relayna/observability/store.py` and `docs/observability.md`. This is per-service storage, not Studio-wide ingestion.
+- Current state in repo: Relayna now ships a merged service event feed via `GET /events/feed`, backed by shared status + observation feed persistence in `src/relayna/observability/`. Studio now exposes Redis-backed ingest/query/SSE routes and a pull-sync worker in `src/relayna/studio/`, and the frontend renders service activity plus task timelines in `apps/studio/src/App.tsx`.
 - Target end state: Services either push normalized Relayna observations into Studio or Studio continuously ingests them into a control-plane store for live and historical operator views.
 - Planned API/interface additions:
   - Studio ingest contract for normalized Relayna observations
@@ -211,11 +211,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Ingested observation items retain `service_id`, `task_id`, and event type
   - Duplicate ingestion is safely deduplicated
 - Checklist:
-  - [ ] Define normalized ingest envelope
-  - [ ] Decide push and pull support strategy
-  - [ ] Add ingest storage schema
-  - [ ] Add task timeline query endpoints
-  - [ ] Add tests for dedupe and out-of-order events
+  - [x] Define normalized ingest envelope
+  - [x] Decide push and pull support strategy
+  - [x] Add ingest storage schema
+  - [x] Add task timeline query endpoints
+  - [x] Add tests for dedupe and out-of-order events
 
 ## 6. Log Pipeline
 
@@ -455,3 +455,4 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - 2026-04-08: Shipped the first service-registry slice with Redis-backed service records, Studio backend CRUD routes, a dependency-gated capability refresh placeholder, and Studio service list/detail UI.
 - 2026-04-09: Shipped feature 2 with `GET /relayna/capabilities`, typed capability documents, Studio-backed capability refresh storage, and deterministic legacy fallback handling for older services.
 - 2026-04-10: Shipped feature 4 with normalized Studio task references, additive `task_ref` identity metadata across federated task-bearing responses, opt-in cross-service joins for correlation and lineage, ambiguity warnings, and Studio UI panels for identity context.
+- 2026-04-10: Shipped feature 5 with service-side merged event feeds, Studio ingest/query/SSE routes, Redis-backed control-plane event storage, pull-sync support for `events.feed`, and Studio UI panels for service activity and task timelines.

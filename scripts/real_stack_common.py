@@ -10,6 +10,7 @@ from fastapi import FastAPI
 
 from relayna.api import (
     create_dlq_router,
+    create_events_router,
     create_execution_router,
     create_relayna_lifespan,
     create_status_router,
@@ -128,6 +129,8 @@ def build_app(
             alias_config=alias_config,
         )
     )
+    if runtime.service_event_store is not None:
+        app.include_router(create_events_router(service_event_store=runtime.service_event_store))
     if runtime.dlq_store is not None:
         app.include_router(
             create_dlq_router(

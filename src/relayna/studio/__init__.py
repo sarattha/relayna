@@ -1,5 +1,17 @@
 from .app import StudioRuntime, create_studio_app, get_studio_runtime
 from .dlq_view import build_dlq_view
+from .events import (
+    RedisStudioEventStore,
+    StudioControlPlaneEvent,
+    StudioEventEnvelope,
+    StudioEventIngestRequest,
+    StudioEventIngestResponse,
+    StudioEventIngestService,
+    StudioEventListResponse,
+    StudioEventStream,
+    StudioPullSyncWorker,
+    create_studio_events_router,
+)
 from .execution_view import build_execution_view
 from .federation import (
     FederatedError,
@@ -42,12 +54,21 @@ __all__ = [
     "HttpCapabilityFetcher",
     "JoinMode",
     "RedisServiceRegistryStore",
+    "RedisStudioEventStore",
     "ServiceListResponse",
     "ServiceRecord",
     "StudioFederationError",
     "StudioFederationService",
+    "StudioControlPlaneEvent",
+    "StudioEventEnvelope",
+    "StudioEventIngestRequest",
+    "StudioEventIngestResponse",
+    "StudioEventIngestService",
+    "StudioEventListResponse",
+    "StudioEventStream",
     "StudioJoinedTaskSearchItem",
     "StudioJoinWarning",
+    "StudioPullSyncWorker",
     "StudioTaskJoin",
     "StudioTaskPointer",
     "StudioTaskRef",
@@ -65,6 +86,7 @@ __all__ = [
     "build_topology_view",
     "create_federation_router",
     "create_service_registry_router",
+    "create_studio_events_router",
     "create_studio_app",
     "get_studio_runtime",
     "normalize_base_url",

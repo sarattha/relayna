@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 
 import httpx
 from fastapi import FastAPI
 from redis.asyncio import Redis
 
+from .events import (
+    RedisStudioEventStore,
+    StudioEventIngestService,
+    StudioEventStream,
+    StudioPullSyncWorker,
+    create_studio_events_router,
+)
 from .federation import (
     StudioFederationService,
     _default_async_client_factory,
@@ -29,6 +37,11 @@ class StudioRuntime:
     registry_service: ServiceRegistryService
     http_client: httpx.AsyncClient
     federation_service: StudioFederationService
+    event_store: RedisStudioEventStore
+    event_ingest_service: StudioEventIngestService
+    event_stream: StudioEventStream
+    pull_sync_worker: StudioPullSyncWorker | None = None
+    pull_sync_task: asyncio.Task[None] | None = None
 
 
 class _StudioLifespan:
@@ -41,6 +54,10 @@ class _StudioLifespan:
         capability_fetcher: CapabilityFetcher | None,
         federation_client_factory,
         federation_timeout_seconds: float,
+        event_store_prefix: str,
+        event_store_ttl_seconds: int | None,
+        event_history_maxlen: int,
+        pull_sync_interval_seconds: float | None,
     ) -> None:
         self._redis_url = redis_url
         self._app_state_key = app_state_key
@@ -48,6 +65,10 @@ class _StudioLifespan:
         self._capability_fetcher = capability_fetcher
         self._federation_client_factory = federation_client_factory
         self._federation_timeout_seconds = federation_timeout_seconds
+        self._event_store_prefix = event_store_prefix
+        self._event_store_ttl_seconds = event_store_ttl_seconds
+        self._event_history_maxlen = event_history_maxlen
+        self._pull_sync_interval_seconds = pull_sync_interval_seconds
         self._runtime: StudioRuntime | None = None
 
     @property
@@ -63,9 +84,29 @@ class _StudioLifespan:
                 capability_fetcher=self._capability_fetcher,
             )
             http_client = self._federation_client_factory(self._federation_timeout_seconds)
+            event_store = RedisStudioEventStore(
+                redis,
+                prefix=self._event_store_prefix,
+                ttl_seconds=self._event_store_ttl_seconds,
+                history_maxlen=self._event_history_maxlen,
+            )
             federation_service = StudioFederationService(
                 registry_service=registry_service,
                 http_client=http_client,
+            )
+            event_ingest_service = StudioEventIngestService(
+                registry_service=registry_service,
+                event_store=event_store,
+                http_client=http_client,
+            )
+            event_stream = StudioEventStream(event_store=event_store)
+            pull_sync_worker = (
+                StudioPullSyncWorker(
+                    ingest_service=event_ingest_service,
+                    interval_seconds=self._pull_sync_interval_seconds,
+                )
+                if self._pull_sync_interval_seconds is not None
+                else None
             )
             self._runtime = StudioRuntime(
                 redis=redis,
@@ -73,6 +114,10 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 http_client=http_client,
                 federation_service=federation_service,
+                event_store=event_store,
+                event_ingest_service=event_ingest_service,
+                event_stream=event_stream,
+                pull_sync_worker=pull_sync_worker,
             )
         return self._runtime
 
@@ -82,8 +127,24 @@ class _StudioLifespan:
             runtime = self.ensure_runtime()
             setattr(app.state, self._app_state_key, runtime)
             try:
+                if runtime.pull_sync_worker is not None:
+                    runtime.pull_sync_task = asyncio.create_task(
+                        runtime.pull_sync_worker.run_forever(),
+                        name="studio-event-pull-sync",
+                    )
                 yield
             finally:
+                if runtime.pull_sync_worker is not None:
+                    runtime.pull_sync_worker.stop()
+                if runtime.pull_sync_task is not None:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(runtime.pull_sync_task), timeout=5.0)
+                    except TimeoutError:
+                        runtime.pull_sync_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await runtime.pull_sync_task
+                    finally:
+                        runtime.pull_sync_task = None
                 await runtime.http_client.aclose()
                 await runtime.redis.aclose()
                 if hasattr(app.state, self._app_state_key):
@@ -103,6 +164,10 @@ def create_studio_app(
     capability_refresh_allowed_networks: tuple[str, ...] | None = None,
     federation_client_factory=None,
     federation_timeout_seconds: float = 5.0,
+    event_store_prefix: str = "studio:events",
+    event_store_ttl_seconds: int | None = 86400,
+    event_history_maxlen: int = 5000,
+    pull_sync_interval_seconds: float | None = 5.0,
 ) -> FastAPI:
     resolved_capability_fetcher = capability_fetcher or HttpCapabilityFetcher(
         allowed_hosts=capability_refresh_allowed_hosts,
@@ -115,11 +180,21 @@ def create_studio_app(
         capability_fetcher=resolved_capability_fetcher,
         federation_client_factory=federation_client_factory or _default_async_client_factory,
         federation_timeout_seconds=federation_timeout_seconds,
+        event_store_prefix=event_store_prefix,
+        event_store_ttl_seconds=event_store_ttl_seconds,
+        event_history_maxlen=event_history_maxlen,
+        pull_sync_interval_seconds=pull_sync_interval_seconds,
     )
     runtime = lifespan_factory.ensure_runtime()
     app = FastAPI(title=title, lifespan=lifespan_factory)
     app.include_router(create_service_registry_router(service_registry=runtime.registry_service))
     app.include_router(create_federation_router(federation_service=runtime.federation_service))
+    app.include_router(
+        create_studio_events_router(
+            ingest_service=runtime.event_ingest_service,
+            event_stream=runtime.event_stream,
+        )
+    )
     return app
 
 

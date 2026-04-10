@@ -127,6 +127,31 @@ type HistoryPayload = {
   events: Array<Record<string, unknown>>;
 };
 
+type ServiceEventSourceKind = "status" | "observation";
+
+type StudioControlPlaneEvent = {
+  service_id: string;
+  ingest_method: "push" | "pull";
+  ingested_at: string;
+  dedupe_key: string;
+  out_of_order: boolean;
+  task_id: string;
+  event_type: string;
+  source_kind: ServiceEventSourceKind;
+  component?: string | null;
+  timestamp?: string | null;
+  event_id?: string | null;
+  correlation_id?: string | null;
+  parent_task_id?: string | null;
+  payload: Record<string, unknown>;
+};
+
+type StudioEventListResponse = {
+  count: number;
+  items: StudioControlPlaneEvent[];
+  next_cursor?: string | null;
+};
+
 type DlqMessagesPayload = {
   service_id: string;
   items: Array<Record<string, unknown>>;
@@ -256,6 +281,34 @@ function formatTimestamp(value?: string | null) {
     return "Never";
   }
   return new Date(value).toLocaleString();
+}
+
+function sortControlPlaneEvents(items: StudioControlPlaneEvent[]) {
+  return [...items].sort((left, right) => {
+    const leftKey = `${left.timestamp || ""}|${left.ingested_at}|${left.dedupe_key}`;
+    const rightKey = `${right.timestamp || ""}|${right.ingested_at}|${right.dedupe_key}`;
+    return rightKey.localeCompare(leftKey);
+  });
+}
+
+function mergeControlPlaneEvent(items: StudioControlPlaneEvent[], incoming: StudioControlPlaneEvent) {
+  const seen = new Set<string>();
+  const merged = [incoming, ...items].filter((item) => {
+    if (seen.has(item.dedupe_key)) {
+      return false;
+    }
+    seen.add(item.dedupe_key);
+    return true;
+  });
+  return sortControlPlaneEvents(merged);
+}
+
+function formatEventSummary(item: StudioControlPlaneEvent) {
+  const status = typeof item.payload.status === "string" ? item.payload.status : null;
+  if (item.source_kind === "status" && status) {
+    return status;
+  }
+  return item.event_type;
 }
 
 async function requestJson<T>(input: string, init?: RequestInit): Promise<T | null> {
@@ -533,6 +586,15 @@ export function App() {
   const [taskDetail, setTaskDetail] = useState<StudioTaskDetail | null>(null);
   const [loadingGraph, setLoadingGraph] = useState(false);
   const [graphError, setGraphError] = useState<string | null>(null);
+  const [serviceEvents, setServiceEvents] = useState<StudioEventListResponse | null>(null);
+  const [serviceEventsLoading, setServiceEventsLoading] = useState(false);
+  const [serviceEventsError, setServiceEventsError] = useState<string | null>(null);
+  const [serviceEventTaskFilter, setServiceEventTaskFilter] = useState("");
+  const [serviceEventSourceFilter, setServiceEventSourceFilter] = useState<"" | ServiceEventSourceKind>("");
+  const [serviceEventTypeFilter, setServiceEventTypeFilter] = useState("");
+  const [taskTimeline, setTaskTimeline] = useState<StudioEventListResponse | null>(null);
+  const [taskTimelineLoading, setTaskTimelineLoading] = useState(false);
+  const [taskTimelineError, setTaskTimelineError] = useState<string | null>(null);
 
   const selectedService = services.find((service) => service.service_id === selectedServiceId) ?? null;
   const graph = taskDetail?.execution_graph || null;
@@ -553,6 +615,67 @@ export function App() {
     void loadTaskDetail(initialTaskId, initialServiceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!selectedServiceId) {
+      setServiceEvents(null);
+      return;
+    }
+    void loadServiceEvents(selectedServiceId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedServiceId]);
+
+  useEffect(() => {
+    if (!taskDetail) {
+      setTaskTimeline(null);
+      return;
+    }
+    void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id);
+  }, [taskDetail]);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined" || !selectedServiceId) {
+      return;
+    }
+    const source = new EventSource(`/studio/services/${encodeURIComponent(selectedServiceId)}/events/stream`);
+    source.addEventListener("event", (message) => {
+      try {
+        const parsed = JSON.parse((message as MessageEvent<string>).data) as StudioControlPlaneEvent;
+        startTransition(() => {
+          setServiceEvents((current) => {
+            const items = mergeControlPlaneEvent(current?.items || [], parsed);
+            return { count: items.length, items, next_cursor: current?.next_cursor || null };
+          });
+        });
+      } catch {
+        return;
+      }
+    });
+    return () => source.close();
+  }, [selectedServiceId]);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined" || !taskDetail) {
+      return;
+    }
+    const source = new EventSource(
+      `/studio/tasks/${encodeURIComponent(taskDetail.service_id)}/${encodeURIComponent(taskDetail.task_id)}/events/stream`,
+    );
+    source.addEventListener("event", (message) => {
+      try {
+        const parsed = JSON.parse((message as MessageEvent<string>).data) as StudioControlPlaneEvent;
+        startTransition(() => {
+          setTaskTimeline((current) => {
+            const items = mergeControlPlaneEvent(current?.items || [], parsed);
+            return { count: items.length, items, next_cursor: current?.next_cursor || null };
+          });
+        });
+      } catch {
+        return;
+      }
+    });
+    return () => source.close();
+  }, [taskDetail]);
 
   async function loadServices(preferredServiceId?: string | null) {
     setRegistryLoading(true);
@@ -628,6 +751,47 @@ export function App() {
       setGraphError(fetchError instanceof Error ? fetchError.message : "Unable to load execution graph.");
     } finally {
       setLoadingGraph(false);
+    }
+  }
+
+  async function loadServiceEvents(serviceId: string) {
+    const normalizedServiceId = serviceId.trim();
+    if (!normalizedServiceId) {
+      return;
+    }
+    setServiceEventsLoading(true);
+    setServiceEventsError(null);
+    try {
+      const params = new URLSearchParams({ limit: "20" });
+      const payload = await requestJson<StudioEventListResponse>(
+        `/studio/services/${encodeURIComponent(normalizedServiceId)}/events?${params.toString()}`,
+      );
+      startTransition(() => setServiceEvents(payload));
+    } catch (fetchError) {
+      setServiceEventsError(fetchError instanceof Error ? fetchError.message : "Unable to load service activity.");
+    } finally {
+      setServiceEventsLoading(false);
+    }
+  }
+
+  async function loadTaskTimeline(serviceId: string, nextTaskId: string) {
+    const normalizedServiceId = serviceId.trim();
+    const normalizedTaskId = nextTaskId.trim();
+    if (!normalizedServiceId || !normalizedTaskId) {
+      return;
+    }
+    setTaskTimelineLoading(true);
+    setTaskTimelineError(null);
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      const payload = await requestJson<StudioEventListResponse>(
+        `/studio/tasks/${encodeURIComponent(normalizedServiceId)}/${encodeURIComponent(normalizedTaskId)}/events?${params.toString()}`,
+      );
+      startTransition(() => setTaskTimeline(payload));
+    } catch (fetchError) {
+      setTaskTimelineError(fetchError instanceof Error ? fetchError.message : "Unable to load task timeline.");
+    } finally {
+      setTaskTimelineLoading(false);
     }
   }
 
@@ -765,6 +929,19 @@ export function App() {
   const historyCount = taskDetail?.history?.count ?? 0;
   const dlqCount = taskDetail?.dlq_messages?.items.length ?? 0;
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
+  const filteredServiceEvents = (serviceEvents?.items || []).filter((item) => {
+    if (serviceEventTaskFilter.trim() && !item.task_id.includes(serviceEventTaskFilter.trim())) {
+      return false;
+    }
+    if (serviceEventSourceFilter && item.source_kind !== serviceEventSourceFilter) {
+      return false;
+    }
+    if (serviceEventTypeFilter.trim() && !item.event_type.includes(serviceEventTypeFilter.trim())) {
+      return false;
+    }
+    return true;
+  });
+  const taskTimelineItems = taskTimeline?.items || [];
 
   return (
     <ReactFlowProvider>
@@ -1077,6 +1254,75 @@ export function App() {
                         <p style={mutedTextStyle}>No capability document stored yet.</p>
                       )}
                     </div>
+
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                        <h3 style={{ margin: 0 }}>Recent Activity</h3>
+                        <button
+                          type="button"
+                          onClick={() => void loadServiceEvents(selectedService.service_id)}
+                          style={secondaryButtonStyle}
+                        >
+                          Reload Activity
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                        <input
+                          value={serviceEventTaskFilter}
+                          onChange={(event) => setServiceEventTaskFilter(event.target.value)}
+                          placeholder="Filter task id"
+                          style={inputStyle}
+                        />
+                        <select
+                          value={serviceEventSourceFilter}
+                          onChange={(event) => setServiceEventSourceFilter(event.target.value as "" | ServiceEventSourceKind)}
+                          style={inputStyle}
+                        >
+                          <option value="">All sources</option>
+                          <option value="status">status</option>
+                          <option value="observation">observation</option>
+                        </select>
+                        <input
+                          value={serviceEventTypeFilter}
+                          onChange={(event) => setServiceEventTypeFilter(event.target.value)}
+                          placeholder="Filter event type"
+                          style={inputStyle}
+                        />
+                      </div>
+                      {serviceEventsLoading ? <p style={mutedTextStyle}>Loading service activity...</p> : null}
+                      {serviceEventsError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{serviceEventsError}</p> : null}
+                      {!serviceEventsLoading && !filteredServiceEvents.length ? (
+                        <p style={mutedTextStyle}>No Studio-ingested events for this service yet.</p>
+                      ) : null}
+                      {filteredServiceEvents.length ? (
+                        <div style={{ display: "grid", gap: 10, maxHeight: 360, overflowY: "auto" }}>
+                          {filteredServiceEvents.map((item) => (
+                            <article
+                              key={item.dedupe_key}
+                              style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                            >
+                              <div
+                                style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}
+                              >
+                                <div style={{ display: "grid", gap: 4 }}>
+                                  <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
+                                  <span style={{ fontSize: 12, color: "#62584b" }}>
+                                    {item.task_id} · {item.source_kind} · {item.component || "unknown"}
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: 12, color: "#62584b", textAlign: "right" }}>
+                                  {formatTimestamp(item.timestamp || item.ingested_at)}
+                                </span>
+                              </div>
+                              <p style={{ ...mutedTextStyle, marginTop: 8 }}>
+                                {item.event_type}
+                                {item.out_of_order ? " · out-of-order" : ""}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
                   </>
                 )}
               </section>
@@ -1170,6 +1416,7 @@ export function App() {
                     >
                       <MetricCard label="Status" value={latestStatusValue} />
                       <MetricCard label="History Events" value={String(historyCount)} />
+                      <MetricCard label="Timeline Events" value={String(taskTimelineItems.length)} />
                       <MetricCard label="DLQ Messages" value={String(dlqCount)} />
                       <MetricCard
                         label="Graph"
@@ -1283,6 +1530,47 @@ export function App() {
                         value={graph?.related_task_ids.length ? graph.related_task_ids.join(", ") : "none"}
                       />
                     </dl>
+                  </section>
+                ) : null}
+
+                {taskDetail ? (
+                  <section style={{ ...frameStyle, padding: 18 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                      <h3 style={{ marginTop: 0, marginBottom: 12 }}>Task Timeline</h3>
+                      <button
+                        type="button"
+                        onClick={() => void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id)}
+                        style={secondaryButtonStyle}
+                      >
+                        Reload Timeline
+                      </button>
+                    </div>
+                    {taskTimelineLoading ? <p style={mutedTextStyle}>Loading task timeline...</p> : null}
+                    {taskTimelineError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{taskTimelineError}</p> : null}
+                    {!taskTimelineLoading && !taskTimelineItems.length ? (
+                      <p style={mutedTextStyle}>No Studio-ingested task events yet.</p>
+                    ) : null}
+                    {taskTimelineItems.length ? (
+                      <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto" }}>
+                        {taskTimelineItems.map((item) => (
+                          <article
+                            key={item.dedupe_key}
+                            style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                              <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
+                              <span style={{ fontSize: 12, color: "#62584b" }}>
+                                {formatTimestamp(item.timestamp || item.ingested_at)}
+                              </span>
+                            </div>
+                            <p style={{ ...mutedTextStyle, marginTop: 8 }}>
+                              {item.source_kind} · {item.event_type} · {item.component || "unknown"}
+                              {item.out_of_order ? " · out-of-order" : ""}
+                            </p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
                   </section>
                 ) : null}
 
