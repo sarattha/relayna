@@ -301,8 +301,10 @@ class StudioFederationService:
                 try:
                     latest_status = await self._search_latest_status(service, normalized_task_id)
                 except StudioFederationError as exc:
-                    if exc.code == "upstream_not_found" or not include_errors:
+                    if exc.code == "upstream_not_found":
                         return None, None
+                    if not include_errors:
+                        return None, exc.to_model()
                     return None, exc.to_model()
                 if latest_status is None:
                     return None, None
@@ -488,13 +490,26 @@ class StudioFederationService:
         join_kind: JoinKind,
         matched_value: str,
     ) -> tuple[_SearchTaskMatch | None, StudioJoinWarning | None]:
-        candidate_matches, _ = await self._find_task_matches(matched_value, services, include_errors=False)
+        candidate_matches, candidate_errors = await self._find_task_matches(
+            matched_value,
+            services,
+            include_errors=False,
+        )
         cross_service_matches = [
             match
             for match in candidate_matches
             if match.item.service_id != source_task_ref.service_id
             and (match.item.service_id, match.item.task_id) != (source_task_ref.service_id, source_task_ref.task_id)
         ]
+        if candidate_errors:
+            return None, StudioJoinWarning(
+                code="incomplete_join_candidate_scan",
+                detail=(
+                    f"Skipped {join_kind} join for '{matched_value}' because one or more services could not be scanned."
+                ),
+                join_kind=join_kind,
+                matched_value=matched_value,
+            )
         if len(cross_service_matches) > 1:
             return None, StudioJoinWarning(
                 code="ambiguous_join_candidate",
@@ -541,7 +556,7 @@ class StudioFederationService:
             service,
             capability_id=STATUS_LATEST_ROUTE_ID,
             path=path,
-            missing_route_404=self._capability_document(service) is None,
+            missing_route_404=self._missing_route_404_enabled(service),
         )
         return self._normalize_status_payload(service, payload, requested_task_id=task_id)
 
@@ -611,7 +626,7 @@ class StudioFederationService:
             service,
             capability_id=EXECUTION_GRAPH_ROUTE_ID,
             path=path,
-            missing_route_404=self._capability_document(service) is None,
+            missing_route_404=self._missing_route_404_enabled(service),
         )
         return self._normalize_execution_graph_payload(service, payload, requested_task_id=task_id)
 
@@ -936,6 +951,12 @@ class StudioFederationService:
         if capability_document.service_metadata.compatibility != "capabilities_v1":
             return None
         return capability_id in capability_document.supported_routes
+
+    def _missing_route_404_enabled(self, service: ServiceRecord) -> bool:
+        capability_document = self._capability_document(service)
+        if capability_document is None:
+            return True
+        return capability_document.service_metadata.compatibility != "capabilities_v1"
 
     def _capability_document(self, service: ServiceRecord) -> CapabilityDocument | None:
         if not service.capabilities:

@@ -298,6 +298,54 @@ def test_task_search_fans_out_and_falls_back_to_history(monkeypatch) -> None:
         ]
 
 
+def test_task_search_legacy_404_status_falls_back_to_history(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "legacy.example.test" and request.url.path == "/status/task-123":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        if request.url.host == "legacy.example.test" and request.url.path == "/history":
+            return httpx.Response(
+                200,
+                json={"count": 1, "events": [{"task_id": "task-123", "status": "completed"}]},
+            )
+        if request.url.host == "legacy.example.test" and request.url.path == "/dlq/messages":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        if request.url.host == "legacy.example.test" and request.url.path == "/executions/task-123/graph":
+            return httpx.Response(404, json={"detail": "Not Found"})
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="legacy-api",
+                base_url="https://legacy.example.test",
+                capabilities=make_capability_document(
+                    supported_routes=[],
+                    compatibility="legacy_no_capabilities_endpoint",
+                ),
+            ),
+        )
+
+        search_response = client.get("/studio/tasks/search", params={"task_id": "task-123"})
+        detail_response = client.get("/studio/tasks/legacy-api/task-123")
+
+        assert search_response.status_code == 200
+        assert search_response.json()["count"] == 1
+        assert search_response.json()["items"][0]["service_id"] == "legacy-api"
+        assert detail_response.status_code == 200
+        assert detail_response.json()["latest_status"]["event"]["status"] == "completed"
+
+
 def test_task_detail_tolerates_partial_failures_and_derives_latest_from_history(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 
@@ -636,6 +684,102 @@ def test_task_search_join_correlation_adds_joined_items(monkeypatch) -> None:
             }
         ]
         assert payload["join_warnings"] == []
+
+
+def test_task_detail_join_skips_when_candidate_scan_is_incomplete(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        path = request.url.path
+        if host == "payments.example.test" and path == "/status/task-123":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "task-123",
+                    "event": {"status": "processing", "correlation_id": "corr-123"},
+                },
+            )
+        if host == "payments.example.test" and path == "/history":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 1,
+                    "events": [{"task_id": "task-123", "status": "processing", "correlation_id": "corr-123"}],
+                },
+            )
+        if host == "payments.example.test" and path == "/dlq/messages":
+            return httpx.Response(200, json={"items": [], "next_cursor": None})
+        if host == "payments.example.test" and path == "/executions/task-123/graph":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "task-123",
+                    "topology_kind": "shared_tasks_shared_status",
+                    "summary": {"status": "processing", "graph_completeness": "partial"},
+                    "nodes": [],
+                    "edges": [],
+                    "annotations": {},
+                    "related_task_ids": [],
+                },
+            )
+        if host == "billing.example.test" and path == "/status/corr-123":
+            return httpx.Response(200, json={"task_id": "corr-123", "event": {"status": "completed"}})
+        if host == "shipping.example.test" and path == "/status/corr-123":
+            return httpx.Response(401, json={"detail": "Unauthorized"})
+        return httpx.Response(404, json={"detail": "No status found for task_id."})
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(
+                    supported_routes=["status.latest", "status.history", "dlq.messages", "execution.graph"]
+                ),
+            ),
+        )
+        install_service(
+            app,
+            make_record(
+                service_id="billing-api",
+                base_url="https://billing.example.test",
+                capabilities=make_capability_document(supported_routes=["status.latest"]),
+            ),
+        )
+        install_service(
+            app,
+            make_record(
+                service_id="shipping-api",
+                base_url="https://shipping.example.test",
+                capabilities=make_capability_document(supported_routes=["status.latest"]),
+            ),
+        )
+
+        response = client.get("/studio/tasks/payments-api/task-123", params={"join": "correlation"})
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["joined_refs"] == []
+        assert payload["join_warnings"] == [
+            {
+                "code": "incomplete_join_candidate_scan",
+                "detail": (
+                    "Skipped correlation_id join for 'corr-123' because one or more services could not be scanned."
+                ),
+                "join_kind": "correlation_id",
+                "matched_value": "corr-123",
+            }
+        ]
 
 
 def test_service_scoped_status_and_graph_encode_reserved_task_id_characters(monkeypatch) -> None:
