@@ -345,18 +345,40 @@ describe("App", () => {
       if (url === "/studio/services" && method === "GET") {
         return serviceListResponse(services);
       }
-      if (url === "/studio/tasks/payments-api/task-123" && method === "GET") {
+      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
         return jsonResponse({
           service: services[0],
           service_id: "payments-api",
           task_id: "task-123",
+          task_ref: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            correlation_id: "corr-123",
+            parent_refs: [{ service_id: "payments-api", task_id: "parent-1" }],
+            child_refs: [{ service_id: "payments-api", task_id: "child-1" }],
+          },
           latest_status: {
             service_id: "payments-api",
             task_id: "task-123",
+            task_ref: {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              parent_refs: [{ service_id: "payments-api", task_id: "parent-1" }],
+              child_refs: [],
+            },
             event: { status: "completed" },
           },
           history: {
             service_id: "payments-api",
+            task_id: "task-123",
+            task_ref: {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              parent_refs: [{ service_id: "payments-api", task_id: "parent-1" }],
+              child_refs: [{ service_id: "payments-api", task_id: "child-1" }],
+            },
             count: 1,
             events: [{ task_id: "task-123", status: "completed" }],
           },
@@ -368,6 +390,13 @@ describe("App", () => {
           execution_graph: {
             service_id: "payments-api",
             task_id: "task-123",
+            task_ref: {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              parent_refs: [{ service_id: "payments-api", task_id: "parent-1" }],
+              child_refs: [{ service_id: "payments-api", task_id: "child-1" }],
+            },
             topology_kind: "shared_tasks_shared_status",
             summary: {
               status: "completed",
@@ -386,6 +415,27 @@ describe("App", () => {
             annotations: {},
             related_task_ids: [],
           },
+          joined_refs: [
+            {
+              task_ref: {
+                service_id: "billing-api",
+                task_id: "corr-123",
+                correlation_id: "corr-123",
+                parent_refs: [],
+                child_refs: [],
+              },
+              join_kind: "correlation_id",
+              matched_value: "corr-123",
+            },
+          ],
+          join_warnings: [
+            {
+              code: "ambiguous_join_candidate",
+              detail: "Skipped parent task id join for 'parent-1' because it matched multiple services.",
+              join_kind: "parent_task_id",
+              matched_value: "parent-1",
+            },
+          ],
           errors: [],
         });
       }
@@ -401,7 +451,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load Execution Graph" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/studio/tasks/payments-api/task-123", undefined);
+      expect(fetchMock).toHaveBeenCalledWith("/studio/tasks/payments-api/task-123?join=all", undefined);
     });
 
     expect((await screen.findAllByText("completed")).length).toBeGreaterThanOrEqual(2);
@@ -410,6 +460,11 @@ describe("App", () => {
     expect(screen.getAllByText("shared_tasks_shared_status").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("full graph")).toBeInTheDocument();
     expect(screen.getByText("task-123 attempt 1")).toBeInTheDocument();
+    expect(screen.getAllByText("corr-123").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("payments-api/parent-1")).toBeInTheDocument();
+    expect(screen.getByText("payments-api/child-1")).toBeInTheDocument();
+    expect(screen.getByText("billing-api/corr-123 via correlation id")).toBeInTheDocument();
+    expect(screen.getByText("Skipped parent task id join for 'parent-1' because it matched multiple services.")).toBeInTheDocument();
     expect(window.location.search).toContain("service_id=payments-api");
     expect(window.location.search).toContain("task_id=task-123");
   });
@@ -435,18 +490,40 @@ describe("App", () => {
       if (url === "/studio/services" && method === "GET") {
         return serviceListResponse(services);
       }
-      if (url === "/studio/tasks/payments-api/task-123" && method === "GET") {
+      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
         return jsonResponse({
           service: services[0],
           service_id: "payments-api",
           task_id: "task-123",
+          task_ref: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            correlation_id: "corr-123",
+            parent_refs: [],
+            child_refs: [],
+          },
           latest_status: {
             service_id: "payments-api",
             task_id: "task-123",
+            task_ref: {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              parent_refs: [],
+              child_refs: [],
+            },
             event: { status: "completed" },
           },
           history: {
             service_id: "payments-api",
+            task_id: "task-123",
+            task_ref: {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              parent_refs: [],
+              child_refs: [],
+            },
             count: 2,
             events: [
               { task_id: "task-123", status: "completed" },
@@ -459,6 +536,8 @@ describe("App", () => {
             next_cursor: null,
           },
           execution_graph: null,
+          joined_refs: [],
+          join_warnings: [],
           errors: [
             {
               detail: "No execution graph found for task_id 'task-123'.",
