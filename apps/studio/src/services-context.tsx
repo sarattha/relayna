@@ -1,0 +1,134 @@
+import type { ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+
+import {
+  createService,
+  deleteService,
+  listServices,
+  refreshService,
+  serviceToDraft,
+  updateService,
+  updateServiceStatus,
+} from "./api";
+import type { ServiceDraft, ServiceRecord, ServiceStatus } from "./types";
+
+type ServicesContextValue = {
+  services: ServiceRecord[];
+  servicesById: Map<string, ServiceRecord>;
+  loading: boolean;
+  error: string | null;
+  notice: string | null;
+  emptyDraft: ServiceDraft;
+  serviceToDraft: typeof serviceToDraft;
+  reload: (preferredServiceId?: string | null) => Promise<void>;
+  create: (draft: ServiceDraft) => Promise<ServiceRecord>;
+  update: (serviceId: string, draft: ServiceDraft) => Promise<ServiceRecord>;
+  refresh: (serviceId: string) => Promise<ServiceRecord>;
+  updateStatus: (serviceId: string, status: ServiceStatus) => Promise<ServiceRecord>;
+  remove: (serviceId: string) => Promise<void>;
+  clearMessages: () => void;
+};
+
+const emptyDraft: ServiceDraft = {
+  service_id: "",
+  name: "",
+  base_url: "http://localhost:8000",
+  environment: "dev",
+  tags: "",
+  auth_mode: "internal_network",
+  log_provider: "",
+  log_base_url: "",
+  log_tenant_id: "",
+  log_service_selector_labels: "",
+  log_task_id_label: "",
+  log_correlation_id_label: "",
+  log_level_label: "",
+};
+
+const ServicesContext = createContext<ServicesContextValue | null>(null);
+
+export function StudioServicesProvider({ children }: { children: ReactNode }) {
+  const [services, setServices] = useState<ServiceRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function reload() {
+    setLoading(true);
+    try {
+      const payload = await listServices();
+      setServices(payload.services || []);
+      setError(null);
+    } catch (fetchError) {
+      setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  const value = useMemo<ServicesContextValue>(
+    () => ({
+      services,
+      servicesById: new Map(services.map((service) => [service.service_id, service])),
+      loading,
+      error,
+      notice,
+      emptyDraft,
+      serviceToDraft,
+      reload,
+      async create(draft) {
+        const saved = await createService(draft);
+        setNotice(`Registered service '${saved.service_id}'.`);
+        setError(null);
+        await reload();
+        return saved;
+      },
+      async update(serviceId, draft) {
+        const saved = await updateService(serviceId, draft);
+        setNotice(`Updated service '${saved.service_id}'.`);
+        setError(null);
+        await reload();
+        return saved;
+      },
+      async refresh(serviceId) {
+        const saved = await refreshService(serviceId);
+        setNotice(`Refreshed '${saved.service_id}'.`);
+        setError(null);
+        await reload();
+        return saved;
+      },
+      async updateStatus(serviceId, status) {
+        const saved = await updateServiceStatus(serviceId, status);
+        setNotice(`Marked '${serviceId}' as ${status}.`);
+        setError(null);
+        await reload();
+        return saved;
+      },
+      async remove(serviceId) {
+        await deleteService(serviceId);
+        setNotice(`Deleted service '${serviceId}'.`);
+        setError(null);
+        await reload();
+      },
+      clearMessages() {
+        setError(null);
+        setNotice(null);
+      },
+    }),
+    [services, loading, error, notice],
+  );
+
+  return <ServicesContext.Provider value={value}>{children}</ServicesContext.Provider>;
+}
+
+export function useStudioServices() {
+  const context = useContext(ServicesContext);
+  if (!context) {
+    throw new Error("useStudioServices must be used within StudioServicesProvider.");
+  }
+  return context;
+}

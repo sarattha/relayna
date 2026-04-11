@@ -12,7 +12,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 4 | Cross-service identity model | implemented | 2026-04-10 |
 | 5 | Aggregated event and observation ingestion | implemented | 2026-04-10 |
 | 6 | Log pipeline | implemented | 2026-04-11 |
-| 7 | Control-plane UI expansion | partially_implemented | 2026-04-08 |
+| 7 | Control-plane UI expansion | implemented | 2026-04-11 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
 | 9 | Health and liveness model | partially_implemented | 2026-04-08 |
 | 10 | Search and retention | partially_implemented | 2026-04-08 |
@@ -260,11 +260,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 7. Control-Plane UI Expansion
 
-- Status: partially_implemented
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-11
 - Goal: Expand Studio from a single execution-graph page into a full operator console.
 - Why it exists: A control plane must show services, topology, DLQ, task search, task detail, live events, and graphs in one consistent UI.
-- Current state in repo: Backend presenter helpers exist for execution, run, stage, topology, and DLQ views in `src/relayna/studio/`. The frontend now includes service list and service detail management backed by the Studio registry, while execution-graph inspection remains a manual direct-to-service tool in `apps/studio/src/App.tsx`.
+- Current state in repo: Studio now ships a route-based operator console in `apps/studio/src/` backed entirely by `/studio/*` backend routes, including routed service list/detail, topology, DLQ explorer, task search, and federated task detail screens with logs, timelines, execution graph rendering, and deep-link navigation.
 - Target end state: Studio UI has service list, service detail, topology diagrams, task search, task detail, DLQ explorer, live event timeline, execution graph, and operator action surfaces.
 - Planned API/interface additions:
   - Frontend routes:
@@ -293,11 +293,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - Checklist:
   - [x] Add service list UI
   - [x] Add service detail UI
-  - [ ] Add topology visualization page
-  - [ ] Add task search UI
-  - [ ] Add task detail view with status, timeline, graph, and logs
-  - [ ] Add DLQ explorer UI
-  - [ ] Add tests for navigation and service-scoped fetching
+  - [x] Add topology visualization page
+  - [x] Add task search UI
+  - [x] Add task detail view with status, timeline, graph, and logs
+  - [x] Add DLQ explorer UI
+  - [x] Add tests for navigation and service-scoped fetching
 
 ## 8. Auth, Trust, And Operator Controls
 
@@ -456,3 +456,4 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - 2026-04-09: Shipped feature 2 with `GET /relayna/capabilities`, typed capability documents, Studio-backed capability refresh storage, and deterministic legacy fallback handling for older services.
 - 2026-04-10: Shipped feature 4 with normalized Studio task references, additive `task_ref` identity metadata across federated task-bearing responses, opt-in cross-service joins for correlation and lineage, ambiguity warnings, and Studio UI panels for identity context.
 - 2026-04-10: Shipped feature 5 with service-side merged event feeds, Studio ingest/query/SSE routes, Redis-backed control-plane event storage, pull-sync support for `events.feed`, and Studio UI panels for service activity and task timelines.
+- 2026-04-11: Shipped feature 7 with a route-based Studio operator console, shared frontend API/services layers, standalone topology/DLQ/task-search/task-detail screens, and tests covering navigation plus service- and task-scoped reads.
