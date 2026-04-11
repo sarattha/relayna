@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
+
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from relayna.api import create_events_router
-from relayna.observability import RedisObservationStore, RedisServiceEventFeedStore, SSEKeepaliveSent
+from relayna.observability import (
+    RedisObservationStore,
+    RedisServiceEventFeedStore,
+    SSEKeepaliveSent,
+    make_studio_observation_forwarder,
+)
 from relayna.status import RedisStatusStore
 
 
@@ -126,6 +134,44 @@ def test_service_event_feed_route_merges_status_and_observations() -> None:
         assert second_page.json()["items"][0]["source_kind"] == "status"
         assert second_page.json()["items"][0]["event_type"] == "status.completed"
         assert second_page.json()["items"][0]["task_id"] == "task-123"
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_studio_observation_forwarder_retries_pending_batch_after_http_error() -> None:
+    async def scenario() -> None:
+        request_payloads: list[dict[str, object]] = []
+        request_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            request_payloads.append(json.loads(request.content.decode("utf-8")))
+            if request_count == 1:
+                return httpx.Response(503, json={"detail": "unavailable"})
+            return httpx.Response(200, json={"inserted": 2, "duplicate": 0, "invalid": 0})
+
+        forwarder = make_studio_observation_forwarder(
+            studio_base_url="https://studio.example.test",
+            service_id="payments-api",
+            batch_size=10,
+            client_factory=lambda timeout: httpx.AsyncClient(
+                transport=httpx.MockTransport(handler),
+                timeout=timeout,
+            ),
+        )
+
+        await forwarder(SSEKeepaliveSent(task_id="task-1"))
+        await forwarder.flush()
+        await forwarder(SSEKeepaliveSent(task_id="task-2"))
+        await forwarder.flush()
+
+        assert len(request_payloads) == 2
+        assert len(request_payloads[0]["events"]) == 1
+        assert len(request_payloads[1]["events"]) == 2
+        assert [item["event"]["task_id"] for item in request_payloads[1]["events"]] == ["task-1", "task-2"]
 
     import asyncio
 

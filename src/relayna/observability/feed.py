@@ -220,6 +220,7 @@ class StudioObservationForwarder:
     async def flush(self) -> None:
         if not self._pending:
             return
+        batch = list(self._pending)
         payload = {
             "events": [
                 {
@@ -227,15 +228,16 @@ class StudioObservationForwarder:
                     "ingest_method": StudioEventIngestMethod.PUSH,
                     "event": item.model_dump(mode="json"),
                 }
-                for item in self._pending
+                for item in batch
             ]
         }
         try:
             async with self._client_factory(self._timeout_seconds) as client:
-                await client.post(f"{self._studio_base_url}/studio/ingest/events", json=payload)
+                response = await client.post(f"{self._studio_base_url}/studio/ingest/events", json=payload)
+                response.raise_for_status()
         except Exception:
             return
-        self._pending.clear()
+        del self._pending[: len(batch)]
 
 
 def make_studio_observation_forwarder(

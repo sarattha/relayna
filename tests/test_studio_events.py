@@ -328,6 +328,95 @@ def test_studio_pull_sync_ingests_service_feed(monkeypatch) -> None:
         assert asyncio.run(runtime.event_store.get_pull_cursor("payments-api")) == "evt-1"
 
 
+def test_studio_pull_sync_advances_existing_cursor(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    request_count = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal request_count
+        request_count += 1
+        assert request.url.path == "/events/feed"
+        if request_count == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "count": 1,
+                    "items": [
+                        {
+                            "cursor": "evt-1",
+                            "task_id": "task-123",
+                            "event_type": "status.processing",
+                            "source_kind": "status",
+                            "component": "status",
+                            "timestamp": "2026-04-10T01:00:00Z",
+                            "event_id": "evt-1",
+                            "payload": {"status": "processing"},
+                        }
+                    ],
+                    "next_cursor": None,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "count": 2,
+                "items": [
+                    {
+                        "cursor": "evt-2",
+                        "task_id": "task-123",
+                        "event_type": "status.completed",
+                        "source_kind": "status",
+                        "component": "status",
+                        "timestamp": "2026-04-10T02:00:00Z",
+                        "event_id": "evt-2",
+                        "payload": {"status": "completed"},
+                    },
+                    {
+                        "cursor": "evt-1",
+                        "task_id": "task-123",
+                        "event_type": "status.processing",
+                        "source_kind": "status",
+                        "component": "status",
+                        "timestamp": "2026-04-10T01:00:00Z",
+                        "event_id": "evt-1",
+                        "payload": {"status": "processing"},
+                    },
+                ],
+                "next_cursor": None,
+            },
+        )
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                status=ServiceStatus.HEALTHY,
+                capabilities=make_capability_document(supported_routes=["events.feed"]),
+            ),
+        )
+        runtime = get_studio_runtime(app)
+        asyncio.run(runtime.event_ingest_service.sync_registered_services())
+        assert asyncio.run(runtime.event_store.get_pull_cursor("payments-api")) == "evt-1"
+
+        asyncio.run(runtime.event_ingest_service.sync_registered_services())
+
+        response = client.get("/studio/services/payments-api/events")
+        assert response.status_code == 200
+        assert response.json()["count"] == 2
+        assert response.json()["items"][0]["event_id"] == "evt-2"
+        assert asyncio.run(runtime.event_store.get_pull_cursor("payments-api")) == "evt-2"
+
+
 @pytest.mark.asyncio
 async def test_studio_event_stream_emits_live_inserted_items() -> None:
     store = RedisStudioEventStore(FakeRedis(), prefix="studio-events", ttl_seconds=60, history_maxlen=10)

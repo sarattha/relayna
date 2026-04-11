@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Protocol, cast
+from typing import Annotated, Any, Protocol, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -326,7 +326,7 @@ class StudioEventIngestService:
 
     async def sync_service(self, service: ServiceRecord) -> None:
         stored_cursor = await self.event_store.get_pull_cursor(service.service_id)
-        newest_cursor: str | None = stored_cursor
+        newest_cursor: str | None = None
         next_after: str | None = None
         for page_index in range(self.pull_max_pages):
             response = await self.http_client.get(
@@ -337,7 +337,7 @@ class StudioEventIngestService:
             payload = RelaynaServiceEventFeedResponse.model_validate(response.json())
             if not payload.items:
                 break
-            if newest_cursor is None:
+            if page_index == 0:
                 newest_cursor = payload.items[0].cursor
             batch: list[StudioEventEnvelope] = []
             encountered_existing = False
@@ -455,11 +455,11 @@ def create_studio_events_router(
     @router.get(f"{prefix}/services/{{service_id}}/events", response_model=StudioEventListResponse)
     async def service_events(
         service_id: str,
-        task_id: str | None = Query(default=None),
-        source_kind: ServiceEventSourceKind | None = Query(default=None),
-        event_type: str | None = Query(default=None),
-        before: str | None = Query(default=None),
-        limit: int = Query(default=100, ge=1, le=500),
+        task_id: Annotated[str | None, Query()] = None,
+        source_kind: Annotated[ServiceEventSourceKind | None, Query()] = None,
+        event_type: Annotated[str | None, Query()] = None,
+        before: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ) -> StudioEventListResponse:
         try:
             return await ingest_service.list_service_events(
@@ -477,8 +477,8 @@ def create_studio_events_router(
     async def task_events(
         service_id: str,
         task_id: str,
-        before: str | None = Query(default=None),
-        limit: int = Query(default=100, ge=1, le=500),
+        before: Annotated[str | None, Query()] = None,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ) -> StudioEventListResponse:
         try:
             return await ingest_service.list_task_events(service_id, task_id, before=before, limit=limit)

@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.3.9 - 2026-04-11
+
+### Fixed
+
+- Studio pull-sync now advances the stored `events.feed` cursor on every successful non-empty sync, so services with an existing cursor continue catching up instead of repeatedly re-reading the same page window.
+- Best-effort Studio observation forwarding now keeps the pending batch on non-2xx ingest responses and retries it on a later flush instead of silently dropping events.
+
+### Changed
+
+- Bumped the package version to `1.3.9`.
+
 ## 1.3.8 - 2026-04-10
 
 ### Added
