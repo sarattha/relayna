@@ -9,6 +9,8 @@ from .capabilities_routes import (
     EVENTS_FEED_ROUTE_ID,
     EXECUTION_CAPABILITY_ROUTE_IDS,
     EXECUTION_GRAPH_ROUTE_ID,
+    HEALTH_CAPABILITY_ROUTE_IDS,
+    HEALTH_WORKERS_ROUTE_ID,
     STATUS_CAPABILITY_ROUTE_IDS,
     STATUS_EVENTS_ROUTE_ID,
     STATUS_HISTORY_ROUTE_ID,
@@ -24,6 +26,7 @@ from .capabilities_routes import (
 from .events_routes import create_events_router
 from .execution_routes import create_execution_router
 from .fastapi_lifespan import HistoryOutputAdapter, RelaynaRuntime, create_relayna_lifespan, get_relayna_runtime
+from .health_routes import WorkerHeartbeatListResponse, WorkerHeartbeatSummary, create_worker_health_router
 from .replay_routes import create_dlq_router, create_replay_router
 from .schemas import (
     AliasConfigSummary,
@@ -47,6 +50,8 @@ __all__ = [
     "EVENTS_FEED_ROUTE_ID",
     "EXECUTION_CAPABILITY_ROUTE_IDS",
     "EXECUTION_GRAPH_ROUTE_ID",
+    "HEALTH_CAPABILITY_ROUTE_IDS",
+    "HEALTH_WORKERS_ROUTE_ID",
     "AliasConfigSummary",
     "CapabilityDocument",
     "CapabilityServiceMetadata",
@@ -58,6 +63,8 @@ __all__ = [
     "STATUS_LATEST_ROUTE_ID",
     "StageSummaryResponse",
     "TopologyGraphResponse",
+    "WorkerHeartbeatListResponse",
+    "WorkerHeartbeatSummary",
     "WorkflowRouteSummary",
     "WORKFLOW_CAPABILITY_ROUTE_IDS",
     "WORKFLOW_STAGES_ROUTE_ID",
@@ -68,6 +75,7 @@ __all__ = [
     "create_dlq_router",
     "create_events_router",
     "create_execution_router",
+    "create_worker_health_router",
     "create_relayna_lifespan",
     "create_replay_router",
     "create_status_router",

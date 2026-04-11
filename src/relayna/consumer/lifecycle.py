@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 
 from ..dlq import DLQRecorder
 from ..observability import ObservationSink
@@ -87,6 +88,7 @@ class AggregationWorkerRuntime:
 class WorkerHeartbeat:
     worker_name: str
     running: bool
+    last_heartbeat_at: datetime | None = None
 
 
 async def stop_runtime(runtime: AggregationWorkerRuntime) -> None:

@@ -25,6 +25,7 @@ FEATURE_HEADINGS = [
     "## 8. Auth, Trust, And Operator Controls",
     "## 9. Health And Liveness Model",
     "## 10. Search And Retention",
+    "## 11. Studio Deployment Packaging",
 ]
 
 
@@ -54,7 +55,7 @@ def test_internal_roadmap_has_required_sections_and_feature_headings() -> None:
 def test_internal_roadmap_uses_only_allowed_status_values() -> None:
     text = ROADMAP.read_text()
     feature_statuses = re.findall(r"^- Status: ([a-z_]+)$", text, flags=re.MULTILINE)
-    assert len(feature_statuses) == 10
+    assert len(feature_statuses) == 11
     assert set(feature_statuses) <= ALLOWED_STATUSES
 
 
@@ -65,5 +66,5 @@ def test_internal_roadmap_has_status_summary_table_for_all_features() -> None:
         text,
         flags=re.MULTILINE,
     )
-    assert len(table_rows) == 10
+    assert len(table_rows) == 11
     assert {status for _, _, status, _ in table_rows} <= ALLOWED_STATUSES

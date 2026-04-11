@@ -5,6 +5,7 @@ import type {
   ServiceListResponse,
   ServiceRecord,
   ServiceStatus,
+  ServiceHealthSummary,
   StudioEventListResponse,
   StudioLogListResponse,
   StudioTaskDetail,
@@ -139,6 +140,12 @@ export async function updateServiceStatus(serviceId: string, status: ServiceStat
 
 export async function refreshService(serviceId: string) {
   return requestJson<ServiceRecord>(`/studio/services/${encodeURIComponent(serviceId)}/refresh`, {
+    method: "POST",
+  });
+}
+
+export async function runHealthCheck(serviceId: string) {
+  return requestJson<ServiceHealthSummary>(`/studio/services/${encodeURIComponent(serviceId)}/health/refresh`, {
     method: "POST",
   });
 }

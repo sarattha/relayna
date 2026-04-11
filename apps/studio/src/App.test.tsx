@@ -52,6 +52,7 @@ type MockServiceRecord = {
   capabilities?: Record<string, unknown> | null;
   last_seen_at?: string | null;
   log_config?: Record<string, unknown> | null;
+  health?: Record<string, unknown> | null;
 };
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -105,6 +106,32 @@ const services: MockServiceRecord[] = [
     status: "registered",
     capabilities: { supported_routes: ["status", "workflow"] },
     last_seen_at: "2026-04-08T12:00:00Z",
+    health: {
+      service_id: "payments-api",
+      registry_status: "registered",
+      http_status: { state: "reachable", checked_at: "2026-04-08T12:00:00Z", error_detail: null },
+      capability_status: {
+        state: "fresh",
+        checked_at: "2026-04-08T12:00:00Z",
+        last_successful_at: "2026-04-08T12:00:00Z",
+        error_detail: null,
+      },
+      observation_freshness: {
+        state: "fresh",
+        latest_status_event_at: "2026-04-08T12:00:00Z",
+        latest_observation_event_at: "2026-04-08T12:00:00Z",
+        latest_ingested_at: "2026-04-08T12:00:01Z",
+      },
+      worker_health: {
+        state: "unsupported",
+        reported_at: null,
+        latest_heartbeat_at: null,
+        workers: [],
+        detail: null,
+      },
+      last_checked_at: "2026-04-08T12:00:00Z",
+      overall_status: "healthy",
+    },
     log_config: {
       provider: "loki",
       base_url: "https://loki.example.test",
