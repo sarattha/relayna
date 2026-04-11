@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from .registry import LokiLogConfig, ServiceNotFoundError, ServiceRecord, ServiceRegistryService
 
+_LOKI_CURSOR_PREFIX = "loki:"
+
 
 def _normalize_optional_string(value: Any) -> str | None:
     if value is None:
@@ -47,6 +49,23 @@ def _escape_logql_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _parse_page_cursor(value: str) -> tuple[str, int]:
+    normalized = value.strip()
+    if normalized.startswith(_LOKI_CURSOR_PREFIX):
+        remainder = normalized[len(_LOKI_CURSOR_PREFIX) :]
+        timestamp_value, separator, skip_value = remainder.partition(":")
+        if not separator or not timestamp_value.isdigit() or not skip_value.isdigit():
+            raise ValueError("before must be an ISO timestamp or Loki nanosecond cursor")
+        return timestamp_value, int(skip_value)
+    return _parse_cursor_timestamp(normalized), 0
+
+
+def _encode_page_cursor(*, cursor: str, skip_count: int) -> str:
+    if skip_count <= 0:
+        return cursor
+    return f"{_LOKI_CURSOR_PREFIX}{cursor}:{skip_count}"
+
+
 class StudioLogEntry(BaseModel):
     service_id: str
     task_id: str | None = None
@@ -82,7 +101,8 @@ class StudioLogQuery(BaseModel):
         normalized = _normalize_optional_string(value)
         if normalized is None:
             return None
-        return _parse_cursor_timestamp(normalized)
+        parsed_cursor, skip_count = _parse_page_cursor(normalized)
+        return _encode_page_cursor(cursor=parsed_cursor, skip_count=skip_count)
 
 
 class StudioLogProviderError(Exception):
@@ -126,14 +146,18 @@ class LokiLogProvider:
         config: LokiLogConfig,
         query: StudioLogQuery,
     ) -> StudioLogListResponse:
+        before_cursor: str | None = None
+        skip_boundary_count = 0
+        if query.before is not None:
+            before_cursor, skip_boundary_count = _parse_page_cursor(query.before)
         request_query = self._build_query(config=config, query=query)
         params = {
             "query": request_query,
-            "limit": str(query.limit + 1),
+            "limit": str(query.limit + skip_boundary_count + 1),
             "direction": "backward",
         }
-        if query.before is not None:
-            params["end"] = _iso_to_loki_ns(query.before)
+        if before_cursor is not None:
+            params["end"] = _iso_to_loki_ns(before_cursor)
         headers = {"Accept": "application/json"}
         if config.tenant_id:
             headers["X-Scope-OrgID"] = config.tenant_id
@@ -156,10 +180,24 @@ class LokiLogProvider:
             ) from exc
 
         entries = self._normalize_response(service=service, config=config, payload=payload)
+        if before_cursor is not None and skip_boundary_count > 0:
+            entries = self._skip_boundary_entries(entries, cursor=before_cursor, skip_count=skip_boundary_count)
         next_cursor: str | None = None
         if len(entries) > query.limit:
             last_visible = entries[query.limit - 1]
-            next_cursor = cast(str | None, last_visible.fields.get("loki_cursor"))
+            boundary_cursor = cast(str | None, last_visible.fields.get("loki_cursor"))
+            if boundary_cursor is None:
+                next_cursor = None
+            else:
+                has_hidden_boundary_entry = any(
+                    item.fields.get("loki_cursor") == boundary_cursor for item in entries[query.limit :]
+                )
+                boundary_skip_count = (
+                    sum(1 for item in entries[: query.limit] if item.fields.get("loki_cursor") == boundary_cursor)
+                    if has_hidden_boundary_entry
+                    else 0
+                )
+                next_cursor = _encode_page_cursor(cursor=boundary_cursor, skip_count=boundary_skip_count)
             entries = entries[: query.limit]
 
         return StudioLogListResponse(count=len(entries), items=entries, next_cursor=next_cursor)
@@ -235,6 +273,20 @@ class LokiLogProvider:
 
         entries_with_cursor.sort(key=lambda item: item[0], reverse=True)
         return [entry for _, entry in entries_with_cursor]
+
+    def _skip_boundary_entries(
+        self, entries: list[StudioLogEntry], *, cursor: str, skip_count: int
+    ) -> list[StudioLogEntry]:
+        if skip_count <= 0:
+            return entries
+        remaining = skip_count
+        filtered: list[StudioLogEntry] = []
+        for entry in entries:
+            if remaining > 0 and entry.fields.get("loki_cursor") == cursor:
+                remaining -= 1
+                continue
+            filtered.append(entry)
+        return filtered
 
 
 class StudioLogQueryService:

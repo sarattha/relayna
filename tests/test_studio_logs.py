@@ -146,6 +146,44 @@ def loki_success_response() -> dict[str, object]:
     }
 
 
+def loki_same_timestamp_response() -> dict[str, object]:
+    return {
+        "status": "success",
+        "data": {
+            "resultType": "streams",
+            "result": [
+                {
+                    "stream": {
+                        "app": "payments-api",
+                        "namespace": "prod",
+                        "task_id": "task-123",
+                        "correlation_id": "corr-123",
+                        "level": "info",
+                        "stream": "a",
+                    },
+                    "values": [
+                        ["1712797201000000000", "stream-a first"],
+                    ],
+                },
+                {
+                    "stream": {
+                        "app": "payments-api",
+                        "namespace": "prod",
+                        "task_id": "task-123",
+                        "correlation_id": "corr-123",
+                        "level": "info",
+                        "stream": "b",
+                    },
+                    "values": [
+                        ["1712797201000000000", "stream-b first"],
+                        ["1712797200000000000", "older entry"],
+                    ],
+                },
+            ],
+        },
+    }
+
+
 def test_registry_service_accepts_lists_and_patches_log_config() -> None:
     async def scenario() -> None:
         store = RedisServiceRegistryStore(FakeRedis())
@@ -250,6 +288,44 @@ def test_loki_provider_omits_missing_task_and_correlation_label_filters() -> Non
     )
 
     assert observed_query["query"] == '{app="payments-api",level="info",namespace="prod"}'
+
+
+def test_loki_provider_preserves_shared_timestamp_page_boundaries() -> None:
+    responses = [loki_same_timestamp_response(), loki_same_timestamp_response()]
+    observed_queries: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(dict(request.url.params))
+        return httpx.Response(200, json=responses.pop(0))
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    first_page = asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config()),
+            config=make_log_config(),
+            query=StudioLogQuery(limit=1),
+        )
+    )
+
+    assert first_page.count == 1
+    assert first_page.items[0].message in {"stream-a first", "stream-b first"}
+    assert first_page.next_cursor == "loki:1712797201000000000:1"
+
+    second_page = asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config()),
+            config=make_log_config(),
+            query=StudioLogQuery(limit=1, before=first_page.next_cursor),
+        )
+    )
+
+    assert observed_queries[0]["limit"] == "2"
+    assert observed_queries[1]["limit"] == "3"
+    assert observed_queries[1]["end"] == "1712797201000000000"
+    assert second_page.count == 1
+    assert second_page.items[0].message in {"stream-a first", "stream-b first"}
+    assert second_page.items[0].message != first_page.items[0].message
+    assert second_page.next_cursor == "1712797201000000000"
 
 
 def test_studio_log_query_service_raises_for_missing_provider_mapping() -> None:
