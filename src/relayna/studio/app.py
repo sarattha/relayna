@@ -322,6 +322,7 @@ def create_studio_app(
     )
     runtime = lifespan_factory.ensure_runtime()
     app = FastAPI(title=title, lifespan=lifespan_factory)
+    app.include_router(create_studio_search_router(search_service=runtime.search_service))
     app.include_router(
         create_service_registry_router(service_registry=runtime.registry_service, health_service=runtime.health_service)
     )
@@ -333,7 +334,6 @@ def create_studio_app(
             event_stream=runtime.event_stream,
         )
     )
-    app.include_router(create_studio_search_router(search_service=runtime.search_service))
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     return app
 

@@ -3,13 +3,18 @@ from __future__ import annotations
 import asyncio
 
 import httpx
+import pytest
+from fastapi.testclient import TestClient
 
+import relayna.studio.app as studio_app
 from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
 from relayna.studio import (
     CreateServiceRequest,
     RedisServiceRegistryStore,
     RedisStudioEventStore,
     ServiceRegistryService,
+    create_studio_app,
+    get_studio_runtime,
 )
 from relayna.studio.events import StudioControlPlaneEvent, StudioEventEnvelope, StudioEventIngestService
 from relayna.studio.search import (
@@ -17,6 +22,7 @@ from relayna.studio.search import (
     StudioSearchService,
     StudioServiceSearchQuery,
     StudioTaskSearchQuery,
+    _later_iso,
 )
 
 
@@ -110,6 +116,9 @@ class FakeRedis:
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
 
+    async def aclose(self) -> None:
+        return None
+
 
 async def _create_service(registry: ServiceRegistryService, service_id: str, *, name: str = "Payments API") -> None:
     await registry.create_service(
@@ -122,6 +131,11 @@ async def _create_service(registry: ServiceRegistryService, service_id: str, *, 
             auth_mode="internal_network",
         )
     )
+
+
+def _install_service(app, service_id: str, *, name: str = "Payments API") -> None:
+    runtime = get_studio_runtime(app)
+    asyncio.run(_create_service(runtime.registry_service, service_id, name=name))
 
 
 def test_search_service_indexes_events_and_filters_tasks() -> None:
@@ -317,3 +331,36 @@ def test_task_search_requires_a_filter_or_time_range() -> None:
             raise AssertionError("Expected task search without filters to fail.")
 
     asyncio.run(scenario())
+
+
+def test_create_studio_app_exposes_services_search_before_service_id_route(monkeypatch) -> None:
+    monkeypatch.setattr(
+        studio_app, "Redis", type("RedisFactory", (), {"from_url": staticmethod(lambda url: FakeRedis())})
+    )
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        health_refresh_interval_seconds=None,
+        retention_prune_interval_seconds=None,
+    )
+
+    with TestClient(app) as client:
+        _install_service(app, "payments-api")
+
+        response = client.get("/studio/services/search", params={"query": "pay"})
+
+        assert response.status_code == 200
+        assert response.json()["count"] == 1
+        assert response.json()["items"][0]["service_id"] == "payments-api"
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ("2026-04-10T10:00:00", "2026-04-10T09:00:00Z", "2026-04-10T10:00:00Z"),
+        ("2026-04-10T10:00:00Z", "2026-04-10T09:00:00", "2026-04-10T10:00:00Z"),
+    ],
+)
+def test_parse_datetime_treats_offsetless_timestamps_as_utc(left: str, right: str, expected: str) -> None:
+    assert _later_iso(left, right) == expected

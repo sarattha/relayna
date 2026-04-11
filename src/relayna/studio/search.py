@@ -50,16 +50,17 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
     normalized = value.strip()
     if not normalized:
         return None
     if normalized.endswith("Z"):
         normalized = f"{normalized[:-1]}+00:00"
     try:
-        return datetime.fromisoformat(normalized)
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def _isoformat(value: datetime | None) -> str | None:
