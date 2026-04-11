@@ -17,10 +17,7 @@ from .federation import (
     FederatedError,
     StudioFederationError,
     StudioFederationService,
-    StudioJoinedTaskSearchItem,
     StudioTaskDetailResponse,
-    StudioTaskSearchItem,
-    StudioTaskSearchResponse,
     create_federation_router,
 )
 from .health import (
@@ -68,6 +65,17 @@ from .registry import (
     normalize_base_url,
 )
 from .run_view import build_run_view
+from .search import (
+    RedisStudioSearchStore,
+    StudioRetentionWorker,
+    StudioSearchService,
+    StudioServiceSearchDocument,
+    StudioServiceSearchItem,
+    StudioServiceSearchResponse,
+    StudioTaskSearchDocument,
+    StudioTaskSearchResponse,
+    create_studio_search_router,
+)
 from .stage_view import build_stage_view
 from .topology_view import build_topology_view
 
@@ -84,6 +92,7 @@ __all__ = [
     "RedisStudioEventStore",
     "ObservationFreshnessState",
     "RedisStudioHealthStore",
+    "RedisStudioSearchStore",
     "ServiceListResponse",
     "ServiceRecord",
     "StudioHealthRefreshService",
@@ -99,7 +108,6 @@ __all__ = [
     "StudioEventIngestService",
     "StudioEventListResponse",
     "StudioEventStream",
-    "StudioJoinedTaskSearchItem",
     "StudioJoinWarning",
     "StudioLogConfigError",
     "StudioLogEntry",
@@ -109,7 +117,12 @@ __all__ = [
     "StudioLogQuery",
     "StudioLogQueryService",
     "StudioPullSyncWorker",
+    "StudioRetentionWorker",
+    "StudioSearchService",
     "StudioServiceHealthDocument",
+    "StudioServiceSearchDocument",
+    "StudioServiceSearchItem",
+    "StudioServiceSearchResponse",
     "StudioTaskJoin",
     "StudioTaskPointer",
     "StudioTaskRef",
@@ -117,7 +130,7 @@ __all__ = [
     "ServiceStatus",
     "StudioRuntime",
     "StudioTaskDetailResponse",
-    "StudioTaskSearchItem",
+    "StudioTaskSearchDocument",
     "StudioTaskSearchResponse",
     "UpdateServiceRequest",
     "WorkerHealthState",
@@ -131,6 +144,7 @@ __all__ = [
     "create_studio_health_router",
     "create_studio_events_router",
     "create_studio_logs_router",
+    "create_studio_search_router",
     "create_studio_app",
     "get_studio_runtime",
     "normalize_base_url",

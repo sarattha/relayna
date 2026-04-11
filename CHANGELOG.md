@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.3 - 2026-04-12
+
+### Added
+
+- Redis-backed Studio search and retention support via `relayna.studio.search`, including retained task/service search documents, indexed `GET /studio/tasks/search` and `GET /studio/services/search`, startup backfill from retained Studio events, and a scheduled retention pruning worker.
+- Studio frontend indexed search UX for retained task discovery and service discovery in `apps/studio/`, plus backend/frontend regression coverage for the new search contracts and retention behavior.
+
+### Changed
+
+- `create_studio_app(...)` now wires the Studio search subsystem and mounts the indexed search routes alongside the existing registry, federation, events, health, and logs surfaces.
+- The internal Studio roadmap now marks feature 10, Search and retention, as implemented.
+- Bumped the package version to `1.4.3`.
+
+### Fixed
+
+- `GET /studio/services/search` now resolves to the search handler before the catch-all `/studio/services/{service_id}` route.
+- Studio search now treats offsetless ISO timestamps as UTC-aware, preventing `datetime-local` task-search filters from mixing naive and aware datetimes at runtime.
+
 ## 1.4.2 - 2026-04-12
 
 ### Added

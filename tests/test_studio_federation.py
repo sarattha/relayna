@@ -17,6 +17,7 @@ class FakeRedis:
         self.url = url
         self.values: dict[str, str] = {}
         self.sets: dict[str, set[str]] = {}
+        self.lists: dict[str, list[str]] = {}
         self.close_calls = 0
         FakeRedis.instances.append(self)
 
@@ -27,10 +28,11 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
-    async def set(self, key: str, value: str, *, nx: bool = False) -> bool:
+    async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
         if nx and key in self.values:
             return False
         self.values[key] = value
+        del ex
         return True
 
     async def delete(self, *keys: str) -> int:
@@ -57,8 +59,58 @@ class FakeRedis:
     async def smembers(self, key: str) -> set[str]:
         return set(self.sets.get(key, set()))
 
+    async def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        items = self.lists.get(key, [])
+        return items[int(start) : int(stop) + 1]
+
+    def pipeline(self) -> FakePipeline:
+        return FakePipeline(self)
+
     async def aclose(self) -> None:
         self.close_calls += 1
+
+
+class FakePipeline:
+    def __init__(self, redis: FakeRedis) -> None:
+        self._redis = redis
+        self._ops: list[tuple[str, tuple[object, ...]]] = []
+
+    def lpush(self, key: str, payload: str) -> None:
+        self._ops.append(("lpush", (key, payload)))
+
+    def ltrim(self, key: str, start: int, stop: int) -> None:
+        self._ops.append(("ltrim", (key, start, stop)))
+
+    def expire(self, key: str, ttl: int) -> None:
+        self._ops.append(("expire", (key, ttl)))
+
+    def publish(self, channel: str, payload: str) -> None:
+        self._ops.append(("publish", (channel, payload)))
+
+    def set(self, key: str, value: str) -> None:
+        self._ops.append(("set", (key, value)))
+
+    async def execute(self) -> list[object]:
+        results: list[object] = []
+        for op, args in self._ops:
+            if op == "lpush":
+                key, payload = args
+                self._redis.lists.setdefault(str(key), []).insert(0, str(payload))
+                results.append(1)
+            elif op == "ltrim":
+                key, start, stop = args
+                items = self._redis.lists.get(str(key), [])
+                self._redis.lists[str(key)] = items[int(start) : int(stop) + 1]
+                results.append(True)
+            elif op == "expire":
+                results.append(True)
+            elif op == "publish":
+                results.append(1)
+            elif op == "set":
+                key, value = args
+                self._redis.values[str(key)] = str(value)
+                results.append(True)
+        return results
 
 
 class TrackingAsyncClient(httpx.AsyncClient):
@@ -209,23 +261,10 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
         assert graph_response.json()["task_ref"]["task_id"] == "task-123"
 
 
-def test_task_search_fans_out_and_falls_back_to_history(monkeypatch) -> None:
+def test_task_search_returns_retained_indexed_matches(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
-    observed_queries: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "payments.example.test" and request.url.path == "/status/task-123":
-            return httpx.Response(200, json={"task_id": "task-123", "event": {"status": "completed"}})
-        if request.url.host == "legacy.example.test" and request.url.path == "/status/task-123":
-            return httpx.Response(405, json={"detail": "Method Not Allowed"})
-        if request.url.host == "legacy.example.test" and request.url.path == "/history":
-            observed_queries.append(str(request.url.query))
-            return httpx.Response(
-                200,
-                json={"count": 1, "events": [{"task_id": "task-123", "status": "completed"}]},
-            )
-        if request.url.host == "broken.example.test" and request.url.path == "/status/task-123":
-            return httpx.Response(401, json={"detail": "Unauthorized"})
         raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
 
     app = create_studio_app(
@@ -256,49 +295,56 @@ def test_task_search_fans_out_and_falls_back_to_history(monkeypatch) -> None:
                 ),
             ),
         )
-        install_service(
-            app,
-            make_record(
-                service_id="broken-api",
-                base_url="https://broken.example.test",
-                capabilities=make_capability_document(supported_routes=["status.latest"]),
-            ),
+        ingest_response = client.post(
+            "/studio/ingest/events",
+            json={
+                "events": [
+                    {
+                        "service_id": "payments-api",
+                        "ingest_method": "pull",
+                        "event": {
+                            "cursor": "payments-evt-1",
+                            "task_id": "task-123",
+                            "event_type": "status.completed",
+                            "source_kind": "status",
+                            "component": "status",
+                            "timestamp": "2026-04-10T02:00:00Z",
+                            "event_id": "payments-evt-1",
+                            "payload": {"status": "completed"},
+                        },
+                    },
+                    {
+                        "service_id": "legacy-api",
+                        "ingest_method": "pull",
+                        "event": {
+                            "cursor": "legacy-evt-1",
+                            "task_id": "task-123",
+                            "event_type": "status.completed",
+                            "source_kind": "status",
+                            "component": "status",
+                            "timestamp": "2026-04-10T01:30:00Z",
+                            "event_id": "legacy-evt-1",
+                            "payload": {"status": "completed"},
+                        },
+                    },
+                ]
+            },
         )
-        install_service(
-            app,
-            make_record(
-                service_id="disabled-api",
-                base_url="https://disabled.example.test",
-                status=ServiceStatus.DISABLED,
-                capabilities=make_capability_document(supported_routes=["status.latest"]),
-            ),
-        )
+        assert ingest_response.status_code == 200
+        assert ingest_response.json() == {"inserted": 2, "duplicate": 0, "invalid": 0}
 
         response = client.get("/studio/tasks/search", params={"task_id": "task-123"})
 
         assert response.status_code == 200
         payload = response.json()
         assert payload["count"] == 2
-        assert {item["service_id"] for item in payload["items"]} == {"payments-api", "legacy-api"}
-        assert {item["task_ref"]["service_id"] for item in payload["items"]} == {"payments-api", "legacy-api"}
-        assert set(payload["scanned_services"]) == {"payments-api", "legacy-api", "broken-api"}
+        assert [item["service_id"] for item in payload["items"]] == ["payments-api", "legacy-api"]
+        assert [item["status"] for item in payload["items"]] == ["completed", "completed"]
         assert payload["items"][0]["detail_path"].startswith("/studio/tasks/")
-        legacy_item = next(item for item in payload["items"] if item["service_id"] == "legacy-api")
-        assert legacy_item["latest_status"]["event"]["status"] == "completed"
-        assert "start_offset=last" in observed_queries[0]
-        assert "max_scan=1" in observed_queries[0]
-        assert payload["errors"] == [
-            {
-                "detail": "Relayna service 'broken-api' rejected Studio credentials for 'status.latest'.",
-                "code": "upstream_auth_failure",
-                "service_id": "broken-api",
-                "upstream_status": 401,
-                "retryable": False,
-            }
-        ]
+        assert payload["next_cursor"] is None
 
 
-def test_task_search_legacy_404_status_falls_back_to_history(monkeypatch) -> None:
+def test_task_search_uses_retained_index_even_when_task_detail_falls_back_to_history(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -335,6 +381,28 @@ def test_task_search_legacy_404_status_falls_back_to_history(monkeypatch) -> Non
                 ),
             ),
         )
+        ingest_response = client.post(
+            "/studio/ingest/events",
+            json={
+                "events": [
+                    {
+                        "service_id": "legacy-api",
+                        "ingest_method": "pull",
+                        "event": {
+                            "cursor": "legacy-evt-1",
+                            "task_id": "task-123",
+                            "event_type": "status.completed",
+                            "source_kind": "status",
+                            "component": "status",
+                            "timestamp": "2026-04-10T03:00:00Z",
+                            "event_id": "legacy-evt-1",
+                            "payload": {"status": "completed"},
+                        },
+                    }
+                ]
+            },
+        )
+        assert ingest_response.status_code == 200
 
         search_response = client.get("/studio/tasks/search", params={"task_id": "task-123"})
         detail_response = client.get("/studio/tasks/legacy-api/task-123")
@@ -342,6 +410,7 @@ def test_task_search_legacy_404_status_falls_back_to_history(monkeypatch) -> Non
         assert search_response.status_code == 200
         assert search_response.json()["count"] == 1
         assert search_response.json()["items"][0]["service_id"] == "legacy-api"
+        assert search_response.json()["items"][0]["status"] == "completed"
         assert detail_response.status_code == 200
         assert detail_response.json()["latest_status"]["event"]["status"] == "completed"
 
@@ -577,7 +646,7 @@ def test_task_detail_join_all_adds_cross_service_identity_refs(monkeypatch) -> N
         ]
 
 
-def test_task_search_join_correlation_adds_joined_items(monkeypatch) -> None:
+def test_task_detail_join_correlation_still_works_after_task_search_replacement(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -646,17 +715,13 @@ def test_task_search_join_correlation_adds_joined_items(monkeypatch) -> None:
             ),
         )
 
-        response = client.get("/studio/tasks/search", params={"task_id": "task-123", "join": "correlation"})
+        response = client.get("/studio/tasks/payments-api/task-123", params={"join": "correlation"})
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["count"] == 1
-        assert payload["joined_count"] == 1
-        assert payload["items"][0]["task_ref"]["task_id"] == "task-123"
-        assert payload["joined_items"] == [
+        assert payload["task_ref"]["task_id"] == "task-123"
+        assert payload["joined_refs"] == [
             {
-                "service_id": "billing-api",
-                "task_id": "corr-123",
                 "task_ref": {
                     "service_id": "billing-api",
                     "task_id": "corr-123",
@@ -664,21 +729,6 @@ def test_task_search_join_correlation_adds_joined_items(monkeypatch) -> None:
                     "parent_refs": [],
                     "child_refs": [],
                 },
-                "service_name": "Billing Api",
-                "environment": "prod",
-                "latest_status": {
-                    "service_id": "billing-api",
-                    "task_id": "corr-123",
-                    "task_ref": {
-                        "service_id": "billing-api",
-                        "task_id": "corr-123",
-                        "correlation_id": None,
-                        "parent_refs": [],
-                        "child_refs": [],
-                    },
-                    "event": {"status": "completed"},
-                },
-                "detail_path": "/studio/tasks/billing-api/corr-123",
                 "join_kind": "correlation_id",
                 "matched_value": "corr-123",
             }

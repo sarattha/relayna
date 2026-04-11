@@ -16,6 +16,7 @@ from ..api import CapabilityDocument, build_legacy_fallback_capability_document
 
 if TYPE_CHECKING:
     from .health import StudioHealthRefreshService
+    from .search import StudioSearchIndexer
 
 
 class ServiceStatus(StrEnum):
@@ -469,12 +470,25 @@ class RedisServiceRegistryStore:
 
 
 class ServiceRegistryService:
-    def __init__(self, *, store: ServiceRegistryStore, capability_fetcher: CapabilityFetcher | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        store: ServiceRegistryStore,
+        capability_fetcher: CapabilityFetcher | None = None,
+        search_indexer: StudioSearchIndexer | None = None,
+    ) -> None:
         self._store = store
         self._capability_fetcher = capability_fetcher or HttpCapabilityFetcher()
+        self._search_indexer = search_indexer
+
+    def set_search_indexer(self, search_indexer: StudioSearchIndexer | None) -> None:
+        self._search_indexer = search_indexer
 
     async def create_service(self, request: CreateServiceRequest) -> ServiceRecord:
-        return await self._store.create(request.to_record())
+        created = await self._store.create(request.to_record())
+        if self._search_indexer is not None:
+            await self._search_indexer.upsert_service_document(created)
+        return created
 
     async def list_services(self) -> list[ServiceRecord]:
         return await self._store.list_records()
@@ -499,11 +513,18 @@ class ServiceRegistryService:
         if next_status is not None:
             data["status"] = next_status
         updated = ServiceRecord.model_validate(data)
-        return await self._store.update(normalized_service_id, updated)
+        saved = await self._store.update(normalized_service_id, updated)
+        if self._search_indexer is not None:
+            await self._search_indexer.upsert_service_document(saved)
+        return saved
 
     async def delete_service(self, service_id: str) -> None:
         normalized_service_id = service_id.strip()
+        await self.get_service(normalized_service_id)
         await self._store.delete(normalized_service_id)
+        if self._search_indexer is not None:
+            await self._search_indexer.delete_task_documents_for_service(normalized_service_id)
+            await self._search_indexer.delete_service_document(normalized_service_id)
 
     async def refresh_service(self, service_id: str) -> ServiceRecord:
         _, capability_document = await self.fetch_capability_document(service_id)
@@ -535,7 +556,10 @@ class ServiceRegistryService:
                 else existing.status,
             }
         )
-        return await self._store.update(normalized_service_id, refreshed)
+        saved = await self._store.update(normalized_service_id, refreshed)
+        if self._search_indexer is not None:
+            await self._search_indexer.upsert_service_document(saved)
+        return saved
 
 
 def create_service_registry_router(

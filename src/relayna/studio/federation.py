@@ -1088,16 +1088,6 @@ def create_federation_router(
             return exc.to_response()
         return JSONResponse(payload)
 
-    @router.get(f"{prefix}/tasks/search", response_model=StudioTaskSearchResponse)
-    async def task_search(
-        task_id: str = TASK_SEARCH_QUERY,
-        join: JoinMode = JOIN_MODE_QUERY,
-    ) -> StudioTaskSearchResponse | JSONResponse:
-        try:
-            return await federation_service.search_tasks(task_id, join=join)
-        except StudioFederationError as exc:
-            return exc.to_response()
-
     @router.get(f"{prefix}/tasks/{{service_id}}/{{task_id}}", response_model=StudioTaskDetailResponse)
     async def task_detail(
         service_id: str,

@@ -2,6 +2,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { searchServices } from "../api";
 import { useStudioServices } from "../services-context";
 import {
   EmptyState,
@@ -16,7 +17,7 @@ import {
   primaryButtonStyle,
   secondaryButtonStyle,
 } from "../ui";
-import type { ServiceDraft, ServiceRecord } from "../types";
+import type { ServiceDraft, ServiceRecord, StudioServiceSearchItem } from "../types";
 
 export function ServicesPage() {
   const navigate = useNavigate();
@@ -24,6 +25,16 @@ export function ServicesPage() {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServiceDraft>(servicesState.emptyDraft);
   const [saving, setSaving] = useState(false);
+  const [searchDraft, setSearchDraft] = useState({
+    query: "",
+    environment: "",
+    status: "",
+    health: "",
+    tag: "",
+  });
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<StudioServiceSearchItem[] | null>(null);
 
   function startCreate() {
     setEditingServiceId(null);
@@ -69,6 +80,21 @@ export function ServicesPage() {
     }
   }
 
+  async function handleServiceSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSearchLoading(true);
+    setSearchError(null);
+    try {
+      const payload = await searchServices({ ...searchDraft, limit: 25 });
+      setSearchResults(payload.items);
+    } catch (fetchError) {
+      setSearchResults(null);
+      setSearchError(fetchError instanceof Error ? fetchError.message : "Unable to search services.");
+    } finally {
+      setSearchLoading(false);
+    }
+  }
+
   const unreachableCount = servicesState.services.filter((service) => service.health?.overall_status === "unreachable").length;
   const staleOrDegradedCount = servicesState.services.filter((service) =>
     service.health ? ["stale", "degraded"].includes(service.health.overall_status) : false,
@@ -96,6 +122,71 @@ export function ServicesPage() {
             <MetricCard label="Stale / Degraded" value={String(staleOrDegradedCount)} />
             <MetricCard label="Disabled" value={String(disabledCount)} />
           </div>
+        </SectionCard>
+
+        <SectionCard title="Service Search" subtitle="Search registered services with lightweight fuzzy matching plus structured filters.">
+          <form onSubmit={handleServiceSearch} style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+            <input
+              value={searchDraft.query}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, query: event.target.value }))}
+              placeholder="query"
+              style={inputStyle}
+            />
+            <input
+              value={searchDraft.environment}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, environment: event.target.value }))}
+              placeholder="environment"
+              style={inputStyle}
+            />
+            <input
+              value={searchDraft.status}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, status: event.target.value }))}
+              placeholder="status"
+              style={inputStyle}
+            />
+            <input
+              value={searchDraft.health}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, health: event.target.value }))}
+              placeholder="health"
+              style={inputStyle}
+            />
+            <input
+              value={searchDraft.tag}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, tag: event.target.value }))}
+              placeholder="tag"
+              style={inputStyle}
+            />
+            <button type="submit" style={primaryButtonStyle}>
+              Search Services
+            </button>
+          </form>
+          {searchError ? <p style={{ ...mutedTextStyle, color: "#9d3b2d" }}>{searchError}</p> : null}
+          {searchLoading ? <p style={mutedTextStyle}>Searching services...</p> : null}
+          {searchResults ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              {!searchResults.length ? <p style={mutedTextStyle}>No matching services found.</p> : null}
+              {searchResults.map((service) => (
+                <article
+                  key={`${service.service_id}-search`}
+                  style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 14, display: "grid", gap: 6 }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                    <strong>{service.name}</strong>
+                    <Link to={`/services/${encodeURIComponent(service.service_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+                      Open
+                    </Link>
+                  </div>
+                  <span style={{ fontSize: 13, color: "#62584b" }}>
+                    {service.service_id} · {service.environment} · registry={service.status}
+                    {service.health_status ? ` · health=${service.health_status}` : ""}
+                  </span>
+                  <span style={{ fontSize: 13, color: "#62584b" }}>
+                    matched fields: {service.matched_fields.length ? service.matched_fields.join(", ") : "structured filters only"}
+                  </span>
+                </article>
+              ))}
+            </div>
+          ) : null}
         </SectionCard>
 
         <SectionCard

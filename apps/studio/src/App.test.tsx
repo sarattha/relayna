@@ -336,49 +336,27 @@ describe("App", () => {
       if (url === "/studio/services/payments-api/dlq/messages?limit=50&cursor=cursor-2" && method === "GET") {
         return jsonResponse({ service_id: "payments-api", items: [], next_cursor: null });
       }
-      if (url === "/studio/tasks/search?task_id=task-123&join=all" && method === "GET") {
+      if (url === "/studio/tasks/search?task_id=task-123&limit=50" && method === "GET") {
         return jsonResponse({
           count: 1,
           items: [
             {
               service_id: "payments-api",
-              task_id: "task-123",
-              task_ref: {
-                service_id: "payments-api",
-                task_id: "task-123",
-                correlation_id: "corr-123",
-                parent_refs: [],
-                child_refs: [],
-              },
               service_name: "Payments API",
               environment: "prod",
-              latest_status: { event: { status: "running" } },
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              status: "running",
+              stage: "authorize",
+              first_seen_at: "2026-04-08T10:00:00Z",
+              last_seen_at: "2026-04-08T10:05:00Z",
+              latest_event_type: "task.running",
+              latest_event_at: "2026-04-08T10:05:00Z",
+              latest_ingested_at: "2026-04-08T10:05:01Z",
               detail_path: "/studio/tasks/payments-api/task-123",
             },
           ],
-          joined_count: 1,
-          joined_items: [
-            {
-              service_id: "fraud-api",
-              task_id: "fraud-999",
-              task_ref: {
-                service_id: "fraud-api",
-                task_id: "fraud-999",
-                correlation_id: "corr-123",
-                parent_refs: [],
-                child_refs: [],
-              },
-              service_name: "Fraud API",
-              environment: "prod",
-              latest_status: { event: { status: "running" } },
-              detail_path: "/studio/tasks/fraud-api/fraud-999",
-              join_kind: "correlation_id",
-              matched_value: "corr-123",
-            },
-          ],
-          join_warnings: [],
-          errors: [],
-          scanned_services: ["payments-api", "fraud-api"],
+          next_cursor: null,
         });
       }
       if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
@@ -519,17 +497,17 @@ describe("App", () => {
     );
   });
 
-  it("submits task search and renders exact and joined task results", async () => {
+  it("submits task search and renders indexed task results", async () => {
     window.history.replaceState({}, "", "/tasks/search");
 
     render(<App />);
 
-    fireEvent.change(await screen.findByPlaceholderText("task-123"), { target: { value: "task-123" } });
+    fireEvent.change(await screen.findByPlaceholderText("task_id"), { target: { value: "task-123" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
-    expect(await screen.findByText("Exact Matches")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "payments-api/task-123" })).toBeInTheDocument();
-    expect(screen.getByText("Fraud API via correlation id")).toBeInTheDocument();
+    expect(await screen.findByText(/Matches:/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Task Detail" })).toBeInTheDocument();
+    expect(screen.getByText(/correlation=corr-123/)).toBeInTheDocument();
   });
 
   it("renders the direct task detail route with graph, timeline, logs, joins, and SSE cleanup", async () => {

@@ -5,7 +5,7 @@ from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -14,6 +14,9 @@ from pydantic import BaseModel, Field, ValidationError
 from ..api import HEALTH_WORKERS_ROUTE_ID, CapabilityDocument, WorkerHeartbeatListResponse, WorkerHeartbeatSummary
 from .events import StudioServiceActivitySnapshot
 from .registry import CapabilityRefreshError, ServiceNotFoundError, ServiceRecord, ServiceRegistryService, ServiceStatus
+
+if TYPE_CHECKING:
+    from .search import StudioSearchIndexer
 
 
 def _utcnow() -> datetime:
@@ -156,6 +159,7 @@ class StudioHealthRefreshService:
     health_store: StudioServiceHealthStore
     activity_reader: StudioServiceActivityReader
     http_client: httpx.AsyncClient
+    search_indexer: StudioSearchIndexer | None = None
     capability_stale_after_seconds: int = 180
     observation_stale_after_seconds: int = 300
     worker_heartbeat_stale_after_seconds: int = 90
@@ -192,6 +196,8 @@ class StudioHealthRefreshService:
         if service.status == ServiceStatus.DISABLED:
             document = self._materialize_document(service, snapshot, current, now=now)
             await self.health_store.set_health(service.service_id, document)
+            if self.search_indexer is not None:
+                await self.search_indexer.upsert_service_document(service, health_status=document.overall_status.value)
             return document
 
         if use_cached_capabilities:
@@ -242,6 +248,8 @@ class StudioHealthRefreshService:
 
         document = self._materialize_document(service, snapshot, current, now=now)
         await self.health_store.set_health(service.service_id, document)
+        if self.search_indexer is not None:
+            await self.search_indexer.upsert_service_document(service, health_status=document.overall_status.value)
         return document
 
     async def refresh_all_services(self) -> None:
