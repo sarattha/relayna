@@ -11,7 +11,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 3 | Federated API aggregation layer | implemented | 2026-04-09 |
 | 4 | Cross-service identity model | implemented | 2026-04-10 |
 | 5 | Aggregated event and observation ingestion | implemented | 2026-04-10 |
-| 6 | Log pipeline | partially_implemented | 2026-04-08 |
+| 6 | Log pipeline | implemented | 2026-04-11 |
 | 7 | Control-plane UI expansion | partially_implemented | 2026-04-08 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
 | 9 | Health and liveness model | partially_implemented | 2026-04-08 |
@@ -219,11 +219,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 6. Log Pipeline
 
-- Status: partially_implemented
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-11
 - Goal: Let Studio expose logs alongside Relayna task and observation views without conflating the two.
 - Why it exists: Operators will expect logs in the control plane, but Relayna observations are not a full log backend.
-- Current state in repo: Relayna provides `make_logging_sink(...)` and event serialization helpers. See `src/relayna/observability/exporters.py`. `docs/observability.md` explicitly states Relayna does not ship a logging backend, metrics registry, or tracing exporter.
+- Current state in repo: Relayna provides `make_logging_sink(...)` and event serialization helpers in `src/relayna/observability/exporters.py`, while Studio now ships a pluggable read-only log query surface with per-service `log_config`, a Loki provider, normalized `/studio/services/{service_id}/logs` and `/studio/tasks/{service_id}/{task_id}/logs` routes, and service/task log panels in `apps/studio/src/App.tsx`.
 - Target end state: Studio supports a pluggable log backend contract and can query logs scoped by service and task context.
 - Planned API/interface additions:
   - Studio log provider abstraction
@@ -252,11 +252,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Log queries are clearly separate from Relayna status and observation queries
   - Missing log correlation does not break the rest of the control plane
 - Checklist:
-  - [ ] Define Studio log provider interface
-  - [ ] Define normalized log response schema
-  - [ ] Add at least one pluggable provider implementation
-  - [ ] Add task-scoped and service-scoped log views
-  - [ ] Add tests for provider errors and missing correlation keys
+  - [x] Define Studio log provider interface
+  - [x] Define normalized log response schema
+  - [x] Add at least one pluggable provider implementation
+  - [x] Add task-scoped and service-scoped log views
+  - [x] Add tests for provider errors and missing correlation keys
 
 ## 7. Control-Plane UI Expansion
 
