@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.0 - 2026-04-11
+
+### Added
+
+- Studio log pipeline support via `relayna.studio.logs`, including `StudioLogQuery`, `StudioLogEntry`, `StudioLogListResponse`, `StudioLogQueryService`, `create_studio_logs_router(...)`, and a first pluggable `LokiLogProvider`.
+- New Studio backend log routes at `GET /studio/services/{service_id}/logs` and `GET /studio/tasks/{service_id}/{task_id}/logs` with normalized service/task-scoped log query behavior.
+- Per-service Studio registry `log_config` support so operators can configure Loki log access separately for each registered service.
+- Studio UI log configuration fields plus service-level and task-level log panels in `apps/studio/` for querying logs alongside existing control-plane views.
+
+### Changed
+
+- `create_studio_app(...)` now wires the Studio log-query service and mounts the Studio log routes next to registry, federation, and events.
+- The internal Studio roadmap now marks feature 6, Log pipeline, as implemented.
+- Bumped the package version to `1.4.0`.
+
 ## 1.3.9 - 2026-04-11
 
 ### Fixed

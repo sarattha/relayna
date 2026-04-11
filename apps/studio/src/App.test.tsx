@@ -51,6 +51,7 @@ type MockServiceRecord = {
   status: "registered" | "healthy" | "unavailable" | "disabled";
   capabilities?: Record<string, unknown> | null;
   last_seen_at?: string | null;
+  log_config?: Record<string, unknown> | null;
 };
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -751,5 +752,132 @@ describe("App", () => {
 
     expect(await screen.findByText("task-456 · status · status")).toBeInTheDocument();
     expect(await screen.findByText("TaskMessageAcked")).toBeInTheDocument();
+  });
+
+  it("loads and renders service and task log panels", async () => {
+    const services: MockServiceRecord[] = [
+      {
+        service_id: "payments-api",
+        name: "Payments API",
+        base_url: "https://payments.example.test",
+        environment: "prod",
+        tags: ["core"],
+        auth_mode: "internal_network",
+        status: "healthy",
+        capabilities: { supported_routes: ["status.latest", "execution.graph"] },
+        last_seen_at: "2026-04-09T10:00:00Z",
+        log_config: {
+          provider: "loki",
+          base_url: "https://loki.example.test",
+          tenant_id: null,
+          service_selector_labels: { app: "payments-api", namespace: "prod" },
+          task_id_label: "task_id",
+          correlation_id_label: "correlation_id",
+          level_label: "level",
+        },
+      },
+    ];
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      if (url === "/studio/services/payments-api/events?limit=20" && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url === "/studio/services/payments-api/logs?limit=20" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-10T01:00:00Z",
+              level: "info",
+              message: "service log line",
+              fields: { labels: { app: "payments-api" } },
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
+        return jsonResponse({
+          service: services[0],
+          service_id: "payments-api",
+          task_id: "task-123",
+          task_ref: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            correlation_id: "corr-123",
+            parent_refs: [],
+            child_refs: [],
+          },
+          latest_status: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            task_ref: {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              parent_refs: [],
+              child_refs: [],
+            },
+            event: { status: "completed" },
+          },
+          history: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            task_ref: null,
+            count: 1,
+            events: [],
+          },
+          dlq_messages: { service_id: "payments-api", items: [], next_cursor: null },
+          execution_graph: null,
+          joined_refs: [],
+          join_warnings: [],
+          errors: [],
+        });
+      }
+      if (url === "/studio/tasks/payments-api/task-123/events?limit=50" && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url === "/studio/tasks/payments-api/task-123/logs?limit=50&correlation_id=corr-123" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-10T01:02:00Z",
+              level: "error",
+              message: "task log line",
+              fields: { labels: { task_id: "task-123", correlation_id: "corr-123" } },
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Logs")).toBeInTheDocument();
+    expect(await screen.findByText("service log line")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Task id"), { target: { value: "task-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load Execution Graph" }));
+
+    expect(await screen.findByText("Task Logs")).toBeInTheDocument();
+    expect(await screen.findByText("task log line")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/studio/tasks/payments-api/task-123/logs?limit=50&correlation_id=corr-123",
+      undefined,
+    );
   });
 });

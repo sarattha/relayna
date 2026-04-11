@@ -5,7 +5,7 @@ from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from ipaddress import ip_address, ip_network
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
@@ -22,6 +22,53 @@ class ServiceStatus(StrEnum):
     DISABLED = "disabled"
 
 
+def _normalize_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("value must be a string")
+    normalized = value.strip()
+    return normalized or None
+
+
+class LokiLogConfig(BaseModel):
+    provider: Literal["loki"] = "loki"
+    base_url: str
+    tenant_id: str | None = None
+    service_selector_labels: dict[str, str] = Field(default_factory=dict)
+    task_id_label: str | None = None
+    correlation_id_label: str | None = None
+    level_label: str | None = None
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _normalize_base_url(cls, value: Any) -> str:
+        return normalize_base_url(value)
+
+    @field_validator("tenant_id", "task_id_label", "correlation_id_label", "level_label", mode="before")
+    @classmethod
+    def _normalize_optional_strings(cls, value: Any) -> str | None:
+        return _normalize_optional_string(value)
+
+    @field_validator("service_selector_labels", mode="before")
+    @classmethod
+    def _normalize_service_selector_labels(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            raise ValueError("service_selector_labels must not be empty")
+        if not isinstance(value, dict):
+            raise ValueError("service_selector_labels must be an object")
+        normalized: dict[str, str] = {}
+        for raw_key, raw_value in value.items():
+            key = _normalize_optional_string(raw_key)
+            field_value = _normalize_optional_string(raw_value)
+            if key is None or field_value is None:
+                raise ValueError("service_selector_labels must contain non-empty string keys and values")
+            normalized[key] = field_value
+        if not normalized:
+            raise ValueError("service_selector_labels must not be empty")
+        return normalized
+
+
 class ServiceRecord(BaseModel):
     service_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -32,6 +79,7 @@ class ServiceRecord(BaseModel):
     status: ServiceStatus = ServiceStatus.REGISTERED
     capabilities: dict[str, Any] | None = None
     last_seen_at: datetime | None = None
+    log_config: LokiLogConfig | None = None
 
     @field_validator("service_id", "name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -77,6 +125,7 @@ class CreateServiceRequest(BaseModel):
     environment: str = Field(min_length=1)
     tags: list[str] = Field(default_factory=list)
     auth_mode: str = Field(min_length=1)
+    log_config: LokiLogConfig | None = None
 
     @field_validator("service_id", "name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -94,7 +143,12 @@ class CreateServiceRequest(BaseModel):
         return ServiceRecord._normalize_tags(value)
 
     def to_record(self) -> ServiceRecord:
-        return ServiceRecord(**self.model_dump(), status=ServiceStatus.REGISTERED, capabilities=None, last_seen_at=None)
+        return ServiceRecord(
+            **self.model_dump(),
+            status=ServiceStatus.REGISTERED,
+            capabilities=None,
+            last_seen_at=None,
+        )
 
 
 class UpdateServiceRequest(BaseModel):
@@ -104,6 +158,7 @@ class UpdateServiceRequest(BaseModel):
     tags: list[str] | None = None
     auth_mode: str | None = None
     status: ServiceStatus | None = None
+    log_config: LokiLogConfig | None = None
 
     @field_validator("name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -530,6 +585,7 @@ __all__ = [
     "CreateServiceRequest",
     "DuplicateServiceError",
     "HttpCapabilityFetcher",
+    "LokiLogConfig",
     "RedisServiceRegistryStore",
     "ServiceListResponse",
     "ServiceNotFoundError",

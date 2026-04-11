@@ -21,6 +21,7 @@ from .federation import (
     _default_async_client_factory,
     create_federation_router,
 )
+from .logs import LokiLogProvider, StudioLogQueryService, create_studio_logs_router
 from .registry import (
     CapabilityFetcher,
     HttpCapabilityFetcher,
@@ -40,6 +41,7 @@ class StudioRuntime:
     event_store: RedisStudioEventStore
     event_ingest_service: StudioEventIngestService
     event_stream: StudioEventStream
+    log_query_service: StudioLogQueryService
     pull_sync_worker: StudioPullSyncWorker | None = None
     pull_sync_task: asyncio.Task[None] | None = None
 
@@ -94,6 +96,10 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 http_client=http_client,
             )
+            log_query_service = StudioLogQueryService(
+                registry_service=registry_service,
+                providers={"loki": LokiLogProvider(http_client=http_client)},
+            )
             event_ingest_service = StudioEventIngestService(
                 registry_service=registry_service,
                 event_store=event_store,
@@ -117,6 +123,7 @@ class _StudioLifespan:
                 event_store=event_store,
                 event_ingest_service=event_ingest_service,
                 event_stream=event_stream,
+                log_query_service=log_query_service,
                 pull_sync_worker=pull_sync_worker,
             )
         return self._runtime
@@ -195,6 +202,7 @@ def create_studio_app(
             event_stream=runtime.event_stream,
         )
     )
+    app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     return app
 
 

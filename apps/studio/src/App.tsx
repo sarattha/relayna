@@ -13,6 +13,16 @@ import {
 
 type ServiceStatus = "registered" | "healthy" | "unavailable" | "disabled";
 
+type ServiceLogConfig = {
+  provider: "loki";
+  base_url: string;
+  tenant_id?: string | null;
+  service_selector_labels: Record<string, string>;
+  task_id_label?: string | null;
+  correlation_id_label?: string | null;
+  level_label?: string | null;
+};
+
 type ServiceRecord = {
   service_id: string;
   name: string;
@@ -23,6 +33,7 @@ type ServiceRecord = {
   status: ServiceStatus;
   capabilities?: Record<string, unknown> | null;
   last_seen_at?: string | null;
+  log_config?: ServiceLogConfig | null;
 };
 
 type ServiceListResponse = {
@@ -37,6 +48,13 @@ type ServiceDraft = {
   environment: string;
   tags: string;
   auth_mode: string;
+  log_provider: "" | "loki";
+  log_base_url: string;
+  log_tenant_id: string;
+  log_service_selector_labels: string;
+  log_task_id_label: string;
+  log_correlation_id_label: string;
+  log_level_label: string;
 };
 
 type StudioTaskPointer = {
@@ -172,6 +190,22 @@ type StudioTaskDetail = {
   errors: FederatedError[];
 };
 
+type StudioLogEntry = {
+  service_id: string;
+  task_id?: string | null;
+  correlation_id?: string | null;
+  timestamp: string;
+  level?: string | null;
+  message: string;
+  fields: Record<string, unknown>;
+};
+
+type StudioLogListResponse = {
+  count: number;
+  items: StudioLogEntry[];
+  next_cursor?: string | null;
+};
+
 const frameStyle = {
   border: "1px solid rgba(99, 83, 57, 0.18)",
   borderRadius: 18,
@@ -249,6 +283,13 @@ const emptyServiceDraft: ServiceDraft = {
   environment: "dev",
   tags: "",
   auth_mode: "internal_network",
+  log_provider: "",
+  log_base_url: "",
+  log_tenant_id: "",
+  log_service_selector_labels: "",
+  log_task_id_label: "",
+  log_correlation_id_label: "",
+  log_level_label: "",
 };
 
 function serviceToDraft(service: ServiceRecord): ServiceDraft {
@@ -259,10 +300,26 @@ function serviceToDraft(service: ServiceRecord): ServiceDraft {
     environment: service.environment,
     tags: service.tags.join(", "),
     auth_mode: service.auth_mode,
+    log_provider: service.log_config?.provider || "",
+    log_base_url: service.log_config?.base_url || "",
+    log_tenant_id: service.log_config?.tenant_id || "",
+    log_service_selector_labels: formatLabelPairs(service.log_config?.service_selector_labels || {}),
+    log_task_id_label: service.log_config?.task_id_label || "",
+    log_correlation_id_label: service.log_config?.correlation_id_label || "",
+    log_level_label: service.log_config?.level_label || "",
   };
 }
 
 function buildServicePayload(draft: ServiceDraft) {
+  const hasLogConfig = Boolean(
+    draft.log_provider ||
+      draft.log_base_url.trim() ||
+      draft.log_service_selector_labels.trim() ||
+      draft.log_task_id_label.trim() ||
+      draft.log_correlation_id_label.trim() ||
+      draft.log_level_label.trim() ||
+      draft.log_tenant_id.trim(),
+  );
   return {
     service_id: draft.service_id.trim(),
     name: draft.name.trim(),
@@ -273,7 +330,53 @@ function buildServicePayload(draft: ServiceDraft) {
       .map((item) => item.trim())
       .filter(Boolean),
     auth_mode: draft.auth_mode.trim(),
+    log_config: hasLogConfig
+      ? {
+          provider: (draft.log_provider || "loki") as "loki",
+          base_url: draft.log_base_url.trim(),
+          tenant_id: draft.log_tenant_id.trim() || null,
+          service_selector_labels: parseLabelPairs(draft.log_service_selector_labels),
+          task_id_label: draft.log_task_id_label.trim() || null,
+          correlation_id_label: draft.log_correlation_id_label.trim() || null,
+          level_label: draft.log_level_label.trim() || null,
+        }
+      : null,
   };
+}
+
+function parseLabelPairs(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .reduce<Record<string, string>>((accumulator, item) => {
+      const separatorIndex = item.indexOf("=");
+      if (separatorIndex <= 0) {
+        return accumulator;
+      }
+      const key = item.slice(0, separatorIndex).trim();
+      const parsedValue = item.slice(separatorIndex + 1).trim();
+      if (!key || !parsedValue) {
+        return accumulator;
+      }
+      accumulator[key] = parsedValue;
+      return accumulator;
+    }, {});
+}
+
+function formatLabelPairs(value: Record<string, string>) {
+  return Object.entries(value)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, itemValue]) => `${key}=${itemValue}`)
+    .join(", ");
+}
+
+function parseLimit(value: string, fallback: number) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(200, Math.max(1, parsed));
 }
 
 function formatTimestamp(value?: string | null) {
@@ -281,6 +384,13 @@ function formatTimestamp(value?: string | null) {
     return "Never";
   }
   return new Date(value).toLocaleString();
+}
+
+function formatLogLevel(value?: string | null) {
+  if (!value) {
+    return "unlabeled";
+  }
+  return value;
 }
 
 function sortControlPlaneEvents(items: StudioControlPlaneEvent[]) {
@@ -592,9 +702,21 @@ export function App() {
   const [serviceEventTaskFilter, setServiceEventTaskFilter] = useState("");
   const [serviceEventSourceFilter, setServiceEventSourceFilter] = useState<"" | ServiceEventSourceKind>("");
   const [serviceEventTypeFilter, setServiceEventTypeFilter] = useState("");
+  const [serviceLogs, setServiceLogs] = useState<StudioLogListResponse | null>(null);
+  const [serviceLogsLoading, setServiceLogsLoading] = useState(false);
+  const [serviceLogsError, setServiceLogsError] = useState<string | null>(null);
+  const [serviceLogQuery, setServiceLogQuery] = useState("");
+  const [serviceLogLevel, setServiceLogLevel] = useState("");
+  const [serviceLogLimit, setServiceLogLimit] = useState("20");
   const [taskTimeline, setTaskTimeline] = useState<StudioEventListResponse | null>(null);
   const [taskTimelineLoading, setTaskTimelineLoading] = useState(false);
   const [taskTimelineError, setTaskTimelineError] = useState<string | null>(null);
+  const [taskLogs, setTaskLogs] = useState<StudioLogListResponse | null>(null);
+  const [taskLogsLoading, setTaskLogsLoading] = useState(false);
+  const [taskLogsError, setTaskLogsError] = useState<string | null>(null);
+  const [taskLogQuery, setTaskLogQuery] = useState("");
+  const [taskLogLevel, setTaskLogLevel] = useState("");
+  const [taskLogLimit, setTaskLogLimit] = useState("50");
 
   const selectedService = services.find((service) => service.service_id === selectedServiceId) ?? null;
   const graph = taskDetail?.execution_graph || null;
@@ -619,18 +741,34 @@ export function App() {
   useEffect(() => {
     if (!selectedServiceId) {
       setServiceEvents(null);
+      setServiceLogs(null);
+      setServiceLogsError(null);
       return;
     }
     void loadServiceEvents(selectedServiceId);
+    if (selectedService?.log_config) {
+      void loadServiceLogs(selectedService.service_id);
+    } else {
+      setServiceLogs(null);
+      setServiceLogsError("No log provider configured for this service.");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedServiceId]);
+  }, [selectedServiceId, selectedService?.log_config]);
 
   useEffect(() => {
     if (!taskDetail) {
       setTaskTimeline(null);
+      setTaskLogs(null);
+      setTaskLogsError(null);
       return;
     }
     void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id);
+    if (taskDetail.service.log_config) {
+      void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null);
+    } else {
+      setTaskLogs(null);
+      setTaskLogsError("No log provider configured for this service.");
+    }
   }, [taskDetail]);
 
   useEffect(() => {
@@ -774,6 +912,32 @@ export function App() {
     }
   }
 
+  async function loadServiceLogs(serviceId: string) {
+    const normalizedServiceId = serviceId.trim();
+    if (!normalizedServiceId) {
+      return;
+    }
+    setServiceLogsLoading(true);
+    setServiceLogsError(null);
+    try {
+      const params = new URLSearchParams({ limit: String(parseLimit(serviceLogLimit, 20)) });
+      if (serviceLogQuery.trim()) {
+        params.set("query", serviceLogQuery.trim());
+      }
+      if (serviceLogLevel.trim()) {
+        params.set("level", serviceLogLevel.trim());
+      }
+      const payload = await requestJson<StudioLogListResponse>(
+        `/studio/services/${encodeURIComponent(normalizedServiceId)}/logs?${params.toString()}`,
+      );
+      startTransition(() => setServiceLogs(payload));
+    } catch (fetchError) {
+      setServiceLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load service logs.");
+    } finally {
+      setServiceLogsLoading(false);
+    }
+  }
+
   async function loadTaskTimeline(serviceId: string, nextTaskId: string) {
     const normalizedServiceId = serviceId.trim();
     const normalizedTaskId = nextTaskId.trim();
@@ -795,6 +959,36 @@ export function App() {
     }
   }
 
+  async function loadTaskLogs(serviceId: string, nextTaskId: string, correlationId?: string | null) {
+    const normalizedServiceId = serviceId.trim();
+    const normalizedTaskId = nextTaskId.trim();
+    if (!normalizedServiceId || !normalizedTaskId) {
+      return;
+    }
+    setTaskLogsLoading(true);
+    setTaskLogsError(null);
+    try {
+      const params = new URLSearchParams({ limit: String(parseLimit(taskLogLimit, 50)) });
+      if (taskLogQuery.trim()) {
+        params.set("query", taskLogQuery.trim());
+      }
+      if (taskLogLevel.trim()) {
+        params.set("level", taskLogLevel.trim());
+      }
+      if (correlationId?.trim()) {
+        params.set("correlation_id", correlationId.trim());
+      }
+      const payload = await requestJson<StudioLogListResponse>(
+        `/studio/tasks/${encodeURIComponent(normalizedServiceId)}/${encodeURIComponent(normalizedTaskId)}/logs?${params.toString()}`,
+      );
+      startTransition(() => setTaskLogs(payload));
+    } catch (fetchError) {
+      setTaskLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load task logs.");
+    } finally {
+      setTaskLogsLoading(false);
+    }
+  }
+
   async function handleRegistrySubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const payload = buildServicePayload(draft);
@@ -807,6 +1001,7 @@ export function App() {
           environment: payload.environment,
           tags: payload.tags,
           auth_mode: payload.auth_mode,
+          log_config: payload.log_config,
         })
       : JSON.stringify(payload);
 
@@ -1170,6 +1365,88 @@ export function App() {
                       style={inputStyle}
                     />
                   </label>
+                  <section style={{ ...frameStyle, padding: 14, display: "grid", gap: 12, background: "#fffaf1" }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 16 }}>Log Configuration</h3>
+                      <p style={mutedTextStyle}>Optional per-service Loki query settings for Studio log panels.</p>
+                    </div>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                      Log provider
+                      <select
+                        value={draft.log_provider}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            log_provider: event.target.value as "" | "loki",
+                          }))
+                        }
+                        style={inputStyle}
+                      >
+                        <option value="">Disabled</option>
+                        <option value="loki">Loki</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                      Log base URL
+                      <input
+                        value={draft.log_base_url}
+                        onChange={(event) => setDraft((current) => ({ ...current, log_base_url: event.target.value }))}
+                        placeholder="https://loki.example.test"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                      Loki tenant id
+                      <input
+                        value={draft.log_tenant_id}
+                        onChange={(event) => setDraft((current) => ({ ...current, log_tenant_id: event.target.value }))}
+                        placeholder="optional"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                      Service selector labels
+                      <input
+                        value={draft.log_service_selector_labels}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, log_service_selector_labels: event.target.value }))
+                        }
+                        placeholder="app=payments-api, namespace=prod"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                      Task id label
+                      <input
+                        value={draft.log_task_id_label}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, log_task_id_label: event.target.value }))
+                        }
+                        placeholder="task_id"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                      Correlation id label
+                      <input
+                        value={draft.log_correlation_id_label}
+                        onChange={(event) =>
+                          setDraft((current) => ({ ...current, log_correlation_id_label: event.target.value }))
+                        }
+                        placeholder="correlation_id"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                      Level label
+                      <input
+                        value={draft.log_level_label}
+                        onChange={(event) => setDraft((current) => ({ ...current, log_level_label: event.target.value }))}
+                        placeholder="level"
+                        style={inputStyle}
+                      />
+                    </label>
+                  </section>
                   <button type="submit" disabled={registrySaving} style={primaryButtonStyle}>
                     {registrySaving ? "Saving..." : editingServiceId ? "Save Service" : "Register Service"}
                   </button>
@@ -1195,6 +1472,7 @@ export function App() {
                       <MetadataRow label="Environment" value={selectedService.environment} />
                       <MetadataRow label="Base URL" value={selectedService.base_url} />
                       <MetadataRow label="Auth mode" value={selectedService.auth_mode} />
+                      <MetadataRow label="Log provider" value={selectedService.log_config?.provider || "none"} />
                       <MetadataRow
                         label="Tags"
                         value={selectedService.tags.length ? selectedService.tags.join(", ") : "none"}
@@ -1252,6 +1530,26 @@ export function App() {
                         />
                       ) : (
                         <p style={mutedTextStyle}>No capability document stored yet.</p>
+                      )}
+                    </div>
+
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <h3 style={{ margin: 0 }}>Stored Log Config</h3>
+                      {selectedService.log_config ? (
+                        <textarea
+                          value={JSON.stringify(selectedService.log_config, null, 2)}
+                          readOnly
+                          spellCheck={false}
+                          style={{
+                            ...inputStyle,
+                            minHeight: 160,
+                            resize: "vertical",
+                            fontFamily: "'SFMono-Regular', Menlo, monospace",
+                            fontSize: 12,
+                          }}
+                        />
+                      ) : (
+                        <p style={mutedTextStyle}>No log provider configured for this service.</p>
                       )}
                     </div>
 
@@ -1318,6 +1616,69 @@ export function App() {
                                 {item.event_type}
                                 {item.out_of_order ? " · out-of-order" : ""}
                               </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                        <h3 style={{ margin: 0 }}>Service Logs</h3>
+                        <button
+                          type="button"
+                          onClick={() => selectedService && void loadServiceLogs(selectedService.service_id)}
+                          style={secondaryButtonStyle}
+                        >
+                          Reload Logs
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1.4fr) 140px 110px" }}>
+                        <input
+                          aria-label="Service log text filter"
+                          value={serviceLogQuery}
+                          onChange={(event) => setServiceLogQuery(event.target.value)}
+                          placeholder="Search log text"
+                          style={inputStyle}
+                        />
+                        <input
+                          aria-label="Service log level"
+                          value={serviceLogLevel}
+                          onChange={(event) => setServiceLogLevel(event.target.value)}
+                          placeholder="level"
+                          style={inputStyle}
+                        />
+                        <input
+                          aria-label="Service log limit"
+                          value={serviceLogLimit}
+                          onChange={(event) => setServiceLogLimit(event.target.value)}
+                          placeholder="20"
+                          style={inputStyle}
+                        />
+                      </div>
+                      {serviceLogsLoading ? <p style={mutedTextStyle}>Loading service logs...</p> : null}
+                      {serviceLogsError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{serviceLogsError}</p> : null}
+                      {!serviceLogsLoading && !serviceLogsError && !(serviceLogs?.items.length || 0) ? (
+                        <p style={mutedTextStyle}>No service logs matched the current filters.</p>
+                      ) : null}
+                      {serviceLogs?.items.length ? (
+                        <div style={{ display: "grid", gap: 10, maxHeight: 360, overflowY: "auto" }}>
+                          {serviceLogs.items.map((item, index) => (
+                            <article
+                              key={`${item.timestamp}-${item.message}-${index}`}
+                              style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                                <div style={{ display: "grid", gap: 4 }}>
+                                  <strong style={{ fontSize: 13 }}>{item.message}</strong>
+                                  <span style={{ fontSize: 12, color: "#62584b" }}>
+                                    {formatLogLevel(item.level)} · {item.task_id || "service scope"}
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: 12, color: "#62584b", textAlign: "right" }}>
+                                  {formatTimestamp(item.timestamp)}
+                                </span>
+                              </div>
                             </article>
                           ))}
                         </div>
@@ -1567,6 +1928,81 @@ export function App() {
                               {item.source_kind} · {item.event_type} · {item.component || "unknown"}
                               {item.out_of_order ? " · out-of-order" : ""}
                             </p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {taskDetail ? (
+                  <section style={{ ...frameStyle, padding: 18 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                      <h3 style={{ marginTop: 0, marginBottom: 12 }}>Task Logs</h3>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void loadTaskLogs(
+                            taskDetail.service_id,
+                            taskDetail.task_id,
+                            taskDetail.task_ref.correlation_id || null,
+                          )
+                        }
+                        style={secondaryButtonStyle}
+                      >
+                        Reload Logs
+                      </button>
+                    </div>
+                    <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1.4fr) 140px 110px" }}>
+                      <input
+                        aria-label="Task log text filter"
+                        value={taskLogQuery}
+                        onChange={(event) => setTaskLogQuery(event.target.value)}
+                        placeholder="Search task logs"
+                        style={inputStyle}
+                      />
+                      <input
+                        aria-label="Task log level"
+                        value={taskLogLevel}
+                        onChange={(event) => setTaskLogLevel(event.target.value)}
+                        placeholder="level"
+                        style={inputStyle}
+                      />
+                      <input
+                        aria-label="Task log limit"
+                        value={taskLogLimit}
+                        onChange={(event) => setTaskLogLimit(event.target.value)}
+                        placeholder="50"
+                        style={inputStyle}
+                      />
+                    </div>
+                    {!taskDetail.task_ref.correlation_id ? (
+                      <p style={mutedTextStyle}>Correlation filter unavailable for this task; Studio is filtering by task id only.</p>
+                    ) : null}
+                    {taskLogsLoading ? <p style={mutedTextStyle}>Loading task logs...</p> : null}
+                    {taskLogsError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{taskLogsError}</p> : null}
+                    {!taskLogsLoading && !taskLogsError && !(taskLogs?.items.length || 0) ? (
+                      <p style={mutedTextStyle}>No task logs matched the current filters.</p>
+                    ) : null}
+                    {taskLogs?.items.length ? (
+                      <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto" }}>
+                        {taskLogs.items.map((item, index) => (
+                          <article
+                            key={`${item.timestamp}-${item.message}-${index}`}
+                            style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                              <div style={{ display: "grid", gap: 4 }}>
+                                <strong style={{ fontSize: 13 }}>{item.message}</strong>
+                                <span style={{ fontSize: 12, color: "#62584b" }}>
+                                  {formatLogLevel(item.level)}
+                                  {item.correlation_id ? ` · ${item.correlation_id}` : ""}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: 12, color: "#62584b" }}>
+                                {formatTimestamp(item.timestamp)}
+                              </span>
+                            </div>
                           </article>
                         ))}
                       </div>
