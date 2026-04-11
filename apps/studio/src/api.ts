@@ -4,11 +4,14 @@ import type {
   ServiceDraft,
   ServiceListResponse,
   ServiceRecord,
+  StudioServiceSearchQuery,
+  StudioServiceSearchResponse,
   ServiceStatus,
   ServiceHealthSummary,
   StudioEventListResponse,
   StudioLogListResponse,
   StudioTaskDetail,
+  StudioTaskSearchQuery,
   StudioTaskSearchResponse,
   WorkflowTopologyResponse,
 } from "./types";
@@ -213,9 +216,58 @@ export async function fetchTaskDetail(serviceId: string, taskId: string, join = 
   );
 }
 
-export async function searchTasks(taskId: string, join = "none") {
-  const params = new URLSearchParams({ task_id: taskId.trim(), join });
+export async function searchTasks(query: StudioTaskSearchQuery) {
+  const params = new URLSearchParams();
+  if (query.service_id?.trim()) {
+    params.set("service_id", query.service_id.trim());
+  }
+  if (query.task_id?.trim()) {
+    params.set("task_id", query.task_id.trim());
+  }
+  if (query.correlation_id?.trim()) {
+    params.set("correlation_id", query.correlation_id.trim());
+  }
+  if (query.status?.trim()) {
+    params.set("status", query.status.trim());
+  }
+  if (query.stage?.trim()) {
+    params.set("stage", query.stage.trim());
+  }
+  if (query.from?.trim()) {
+    params.set("from", query.from.trim());
+  }
+  if (query.to?.trim()) {
+    params.set("to", query.to.trim());
+  }
+  if (query.cursor?.trim()) {
+    params.set("cursor", query.cursor.trim());
+  }
+  params.set("limit", String(query.limit || 50));
   return requestJson<StudioTaskSearchResponse>(`/studio/tasks/search?${params.toString()}`);
+}
+
+export async function searchServices(query: StudioServiceSearchQuery) {
+  const params = new URLSearchParams();
+  if (query.query?.trim()) {
+    params.set("query", query.query.trim());
+  }
+  if (query.environment?.trim()) {
+    params.set("environment", query.environment.trim());
+  }
+  if (query.status?.trim()) {
+    params.set("status", query.status.trim());
+  }
+  if (query.health?.trim()) {
+    params.set("health", query.health.trim());
+  }
+  if (query.tag?.trim()) {
+    params.set("tag", query.tag.trim());
+  }
+  if (query.cursor?.trim()) {
+    params.set("cursor", query.cursor.trim());
+  }
+  params.set("limit", String(query.limit || 50));
+  return requestJson<StudioServiceSearchResponse>(`/studio/services/search?${params.toString()}`);
 }
 
 export async function fetchTopology(serviceId: string) {

@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Annotated, Any, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, Any, Protocol, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -21,6 +21,9 @@ from ..observability import (
     StudioEventIngestMethod,
 )
 from .registry import ServiceNotFoundError, ServiceRecord, ServiceRegistryService, ServiceStatus
+
+if TYPE_CHECKING:
+    from .search import StudioSearchIndexer
 
 
 def _utcnow() -> datetime:
@@ -338,6 +341,7 @@ class StudioEventIngestService:
     registry_service: ServiceRegistryService
     event_store: StudioEventStore
     http_client: httpx.AsyncClient
+    search_indexer: StudioSearchIndexer | None = None
     pull_page_limit: int = 200
     pull_max_pages: int = 25
 
@@ -348,12 +352,32 @@ class StudioEventIngestService:
         response = StudioEventIngestResponse()
         for envelope in events:
             try:
-                await self.registry_service.get_service(envelope.service_id)
+                service = await self.registry_service.get_service(envelope.service_id)
             except ServiceNotFoundError:
                 response.invalid += 1
                 continue
             inserted = await self.event_store.insert_event(envelope)
             if inserted:
+                if self.search_indexer is not None:
+                    await self.search_indexer.upsert_task_document(
+                        service,
+                        StudioControlPlaneEvent(
+                            service_id=envelope.service_id,
+                            ingest_method=envelope.ingest_method,
+                            ingested_at=_utcnow().isoformat(),
+                            dedupe_key=_event_dedupe_key(envelope.service_id, envelope.event),
+                            out_of_order=False,
+                            task_id=envelope.event.task_id,
+                            event_type=envelope.event.event_type,
+                            source_kind=envelope.event.source_kind,
+                            component=envelope.event.component,
+                            timestamp=envelope.event.timestamp,
+                            event_id=envelope.event.event_id,
+                            correlation_id=envelope.event.correlation_id,
+                            parent_task_id=envelope.event.parent_task_id,
+                            payload=envelope.event.payload,
+                        ),
+                    )
                 response.inserted += 1
             else:
                 response.duplicate += 1

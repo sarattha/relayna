@@ -35,6 +35,12 @@ from .registry import (
     ServiceRegistryService,
     create_service_registry_router,
 )
+from .search import (
+    RedisStudioSearchStore,
+    StudioRetentionWorker,
+    StudioSearchService,
+    create_studio_search_router,
+)
 
 
 @dataclass(slots=True)
@@ -50,10 +56,14 @@ class StudioRuntime:
     health_store: RedisStudioHealthStore
     health_service: StudioHealthRefreshService
     log_query_service: StudioLogQueryService
+    search_store: RedisStudioSearchStore
+    search_service: StudioSearchService
     pull_sync_worker: StudioPullSyncWorker | None = None
     pull_sync_task: asyncio.Task[None] | None = None
     health_refresh_worker: StudioHealthRefreshWorker | None = None
     health_refresh_task: asyncio.Task[None] | None = None
+    retention_worker: StudioRetentionWorker | None = None
+    retention_task: asyncio.Task[None] | None = None
 
 
 class _StudioLifespan:
@@ -75,6 +85,9 @@ class _StudioLifespan:
         capability_stale_after_seconds: int,
         observation_stale_after_seconds: int,
         worker_heartbeat_stale_after_seconds: int,
+        task_search_index_prefix: str,
+        task_index_ttl_seconds: int,
+        retention_prune_interval_seconds: float | None,
     ) -> None:
         self._redis_url = redis_url
         self._app_state_key = app_state_key
@@ -91,6 +104,9 @@ class _StudioLifespan:
         self._capability_stale_after_seconds = capability_stale_after_seconds
         self._observation_stale_after_seconds = observation_stale_after_seconds
         self._worker_heartbeat_stale_after_seconds = worker_heartbeat_stale_after_seconds
+        self._task_search_index_prefix = task_search_index_prefix
+        self._task_index_ttl_seconds = task_index_ttl_seconds
+        self._retention_prune_interval_seconds = retention_prune_interval_seconds
         self._runtime: StudioRuntime | None = None
 
     @property
@@ -101,6 +117,7 @@ class _StudioLifespan:
         if self._runtime is None:
             redis = Redis.from_url(self._redis_url)
             registry_store = RedisServiceRegistryStore(redis, prefix=self._registry_prefix)
+            search_store = RedisStudioSearchStore(redis, prefix=self._task_search_index_prefix)
             registry_service = ServiceRegistryService(
                 store=registry_store,
                 capability_fetcher=self._capability_fetcher,
@@ -113,6 +130,14 @@ class _StudioLifespan:
                 history_maxlen=self._event_history_maxlen,
             )
             health_store = RedisStudioHealthStore(redis, prefix=self._health_store_prefix)
+            search_service = StudioSearchService(
+                registry_service=registry_service,
+                event_store=event_store,
+                store=search_store,
+                task_index_ttl_seconds=self._task_index_ttl_seconds,
+                backfill_event_limit=max(1, self._event_history_maxlen),
+            )
+            registry_service.set_search_indexer(search_service)
             federation_service = StudioFederationService(
                 registry_service=registry_service,
                 http_client=http_client,
@@ -122,6 +147,7 @@ class _StudioLifespan:
                 health_store=health_store,
                 activity_reader=event_store,
                 http_client=http_client,
+                search_indexer=search_service,
                 capability_stale_after_seconds=self._capability_stale_after_seconds,
                 observation_stale_after_seconds=self._observation_stale_after_seconds,
                 worker_heartbeat_stale_after_seconds=self._worker_heartbeat_stale_after_seconds,
@@ -134,6 +160,7 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 event_store=event_store,
                 http_client=http_client,
+                search_indexer=search_service,
             )
             event_stream = StudioEventStream(event_store=event_store)
             pull_sync_worker = (
@@ -152,6 +179,14 @@ class _StudioLifespan:
                 if self._health_refresh_interval_seconds is not None
                 else None
             )
+            retention_worker = (
+                StudioRetentionWorker(
+                    search_service=search_service,
+                    interval_seconds=self._retention_prune_interval_seconds,
+                )
+                if self._retention_prune_interval_seconds is not None
+                else None
+            )
             self._runtime = StudioRuntime(
                 redis=redis,
                 registry_store=registry_store,
@@ -164,8 +199,11 @@ class _StudioLifespan:
                 health_store=health_store,
                 health_service=health_service,
                 log_query_service=log_query_service,
+                search_store=search_store,
+                search_service=search_service,
                 pull_sync_worker=pull_sync_worker,
                 health_refresh_worker=health_refresh_worker,
+                retention_worker=retention_worker,
             )
         return self._runtime
 
@@ -175,6 +213,7 @@ class _StudioLifespan:
             runtime = self.ensure_runtime()
             setattr(app.state, self._app_state_key, runtime)
             try:
+                await runtime.search_service.initialize()
                 if runtime.pull_sync_worker is not None:
                     runtime.pull_sync_task = asyncio.create_task(
                         runtime.pull_sync_worker.run_forever(),
@@ -185,12 +224,19 @@ class _StudioLifespan:
                         runtime.health_refresh_worker.run_forever(),
                         name="studio-health-refresh",
                     )
+                if runtime.retention_worker is not None:
+                    runtime.retention_task = asyncio.create_task(
+                        runtime.retention_worker.run_forever(),
+                        name="studio-retention-prune",
+                    )
                 yield
             finally:
                 if runtime.pull_sync_worker is not None:
                     runtime.pull_sync_worker.stop()
                 if runtime.health_refresh_worker is not None:
                     runtime.health_refresh_worker.stop()
+                if runtime.retention_worker is not None:
+                    runtime.retention_worker.stop()
                 if runtime.pull_sync_task is not None:
                     try:
                         await asyncio.wait_for(asyncio.shield(runtime.pull_sync_task), timeout=5.0)
@@ -209,6 +255,15 @@ class _StudioLifespan:
                             await runtime.health_refresh_task
                     finally:
                         runtime.health_refresh_task = None
+                if runtime.retention_task is not None:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(runtime.retention_task), timeout=5.0)
+                    except TimeoutError:
+                        runtime.retention_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await runtime.retention_task
+                    finally:
+                        runtime.retention_task = None
                 await runtime.http_client.aclose()
                 await runtime.redis.aclose()
                 if hasattr(app.state, self._app_state_key):
@@ -237,6 +292,9 @@ def create_studio_app(
     capability_stale_after_seconds: int = 180,
     observation_stale_after_seconds: int = 300,
     worker_heartbeat_stale_after_seconds: int = 90,
+    task_search_index_prefix: str = "studio:search",
+    task_index_ttl_seconds: int = 86400,
+    retention_prune_interval_seconds: float | None = 60.0,
 ) -> FastAPI:
     resolved_capability_fetcher = capability_fetcher or HttpCapabilityFetcher(
         allowed_hosts=capability_refresh_allowed_hosts,
@@ -258,6 +316,9 @@ def create_studio_app(
         capability_stale_after_seconds=capability_stale_after_seconds,
         observation_stale_after_seconds=observation_stale_after_seconds,
         worker_heartbeat_stale_after_seconds=worker_heartbeat_stale_after_seconds,
+        task_search_index_prefix=task_search_index_prefix,
+        task_index_ttl_seconds=task_index_ttl_seconds,
+        retention_prune_interval_seconds=retention_prune_interval_seconds,
     )
     runtime = lifespan_factory.ensure_runtime()
     app = FastAPI(title=title, lifespan=lifespan_factory)
@@ -272,6 +333,7 @@ def create_studio_app(
             event_stream=runtime.event_stream,
         )
     )
+    app.include_router(create_studio_search_router(search_service=runtime.search_service))
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     return app
 

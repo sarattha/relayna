@@ -260,27 +260,65 @@ export type StudioTaskDetail = {
 
 export type StudioTaskSearchItem = {
   service_id: string;
-  task_id: string;
-  task_ref: StudioTaskRef;
   service_name: string;
   environment: string;
-  latest_status: Record<string, unknown>;
+  task_id: string;
+  correlation_id?: string | null;
+  status?: string | null;
+  stage?: string | null;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  latest_event_type?: string | null;
+  latest_event_at?: string | null;
+  latest_ingested_at?: string | null;
   detail_path: string;
-};
-
-export type StudioJoinedTaskSearchItem = StudioTaskSearchItem & {
-  join_kind: JoinKind;
-  matched_value: string;
 };
 
 export type StudioTaskSearchResponse = {
   count: number;
   items: StudioTaskSearchItem[];
-  joined_count: number;
-  joined_items: StudioJoinedTaskSearchItem[];
-  join_warnings: StudioJoinWarning[];
-  errors: FederatedError[];
-  scanned_services: string[];
+  next_cursor?: string | null;
+};
+
+export type StudioTaskSearchQuery = {
+  service_id?: string;
+  task_id?: string;
+  correlation_id?: string;
+  status?: string;
+  stage?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  cursor?: string | null;
+};
+
+export type StudioServiceSearchItem = {
+  service_id: string;
+  name: string;
+  environment: string;
+  tags: string[];
+  status: ServiceStatus;
+  health_status?: HealthStatus | null;
+  base_url: string;
+  auth_mode: string;
+  last_seen_at?: string | null;
+  matched_fields: string[];
+};
+
+export type StudioServiceSearchResponse = {
+  count: number;
+  items: StudioServiceSearchItem[];
+  next_cursor?: string | null;
+};
+
+export type StudioServiceSearchQuery = {
+  query?: string;
+  environment?: string;
+  status?: string;
+  health?: string;
+  tag?: string;
+  limit?: number;
+  cursor?: string | null;
 };
 
 export type StudioLogEntry = {
