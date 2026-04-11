@@ -16,6 +16,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
 | 9 | Health and liveness model | partially_implemented | 2026-04-08 |
 | 10 | Search and retention | partially_implemented | 2026-04-08 |
+| 11 | Studio deployment packaging | planned | 2026-04-11 |
 
 ## Defaults And Assumptions
 
@@ -25,7 +26,10 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - Logs are treated as separate from Relayna status and observation payloads and require a pluggable backend.
 - Studio user authentication starts with simple username/password authentication in the first implementation phase.
 - Service-to-service trust can initially rely on the existing AKS environment and internal network controls instead of a new distributed auth scheme.
-- This file is the single source of truth for these 10 features. Do not split it into multiple roadmap files unless this document is explicitly replaced.
+- `relayna` SDK and `relayna studio` have separate packaging and deployment models.
+- Studio runs as one central internal service even though its frontend and backend are shipped as separate images.
+- Internal teams build Studio images directly from this repo source; image publication workflow is out of scope.
+- This file is the single source of truth for these 11 features. Do not split it into multiple roadmap files unless this document is explicitly replaced.
 - Internal roadmap status must be updated in the same PR that changes covered behavior.
 - `implemented` means shipped in repo with tests covering the behavior.
 - `partially_implemented` means code exists in repo but the target end state in this file is not complete.
@@ -430,9 +434,52 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - [ ] Add pruning jobs
   - [ ] Add tests for search filters and retention expiry
 
+## 11. Studio Deployment Packaging
+
+- Status: planned
+- last_updated: 2026-04-11
+- Goal: Establish a clear deployment model for Studio that is separate from the SDK delivery model used by downstream repos.
+- Why it exists: Downstream repos need the SDK only, while Studio should be operated once as a central governance surface.
+- Current state in repo: Studio backend exists in `src/relayna/studio/`, frontend exists in `apps/studio/`, the frontend currently assumes same-origin `/studio/*` APIs, and there is no formal production packaging story yet.
+- Target end state: SDK consumption is independent from Studio deployment. Studio is run centrally. Studio ships as two source-buildable Docker images: frontend and backend. The frontend image serves the SPA. The backend image runs the Studio API. Production routing preserves one public origin and forwards `/studio/*` to the backend. Registry publishing strategy is explicitly out of scope.
+- Planned API/interface additions:
+  - one Docker build target for Studio frontend
+  - one Docker build target for Studio backend
+  - runtime config for backend connectivity, Redis, and ingress proxy rules
+  - source-based build and run instructions for internal teams
+- Implementation phases:
+  - Phase 1: define SDK versus Studio packaging boundary
+  - Phase 2: add separate frontend and backend Docker build paths
+  - Phase 3: document source-based internal deployment with single-origin routing
+- Dependencies:
+  - Service registry
+  - Federated API aggregation layer
+  - Control-plane UI expansion
+  - Auth, trust, and operator controls
+- Open risks:
+  - frontend/backend routing drift breaking same-origin assumptions
+  - SPA deep links needing correct ingress fallback behavior
+  - confusion between SDK release workflow and Studio deployment workflow
+  - central Studio availability becoming an operational dependency
+- Acceptance criteria:
+  - downstream repos can consume `relayna` without hosting Studio
+  - Studio frontend and backend can each be built into separate images from this repo
+  - browser access remains single-origin in production
+  - `/studio/*` requests are routed to the backend while UI routes continue to work
+  - internal teams can build and run both images from source without relying on pre-published artifacts
+  - the roadmap clearly states that image publication is not part of this feature
+- Checklist:
+  - [ ] Define SDK versus Studio packaging boundary
+  - [ ] Add frontend Docker image build path
+  - [ ] Add backend Docker image build path
+  - [ ] Define single-origin ingress or reverse-proxy routing requirements
+  - [ ] Document required runtime environment variables and wiring
+  - [ ] Document source-based build and run flow for internal teams
+  - [ ] Add verification steps for frontend routing and `/studio/*` backend access
+
 ## Update Policy
 
-- Any PR that adds, changes, or completes work for one of the 10 roadmap features must update:
+- Any PR that adds, changes, or completes work for one of the 11 roadmap features must update:
   - the `Status Summary` table
   - the relevant feature section
   - the `Change Log` section
@@ -446,14 +493,15 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - `deferred`
 - Public docs under `docs/` remain separate. This file is internal planning and review material only.
 - PR review guidance:
-  - Changes that materially affect one of these 10 features should be rejected if this roadmap was not updated in the same PR.
+  - Changes that materially affect one of these 11 features should be rejected if this roadmap was not updated in the same PR.
 
 ## Change Log
 
-- 2026-04-08: Created the internal Studio control-plane roadmap as the single source of truth for the 10 control-plane features and their tracking statuses.
+- 2026-04-08: Created the internal Studio control-plane roadmap as the single source of truth for the control-plane features and their tracking statuses.
 - 2026-04-08: Refined the auth roadmap to start with simple username/password authentication for Studio users and rely on existing AKS trust boundaries for service-to-service communication in the initial phase.
 - 2026-04-08: Shipped the first service-registry slice with Redis-backed service records, Studio backend CRUD routes, a dependency-gated capability refresh placeholder, and Studio service list/detail UI.
 - 2026-04-09: Shipped feature 2 with `GET /relayna/capabilities`, typed capability documents, Studio-backed capability refresh storage, and deterministic legacy fallback handling for older services.
 - 2026-04-10: Shipped feature 4 with normalized Studio task references, additive `task_ref` identity metadata across federated task-bearing responses, opt-in cross-service joins for correlation and lineage, ambiguity warnings, and Studio UI panels for identity context.
 - 2026-04-10: Shipped feature 5 with service-side merged event feeds, Studio ingest/query/SSE routes, Redis-backed control-plane event storage, pull-sync support for `events.feed`, and Studio UI panels for service activity and task timelines.
 - 2026-04-11: Shipped feature 7 with a route-based Studio operator console, shared frontend API/services layers, standalone topology/DLQ/task-search/task-detail screens, and tests covering navigation plus service- and task-scoped reads.
+- 2026-04-11: Added feature 11 to separate `relayna` SDK packaging from central `relayna studio` deployment, with source-built frontend and backend Docker images behind a single public origin and image publication left out of scope.
