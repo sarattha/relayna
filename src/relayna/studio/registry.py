@@ -5,7 +5,7 @@ from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
 from ipaddress import ip_address, ip_network
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
@@ -13,6 +13,9 @@ from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from ..api import CapabilityDocument, build_legacy_fallback_capability_document
+
+if TYPE_CHECKING:
+    from .health import StudioHealthRefreshService
 
 
 class ServiceStatus(StrEnum):
@@ -80,6 +83,7 @@ class ServiceRecord(BaseModel):
     capabilities: dict[str, Any] | None = None
     last_seen_at: datetime | None = None
     log_config: LokiLogConfig | None = None
+    health: dict[str, Any] | None = None
 
     @field_validator("service_id", "name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -502,16 +506,33 @@ class ServiceRegistryService:
         await self._store.delete(normalized_service_id)
 
     async def refresh_service(self, service_id: str) -> ServiceRecord:
+        _, capability_document = await self.fetch_capability_document(service_id)
+        return await self.store_capability_document(service_id, capability_document, mark_healthy=True)
+
+    async def fetch_capability_document(self, service_id: str) -> tuple[ServiceRecord, CapabilityDocument]:
         normalized_service_id = service_id.strip()
         existing = await self.get_service(normalized_service_id)
         capability_document = await self._capability_fetcher.fetch(existing.base_url)
+        return existing, capability_document
+
+    async def store_capability_document(
+        self,
+        service_id: str,
+        capability_document: CapabilityDocument,
+        *,
+        mark_healthy: bool,
+    ) -> ServiceRecord:
+        normalized_service_id = service_id.strip()
+        existing = await self.get_service(normalized_service_id)
         refreshed = existing.model_copy(
             update={
                 "capabilities": capability_document.model_dump(mode="json"),
                 "last_seen_at": datetime.now(UTC),
                 "status": (
                     ServiceStatus.DISABLED if existing.status == ServiceStatus.DISABLED else ServiceStatus.HEALTHY
-                ),
+                )
+                if mark_healthy
+                else existing.status,
             }
         )
         return await self._store.update(normalized_service_id, refreshed)
@@ -520,33 +541,44 @@ class ServiceRegistryService:
 def create_service_registry_router(
     *,
     service_registry: ServiceRegistryService,
+    health_service: StudioHealthRefreshService | None = None,
     prefix: str = "/studio/services",
 ) -> APIRouter:
     router = APIRouter()
 
+    async def attach_health(record: ServiceRecord) -> ServiceRecord:
+        if health_service is None:
+            return record
+        return await health_service.build_service_record(record)
+
     @router.post(prefix, response_model=ServiceRecord, status_code=status.HTTP_201_CREATED)
     async def create_service(request: CreateServiceRequest) -> ServiceRecord:
         try:
-            return await service_registry.create_service(request)
+            created = await service_registry.create_service(request)
+            return await attach_health(created)
         except DuplicateServiceError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.get(prefix, response_model=ServiceListResponse)
     async def list_services() -> ServiceListResponse:
         services = await service_registry.list_services()
+        if health_service is not None:
+            services = await health_service.build_service_records(services)
         return ServiceListResponse(count=len(services), services=services)
 
     @router.get(f"{prefix}" + "/{service_id}", response_model=ServiceRecord)
     async def get_service(service_id: str) -> ServiceRecord:
         try:
-            return await service_registry.get_service(service_id)
+            record = await service_registry.get_service(service_id)
+            return await attach_health(record)
         except ServiceNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @router.patch(f"{prefix}" + "/{service_id}", response_model=ServiceRecord)
     async def update_service(service_id: str, request: UpdateServiceRequest) -> ServiceRecord:
         try:
-            return await service_registry.update_service(service_id, request)
+            updated = await service_registry.update_service(service_id, request)
+            return await attach_health(updated)
         except ServiceNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except DuplicateServiceError as exc:
@@ -565,7 +597,11 @@ def create_service_registry_router(
     @router.post(f"{prefix}" + "/{service_id}/refresh", response_model=ServiceRecord)
     async def refresh_service(service_id: str) -> ServiceRecord:
         try:
-            return await service_registry.refresh_service(service_id)
+            refreshed = await service_registry.refresh_service(service_id)
+            if health_service is not None:
+                await health_service.refresh_health(service_id, use_cached_capabilities=True)
+                refreshed = await health_service.build_service_record(refreshed)
+            return refreshed
         except ServiceNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except CapabilityRefreshError as exc:

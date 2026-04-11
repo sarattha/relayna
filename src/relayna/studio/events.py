@@ -77,6 +77,13 @@ class StudioEventListResponse(BaseModel):
     next_cursor: str | None = None
 
 
+class StudioServiceActivitySnapshot(BaseModel):
+    service_id: str
+    latest_status_event_at: str | None = None
+    latest_observation_event_at: str | None = None
+    latest_ingested_at: str | None = None
+
+
 class StudioEventStore(Protocol):
     async def insert_event(self, envelope: StudioEventEnvelope) -> bool: ...
 
@@ -103,6 +110,8 @@ class StudioEventStore(Protocol):
     async def get_pull_cursor(self, service_id: str) -> str | None: ...
 
     async def set_pull_cursor(self, service_id: str, cursor: str) -> None: ...
+
+    async def get_service_activity_snapshot(self, service_id: str) -> StudioServiceActivitySnapshot: ...
 
     def service_channel(self, service_id: str) -> str: ...
 
@@ -135,6 +144,15 @@ class RedisStudioEventStore:
     def task_latest_timestamp_key(self, service_id: str, task_id: str) -> str:
         return f"{self.prefix}:task:{service_id}:{task_id}:latest-timestamp"
 
+    def service_latest_status_timestamp_key(self, service_id: str) -> str:
+        return f"{self.prefix}:service:{service_id}:latest-status-timestamp"
+
+    def service_latest_observation_timestamp_key(self, service_id: str) -> str:
+        return f"{self.prefix}:service:{service_id}:latest-observation-timestamp"
+
+    def service_latest_ingested_timestamp_key(self, service_id: str) -> str:
+        return f"{self.prefix}:service:{service_id}:latest-ingested-timestamp"
+
     def pull_cursor_key(self, service_id: str) -> str:
         return f"{self.prefix}:pull-cursor:{service_id}"
 
@@ -152,6 +170,24 @@ class RedisStudioEventStore:
             self.redis.get(self.task_latest_timestamp_key(envelope.service_id, event.task_id)),
         )
         latest_timestamp_value = latest_timestamp.decode() if isinstance(latest_timestamp, bytes) else latest_timestamp
+        latest_service_status_timestamp = await cast(
+            Awaitable[str | bytes | None],
+            self.redis.get(self.service_latest_status_timestamp_key(envelope.service_id)),
+        )
+        latest_service_status_timestamp_value = (
+            latest_service_status_timestamp.decode()
+            if isinstance(latest_service_status_timestamp, bytes)
+            else latest_service_status_timestamp
+        )
+        latest_service_observation_timestamp = await cast(
+            Awaitable[str | bytes | None],
+            self.redis.get(self.service_latest_observation_timestamp_key(envelope.service_id)),
+        )
+        latest_service_observation_timestamp_value = (
+            latest_service_observation_timestamp.decode()
+            if isinstance(latest_service_observation_timestamp, bytes)
+            else latest_service_observation_timestamp
+        )
         normalized = StudioControlPlaneEvent(
             service_id=envelope.service_id,
             ingest_method=envelope.ingest_method,
@@ -196,6 +232,24 @@ class RedisStudioEventStore:
             pipe.set(self.task_latest_timestamp_key(envelope.service_id, event.task_id), event.timestamp)
             if self.ttl_seconds:
                 pipe.expire(self.task_latest_timestamp_key(envelope.service_id, event.task_id), self.ttl_seconds)
+        if event.timestamp is not None:
+            if event.source_kind == ServiceEventSourceKind.STATUS and (
+                latest_service_status_timestamp_value is None
+                or _timestamp_key(event.timestamp) > _timestamp_key(latest_service_status_timestamp_value)
+            ):
+                pipe.set(self.service_latest_status_timestamp_key(envelope.service_id), event.timestamp)
+                if self.ttl_seconds:
+                    pipe.expire(self.service_latest_status_timestamp_key(envelope.service_id), self.ttl_seconds)
+            elif event.source_kind == ServiceEventSourceKind.OBSERVATION and (
+                latest_service_observation_timestamp_value is None
+                or _timestamp_key(event.timestamp) > _timestamp_key(latest_service_observation_timestamp_value)
+            ):
+                pipe.set(self.service_latest_observation_timestamp_key(envelope.service_id), event.timestamp)
+                if self.ttl_seconds:
+                    pipe.expire(self.service_latest_observation_timestamp_key(envelope.service_id), self.ttl_seconds)
+        pipe.set(self.service_latest_ingested_timestamp_key(envelope.service_id), normalized.ingested_at)
+        if self.ttl_seconds:
+            pipe.expire(self.service_latest_ingested_timestamp_key(envelope.service_id), self.ttl_seconds)
         pipe.publish(self.service_channel(envelope.service_id), serialized)
         pipe.publish(self.task_channel(envelope.service_id, event.task_id), serialized)
         await pipe.execute()
@@ -240,6 +294,28 @@ class RedisStudioEventStore:
 
     async def set_pull_cursor(self, service_id: str, cursor: str) -> None:
         await self.redis.set(self.pull_cursor_key(service_id), cursor)
+
+    async def get_service_activity_snapshot(self, service_id: str) -> StudioServiceActivitySnapshot:
+        latest_status = await cast(
+            Awaitable[str | bytes | None],
+            self.redis.get(self.service_latest_status_timestamp_key(service_id)),
+        )
+        latest_observation = await cast(
+            Awaitable[str | bytes | None],
+            self.redis.get(self.service_latest_observation_timestamp_key(service_id)),
+        )
+        latest_ingested = await cast(
+            Awaitable[str | bytes | None],
+            self.redis.get(self.service_latest_ingested_timestamp_key(service_id)),
+        )
+        return StudioServiceActivitySnapshot(
+            service_id=service_id,
+            latest_status_event_at=latest_status.decode() if isinstance(latest_status, bytes) else latest_status,
+            latest_observation_event_at=(
+                latest_observation.decode() if isinstance(latest_observation, bytes) else latest_observation
+            ),
+            latest_ingested_at=latest_ingested.decode() if isinstance(latest_ingested, bytes) else latest_ingested,
+        )
 
     async def _load_history(self, key: str) -> list[StudioControlPlaneEvent]:
         ids = await cast(Awaitable[list[str | bytes]], self.redis.lrange(key, 0, max(0, self.history_maxlen - 1)))
@@ -560,6 +636,7 @@ __all__ = [
     "StudioEventIngestResponse",
     "StudioEventIngestService",
     "StudioEventListResponse",
+    "StudioServiceActivitySnapshot",
     "StudioEventStore",
     "StudioEventStream",
     "StudioPullSyncWorker",

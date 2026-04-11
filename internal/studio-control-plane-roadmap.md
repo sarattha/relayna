@@ -14,7 +14,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 6 | Log pipeline | implemented | 2026-04-11 |
 | 7 | Control-plane UI expansion | implemented | 2026-04-11 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
-| 9 | Health and liveness model | partially_implemented | 2026-04-08 |
+| 9 | Health and liveness model | implemented | 2026-04-12 |
 | 10 | Search and retention | partially_implemented | 2026-04-08 |
 | 11 | Studio deployment packaging | planned | 2026-04-11 |
 
@@ -353,11 +353,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 9. Health And Liveness Model
 
-- Status: partially_implemented
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-12
 - Goal: Give Studio a reliable model for service health, runtime freshness, and control-plane reachability.
 - Why it exists: Operators need to distinguish “service down”, “worker unhealthy”, “relayna route unavailable”, and “data stale”.
-- Current state in repo: Relayna has minimal health-related primitives such as `WorkerHeartbeat`, stage health snapshots, and alert helpers. See `src/relayna/consumer/lifecycle.py`, `src/relayna/observability/stage_metrics.py`, and `src/relayna/observability/alerts.py`. There is no distributed liveness protocol.
+- Current state in repo: Relayna now ships Studio-owned health documents, Redis-backed health storage, scheduled health refresh, service health routes, optional `health.workers` capability support, and Studio UI health panels/badges. Service freshness is derived from Studio-ingested events and capability refresh timestamps, while worker heartbeat support remains optional. See `src/relayna/studio/health.py`, `src/relayna/studio/events.py`, `src/relayna/api/health_routes.py`, and `apps/studio/src/pages/ServiceDetailPage.tsx`.
 - Target end state: Studio tracks service reachability, last capability refresh, observation freshness, and optional worker heartbeat information in a unified health model.
 - Planned API/interface additions:
   - Studio service health document:
@@ -384,12 +384,12 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Service detail page includes last successful check times
   - Worker heartbeat support remains optional and does not block control-plane adoption
 - Checklist:
-  - [ ] Define service health model
-  - [ ] Add scheduled health check job
-  - [ ] Add capability freshness tracking
-  - [ ] Add observation freshness tracking
-  - [ ] Define optional worker heartbeat contract
-  - [ ] Add tests for stale, unreachable, and degraded states
+  - [x] Define service health model
+  - [x] Add scheduled health check job
+  - [x] Add capability freshness tracking
+  - [x] Add observation freshness tracking
+  - [x] Define optional worker heartbeat contract
+  - [x] Add tests for stale, unreachable, and degraded states
 
 ## 10. Search And Retention
 
@@ -505,3 +505,4 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - 2026-04-10: Shipped feature 5 with service-side merged event feeds, Studio ingest/query/SSE routes, Redis-backed control-plane event storage, pull-sync support for `events.feed`, and Studio UI panels for service activity and task timelines.
 - 2026-04-11: Shipped feature 7 with a route-based Studio operator console, shared frontend API/services layers, standalone topology/DLQ/task-search/task-detail screens, and tests covering navigation plus service- and task-scoped reads.
 - 2026-04-11: Added feature 11 to separate `relayna` SDK packaging from central `relayna studio` deployment, with source-built frontend and backend Docker images behind a single public origin and image publication left out of scope.
+- 2026-04-12: Shipped feature 9 with Studio-owned service health documents, scheduled health refresh, merged runtime-health summaries on Studio service reads, optional `health.workers` support for Relayna services, and UI health badges/panels for service reachability and freshness.

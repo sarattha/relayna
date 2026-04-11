@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchServiceEvents, fetchServiceLogs } from "../api";
 import { useStudioServices } from "../services-context";
 import {
+  HealthBadge,
   InlineCodeBox,
   MetadataRow,
   NoticeBanner,
@@ -19,6 +20,14 @@ import {
   secondaryButtonStyle,
 } from "../ui";
 import type { ServiceEventSourceKind, StudioControlPlaneEvent, StudioEventListResponse, StudioLogListResponse } from "../types";
+
+function latestTimestamp(...values: Array<string | null | undefined>) {
+  const candidates = values.filter((value): value is string => Boolean(value));
+  if (!candidates.length) {
+    return null;
+  }
+  return candidates.reduce((latest, value) => (new Date(value).getTime() > new Date(latest).getTime() ? value : latest));
+}
 
 export function ServiceDetailPage() {
   const navigate = useNavigate();
@@ -131,6 +140,18 @@ export function ServiceDetailPage() {
     return <NoticeBanner tone="error">Service `{serviceId}` is not present in the Studio registry.</NoticeBanner>;
   }
 
+  const health = service.health || null;
+  const latestObservedAt = latestTimestamp(
+    health?.observation_freshness.latest_status_event_at,
+    health?.observation_freshness.latest_observation_event_at,
+  );
+  const workerHealthLabel =
+    health?.worker_health.state === "unsupported"
+      ? "unsupported by service"
+      : health?.worker_health.state === "unknown"
+        ? health.worker_health.detail || "unknown"
+        : health?.worker_health.state || "unknown";
+
   return (
     <div style={{ display: "grid", gap: 20 }}>
       {servicesState.notice ? <NoticeBanner>{servicesState.notice}</NoticeBanner> : null}
@@ -138,7 +159,12 @@ export function ServiceDetailPage() {
       <SectionCard
         title="Service Detail"
         subtitle="Inspect stored registry metadata, navigate to routed control-plane screens, and run existing registry actions."
-        action={<StatusBadge status={service.status} />}
+        action={
+          <div style={{ display: "flex", gap: 8 }}>
+            <StatusBadge status={service.status} />
+            <HealthBadge status={health?.overall_status || "unknown"} />
+          </div>
+        }
       >
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
@@ -153,8 +179,8 @@ export function ServiceDetailPage() {
           <Link to={`/tasks/search?service_id=${encodeURIComponent(service.service_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             Task Search
           </Link>
-          <button type="button" onClick={() => void servicesState.refresh(service.service_id)} style={secondaryButtonStyle}>
-            Refresh Capabilities
+          <button type="button" onClick={() => void servicesState.runHealthCheck(service.service_id)} style={secondaryButtonStyle}>
+            Run Health Check
           </button>
           <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "registered")} style={secondaryButtonStyle}>
             Enable
@@ -190,6 +216,26 @@ export function ServiceDetailPage() {
           </dl>
 
           <div style={{ display: "grid", gap: 12 }}>
+            <div>
+              <h3 style={{ margin: 0, marginBottom: 8 }}>Runtime Health</h3>
+              <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
+                <MetadataRow label="Overall" value={<HealthBadge status={health?.overall_status || "unknown"} />} />
+                <MetadataRow label="Last checked" value={formatTimestamp(health?.last_checked_at)} />
+                <MetadataRow label="Capability" value={health?.capability_status.state || "missing"} />
+                <MetadataRow label="Capability refreshed" value={formatTimestamp(health?.capability_status.last_successful_at)} />
+                <MetadataRow label="HTTP reachability" value={health?.http_status.state || "unknown"} />
+                <MetadataRow label="Latest observed activity" value={formatTimestamp(latestObservedAt)} />
+                <MetadataRow label="Observation freshness" value={health?.observation_freshness.state || "missing"} />
+                <MetadataRow label="Worker heartbeat" value={workerHealthLabel} />
+                <MetadataRow label="Worker reported at" value={formatTimestamp(health?.worker_health.reported_at)} />
+              </dl>
+              {health?.http_status.error_detail ? (
+                <p style={{ ...mutedTextStyle, marginTop: 8 }}>Reachability detail: {health.http_status.error_detail}</p>
+              ) : null}
+              {health?.worker_health.detail && health.worker_health.state !== "unsupported" ? (
+                <p style={{ ...mutedTextStyle, marginTop: 8 }}>Worker detail: {health.worker_health.detail}</p>
+              ) : null}
+            </div>
             <div>
               <h3 style={{ margin: 0, marginBottom: 8 }}>Stored Capability Document</h3>
               {service.capabilities ? (

@@ -12,6 +12,7 @@ import { Link } from "react-router-dom";
 
 import type {
   ExecutionGraph,
+  HealthStatus,
   JoinKind,
   ServiceStatus,
   StudioControlPlaneEvent,
@@ -88,6 +89,15 @@ const statusPalette: Record<ServiceStatus, { background: string; border: string;
   healthy: { background: "#e9f5ea", border: "#5f8b62", color: "#214226" },
   unavailable: { background: "#fff0e3", border: "#c47d38", color: "#68330d" },
   disabled: { background: "#f3edf0", border: "#897183", color: "#47343f" },
+};
+
+const healthPalette: Record<HealthStatus, { background: string; border: string; color: string }> = {
+  healthy: { background: "#e6f5ea", border: "#4f8a5e", color: "#1d4a27" },
+  degraded: { background: "#fff5e6", border: "#c6913b", color: "#69410a" },
+  stale: { background: "#fff1e3", border: "#c97c42", color: "#6c3210" },
+  unreachable: { background: "#fceaea", border: "#b95b5b", color: "#672222" },
+  disabled: { background: "#f3edf0", border: "#897183", color: "#47343f" },
+  unknown: { background: "#eef1f5", border: "#78879b", color: "#324153" },
 };
 
 export function parseLimit(value: string, fallback: number) {
@@ -313,6 +323,30 @@ function buildFlowEdges(graph: ExecutionGraph): Edge[] {
 
 export function StatusBadge({ status }: { status: ServiceStatus }) {
   const palette = statusPalette[status];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 999,
+        padding: "6px 10px",
+        border: `1px solid ${palette.border}`,
+        background: palette.background,
+        color: palette.color,
+        fontSize: 12,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: 0.9,
+      }}
+    >
+      {status}
+    </span>
+  );
+}
+
+export function HealthBadge({ status }: { status: HealthStatus }) {
+  const palette = healthPalette[status];
   return (
     <span
       style={{

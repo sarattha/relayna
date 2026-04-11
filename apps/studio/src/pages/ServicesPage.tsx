@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useStudioServices } from "../services-context";
 import {
   EmptyState,
+  HealthBadge,
   MetricCard,
   NoticeBanner,
   SectionCard,
@@ -68,6 +69,12 @@ export function ServicesPage() {
     }
   }
 
+  const unreachableCount = servicesState.services.filter((service) => service.health?.overall_status === "unreachable").length;
+  const staleOrDegradedCount = servicesState.services.filter((service) =>
+    service.health ? ["stale", "degraded"].includes(service.health.overall_status) : false,
+  ).length;
+  const disabledCount = servicesState.services.filter((service) => service.status === "disabled").length;
+
   return (
     <div style={{ display: "grid", gap: 20, gridTemplateColumns: "minmax(0, 1.35fr) minmax(360px, 0.95fr)" }}>
       <section style={{ display: "grid", gap: 20 }}>
@@ -83,16 +90,11 @@ export function ServicesPage() {
             </button>
           }
         >
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
             <MetricCard label="Services" value={String(servicesState.services.length)} />
-            <MetricCard
-              label="Unavailable"
-              value={String(servicesState.services.filter((service) => service.status === "unavailable").length)}
-            />
-            <MetricCard
-              label="Disabled"
-              value={String(servicesState.services.filter((service) => service.status === "disabled").length)}
-            />
+            <MetricCard label="Unreachable" value={String(unreachableCount)} />
+            <MetricCard label="Stale / Degraded" value={String(staleOrDegradedCount)} />
+            <MetricCard label="Disabled" value={String(disabledCount)} />
           </div>
         </SectionCard>
 
@@ -116,7 +118,8 @@ export function ServicesPage() {
                   <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(97, 84, 62, 0.16)" }}>
                     <th style={{ padding: "0 0 10px" }}>Service</th>
                     <th style={{ padding: "0 0 10px" }}>Environment</th>
-                    <th style={{ padding: "0 0 10px" }}>Status</th>
+                    <th style={{ padding: "0 0 10px" }}>Registry</th>
+                    <th style={{ padding: "0 0 10px" }}>Runtime Health</th>
                     <th style={{ padding: "0 0 10px" }}>Base URL</th>
                     <th style={{ padding: "0 0 10px", textAlign: "right" }}>Action</th>
                   </tr>
@@ -133,6 +136,9 @@ export function ServicesPage() {
                       <td style={{ padding: "14px 8px" }}>{service.environment}</td>
                       <td style={{ padding: "14px 8px" }}>
                         <StatusBadge status={service.status} />
+                      </td>
+                      <td style={{ padding: "14px 8px" }}>
+                        <HealthBadge status={service.health?.overall_status || "unknown"} />
                       </td>
                       <td style={{ padding: "14px 8px", color: "#514739" }}>{service.base_url}</td>
                       <td style={{ padding: "14px 0 14px 8px", textAlign: "right" }}>

@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.2 - 2026-04-12
+
+### Added
+
+- Studio health and liveness support via `relayna.studio.health`, including persisted service health documents, scheduled health refresh, service health routes, and merged health summaries on Studio service responses.
+- Optional worker-heartbeat capability support through `health.workers` and `create_worker_health_router(...)` for Relayna services that want to expose worker liveness to Studio.
+
+### Changed
+
+- Studio service activity freshness now uses monotonic service-level status and observation timestamps, preventing out-of-order event ingestion from regressing health freshness.
+- The Studio service detail page now computes “Latest observed activity” from the newer of the latest status and observation timestamps instead of always preferring status events.
+- Bumped the package version to `1.4.2`.
+
+### Fixed
+
+- `make test` roadmap assertions now match the current internal roadmap shape, including feature 11.
+- Worker-health route typing now satisfies static typechecking.
+
 ## 1.4.1 - 2026-04-11
 
 ### Added

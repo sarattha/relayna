@@ -1,4 +1,54 @@
 export type ServiceStatus = "registered" | "healthy" | "unavailable" | "disabled";
+export type HealthStatus = "healthy" | "degraded" | "stale" | "unreachable" | "disabled" | "unknown";
+export type HttpReachability = "reachable" | "unreachable" | "unknown";
+export type CapabilityHealthState = "fresh" | "stale" | "missing" | "error";
+export type ObservationFreshnessState = "fresh" | "stale" | "missing";
+export type WorkerHealthState = "healthy" | "stale" | "unhealthy" | "unsupported" | "unknown";
+
+export type HttpStatusSummary = {
+  state: HttpReachability;
+  checked_at?: string | null;
+  error_detail?: string | null;
+};
+
+export type CapabilityHealth = {
+  state: CapabilityHealthState;
+  checked_at?: string | null;
+  last_successful_at?: string | null;
+  error_detail?: string | null;
+};
+
+export type ObservationFreshness = {
+  state: ObservationFreshnessState;
+  latest_status_event_at?: string | null;
+  latest_observation_event_at?: string | null;
+  latest_ingested_at?: string | null;
+};
+
+export type WorkerHeartbeatSummary = {
+  worker_name: string;
+  running: boolean;
+  last_heartbeat_at?: string | null;
+};
+
+export type WorkerHealth = {
+  state: WorkerHealthState;
+  reported_at?: string | null;
+  latest_heartbeat_at?: string | null;
+  workers: WorkerHeartbeatSummary[];
+  detail?: string | null;
+};
+
+export type ServiceHealthSummary = {
+  service_id: string;
+  registry_status: ServiceStatus;
+  http_status: HttpStatusSummary;
+  capability_status: CapabilityHealth;
+  observation_freshness: ObservationFreshness;
+  worker_health: WorkerHealth;
+  last_checked_at?: string | null;
+  overall_status: HealthStatus;
+};
 
 export type ServiceLogConfig = {
   provider: "loki";
@@ -21,6 +71,7 @@ export type ServiceRecord = {
   capabilities?: Record<string, unknown> | null;
   last_seen_at?: string | null;
   log_config?: ServiceLogConfig | null;
+  health?: ServiceHealthSummary | null;
 };
 
 export type ServiceListResponse = {

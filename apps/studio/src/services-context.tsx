@@ -6,6 +6,7 @@ import {
   deleteService,
   listServices,
   refreshService,
+  runHealthCheck,
   serviceToDraft,
   updateService,
   updateServiceStatus,
@@ -24,6 +25,7 @@ type ServicesContextValue = {
   create: (draft: ServiceDraft) => Promise<ServiceRecord>;
   update: (serviceId: string, draft: ServiceDraft) => Promise<ServiceRecord>;
   refresh: (serviceId: string) => Promise<ServiceRecord>;
+  runHealthCheck: (serviceId: string) => Promise<ServiceRecord>;
   updateStatus: (serviceId: string, status: ServiceStatus) => Promise<ServiceRecord>;
   remove: (serviceId: string) => Promise<void>;
   clearMessages: () => void;
@@ -118,6 +120,25 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
           return saved;
         } catch (fetchError) {
           setMutationError(fetchError, `Unable to refresh service '${serviceId}'.`);
+          throw fetchError;
+        }
+      },
+      async runHealthCheck(serviceId) {
+        try {
+          await runHealthCheck(serviceId);
+          setNotice(`Ran health check for '${serviceId}'.`);
+          setError(null);
+          await reload();
+          const updated = (await listServices()).services.find((service) => service.service_id === serviceId);
+          if (!updated) {
+            throw new Error(`Service '${serviceId}' was not found after health refresh.`);
+          }
+          setServices((current) =>
+            current.map((service) => (service.service_id === serviceId ? updated : service)),
+          );
+          return updated;
+        } catch (fetchError) {
+          setMutationError(fetchError, `Unable to run health check for '${serviceId}'.`);
           throw fetchError;
         }
       },
