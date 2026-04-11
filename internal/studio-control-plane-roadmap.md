@@ -15,7 +15,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 7 | Control-plane UI expansion | implemented | 2026-04-11 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
 | 9 | Health and liveness model | implemented | 2026-04-12 |
-| 10 | Search and retention | partially_implemented | 2026-04-08 |
+| 10 | Search and retention | implemented | 2026-04-12 |
 | 11 | Studio deployment packaging | planned | 2026-04-11 |
 
 ## Defaults And Assumptions
@@ -393,11 +393,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 10. Search And Retention
 
-- Status: partially_implemented
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-12
 - Goal: Let Studio search and retain control-plane data across services over useful time windows.
 - Why it exists: A control plane needs historical lookup, not only live proxy reads.
-- Current state in repo: Relayna already persists bounded local status history and bounded local observation history with TTLs. See `src/relayna/status/store.py` and `src/relayna/observability/store.py`. This is service-local and not searchable across services.
+- Current state in repo: Studio now ships a Redis-backed search subsystem in `src/relayna/studio/search.py` that indexes retained task and service search documents from registry updates, health refreshes, and Studio event ingest. The backend exposes indexed `GET /studio/tasks/search` and `GET /studio/services/search`, supports startup backfill from retained Studio events, and runs a retention pruning worker via `src/relayna/studio/app.py`. The frontend now uses the indexed search contracts in `apps/studio/src/pages/TaskSearchPage.tsx` and `apps/studio/src/pages/ServicesPage.tsx`.
 - Target end state: Studio owns searchable indexes and retention policies for service registry data, normalized task metadata, observations, and optional cached control-plane views.
 - Planned API/interface additions:
   - Studio search endpoints:
@@ -427,12 +427,12 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Retention policies are explicit and configurable
   - Search continues to work when source services have already evicted local history
 - Checklist:
-  - [ ] Define indexed search document
-  - [ ] Add Studio-side task metadata persistence
-  - [ ] Add service and task search endpoints
-  - [ ] Add retention policy configuration
-  - [ ] Add pruning jobs
-  - [ ] Add tests for search filters and retention expiry
+  - [x] Define indexed search document
+  - [x] Add Studio-side task metadata persistence
+  - [x] Add service and task search endpoints
+  - [x] Add retention policy configuration
+  - [x] Add pruning jobs
+  - [x] Add tests for search filters and retention expiry
 
 ## 11. Studio Deployment Packaging
 
