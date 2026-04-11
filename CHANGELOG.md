@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.1 - 2026-04-11
+
+### Added
+
+- Route-based Studio operator-console UI in `apps/studio/`, including dedicated `/services`, `/services/{service_id}`, `/services/{service_id}/topology`, `/services/{service_id}/dlq`, `/tasks/search`, and `/tasks/{service_id}/{task_id}` screens.
+- Shared Studio frontend API, typed route-safe models, and routed page modules for service detail, topology, DLQ exploration, task search, and federated task detail.
+- Route-oriented frontend coverage for Studio navigation, service-scoped reads, task-scoped reads, and SSE lifecycle behavior.
+
+### Changed
+
+- The Studio frontend now treats routed control-plane screens as the primary UI instead of a single-page registry plus task-inspector flow.
+- The internal Studio roadmap now marks feature 7, Control-plane UI expansion, as implemented.
+- Bumped the package version to `1.4.1`.
+
+### Fixed
+
+- Registry create and update failures in the Studio services page now surface through the operator-visible error banner instead of failing silently.
+- Failed service deletion from the Studio services page now keeps the edit context in place until the backend delete succeeds.
+
 ## 1.4.0 - 2026-04-11
 
 ### Added

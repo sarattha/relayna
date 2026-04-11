@@ -47,7 +47,22 @@ export function ServicesPage() {
       setDraft(servicesState.serviceToDraft(saved));
       navigate(`/services/${encodeURIComponent(saved.service_id)}`);
     } catch {
+      // Shared services context populates the error banner for failed mutations.
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteEditingService() {
+    if (!editingServiceId) {
       return;
+    }
+    setSaving(true);
+    try {
+      await servicesState.remove(editingServiceId);
+      startCreate();
+    } catch {
+      // Shared services context populates the error banner for failed mutations.
     } finally {
       setSaving(false);
     }
@@ -304,13 +319,11 @@ export function ServicesPage() {
             </Link>
             <button
               type="button"
-              onClick={() => {
-                void servicesState.remove(editingServiceId);
-                startCreate();
-              }}
+              onClick={() => void handleDeleteEditingService()}
+              disabled={saving}
               style={destructiveButtonStyle}
             >
-              Delete Service
+              {saving ? "Deleting..." : "Delete Service"}
             </button>
           </SectionCard>
         ) : null}

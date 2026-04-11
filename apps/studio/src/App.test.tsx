@@ -411,6 +411,28 @@ describe("App", () => {
     expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
   });
 
+  it("surfaces registry save failures instead of silently swallowing them", async () => {
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "POST") {
+        return jsonResponse({ detail: "Service id already exists." }, 409);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    await screen.findByText("Registered Services");
+    fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "payments-api" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Payments API" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
+
+    expect(await screen.findByText("Service id already exists.")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/services");
+  });
+
   it("navigates from the service list to the routed service detail page", async () => {
     render(<App />);
 
@@ -420,6 +442,28 @@ describe("App", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/services/payments-api"));
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
+  });
+
+  it("keeps the edit context visible when service deletion fails", async () => {
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "DELETE") {
+        return jsonResponse({ detail: "Delete failed." }, 500);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("heading", { name: "Editing Target" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Service" }));
+
+    expect(await screen.findByText("Delete failed.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Editing Target" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Detail Page" })).toBeInTheDocument();
   });
 
   it("renders the topology page from the service-scoped route", async () => {

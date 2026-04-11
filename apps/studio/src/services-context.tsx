@@ -53,6 +53,11 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  function setMutationError(fetchError: unknown, fallback: string) {
+    setNotice(null);
+    setError(fetchError instanceof Error ? fetchError.message : fallback);
+  }
+
   async function reload() {
     setLoading(true);
     try {
@@ -81,38 +86,63 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
       serviceToDraft,
       reload,
       async create(draft) {
-        const saved = await createService(draft);
-        setNotice(`Registered service '${saved.service_id}'.`);
-        setError(null);
-        await reload();
-        return saved;
+        try {
+          const saved = await createService(draft);
+          setNotice(`Registered service '${saved.service_id}'.`);
+          setError(null);
+          await reload();
+          return saved;
+        } catch (fetchError) {
+          setMutationError(fetchError, "Unable to register service.");
+          throw fetchError;
+        }
       },
       async update(serviceId, draft) {
-        const saved = await updateService(serviceId, draft);
-        setNotice(`Updated service '${saved.service_id}'.`);
-        setError(null);
-        await reload();
-        return saved;
+        try {
+          const saved = await updateService(serviceId, draft);
+          setNotice(`Updated service '${saved.service_id}'.`);
+          setError(null);
+          await reload();
+          return saved;
+        } catch (fetchError) {
+          setMutationError(fetchError, `Unable to update service '${serviceId}'.`);
+          throw fetchError;
+        }
       },
       async refresh(serviceId) {
-        const saved = await refreshService(serviceId);
-        setNotice(`Refreshed '${saved.service_id}'.`);
-        setError(null);
-        await reload();
-        return saved;
+        try {
+          const saved = await refreshService(serviceId);
+          setNotice(`Refreshed '${saved.service_id}'.`);
+          setError(null);
+          await reload();
+          return saved;
+        } catch (fetchError) {
+          setMutationError(fetchError, `Unable to refresh service '${serviceId}'.`);
+          throw fetchError;
+        }
       },
       async updateStatus(serviceId, status) {
-        const saved = await updateServiceStatus(serviceId, status);
-        setNotice(`Marked '${serviceId}' as ${status}.`);
-        setError(null);
-        await reload();
-        return saved;
+        try {
+          const saved = await updateServiceStatus(serviceId, status);
+          setNotice(`Marked '${serviceId}' as ${status}.`);
+          setError(null);
+          await reload();
+          return saved;
+        } catch (fetchError) {
+          setMutationError(fetchError, `Unable to update service '${serviceId}'.`);
+          throw fetchError;
+        }
       },
       async remove(serviceId) {
-        await deleteService(serviceId);
-        setNotice(`Deleted service '${serviceId}'.`);
-        setError(null);
-        await reload();
+        try {
+          await deleteService(serviceId);
+          setNotice(`Deleted service '${serviceId}'.`);
+          setError(null);
+          await reload();
+        } catch (fetchError) {
+          setMutationError(fetchError, `Unable to delete service '${serviceId}'.`);
+          throw fetchError;
+        }
       },
       clearMessages() {
         setError(null);
