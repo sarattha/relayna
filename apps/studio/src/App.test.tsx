@@ -118,8 +118,8 @@ const services: MockServiceRecord[] = [
       },
       observation_freshness: {
         state: "fresh",
-        latest_status_event_at: "2026-04-08T12:00:00Z",
-        latest_observation_event_at: "2026-04-08T12:00:00Z",
+        latest_status_event_at: "2026-04-08T11:00:00Z",
+        latest_observation_event_at: "2026-04-08T12:34:56Z",
         latest_ingested_at: "2026-04-08T12:00:01Z",
       },
       worker_health: {
@@ -469,6 +469,7 @@ describe("App", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/services/payments-api"));
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
+    expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
   });
 
   it("keeps the edit context visible when service deletion fails", async () => {

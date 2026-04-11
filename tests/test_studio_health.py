@@ -222,6 +222,18 @@ def test_studio_event_store_tracks_service_activity_snapshot() -> None:
             source_kind=ServiceEventSourceKind.OBSERVATION,
             timestamp="2026-04-10T01:05:00Z",
         )
+        await insert_service_event(
+            event_store,
+            service_id="payments-api",
+            source_kind=ServiceEventSourceKind.STATUS,
+            timestamp="2026-04-10T00:55:00Z",
+        )
+        await insert_service_event(
+            event_store,
+            service_id="payments-api",
+            source_kind=ServiceEventSourceKind.OBSERVATION,
+            timestamp="2026-04-10T01:02:00Z",
+        )
 
         snapshot = await event_store.get_service_activity_snapshot("payments-api")
 

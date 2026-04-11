@@ -21,6 +21,14 @@ import {
 } from "../ui";
 import type { ServiceEventSourceKind, StudioControlPlaneEvent, StudioEventListResponse, StudioLogListResponse } from "../types";
 
+function latestTimestamp(...values: Array<string | null | undefined>) {
+  const candidates = values.filter((value): value is string => Boolean(value));
+  if (!candidates.length) {
+    return null;
+  }
+  return candidates.reduce((latest, value) => (new Date(value).getTime() > new Date(latest).getTime() ? value : latest));
+}
+
 export function ServiceDetailPage() {
   const navigate = useNavigate();
   const { serviceId = "" } = useParams();
@@ -133,10 +141,10 @@ export function ServiceDetailPage() {
   }
 
   const health = service.health || null;
-  const latestObservedAt =
-    health?.observation_freshness.latest_status_event_at ||
-    health?.observation_freshness.latest_observation_event_at ||
-    null;
+  const latestObservedAt = latestTimestamp(
+    health?.observation_freshness.latest_status_event_at,
+    health?.observation_freshness.latest_observation_event_at,
+  );
   const workerHealthLabel =
     health?.worker_health.state === "unsupported"
       ? "unsupported by service"

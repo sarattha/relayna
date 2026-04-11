@@ -170,6 +170,24 @@ class RedisStudioEventStore:
             self.redis.get(self.task_latest_timestamp_key(envelope.service_id, event.task_id)),
         )
         latest_timestamp_value = latest_timestamp.decode() if isinstance(latest_timestamp, bytes) else latest_timestamp
+        latest_service_status_timestamp = await cast(
+            Awaitable[str | bytes | None],
+            self.redis.get(self.service_latest_status_timestamp_key(envelope.service_id)),
+        )
+        latest_service_status_timestamp_value = (
+            latest_service_status_timestamp.decode()
+            if isinstance(latest_service_status_timestamp, bytes)
+            else latest_service_status_timestamp
+        )
+        latest_service_observation_timestamp = await cast(
+            Awaitable[str | bytes | None],
+            self.redis.get(self.service_latest_observation_timestamp_key(envelope.service_id)),
+        )
+        latest_service_observation_timestamp_value = (
+            latest_service_observation_timestamp.decode()
+            if isinstance(latest_service_observation_timestamp, bytes)
+            else latest_service_observation_timestamp
+        )
         normalized = StudioControlPlaneEvent(
             service_id=envelope.service_id,
             ingest_method=envelope.ingest_method,
@@ -215,11 +233,17 @@ class RedisStudioEventStore:
             if self.ttl_seconds:
                 pipe.expire(self.task_latest_timestamp_key(envelope.service_id, event.task_id), self.ttl_seconds)
         if event.timestamp is not None:
-            if event.source_kind == ServiceEventSourceKind.STATUS:
+            if event.source_kind == ServiceEventSourceKind.STATUS and (
+                latest_service_status_timestamp_value is None
+                or _timestamp_key(event.timestamp) > _timestamp_key(latest_service_status_timestamp_value)
+            ):
                 pipe.set(self.service_latest_status_timestamp_key(envelope.service_id), event.timestamp)
                 if self.ttl_seconds:
                     pipe.expire(self.service_latest_status_timestamp_key(envelope.service_id), self.ttl_seconds)
-            elif event.source_kind == ServiceEventSourceKind.OBSERVATION:
+            elif event.source_kind == ServiceEventSourceKind.OBSERVATION and (
+                latest_service_observation_timestamp_value is None
+                or _timestamp_key(event.timestamp) > _timestamp_key(latest_service_observation_timestamp_value)
+            ):
                 pipe.set(self.service_latest_observation_timestamp_key(envelope.service_id), event.timestamp)
                 if self.ttl_seconds:
                     pipe.expire(self.service_latest_observation_timestamp_key(envelope.service_id), self.ttl_seconds)
