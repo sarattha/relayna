@@ -585,6 +585,7 @@ __all__ = [
     "CreateServiceRequest",
     "DuplicateServiceError",
     "HttpCapabilityFetcher",
+    "LokiLogConfig",
     "RedisServiceRegistryStore",
     "ServiceListResponse",
     "ServiceNotFoundError",
