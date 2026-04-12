@@ -16,7 +16,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
 | 9 | Health and liveness model | implemented | 2026-04-12 |
 | 10 | Search and retention | implemented | 2026-04-12 |
-| 11 | Studio deployment packaging | planned | 2026-04-11 |
+| 11 | Studio deployment packaging | implemented | 2026-04-12 |
 
 ## Defaults And Assumptions
 
@@ -40,7 +40,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-10
 - Goal: Give Studio a canonical inventory of Relayna-enabled services across environments.
 - Why it exists: Studio cannot act as a control plane until it knows which services exist, where they live, and how to authenticate to them.
-- Current state in repo: Relayna now ships a Redis-backed Studio service registry, CRUD router, and minimal Studio backend app in `src/relayna/studio/`. The frontend exposes service list and detail management in `apps/studio/src/App.tsx`. Capability refresh is wired as a dependency-gated `501` placeholder until feature 2 adds `GET /relayna/capabilities`.
+- Current state in repo: Relayna now ships a Redis-backed Studio service registry, CRUD router, and minimal Studio backend app in `studio/backend/src/relayna_studio/`. The frontend exposes service list and detail management in `apps/studio/src/App.tsx`. Capability refresh is wired as a dependency-gated `501` placeholder until feature 2 adds `GET /relayna/capabilities`.
 - Target end state: Studio owns a persistent service catalog and operators can register, inspect, enable, disable, and refresh Relayna service entries.
 - Planned API/interface additions:
   - Service registration model with fields `service_id`, `name`, `base_url`, `environment`, `tags`, `auth_mode`, `status`, `capabilities`, `last_seen_at`
@@ -115,7 +115,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-09
 - Goal: Make Studio backend the single read surface for multi-service Relayna operations.
 - Why it exists: Browsers should not coordinate direct calls to many services, normalize response shapes, or handle cross-service failures.
-- Current state in repo: Studio now exposes a federated backend read surface for registered Relayna services, including service-scoped status/history/workflow/DLQ/execution-graph reads, exact-`task_id` cross-service search, and a composite task detail endpoint. The Studio frontend task inspector now reads via `/studio/tasks/{service_id}/{task_id}` instead of calling service base URLs directly. See `src/relayna/studio/federation.py`, `src/relayna/studio/app.py`, and `apps/studio/src/App.tsx`.
+- Current state in repo: Studio now exposes a federated backend read surface for registered Relayna services, including service-scoped status/history/workflow/DLQ/execution-graph reads, exact-`task_id` cross-service search, and a composite task detail endpoint. The Studio frontend task inspector now reads via `/studio/tasks/{service_id}/{task_id}` instead of calling service base URLs directly. See `studio/backend/src/relayna_studio/federation.py`, `studio/backend/src/relayna_studio/app.py`, and `apps/studio/src/App.tsx`.
 - Target end state: Studio backend exposes a normalized API that proxies and aggregates Relayna reads from registered services.
 - Planned API/interface additions:
   - Service-scoped read endpoints:
@@ -192,7 +192,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-10
 - Goal: Aggregate task movement and Relayna observations across services into Studio.
 - Why it exists: Studio cannot show multi-service task movement from ad hoc polling alone.
-- Current state in repo: Relayna now ships a merged service event feed via `GET /events/feed`, backed by shared status + observation feed persistence in `src/relayna/observability/`. Studio now exposes Redis-backed ingest/query/SSE routes and a pull-sync worker in `src/relayna/studio/`, and the frontend renders service activity plus task timelines in `apps/studio/src/App.tsx`.
+- Current state in repo: Relayna now ships a merged service event feed via `GET /events/feed`, backed by shared status + observation feed persistence in `src/relayna/observability/`. Studio now exposes Redis-backed ingest/query/SSE routes and a pull-sync worker in `studio/backend/src/relayna_studio/`, and the frontend renders service activity plus task timelines in `apps/studio/src/App.tsx`.
 - Target end state: Services either push normalized Relayna observations into Studio or Studio continuously ingests them into a control-plane store for live and historical operator views.
 - Planned API/interface additions:
   - Studio ingest contract for normalized Relayna observations
@@ -357,7 +357,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-12
 - Goal: Give Studio a reliable model for service health, runtime freshness, and control-plane reachability.
 - Why it exists: Operators need to distinguish “service down”, “worker unhealthy”, “relayna route unavailable”, and “data stale”.
-- Current state in repo: Relayna now ships Studio-owned health documents, Redis-backed health storage, scheduled health refresh, service health routes, optional `health.workers` capability support, and Studio UI health panels/badges. Service freshness is derived from Studio-ingested events and capability refresh timestamps, while worker heartbeat support remains optional. See `src/relayna/studio/health.py`, `src/relayna/studio/events.py`, `src/relayna/api/health_routes.py`, and `apps/studio/src/pages/ServiceDetailPage.tsx`.
+- Current state in repo: Relayna now ships Studio-owned health documents, Redis-backed health storage, scheduled health refresh, service health routes, optional `health.workers` capability support, and Studio UI health panels/badges. Service freshness is derived from Studio-ingested events and capability refresh timestamps, while worker heartbeat support remains optional. See `studio/backend/src/relayna_studio/health.py`, `studio/backend/src/relayna_studio/events.py`, `src/relayna/api/health_routes.py`, and `apps/studio/src/pages/ServiceDetailPage.tsx`.
 - Target end state: Studio tracks service reachability, last capability refresh, observation freshness, and optional worker heartbeat information in a unified health model.
 - Planned API/interface additions:
   - Studio service health document:
@@ -397,7 +397,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - last_updated: 2026-04-12
 - Goal: Let Studio search and retain control-plane data across services over useful time windows.
 - Why it exists: A control plane needs historical lookup, not only live proxy reads.
-- Current state in repo: Studio now ships a Redis-backed search subsystem in `src/relayna/studio/search.py` that indexes retained task and service search documents from registry updates, health refreshes, and Studio event ingest. The backend exposes indexed `GET /studio/tasks/search` and `GET /studio/services/search`, supports startup backfill from retained Studio events, and runs a retention pruning worker via `src/relayna/studio/app.py`. The frontend now uses the indexed search contracts in `apps/studio/src/pages/TaskSearchPage.tsx` and `apps/studio/src/pages/ServicesPage.tsx`.
+- Current state in repo: Studio now ships a Redis-backed search subsystem in `studio/backend/src/relayna_studio/search.py` that indexes retained task and service search documents from registry updates, health refreshes, and Studio event ingest. The backend exposes indexed `GET /studio/tasks/search` and `GET /studio/services/search`, supports startup backfill from retained Studio events, and runs a retention pruning worker via `studio/backend/src/relayna_studio/app.py`. The frontend now uses the indexed search contracts in `apps/studio/src/pages/TaskSearchPage.tsx` and `apps/studio/src/pages/ServicesPage.tsx`.
 - Target end state: Studio owns searchable indexes and retention policies for service registry data, normalized task metadata, observations, and optional cached control-plane views.
 - Planned API/interface additions:
   - Studio search endpoints:
@@ -436,11 +436,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 11. Studio Deployment Packaging
 
-- Status: planned
-- last_updated: 2026-04-11
+- Status: implemented
+- last_updated: 2026-04-12
 - Goal: Establish a clear deployment model for Studio that is separate from the SDK delivery model used by downstream repos.
 - Why it exists: Downstream repos need the SDK only, while Studio should be operated once as a central governance surface.
-- Current state in repo: Studio backend exists in `src/relayna/studio/`, frontend exists in `apps/studio/`, the frontend currently assumes same-origin `/studio/*` APIs, and there is no formal production packaging story yet.
+- Current state in repo: Studio backend now ships as a separate Python package in `studio/backend/src/relayna_studio/` with env-driven ASGI entrypoints and its own `studio/backend/pyproject.toml`. The frontend remains in `apps/studio/` and now ships with `apps/studio/Dockerfile` plus `apps/studio/nginx/default.conf.template` for same-origin `/studio/*` proxying. Source-build and validation instructions live in `internal/studio-deployment.md`.
 - Target end state: SDK consumption is independent from Studio deployment. Studio is run centrally. Studio ships as two source-buildable Docker images: frontend and backend. The frontend image serves the SPA. The backend image runs the Studio API. Production routing preserves one public origin and forwards `/studio/*` to the backend. Registry publishing strategy is explicitly out of scope.
 - Planned API/interface additions:
   - one Docker build target for Studio frontend
@@ -469,13 +469,13 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - internal teams can build and run both images from source without relying on pre-published artifacts
   - the roadmap clearly states that image publication is not part of this feature
 - Checklist:
-  - [ ] Define SDK versus Studio packaging boundary
-  - [ ] Add frontend Docker image build path
-  - [ ] Add backend Docker image build path
-  - [ ] Define single-origin ingress or reverse-proxy routing requirements
-  - [ ] Document required runtime environment variables and wiring
-  - [ ] Document source-based build and run flow for internal teams
-  - [ ] Add verification steps for frontend routing and `/studio/*` backend access
+  - [x] Define SDK versus Studio packaging boundary
+  - [x] Add frontend Docker image build path
+  - [x] Add backend Docker image build path
+  - [x] Define single-origin ingress or reverse-proxy routing requirements
+  - [x] Document required runtime environment variables and wiring
+  - [x] Document source-based build and run flow for internal teams
+  - [x] Add verification steps for frontend routing and `/studio/*` backend access
 
 ## Update Policy
 
@@ -506,3 +506,4 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - 2026-04-11: Shipped feature 7 with a route-based Studio operator console, shared frontend API/services layers, standalone topology/DLQ/task-search/task-detail screens, and tests covering navigation plus service- and task-scoped reads.
 - 2026-04-11: Added feature 11 to separate `relayna` SDK packaging from central `relayna studio` deployment, with source-built frontend and backend Docker images behind a single public origin and image publication left out of scope.
 - 2026-04-12: Shipped feature 9 with Studio-owned service health documents, scheduled health refresh, merged runtime-health summaries on Studio service reads, optional `health.workers` support for Relayna services, and UI health badges/panels for service reachability and freshness.
+- 2026-04-12: Shipped feature 11 with a hard SDK/Studio package split, a new `relayna-studio` backend package in `studio/backend/`, separate backend/frontend Dockerfiles, Nginx-based same-origin `/studio/*` routing, and internal source-build deployment instructions.

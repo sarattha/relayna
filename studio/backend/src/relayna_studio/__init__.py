@@ -1,4 +1,5 @@
 from .app import StudioRuntime, create_studio_app, get_studio_runtime
+from .config import StudioBackendSettings
 from .dlq_view import build_dlq_view
 from .events import (
     RedisStudioEventStore,
@@ -64,6 +65,7 @@ from .registry import (
     create_service_registry_router,
     normalize_base_url,
 )
+from .factory import create_app
 from .run_view import build_run_view
 from .search import (
     RedisStudioSearchStore,
@@ -95,6 +97,7 @@ __all__ = [
     "RedisStudioSearchStore",
     "ServiceListResponse",
     "ServiceRecord",
+    "StudioBackendSettings",
     "StudioHealthRefreshService",
     "StudioHealthRefreshWorker",
     "StudioHttpReachability",
@@ -139,6 +142,7 @@ __all__ = [
     "build_run_view",
     "build_stage_view",
     "build_topology_view",
+    "create_app",
     "create_federation_router",
     "create_service_registry_router",
     "create_studio_health_router",

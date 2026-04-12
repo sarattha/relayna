@@ -5,9 +5,9 @@ import asyncio
 import httpx
 from fastapi.testclient import TestClient
 
-import relayna.studio.app as studio_app
+import relayna_studio.app as studio_app
 from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
-from relayna.studio import ServiceRecord, ServiceStatus, create_studio_app, get_studio_runtime
+from relayna_studio import ServiceRecord, ServiceStatus, create_studio_app, get_studio_runtime
 
 
 class FakeRedis:

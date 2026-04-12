@@ -8,8 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-import relayna.studio.app as studio_app
-from relayna.studio import (
+import relayna_studio.app as studio_app
+from relayna_studio import (
     CreateServiceRequest,
     LokiLogConfig,
     LokiLogProvider,

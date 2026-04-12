@@ -13,8 +13,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from ..api import EVENTS_FEED_ROUTE_ID, CapabilityDocument, sse_response
-from ..observability import (
+from relayna.api import EVENTS_FEED_ROUTE_ID, CapabilityDocument, sse_response
+from relayna.observability import (
     RelaynaServiceEvent,
     RelaynaServiceEventFeedResponse,
     ServiceEventSourceKind,

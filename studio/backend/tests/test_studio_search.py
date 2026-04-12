@@ -6,9 +6,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-import relayna.studio.app as studio_app
+import relayna_studio.app as studio_app
 from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
-from relayna.studio import (
+from relayna_studio import (
     CreateServiceRequest,
     RedisServiceRegistryStore,
     RedisStudioEventStore,
@@ -16,8 +16,8 @@ from relayna.studio import (
     create_studio_app,
     get_studio_runtime,
 )
-from relayna.studio.events import StudioControlPlaneEvent, StudioEventEnvelope, StudioEventIngestService
-from relayna.studio.search import (
+from relayna_studio.events import StudioControlPlaneEvent, StudioEventEnvelope, StudioEventIngestService
+from relayna_studio.search import (
     RedisStudioSearchStore,
     StudioSearchService,
     StudioServiceSearchQuery,

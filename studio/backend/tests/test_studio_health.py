@@ -7,7 +7,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import relayna.studio.app as studio_app
+import relayna_studio.app as studio_app
 from relayna.api import (
     AliasConfigSummary,
     CapabilityDocument,
@@ -16,7 +16,7 @@ from relayna.api import (
     create_worker_health_router,
 )
 from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
-from relayna.studio import (
+from relayna_studio import (
     CapabilityRefreshError,
     RedisServiceRegistryStore,
     RedisStudioEventStore,

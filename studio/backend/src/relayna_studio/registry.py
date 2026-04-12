@@ -12,7 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
-from ..api import CapabilityDocument, build_legacy_fallback_capability_document
+from relayna.api import CapabilityDocument, build_legacy_fallback_capability_document
 
 if TYPE_CHECKING:
     from .health import StudioHealthRefreshService

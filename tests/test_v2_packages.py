@@ -10,7 +10,6 @@ from relayna.api import (
 from relayna.contracts import ActionSchema, PayloadSchema
 from relayna.mcp import RelaynaMCPServer, inspect_topology
 from relayna.observability import ExecutionGraph, build_execution_graph
-from relayna.studio import build_run_view, build_topology_view, create_service_registry_router, create_studio_app
 from relayna.topology import (
     SharedStatusWorkflowTopology,
     WorkflowEntryRoute,
@@ -19,7 +18,6 @@ from relayna.topology import (
     export_workflow_graph,
     workflow_graph_mermaid,
 )
-from relayna.workflow import WorkflowRunState
 
 
 def test_workflow_template_and_graph_export() -> None:
@@ -93,17 +91,6 @@ def test_workflow_graph_export_includes_stage_contract_metadata() -> None:
     assert planner["dedup_key_fields"] == ["query"]
 
 
-def test_studio_run_view_includes_diagnosis() -> None:
-    run_state = WorkflowRunState(task_id="task-123")
-    run_state.update_stage("planner", status="retrying", message_id="msg-1")
-
-    payload = build_run_view(run_state)
-
-    assert payload["task_id"] == "task-123"
-    assert payload["current_stage"] == "planner"
-    assert payload["diagnosis"]
-
-
 def test_mcp_server_lists_tools_and_topology_resource() -> None:
     topology = build_linear_workflow_topology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
@@ -153,29 +140,9 @@ def test_api_exports_new_route_factories() -> None:
     assert create_replay_router is not None
 
 
-def test_studio_exports_registry_backend_surfaces() -> None:
-    assert create_service_registry_router is not None
-    assert create_studio_app is not None
-
-
 def test_observability_exports_execution_graph_models() -> None:
     assert ExecutionGraph is not None
     assert build_execution_graph is not None
-
-
-def test_studio_topology_view_counts_graph_items() -> None:
-    topology = build_linear_workflow_topology(
-        rabbitmq_url="amqp://guest:guest@localhost:5672/",
-        workflow_exchange="workflow.exchange",
-        status_exchange="status.exchange",
-        status_queue="status.queue",
-        stage_names=("planner", "writer"),
-    )
-
-    payload = build_topology_view(topology)
-
-    assert payload["stage_count"] == 2
-    assert payload["graph"]["stages"][0]["accepted_actions"] == []
 
 
 def test_workflow_routes_expose_stage_contract_metadata() -> None:

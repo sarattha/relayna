@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..observability.stage_metrics import StageHealthSnapshot
+from relayna.observability.stage_metrics import StageHealthSnapshot
 
 
 def build_stage_view(snapshot: StageHealthSnapshot) -> dict[str, object]:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..observability import ExecutionGraph, execution_graph_mermaid
+from relayna.observability import ExecutionGraph, execution_graph_mermaid
 
 
 def build_execution_view(graph: ExecutionGraph) -> dict[str, object]:

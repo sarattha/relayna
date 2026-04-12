@@ -153,13 +153,6 @@ MCP-facing adapters, resources, and operator tools for exposing Relayna
 runtime state to agentic clients. It sits on top of the runtime packages rather
 than owning transport or storage primitives itself.
 
-## `relayna.studio`
-
-Backend-side view builders for workflow topology, run detail, stage health,
-execution graph, and DLQ explorer payloads consumed by the Studio frontend.
-This package is the backend presenter layer; the actual frontend app lives in
-`apps/studio/`.
-
 ## `relayna.dlq`
 
 Dead-letter models, persistence, service operations, and replay helpers.
@@ -167,6 +160,9 @@ Dead-letter models, persistence, service operations, and replay helpers.
 This package owns DLQ state and replay orchestration. It is separate from
 `relayna.rabbitmq` so broker infrastructure and DLQ indexing/replay remain
 distinct concerns.
+
+Studio-specific presenter helpers and the deployable backend now live in the
+separate `relayna-studio` package.
 
 ## `relayna.observability`
 

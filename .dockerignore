@@ -1,0 +1,15 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+htmlcov
+coverage.xml
+node_modules
+apps/studio/node_modules
+dist
+build
