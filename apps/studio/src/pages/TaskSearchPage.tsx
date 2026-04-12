@@ -68,7 +68,7 @@ export function TaskSearchPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div className="studio-stack-lg">
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
 
       <SectionCard
@@ -82,7 +82,7 @@ export function TaskSearchPage() {
           ) : undefined
         }
       >
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+        <form onSubmit={handleSubmit} className="studio-form-grid studio-form-grid--task-search">
           <input
             value={query.service_id || ""}
             onChange={(event) => setQuery((current) => ({ ...current, service_id: event.target.value }))}
@@ -132,27 +132,28 @@ export function TaskSearchPage() {
 
         {loading ? <p style={mutedTextStyle}>Searching retained task summaries...</p> : null}
         {!loading && result ? (
-          <div style={{ display: "grid", gap: 16 }}>
-            <section style={{ ...secondaryButtonStyle, padding: 16, cursor: "default" }}>
+          <div className="studio-stack-md">
+            <section className="studio-subcard" style={{ padding: 16 }}>
               Matches: <strong>{result.items.length}</strong>
             </section>
             {!result.items.length ? <p style={mutedTextStyle}>No retained task matches found.</p> : null}
             {result.items.map((item) => (
               <article
                 key={`${item.service_id}-${item.task_id}`}
-                style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 14, display: "grid", gap: 6 }}
+                className="studio-subcard"
+                style={{ borderRadius: 14, padding: 14, display: "grid", gap: 6 }}
               >
                 <strong>{item.service_name}</strong>
-                <span style={{ fontSize: 13, color: "#62584b" }}>
+                <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                   {item.service_id} · {item.environment}
                 </span>
-                <span style={{ fontSize: 13, color: "#62584b" }}>
+                <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                   task={item.task_id}
                   {item.correlation_id ? ` · correlation=${item.correlation_id}` : ""}
                   {item.status ? ` · status=${item.status}` : ""}
                   {item.stage ? ` · stage=${item.stage}` : ""}
                 </span>
-                <span style={{ fontSize: 13, color: "#62584b" }}>
+                <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                   last seen: {item.last_seen_at ? new Date(item.last_seen_at).toLocaleString() : "unknown"}
                 </span>
                 <Link to={`/tasks/${encodeURIComponent(item.service_id)}/${encodeURIComponent(item.task_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none", width: "fit-content" }}>

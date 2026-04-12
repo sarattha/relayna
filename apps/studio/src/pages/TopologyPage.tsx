@@ -43,7 +43,7 @@ export function TopologyPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div className="studio-stack-lg">
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
 
       <SectionCard
@@ -68,8 +68,8 @@ export function TopologyPage() {
         {loading ? <p style={mutedTextStyle}>Loading topology...</p> : null}
         {!loading && topology ? <WorkflowTopologySurface topology={topology} /> : null}
         {!loading && topology ? (
-          <div style={{ display: "grid", gap: 10 }}>
-            <h3 style={{ margin: 0 }}>Raw Topology Payload</h3>
+          <div className="studio-stack-sm">
+            <h3 className="studio-code-title">Raw Topology Payload</h3>
             <InlineCodeBox value={JSON.stringify(topology, null, 2)} minHeight={240} />
           </div>
         ) : null}

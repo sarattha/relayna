@@ -34,7 +34,7 @@ type ServicesContextValue = {
 const emptyDraft: ServiceDraft = {
   service_id: "",
   name: "",
-  base_url: "http://localhost:8000",
+  base_url: "https://service.example.test",
   environment: "dev",
   tags: "",
   auth_mode: "internal_network",

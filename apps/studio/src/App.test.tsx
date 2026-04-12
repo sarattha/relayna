@@ -430,6 +430,7 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByText("Registered Services");
+    fireEvent.click(screen.getByRole("button", { name: "New Service" }));
     fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "payments-api" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Payments API" } });
     fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
@@ -448,6 +449,14 @@ describe("App", () => {
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
     expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
+  });
+
+  it("opens the service editor with an allowlisted default base URL", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New Service" }));
+
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://service.example.test");
   });
 
   it("keeps the edit context visible when service deletion fails", async () => {
