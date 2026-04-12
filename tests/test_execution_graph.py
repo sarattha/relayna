@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from relayna.api import create_execution_router
 from relayna.contracts import ContractAliasConfig
 from relayna.observability import ExecutionGraph, build_execution_graph, execution_graph_mermaid
-from relayna.studio import build_execution_view
 from relayna.topology import SharedStatusWorkflowTopology, SharedTasksSharedStatusTopology, WorkflowStage
 
 
@@ -228,20 +227,3 @@ def test_execution_graph_mermaid_renders_nodes_and_edges() -> None:
     assert "flowchart LR" in mermaid
     assert "published_status" in mermaid
     assert 'node_task_task_123["task-123\\ntask"]' in mermaid
-
-
-def test_build_execution_view_includes_mermaid_and_graph_payload() -> None:
-    graph = ExecutionGraph(
-        task_id="task-123",
-        topology_kind="shared_tasks_shared_status",
-        summary={"status": "completed", "graph_completeness": "partial"},
-        nodes=[],
-        edges=[],
-        related_task_ids=[],
-    )
-
-    payload = build_execution_view(graph)
-
-    assert payload["task_id"] == "task-123"
-    assert payload["graph"]["task_id"] == "task-123"
-    assert "flowchart LR" in payload["mermaid"]

@@ -5,6 +5,7 @@ from .base import (
     TaskIdRoutingStrategy,
     TaskTypeRoutingStrategy,
 )
+from .kinds import topology_kind
 from .sharded_aggregation import (
     RoutedTasksSharedStatusShardedAggregationTopology,
     SharedTasksSharedStatusShardedAggregationTopology,
@@ -32,6 +33,7 @@ __all__ = [
     "build_search_aggregate_workflow_topology",
     "export_workflow_graph",
     "summarize_topology",
+    "topology_kind",
     "validate_topology",
     "workflow_graph_mermaid",
 ]

@@ -44,4 +44,33 @@ class TopologyGraphResponse(BaseModel):
     edges: list[dict[str, Any]] = Field(default_factory=list)
 
 
-__all__ = ["StageSummaryResponse", "TopologyGraphResponse", "WorkflowRouteSummary"]
+class AliasConfigSummary(BaseModel):
+    aliasing_enabled: bool = False
+    payload_aliases: dict[str, str] = Field(default_factory=dict)
+    http_aliases: dict[str, str] = Field(default_factory=dict)
+
+
+class CapabilityServiceMetadata(BaseModel):
+    service_title: str | None = None
+    capability_path: str
+    discovery_source: str
+    compatibility: str
+
+
+class CapabilityDocument(BaseModel):
+    relayna_version: str
+    topology_kind: str
+    alias_config_summary: AliasConfigSummary
+    supported_routes: list[str] = Field(default_factory=list)
+    feature_flags: list[str] = Field(default_factory=list)
+    service_metadata: CapabilityServiceMetadata
+
+
+__all__ = [
+    "AliasConfigSummary",
+    "CapabilityDocument",
+    "CapabilityServiceMetadata",
+    "StageSummaryResponse",
+    "TopologyGraphResponse",
+    "WorkflowRouteSummary",
+]

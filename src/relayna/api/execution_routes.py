@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from ..contracts import ContractAliasConfig
 from ..observability import ExecutionGraphService
+from .capabilities_routes import EXECUTION_CAPABILITY_ROUTE_IDS, EXECUTION_GRAPH_ROUTE_ID
 from .fastapi_lifespan import http_field_name, payload_field_name
 
 
@@ -34,4 +35,4 @@ def create_execution_router(
     return router
 
 
-__all__ = ["create_execution_router"]
+__all__ = ["EXECUTION_CAPABILITY_ROUTE_IDS", "EXECUTION_GRAPH_ROUTE_ID", "create_execution_router"]

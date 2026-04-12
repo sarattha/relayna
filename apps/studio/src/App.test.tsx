@@ -41,110 +41,506 @@ vi.mock("@xyflow/react", async () => {
   };
 });
 
+type MockServiceRecord = {
+  service_id: string;
+  name: string;
+  base_url: string;
+  environment: string;
+  tags: string[];
+  auth_mode: string;
+  status: "registered" | "healthy" | "unavailable" | "disabled";
+  capabilities?: Record<string, unknown> | null;
+  last_seen_at?: string | null;
+  log_config?: Record<string, unknown> | null;
+  health?: Record<string, unknown> | null;
+};
+
 const fetchMock = vi.fn<typeof fetch>();
+
+class MockEventSource {
+  static instances: MockEventSource[] = [];
+
+  url: string;
+  listeners = new Map<string, Array<(event: MessageEvent<string>) => void>>();
+  closed = false;
+
+  constructor(url: string) {
+    this.url = url;
+    MockEventSource.instances.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
+    this.listeners.set(type, [...(this.listeners.get(type) || []), listener]);
+  }
+
+  close() {
+    this.closed = true;
+  }
+
+  emit(type: string, data: unknown) {
+    const listeners = this.listeners.get(type) || [];
+    const event = { data: JSON.stringify(data) } as MessageEvent<string>;
+    listeners.forEach((listener) => listener(event));
+  }
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function serviceListResponse(services: MockServiceRecord[]) {
+  return jsonResponse({ count: services.length, services });
+}
+
+const services: MockServiceRecord[] = [
+  {
+    service_id: "payments-api",
+    name: "Payments API",
+    base_url: "https://payments.example.test",
+    environment: "prod",
+    tags: ["core", "money"],
+    auth_mode: "internal_network",
+    status: "registered",
+    capabilities: { supported_routes: ["status", "workflow"] },
+    last_seen_at: "2026-04-08T12:00:00Z",
+    health: {
+      service_id: "payments-api",
+      registry_status: "registered",
+      http_status: { state: "reachable", checked_at: "2026-04-08T12:00:00Z", error_detail: null },
+      capability_status: {
+        state: "fresh",
+        checked_at: "2026-04-08T12:00:00Z",
+        last_successful_at: "2026-04-08T12:00:00Z",
+        error_detail: null,
+      },
+      observation_freshness: {
+        state: "fresh",
+        latest_status_event_at: "2026-04-08T11:00:00Z",
+        latest_observation_event_at: "2026-04-08T12:34:56Z",
+        latest_ingested_at: "2026-04-08T12:00:01Z",
+      },
+      worker_health: {
+        state: "unsupported",
+        reported_at: null,
+        latest_heartbeat_at: null,
+        workers: [],
+        detail: null,
+      },
+      last_checked_at: "2026-04-08T12:00:00Z",
+      overall_status: "healthy",
+    },
+    log_config: {
+      provider: "loki",
+      base_url: "https://loki.example.test",
+      service_selector_labels: { app: "payments-api" },
+      task_id_label: "task_id",
+      correlation_id_label: "correlation_id",
+      level_label: "level",
+    },
+  },
+];
+
+function taskDetailResponse() {
+  return {
+    service: services[0],
+    service_id: "payments-api",
+    task_id: "task-123",
+    task_ref: {
+      service_id: "payments-api",
+      task_id: "task-123",
+      correlation_id: "corr-123",
+      parent_refs: [{ service_id: "upstream-api", task_id: "parent-1" }],
+      child_refs: [{ service_id: "payments-api", task_id: "child-1" }],
+    },
+    latest_status: {
+      service_id: "payments-api",
+      task_id: "task-123",
+      task_ref: {
+        service_id: "payments-api",
+        task_id: "task-123",
+        correlation_id: "corr-123",
+        parent_refs: [],
+        child_refs: [],
+      },
+      event: { status: "running" },
+    },
+    history: {
+      service_id: "payments-api",
+      task_id: "task-123",
+      count: 2,
+      events: [{ task_id: "task-123", status: "queued" }, { task_id: "task-123", status: "running" }],
+    },
+    dlq_messages: {
+      service_id: "payments-api",
+      items: [
+        {
+          service_id: "payments-api",
+          dlq_id: "dlq-1",
+          queue_name: "payments.dlq",
+          source_queue_name: "payments.stage",
+          retry_queue_name: "payments.retry",
+          task_id: "task-123",
+          correlation_id: "corr-123",
+          reason: "upstream_timeout",
+          retry_attempt: 2,
+          max_retries: 5,
+          body_encoding: "json",
+          dead_lettered_at: "2026-04-08T10:00:00Z",
+          state: "dead_lettered",
+          replay_count: 0,
+        },
+      ],
+      next_cursor: null,
+    },
+    execution_graph: {
+      service_id: "payments-api",
+      task_id: "task-123",
+      task_ref: {
+        service_id: "payments-api",
+        task_id: "task-123",
+        correlation_id: "corr-123",
+        parent_refs: [],
+        child_refs: [],
+      },
+      topology_kind: "shared_tasks_shared_status",
+      summary: {
+        status: "running",
+        started_at: "2026-04-08T10:00:00Z",
+        ended_at: null,
+        duration_ms: 3200,
+        graph_completeness: "complete",
+      },
+      nodes: [
+        { id: "task", kind: "task", label: "task-123", task_id: "task-123" },
+        { id: "attempt", kind: "task_attempt", label: "attempt-1", task_id: "task-123" },
+      ],
+      edges: [{ source: "task", target: "attempt", kind: "stage_transitioned_to" }],
+      annotations: {},
+      related_task_ids: ["task-123", "child-1"],
+    },
+    joined_refs: [
+      {
+        task_ref: {
+          service_id: "fraud-api",
+          task_id: "fraud-999",
+          correlation_id: "corr-123",
+          parent_refs: [],
+          child_refs: [],
+        },
+        join_kind: "correlation_id",
+        matched_value: "corr-123",
+      },
+    ],
+    join_warnings: [
+      {
+        code: "ambiguous_lineage",
+        detail: "Multiple lineage candidates were available.",
+        join_kind: "workflow_lineage",
+      },
+    ],
+    errors: [{ code: "unsupported_route", detail: "history route missing", retryable: false }],
+  };
+}
 
 describe("App", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    MockEventSource.instances = [];
     vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     window.history.replaceState({}, "", "/");
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url === "/studio/services" && method === "GET") {
+        return serviceListResponse(services);
+      }
+      if (url === "/studio/services/payments-api/events?limit=20" && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url === "/studio/services/payments-api/logs?limit=20" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-08T10:00:00Z",
+              level: "info",
+              message: "service log line",
+              fields: {},
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/services/payments-api/workflow/topology" && method === "GET") {
+        return jsonResponse({
+          workflow_exchange: "payments.workflow",
+          status_queue: "payments.status",
+          stages: [
+            {
+              id: "validate",
+              name: "Validate",
+              queue: "payments.validate",
+              binding_keys: ["payments.validate"],
+              publish_routing_key: "payments.authorize",
+              queue_arguments: {},
+              tags: [],
+              accepted_actions: [],
+              produced_actions: [],
+              allowed_next_stages: ["authorize"],
+              terminal: false,
+              dedup_key_fields: [],
+            },
+          ],
+          entry_routes: [{ name: "start", routing_key: "payments.validate", target_stage: "validate" }],
+          edges: [{ source: "validate", target: "authorize", routing_key: "payments.authorize" }],
+        });
+      }
+      if (url === "/studio/services/payments-api/dlq/messages?limit=50" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          items: [
+            {
+              service_id: "payments-api",
+              dlq_id: "dlq-1",
+              queue_name: "payments.dlq",
+              source_queue_name: "payments.stage",
+              retry_queue_name: "payments.retry",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              reason: "upstream_timeout",
+              retry_attempt: 2,
+              max_retries: 5,
+              body_encoding: "json",
+              dead_lettered_at: "2026-04-08T10:00:00Z",
+              state: "dead_lettered",
+              replay_count: 0,
+              task_ref: {
+                service_id: "payments-api",
+                task_id: "task-123",
+                correlation_id: "corr-123",
+                parent_refs: [],
+                child_refs: [],
+              },
+            },
+          ],
+          next_cursor: "cursor-2",
+        });
+      }
+      if (url === "/studio/services/payments-api/dlq/messages?limit=50&cursor=cursor-2" && method === "GET") {
+        return jsonResponse({ service_id: "payments-api", items: [], next_cursor: null });
+      }
+      if (url === "/studio/tasks/search?task_id=task-123&limit=50" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              service_name: "Payments API",
+              environment: "prod",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              status: "running",
+              stage: "authorize",
+              first_seen_at: "2026-04-08T10:00:00Z",
+              last_seen_at: "2026-04-08T10:05:00Z",
+              latest_event_type: "task.running",
+              latest_event_at: "2026-04-08T10:05:00Z",
+              latest_ingested_at: "2026-04-08T10:05:01Z",
+              detail_path: "/studio/tasks/payments-api/task-123",
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
+        return jsonResponse(taskDetailResponse());
+      }
+      if (url === "/studio/tasks/payments-api/task-123/events?limit=50" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              ingest_method: "pull",
+              ingested_at: "2026-04-08T10:00:00Z",
+              dedupe_key: "evt-1",
+              out_of_order: false,
+              task_id: "task-123",
+              event_type: "task.running",
+              source_kind: "status",
+              component: "worker",
+              timestamp: "2026-04-08T10:00:00Z",
+              payload: { status: "running" },
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/tasks/payments-api/task-123/logs?limit=50&correlation_id=corr-123" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-08T10:00:00Z",
+              level: "info",
+              message: "task log line",
+              fields: {},
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      throw new Error(`Unhandled fetch: ${method} ${url}`);
+    });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("loads and renders an execution graph after form submission", async () => {
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          task_id: "task-123",
-          topology_kind: "shared_tasks_shared_status",
-          summary: {
-            status: "completed",
-            duration_ms: 1250,
-            graph_completeness: "full",
-          },
-          nodes: [
-            { id: "task:task-123", kind: "task", label: "task-123" },
-            { id: "attempt:1", kind: "task_attempt", label: "task-123 attempt 1" },
-            { id: "status:1", kind: "status_event", label: "completed" },
-          ],
-          edges: [
-            { source: "task:task-123", target: "attempt:1", kind: "received_by" },
-            { source: "attempt:1", target: "status:1", kind: "published_status" },
-          ],
-          annotations: {},
-          related_task_ids: [],
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    );
-
+  it("redirects the default route to /services and renders the registry screen", async () => {
     render(<App />);
 
-    fireEvent.change(screen.getByLabelText("API base URL"), {
-      target: { value: "http://api.example.test" },
-    });
-    fireEvent.change(screen.getByLabelText("Task id"), {
-      target: { value: "task-123" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Load Execution Graph" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://api.example.test/executions/task-123/graph");
-    });
-
-    expect((await screen.findAllByText("completed")).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("1.25 s")).toBeInTheDocument();
-    expect(screen.getByDisplayValue(/flowchart LR/)).toBeInTheDocument();
-    expect(screen.getByDisplayValue(/published_status/)).toBeInTheDocument();
-    expect(screen.getAllByText("shared_tasks_shared_status").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("full graph")).toBeInTheDocument();
-    expect(screen.getByText("task-123 attempt 1")).toBeInTheDocument();
+    expect(await screen.findByText("Registered Services")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/services"));
+    expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
   });
 
-  it("auto-loads from query params and normalizes aliased task ids", async () => {
-    window.history.replaceState({}, "", "/?task_id=attempt-456&base_url=http://api.example.test");
-    fetchMock.mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          attempt_id: "attempt-456",
-          topology_kind: "shared_status_workflow",
-          summary: {
-            status: "planning",
-            duration_ms: 900,
-            graph_completeness: "partial",
-          },
-          nodes: [
-            { id: "task:attempt-456", kind: "task", label: "attempt-456" },
-            { id: "msg:1", kind: "workflow_message", label: "planner" },
-          ],
-          edges: [{ source: "task:attempt-456", target: "msg:1", kind: "received_by" }],
-          annotations: {},
-          related_task_ids: ["child-1"],
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    );
+  it("surfaces registry save failures instead of silently swallowing them", async () => {
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "POST") {
+        return jsonResponse({ detail: "Service id already exists." }, 409);
+      }
+      return await baseImpl!(input, init);
+    });
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("http://api.example.test/executions/attempt-456/graph");
+    await screen.findByText("Registered Services");
+    fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "payments-api" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Payments API" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
+
+    expect(await screen.findByText("Service id already exists.")).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/services");
+  });
+
+  it("navigates from the service list to the routed service detail page", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("link", { name: "View" }));
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    await waitFor(() => expect(window.location.pathname).toBe("/services/payments-api"));
+    expect(screen.getByText("Recent Activity")).toBeInTheDocument();
+    expect(screen.getByText("Service Logs")).toBeInTheDocument();
+    expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
+  });
+
+  it("keeps the edit context visible when service deletion fails", async () => {
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "DELETE") {
+        return jsonResponse({ detail: "Delete failed." }, 500);
+      }
+      return await baseImpl!(input, init);
     });
 
-    expect(await screen.findByText("planning")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("attempt-456")).toBeInTheDocument();
-    expect(screen.getAllByText("shared_status_workflow").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("partial graph")).toBeInTheDocument();
-    expect(screen.getByText("child-1")).toBeInTheDocument();
-    expect(screen.getByText("planner")).toBeInTheDocument();
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("heading", { name: "Editing Target" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Service" }));
+
+    expect(await screen.findByText("Delete failed.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Editing Target" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Detail Page" })).toBeInTheDocument();
+  });
+
+  it("renders the topology page from the service-scoped route", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/topology");
+
+    render(<App />);
+
+    expect(await screen.findByText("Workflow Topology")).toBeInTheDocument();
+    expect(screen.getByText("validate")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Entry Routes" })).toBeInTheDocument();
+  });
+
+  it("renders the DLQ explorer, applies pagination, and links back to task detail", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/dlq");
+
+    render(<App />);
+
+    expect(await screen.findByText("DLQ Explorer")).toBeInTheDocument();
+    expect(await screen.findByText("upstream_timeout")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "payments-api/task-123" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load Next Page" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/dlq/messages?limit=50&cursor=cursor-2", undefined),
+    );
+  });
+
+  it("submits task search and renders indexed task results", async () => {
+    window.history.replaceState({}, "", "/tasks/search");
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByPlaceholderText("task_id"), { target: { value: "task-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(await screen.findByText(/Matches:/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Task Detail" })).toBeInTheDocument();
+    expect(screen.getByText(/correlation=corr-123/)).toBeInTheDocument();
+  });
+
+  it("renders the direct task detail route with graph, timeline, logs, joins, and SSE cleanup", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    const { unmount } = render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    expect(screen.getByText("Task Timeline")).toBeInTheDocument();
+    expect(screen.getByText("Task Logs")).toBeInTheDocument();
+    expect(screen.getByText("Joined Refs")).toBeInTheDocument();
+    expect(screen.getByText("Join Warnings")).toBeInTheDocument();
+    expect(screen.getByText("Section Errors")).toBeInTheDocument();
+    expect(MockEventSource.instances.some((item) => item.url === "/studio/tasks/payments-api/task-123/events/stream")).toBe(true);
+
+    MockEventSource.instances[0]?.emit("event", {
+      service_id: "payments-api",
+      ingest_method: "pull",
+      ingested_at: "2026-04-08T10:05:00Z",
+      dedupe_key: "evt-2",
+      out_of_order: false,
+      task_id: "task-123",
+      event_type: "task.completed",
+      source_kind: "status",
+      component: "worker",
+      timestamp: "2026-04-08T10:05:00Z",
+      payload: { status: "completed" },
+    });
+
+    expect(await screen.findByText("completed")).toBeInTheDocument();
+
+    unmount();
+
+    expect(MockEventSource.instances[0]?.closed).toBe(true);
   });
 });

@@ -27,7 +27,8 @@ Relayna exposes the execution-graph feature through:
 - `relayna.observability.build_execution_graph(...)`
 - `relayna.observability.execution_graph_mermaid(...)`
 - `relayna.api.create_execution_router(...)`
-- `relayna.studio.build_execution_view(...)`
+- `relayna_studio.build_execution_view(...)` from the separate `relayna-studio`
+  deployment package
 
 ## FastAPI route
 
@@ -415,10 +416,11 @@ with its user-visible label, node kind, and timestamp when present.
 
 ## Studio and React Flow
 
-Relayna also exposes a Studio presenter helper:
+The separate `relayna-studio` deployment package also exposes a Studio
+presenter helper:
 
 ```python
-from relayna.studio import build_execution_view
+from relayna_studio import build_execution_view
 
 payload = build_execution_view(graph)
 ```

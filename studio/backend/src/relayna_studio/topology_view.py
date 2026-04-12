@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ..topology.workflow import SharedStatusWorkflowTopology
-from ..topology.workflow_graph import export_workflow_graph
+from relayna.topology.workflow import SharedStatusWorkflowTopology
+from relayna.topology.workflow_graph import export_workflow_graph
 
 
 def build_topology_view(topology: SharedStatusWorkflowTopology) -> dict[str, object]:

@@ -22,7 +22,6 @@ surface is organized by package roots:
 - `relayna.observability`
 - `relayna.api`
 - `relayna.mcp`
-- `relayna.studio`
 - `relayna.dlq`
 
 The root package stays minimal and only exports `relayna.__version__`.

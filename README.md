@@ -30,13 +30,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.4/relayna-1.3.4-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.5/relayna-1.3.5-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.4/relayna-1.3.4.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.5/relayna-1.3.5.tar.gz
 ```
 
 For local development in this repository:
@@ -144,7 +144,8 @@ history are available, the graph still returns but is marked `"partial"`.
 Relayna also ships:
 
 - `execution_graph_mermaid(graph)` for docs and debugging output
-- `build_execution_view(graph)` for Studio payloads and the React Flow app in
+- the separate `relayna-studio` deployment package, which exposes
+  `build_execution_view(graph)` for Studio payloads and the React Flow app in
   `apps/studio/`
 
 See [docs/execution-graphs.md](docs/execution-graphs.md) for the full response
@@ -187,12 +188,13 @@ boundaries:
 - `relayna.mcp`
   Owns MCP-facing resources, adapters, and operator tools built on top of the
   runtime packages.
-- `relayna.studio`
-  Owns backend view-builders for the Studio frontend payloads, including
-  execution graph payloads used by the React Flow app.
 
 `relayna.storage` exists as an internal package for Redis models, repository
 helpers, and retention behavior. It is not part of the documented public API.
+
+Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
+the runtime and contract packages; the deployable Studio backend and frontend do
+not ship under the root `relayna` distribution.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -559,12 +561,14 @@ The v2 public package roots are:
 - `relayna.observability`
 - `relayna.api`
 - `relayna.mcp`
-- `relayna.studio`
 - `relayna.dlq`
 
 The package root is intentionally minimal and only exports `relayna.__version__`.
 Import concrete functionality from the package roots above rather than from
 `relayna` itself.
+
+Studio deployment and presenter helpers now live in the separate
+`relayna-studio` package.
 
 ## Docs and releases
 

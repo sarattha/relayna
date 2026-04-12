@@ -10,7 +10,6 @@ PUBLIC_MODULES = [
     "relayna.observability",
     "relayna.topology",
     "relayna.mcp",
-    "relayna.studio",
     "relayna.dlq",
 ]
 

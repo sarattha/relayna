@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..dlq.models import DLQMessageSummary, DLQQueueSummary
+from relayna.dlq.models import DLQMessageSummary, DLQQueueSummary
 
 
 def build_dlq_view(queues: list[DLQQueueSummary], messages: list[DLQMessageSummary]) -> dict[str, object]:

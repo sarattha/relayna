@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ..workflow.diagnostics import explain_stall
-from ..workflow.run_state import WorkflowRunState
+from relayna.workflow.diagnostics import explain_stall
+from relayna.workflow.run_state import WorkflowRunState
 
 
 def build_run_view(run_state: WorkflowRunState) -> dict[str, object]:

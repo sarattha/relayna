@@ -60,7 +60,6 @@ The documented v2 package roots are:
 - `relayna.observability`
 - `relayna.api`
 - `relayna.mcp`
-- `relayna.studio`
 - `relayna.dlq`
 
 The package root stays minimal and only exports `relayna.__version__`.
@@ -87,10 +86,11 @@ Use the v2 package roots by responsibility:
 - `relayna.observability` owns typed runtime observations plus collector and
   exporter helpers.
 - `relayna.mcp` adapts Relayna runtime state into MCP resources and tools.
-- `relayna.studio` builds backend payloads for the Studio frontend.
 
 `relayna.storage` is an internal support package. It backs the public runtime
 packages but is not itself a documented public API root.
+
+Studio deployment is packaged separately as `relayna-studio`.
 
 ## Guides
 
