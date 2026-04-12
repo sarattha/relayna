@@ -5,12 +5,10 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+import relayna_studio.app as studio_app
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import relayna.studio.app as studio_app
-from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
-from relayna.studio import (
+from relayna_studio import (
     CreateServiceRequest,
     HttpCapabilityFetcher,
     RedisServiceRegistryStore,
@@ -22,6 +20,8 @@ from relayna.studio import (
     create_studio_app,
     normalize_base_url,
 )
+
+from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
 
 
 class FakeRedis:

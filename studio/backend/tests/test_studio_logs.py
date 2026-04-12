@@ -4,12 +4,11 @@ import asyncio
 
 import httpx
 import pytest
+import relayna_studio.app as studio_app
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-
-import relayna.studio.app as studio_app
-from relayna.studio import (
+from relayna_studio import (
     CreateServiceRequest,
     LokiLogConfig,
     LokiLogProvider,

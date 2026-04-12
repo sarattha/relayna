@@ -1,0 +1,37 @@
+[project]
+name = "relayna-studio"
+version = "0.1.1"
+description = "Deployable Relayna Studio backend package."
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [
+    { name = "Sarattha", email = "j.sarattha@gmail.com" },
+]
+dependencies = [
+    "fastapi>=0.115.11",
+    "httpx>=0.28.1",
+    "pydantic>=2.11.0",
+    "redis>=7.1.1",
+    "uvicorn>=0.34.0",
+    "relayna>=1.4.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-mock>=3.14.0",
+    "pytest-xdist",
+    "ruff==0.9.2",
+    "ty",
+]
+
+[project.scripts]
+relayna-studio = "relayna_studio.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.9.6,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+relayna = { path = "../..", editable = true }

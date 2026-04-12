@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.4 - 2026-04-12
+
+### Changed
+
+- Bumped the SDK package version to `1.4.4` and the Studio backend package version to `0.1.1`.
+- Updated the Studio backend package dependency floor to require `relayna>=1.4.4`.
+
+### Fixed
+
+- Studio pull-sync background processing now logs transient `sync_registered_services()` failures and continues running instead of terminating the worker for the rest of the process lifetime.
+- Studio task search now uses an unambiguous encoded composite document id for `(service_id, task_id)`, preventing search-index collisions when either identifier contains `:`.
+
 ## 1.4.3 - 2026-04-12
 
 ### Added

@@ -11,7 +11,8 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
-from ..api import HEALTH_WORKERS_ROUTE_ID, CapabilityDocument, WorkerHeartbeatListResponse, WorkerHeartbeatSummary
+from relayna.api import HEALTH_WORKERS_ROUTE_ID, CapabilityDocument, WorkerHeartbeatListResponse, WorkerHeartbeatSummary
+
 from .events import StudioServiceActivitySnapshot
 from .registry import CapabilityRefreshError, ServiceNotFoundError, ServiceRecord, ServiceRegistryService, ServiceStatus
 
