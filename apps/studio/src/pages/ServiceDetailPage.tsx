@@ -153,7 +153,7 @@ export function ServiceDetailPage() {
         : health?.worker_health.state || "unknown";
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div className="studio-stack-lg">
       {servicesState.notice ? <NoticeBanner>{servicesState.notice}</NoticeBanner> : null}
 
       <SectionCard
@@ -166,7 +166,7 @@ export function ServiceDetailPage() {
           </div>
         }
       >
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        <div className="studio-action-row">
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             Back to Services
           </Link>
@@ -203,7 +203,7 @@ export function ServiceDetailPage() {
           </button>
         </div>
 
-        <div style={{ display: "grid", gap: 20, gridTemplateColumns: "minmax(0, 1fr) minmax(320px, 1fr)" }}>
+        <div className="studio-detail-grid">
           <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
             <MetadataRow label="Service id" value={service.service_id} />
             <MetadataRow label="Name" value={service.name} />
@@ -215,7 +215,7 @@ export function ServiceDetailPage() {
             <MetadataRow label="Log provider" value={service.log_config?.provider || "none"} />
           </dl>
 
-          <div style={{ display: "grid", gap: 12 }}>
+          <div className="studio-stack-sm">
             <div>
               <h3 style={{ margin: 0, marginBottom: 8 }}>Runtime Health</h3>
               <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
@@ -256,7 +256,7 @@ export function ServiceDetailPage() {
         </div>
       </SectionCard>
 
-      <div style={{ display: "grid", gap: 20, gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" }}>
+      <div className="studio-two-column">
         <SectionCard
           title="Recent Activity"
           subtitle="Service-scoped Studio-ingested events with live SSE updates."
@@ -266,7 +266,7 @@ export function ServiceDetailPage() {
             </button>
           }
         >
-          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+          <div className="studio-form-grid studio-form-grid--triple">
             <input
               value={serviceEventTaskFilter}
               onChange={(event) => setServiceEventTaskFilter(event.target.value)}
@@ -290,21 +290,22 @@ export function ServiceDetailPage() {
             />
           </div>
           {serviceEventsLoading ? <p style={mutedTextStyle}>Loading service activity...</p> : null}
-          {serviceEventsError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{serviceEventsError}</p> : null}
+          {serviceEventsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceEventsError}</p> : null}
           {!serviceEventsLoading && !serviceEventsError && !filteredServiceEvents.length ? (
             <p style={mutedTextStyle}>No Studio-ingested events for this service yet.</p>
           ) : null}
           {filteredServiceEvents.length ? (
-            <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto" }}>
+            <div className="studio-stack-sm studio-surface-scroll">
               {filteredServiceEvents.map((item) => (
                 <article
                   key={item.dedupe_key}
-                  style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                  className="studio-subcard"
+                  style={{ borderRadius: 14, padding: 12 }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                  <div className="studio-list-card__top">
                     <div style={{ display: "grid", gap: 4 }}>
                       <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
-                      <span style={{ fontSize: 12, color: "#62584b" }}>
+                      <span className="studio-inline-meta">
                         <Link
                           to={`/tasks/${encodeURIComponent(item.service_id)}/${encodeURIComponent(item.task_id)}`}
                           style={{ color: "inherit" }}
@@ -317,9 +318,7 @@ export function ServiceDetailPage() {
                         {item.component || "unknown"}
                       </span>
                     </div>
-                    <span style={{ fontSize: 12, color: "#62584b", textAlign: "right" }}>
-                      {formatTimestamp(item.timestamp || item.ingested_at)}
-                    </span>
+                    <span className="studio-inline-meta">{formatTimestamp(item.timestamp || item.ingested_at)}</span>
                   </div>
                   <p style={{ ...mutedTextStyle, marginTop: 8 }}>
                     {item.event_type}
@@ -340,7 +339,7 @@ export function ServiceDetailPage() {
             </button>
           }
         >
-          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1.4fr) 140px 110px" }}>
+          <div className="studio-log-filter-grid">
             <input
               aria-label="Service log text filter"
               value={serviceLogQuery}
@@ -364,27 +363,26 @@ export function ServiceDetailPage() {
             />
           </div>
           {serviceLogsLoading ? <p style={mutedTextStyle}>Loading service logs...</p> : null}
-          {serviceLogsError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{serviceLogsError}</p> : null}
+          {serviceLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceLogsError}</p> : null}
           {!serviceLogsLoading && !serviceLogsError && !(serviceLogs?.items.length || 0) ? (
             <p style={mutedTextStyle}>No service logs matched the current filters.</p>
           ) : null}
           {serviceLogs?.items.length ? (
-            <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto" }}>
+            <div className="studio-stack-sm studio-surface-scroll">
               {serviceLogs.items.map((item, index) => (
                 <article
                   key={`${item.timestamp}-${item.message}-${index}`}
-                  style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                  className="studio-subcard"
+                  style={{ borderRadius: 14, padding: 12 }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                  <div className="studio-list-card__top">
                     <div style={{ display: "grid", gap: 4 }}>
                       <strong style={{ fontSize: 13 }}>{item.message}</strong>
-                      <span style={{ fontSize: 12, color: "#62584b" }}>
+                      <span className="studio-inline-meta">
                         {formatLogLevel(item.level)} · {item.task_id || "service scope"}
                       </span>
                     </div>
-                    <span style={{ fontSize: 12, color: "#62584b", textAlign: "right" }}>
-                      {formatTimestamp(item.timestamp)}
-                    </span>
+                    <span className="studio-inline-meta">{formatTimestamp(item.timestamp)}</span>
                   </div>
                 </article>
               ))}

@@ -22,19 +22,20 @@ import type {
 } from "./types";
 
 export const frameStyle = {
-  border: "1px solid rgba(99, 83, 57, 0.18)",
-  borderRadius: 18,
-  background: "rgba(255,255,255,0.84)",
-  boxShadow: "0 18px 44px rgba(55, 43, 26, 0.10)",
+  border: "1px solid var(--studio-border)",
+  borderRadius: 20,
+  background: "var(--studio-surface)",
+  boxShadow: "var(--studio-shadow)",
 };
 
 export const inputStyle: CSSProperties = {
   width: "100%",
+  minWidth: 0,
   borderRadius: 14,
-  border: "1px solid rgba(104, 88, 64, 0.25)",
+  border: "1px solid var(--studio-border)",
   padding: "12px 14px",
-  background: "#fffdfa",
-  color: "#2d2923",
+  background: "var(--studio-surface-strong)",
+  color: "var(--studio-text)",
   fontSize: 14,
 };
 
@@ -42,25 +43,26 @@ export const mutedTextStyle: CSSProperties = {
   margin: 0,
   fontSize: 13,
   lineHeight: 1.55,
-  color: "#5f564a",
+  color: "var(--studio-text-muted)",
 };
 
 export const primaryButtonStyle: CSSProperties = {
   border: "none",
   borderRadius: 14,
-  background: "#2f3c53",
-  color: "#f8f3e9",
+  background: "linear-gradient(135deg, var(--studio-primary) 0%, var(--studio-primary-strong) 100%)",
+  color: "var(--studio-primary-contrast)",
   padding: "12px 16px",
   fontSize: 14,
   fontWeight: 700,
   cursor: "pointer",
+  boxShadow: "0 14px 28px rgba(218, 107, 43, 0.24)",
 };
 
 export const secondaryButtonStyle: CSSProperties = {
   borderRadius: 14,
-  border: "1px solid rgba(79, 67, 48, 0.22)",
-  background: "rgba(255, 251, 244, 0.92)",
-  color: "#342b21",
+  border: "1px solid var(--studio-border)",
+  background: "var(--studio-surface-muted)",
+  color: "var(--studio-secondary-strong)",
   padding: "10px 14px",
   fontSize: 13,
   fontWeight: 600,
@@ -69,35 +71,43 @@ export const secondaryButtonStyle: CSSProperties = {
 
 export const destructiveButtonStyle: CSSProperties = {
   ...secondaryButtonStyle,
-  borderColor: "rgba(139, 69, 69, 0.28)",
-  color: "#7a2424",
+  borderColor: "rgba(168, 60, 40, 0.26)",
+  background: "var(--studio-danger-soft)",
+  color: "var(--studio-danger)",
+};
+
+export const insetSurfaceStyle: CSSProperties = {
+  borderRadius: 16,
+  border: "1px solid var(--studio-border)",
+  background: "linear-gradient(180deg, rgba(239, 250, 248, 0.92), rgba(255, 247, 236, 0.9))",
+  padding: 14,
 };
 
 const kindPalette: Record<string, { background: string; border: string; color: string }> = {
-  task: { background: "#f9f4df", border: "#8a7443", color: "#3f3320" },
-  aggregation_child: { background: "#e9f0f7", border: "#6c88a8", color: "#233447" },
-  task_attempt: { background: "#fff7ec", border: "#cc8d44", color: "#513114" },
-  workflow_message: { background: "#eef6ee", border: "#5f8b62", color: "#223725" },
-  stage_attempt: { background: "#f4ecfa", border: "#8864a9", color: "#38214f" },
-  status_event: { background: "#fffdf5", border: "#a99862", color: "#4c4123" },
-  retry: { background: "#fff1f1", border: "#bb6c6c", color: "#582222" },
-  dlq_record: { background: "#2f1f1f", border: "#d68f8f", color: "#fff4f4" },
+  task: { background: "#fff3dd", border: "#cb7b2d", color: "#5d3110" },
+  aggregation_child: { background: "#e4f6f3", border: "#3b8f8d", color: "#184a49" },
+  task_attempt: { background: "#fff1e5", border: "#e08b48", color: "#663414" },
+  workflow_message: { background: "#e6f7f4", border: "#2d8a80", color: "#184841" },
+  stage_attempt: { background: "#eff3f2", border: "#6b8d8c", color: "#284443" },
+  status_event: { background: "#f9f8ef", border: "#b08a51", color: "#57411d" },
+  retry: { background: "#fff0eb", border: "#c46c56", color: "#6a2b1c" },
+  dlq_record: { background: "#233f45", border: "#ffb295", color: "#fff5ef" },
 };
 
 const statusPalette: Record<ServiceStatus, { background: string; border: string; color: string }> = {
-  registered: { background: "#f5ecda", border: "#aa8640", color: "#5f4312" },
-  healthy: { background: "#e9f5ea", border: "#5f8b62", color: "#214226" },
-  unavailable: { background: "#fff0e3", border: "#c47d38", color: "#68330d" },
-  disabled: { background: "#f3edf0", border: "#897183", color: "#47343f" },
+  registered: { background: "#fff2df", border: "#c67a2d", color: "#5f3410" },
+  healthy: { background: "#e4f7f2", border: "#27887e", color: "#154741" },
+  unavailable: { background: "#fff1e5", border: "#d2823b", color: "#6b3610" },
+  disabled: { background: "#edf3f2", border: "#7c8f8d", color: "#314544" },
 };
 
 const healthPalette: Record<HealthStatus, { background: string; border: string; color: string }> = {
-  healthy: { background: "#e6f5ea", border: "#4f8a5e", color: "#1d4a27" },
-  degraded: { background: "#fff5e6", border: "#c6913b", color: "#69410a" },
-  stale: { background: "#fff1e3", border: "#c97c42", color: "#6c3210" },
-  unreachable: { background: "#fceaea", border: "#b95b5b", color: "#672222" },
-  disabled: { background: "#f3edf0", border: "#897183", color: "#47343f" },
-  unknown: { background: "#eef1f5", border: "#78879b", color: "#324153" },
+  healthy: { background: "#e4f7f2", border: "#2b8e7f", color: "#145047" },
+  degraded: { background: "#fff2de", border: "#d38434", color: "#6b3d0f" },
+  stale: { background: "#fff0e8", border: "#cf7446", color: "#6f3117" },
+  unreachable: { background: "#fdebe6", border: "#bc5c48", color: "#69271e" },
+  disabled: { background: "#edf3f2", border: "#7a8c8b", color: "#304342" },
+  unknown: { background: "#edf5f4", border: "#6f9291", color: "#264645" },
 };
 
 export function parseLimit(value: string, fallback: number) {
@@ -380,8 +390,8 @@ export function MetadataRow({ label, value }: { label: string; value: ReactNode 
 
 export function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <article style={{ ...frameStyle, padding: 16 }}>
-      <p style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: 1.2 }}>{label}</p>
+    <article className="studio-card" style={{ ...frameStyle, padding: 16 }}>
+      <p style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--studio-text-soft)" }}>{label}</p>
       <strong style={{ display: "block", marginTop: 10, fontSize: 26 }}>{value}</strong>
     </article>
   );
@@ -393,8 +403,8 @@ export function NoticeBanner({ tone = "info", children }: { tone?: "info" | "err
       style={{
         ...frameStyle,
         padding: 16,
-        borderColor: tone === "error" ? "rgba(152, 66, 66, 0.34)" : "rgba(79, 133, 85, 0.28)",
-        color: tone === "error" ? "#6f2525" : "#224a28",
+        borderColor: tone === "error" ? "rgba(168, 60, 40, 0.3)" : "rgba(15, 124, 123, 0.24)",
+        color: tone === "error" ? "var(--studio-danger)" : "var(--studio-secondary-strong)",
       }}
     >
       {children}
@@ -404,7 +414,7 @@ export function NoticeBanner({ tone = "info", children }: { tone?: "info" | "err
 
 export function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <section style={{ ...frameStyle, padding: 24, background: "rgba(255,250,243,0.72)" }}>
+    <section className="studio-subcard" style={{ ...frameStyle, padding: 24, background: "var(--studio-surface-strong)" }}>
       <h3 style={{ marginTop: 0 }}>{title}</h3>
       <p style={{ ...mutedTextStyle, marginBottom: 0 }}>{body}</p>
     </section>
@@ -416,18 +426,20 @@ export function SectionCard({
   subtitle,
   action,
   children,
+  className,
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section style={{ ...frameStyle, padding: 18, display: "grid", gap: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-        <div>
-          <h2 style={{ margin: 0 }}>{title}</h2>
-          {subtitle ? <p style={mutedTextStyle}>{subtitle}</p> : null}
+    <section className={`studio-card studio-section-card${className ? ` ${className}` : ""}`} style={frameStyle}>
+      <div className="studio-section-header">
+        <div className="studio-section-header__copy">
+          <h2 className="studio-section-title">{title}</h2>
+          {subtitle ? <p className="studio-section-subtitle">{subtitle}</p> : null}
         </div>
         {action}
       </div>
@@ -448,6 +460,7 @@ export function InlineCodeBox({ value, minHeight = 180 }: { value: string; minHe
         resize: "vertical",
         fontFamily: "'SFMono-Regular', Menlo, monospace",
         fontSize: 12,
+        background: "rgba(249, 253, 252, 0.98)",
       }}
     />
   );
@@ -455,16 +468,8 @@ export function InlineCodeBox({ value, minHeight = 180 }: { value: string; minHe
 
 export function AppChrome({ children }: { children: ReactNode }) {
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: "36px 22px 48px",
-        background: "linear-gradient(180deg, #f3dd9a 0%, #f5f1e9 34%, #d8e4ed 100%)",
-        color: "#2f271f",
-        fontFamily: "Georgia, 'Iowan Old Style', serif",
-      }}
-    >
-      <div style={{ maxWidth: 1380, margin: "0 auto", display: "grid", gap: 20 }}>{children}</div>
+    <main className="studio-app">
+      <div className="studio-shell">{children}</div>
     </main>
   );
 }
@@ -479,30 +484,21 @@ export function AppHeader() {
   };
 
   return (
-    <header
-      style={{
-        display: "grid",
-        gap: 14,
-        gridTemplateColumns: "minmax(0, 1.3fr) minmax(280px, 0.7fr)",
-        alignItems: "end",
-      }}
-    >
+    <header className="studio-header">
       <div>
-        <p style={{ letterSpacing: 2, textTransform: "uppercase", fontSize: 12, margin: 0 }}>Relayna Studio</p>
-        <h1 style={{ margin: "6px 0 10px", fontSize: "clamp(2.6rem, 6vw, 4.8rem)", lineHeight: 0.95 }}>
-          Control Plane
-        </h1>
-        <p style={{ margin: 0, maxWidth: 760, fontSize: 18, lineHeight: 1.5 }}>
+        <p className="studio-header__eyebrow">Relayna Studio</p>
+        <h1 className="studio-header__title">Control Plane</h1>
+        <p className="studio-header__body">
           Navigate services, topology, DLQ state, federated task detail, live timelines, and logs from one routed
           operator console.
         </p>
       </div>
-      <section style={{ ...frameStyle, padding: 18, display: "grid", gap: 12 }}>
+      <section className="studio-card studio-section-card studio-nav-card" style={frameStyle}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 20 }}>Routes</h2>
-          <p style={mutedTextStyle}>Studio now treats route paths as the primary UI contract.</p>
+          <h2 className="studio-section-title" style={{ fontSize: 20 }}>Routes</h2>
+          <p className="studio-section-subtitle">Studio now treats route paths as the primary UI contract.</p>
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        <div className="studio-nav-links">
           <Link to="/services" style={navStyle}>
             Services
           </Link>
@@ -525,7 +521,7 @@ export function TaskRefLink({
   return (
     <Link
       to={`/tasks/${encodeURIComponent(taskRef.service_id)}/${encodeURIComponent(taskRef.task_id)}`}
-      style={{ color: "#2f3c53", fontWeight: 700 }}
+      style={{ color: "var(--studio-secondary-strong)", fontWeight: 700 }}
     >
       {children || formatTaskPointer(taskRef)}
     </Link>
@@ -537,14 +533,14 @@ export function GraphSurface({ graph }: { graph: ExecutionGraph }) {
   const edges = buildFlowEdges(graph);
 
   return (
-    <div style={{ ...frameStyle, overflow: "hidden", minHeight: 560 }}>
+    <div className="studio-card studio-flow-surface" style={frameStyle}>
       <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
-        <Background gap={20} color="rgba(117, 103, 79, 0.18)" />
+        <Background gap={20} color="rgba(15, 124, 123, 0.14)" />
         <Controls />
         <MiniMap
           pannable
           zoomable
-          style={{ background: "rgba(249, 245, 236, 0.96)", border: "1px solid rgba(110, 95, 70, 0.2)" }}
+          style={{ background: "rgba(250, 253, 252, 0.96)", border: "1px solid var(--studio-border)" }}
         />
         <Panel
           position="top-right"
@@ -554,7 +550,7 @@ export function GraphSurface({ graph }: { graph: ExecutionGraph }) {
             padding: "10px 12px",
             borderRadius: 14,
             fontSize: 12,
-            background: "rgba(255,248,235,0.9)",
+            background: "rgba(255, 248, 236, 0.92)",
           }}
         >
           <strong>{graph.topology_kind}</strong>
@@ -567,22 +563,23 @@ export function GraphSurface({ graph }: { graph: ExecutionGraph }) {
 
 export function WorkflowTopologySurface({ topology }: { topology: WorkflowTopologyGraph }) {
   return (
-    <section style={{ ...frameStyle, padding: 18, display: "grid", gap: 16 }}>
-      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+    <section className="studio-stack-md">
+      <div className="studio-metrics-grid studio-metrics-grid--3">
         <MetricCard label="Stages" value={String(topology.stages.length)} />
         <MetricCard label="Entry Routes" value={String(topology.entry_routes.length)} />
         <MetricCard label="Edges" value={String(topology.edges.length)} />
       </div>
-      <div style={{ display: "grid", gap: 14, gridTemplateColumns: "minmax(0, 1.5fr) minmax(280px, 0.9fr)" }}>
-        <div style={{ display: "grid", gap: 12 }}>
+      <div className="studio-content-split studio-content-split--topology">
+        <div className="studio-stack-sm">
           {topology.stages.map((stage) => (
             <article
               key={stage.id || stage.name}
-              style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 14, display: "grid", gap: 8 }}
+              className="studio-subcard"
+              style={{ borderRadius: 14, padding: 14, display: "grid", gap: 8 }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                 <strong>{stage.id || stage.name}</strong>
-                {stage.terminal ? <span style={{ fontSize: 12, color: "#62584b" }}>terminal</span> : null}
+                {stage.terminal ? <span style={{ fontSize: 12, color: "var(--studio-text-soft)" }}>terminal</span> : null}
               </div>
               <p style={{ ...mutedTextStyle, margin: 0 }}>{stage.queue}</p>
               <p style={{ ...mutedTextStyle, margin: 0 }}>
@@ -594,15 +591,15 @@ export function WorkflowTopologySurface({ topology }: { topology: WorkflowTopolo
             </article>
           ))}
         </div>
-        <aside style={{ display: "grid", gap: 12 }}>
-          <section style={{ ...frameStyle, padding: 16 }}>
+        <aside className="studio-stack-sm">
+          <section className="studio-card" style={{ ...frameStyle, padding: 16 }}>
             <h3 style={{ marginTop: 0, marginBottom: 10 }}>Entry Routes</h3>
-            <div style={{ display: "grid", gap: 8 }}>
+            <div className="studio-stack-sm">
               {topology.entry_routes.length ? (
                 topology.entry_routes.map((route) => (
                   <div key={`${route.name}-${route.routing_key}`} style={{ display: "grid", gap: 2 }}>
                     <strong style={{ fontSize: 13 }}>{route.name}</strong>
-                    <span style={{ fontSize: 12, color: "#62584b" }}>
+                    <span style={{ fontSize: 12, color: "var(--studio-text-soft)" }}>
                       <code>{route.routing_key}</code> to {route.target_stage}
                     </span>
                   </div>
@@ -612,7 +609,7 @@ export function WorkflowTopologySurface({ topology }: { topology: WorkflowTopolo
               )}
             </div>
           </section>
-          <section style={{ ...frameStyle, padding: 16 }}>
+          <section className="studio-card" style={{ ...frameStyle, padding: 16 }}>
             <h3 style={{ marginTop: 0, marginBottom: 10 }}>Queues</h3>
             <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
               <MetadataRow label="Workflow exchange" value={topology.workflow_exchange || "none"} />

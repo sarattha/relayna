@@ -12,6 +12,7 @@ import {
   SectionCard,
   StatusBadge,
   destructiveButtonStyle,
+  insetSurfaceStyle,
   inputStyle,
   mutedTextStyle,
   primaryButtonStyle,
@@ -102,8 +103,8 @@ export function ServicesPage() {
   const disabledCount = servicesState.services.filter((service) => service.status === "disabled").length;
 
   return (
-    <div style={{ display: "grid", gap: 20, gridTemplateColumns: "minmax(0, 1.35fr) minmax(360px, 0.95fr)" }}>
-      <section style={{ display: "grid", gap: 20 }}>
+    <div className="studio-page-grid studio-page-grid--services">
+      <section className="studio-stack-lg">
         {servicesState.error ? <NoticeBanner tone="error">{servicesState.error}</NoticeBanner> : null}
         {servicesState.notice ? <NoticeBanner>{servicesState.notice}</NoticeBanner> : null}
 
@@ -116,7 +117,7 @@ export function ServicesPage() {
             </button>
           }
         >
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+          <div className="studio-metrics-grid studio-metrics-grid--4">
             <MetricCard label="Services" value={String(servicesState.services.length)} />
             <MetricCard label="Unreachable" value={String(unreachableCount)} />
             <MetricCard label="Stale / Degraded" value={String(staleOrDegradedCount)} />
@@ -125,7 +126,7 @@ export function ServicesPage() {
         </SectionCard>
 
         <SectionCard title="Service Search" subtitle="Search registered services with lightweight fuzzy matching plus structured filters.">
-          <form onSubmit={handleServiceSearch} style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+          <form onSubmit={handleServiceSearch} className="studio-form-grid studio-form-grid--service-search">
             <input
               value={searchDraft.query}
               onChange={(event) => setSearchDraft((current) => ({ ...current, query: event.target.value }))}
@@ -160,27 +161,28 @@ export function ServicesPage() {
               Search Services
             </button>
           </form>
-          {searchError ? <p style={{ ...mutedTextStyle, color: "#9d3b2d" }}>{searchError}</p> : null}
+          {searchError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{searchError}</p> : null}
           {searchLoading ? <p style={mutedTextStyle}>Searching services...</p> : null}
           {searchResults ? (
-            <div style={{ display: "grid", gap: 10 }}>
+            <div className="studio-stack-sm">
               {!searchResults.length ? <p style={mutedTextStyle}>No matching services found.</p> : null}
               {searchResults.map((service) => (
                 <article
                   key={`${service.service_id}-search`}
-                  style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 14, display: "grid", gap: 6 }}
+                  className="studio-subcard"
+                  style={{ borderRadius: 14, padding: 14, display: "grid", gap: 6 }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                  <div className="studio-list-card__top">
                     <strong>{service.name}</strong>
                     <Link to={`/services/${encodeURIComponent(service.service_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
                       Open
                     </Link>
                   </div>
-                  <span style={{ fontSize: 13, color: "#62584b" }}>
+                  <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                     {service.service_id} · {service.environment} · registry={service.status}
                     {service.health_status ? ` · health=${service.health_status}` : ""}
                   </span>
-                  <span style={{ fontSize: 13, color: "#62584b" }}>
+                  <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                     matched fields: {service.matched_fields.length ? service.matched_fields.join(", ") : "structured filters only"}
                   </span>
                 </article>
@@ -203,58 +205,98 @@ export function ServicesPage() {
             <EmptyState title="No services registered" body="Create the first service entry to give Studio a control-plane inventory." />
           ) : null}
           {servicesState.services.length > 0 ? (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-                <thead>
-                  <tr style={{ textAlign: "left", borderBottom: "1px solid rgba(97, 84, 62, 0.16)" }}>
-                    <th style={{ padding: "0 0 10px" }}>Service</th>
-                    <th style={{ padding: "0 0 10px" }}>Environment</th>
-                    <th style={{ padding: "0 0 10px" }}>Registry</th>
-                    <th style={{ padding: "0 0 10px" }}>Runtime Health</th>
-                    <th style={{ padding: "0 0 10px" }}>Base URL</th>
-                    <th style={{ padding: "0 0 10px", textAlign: "right" }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {servicesState.services.map((service) => (
-                    <tr key={service.service_id} style={{ borderBottom: "1px solid rgba(97, 84, 62, 0.12)" }}>
-                      <td style={{ padding: "14px 8px 14px 0" }}>
-                        <div style={{ display: "grid", gap: 4 }}>
-                          <strong>{service.name}</strong>
-                          <span style={{ fontSize: 12, color: "#62584b" }}>{service.service_id}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: "14px 8px" }}>{service.environment}</td>
-                      <td style={{ padding: "14px 8px" }}>
-                        <StatusBadge status={service.status} />
-                      </td>
-                      <td style={{ padding: "14px 8px" }}>
-                        <HealthBadge status={service.health?.overall_status || "unknown"} />
-                      </td>
-                      <td style={{ padding: "14px 8px", color: "#514739" }}>{service.base_url}</td>
-                      <td style={{ padding: "14px 0 14px 8px", textAlign: "right" }}>
-                        <div style={{ display: "flex", justifyContent: "end", gap: 8 }}>
-                          <Link
-                            to={`/services/${encodeURIComponent(service.service_id)}`}
-                            style={{ ...secondaryButtonStyle, textDecoration: "none" }}
-                          >
-                            View
-                          </Link>
-                          <button type="button" onClick={() => startEdit(service)} style={secondaryButtonStyle}>
-                            Edit
-                          </button>
-                        </div>
-                      </td>
+            <>
+              <div className="studio-table-wrap studio-desktop-only">
+                <table className="studio-table">
+                  <thead>
+                    <tr>
+                      <th>Service</th>
+                      <th>Environment</th>
+                      <th>Registry</th>
+                      <th>Runtime Health</th>
+                      <th>Base URL</th>
+                      <th style={{ textAlign: "right" }}>Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {servicesState.services.map((service) => (
+                      <tr key={service.service_id}>
+                        <td>
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <strong>{service.name}</strong>
+                            <span className="studio-inline-meta">{service.service_id}</span>
+                          </div>
+                        </td>
+                        <td>{service.environment}</td>
+                        <td>
+                          <StatusBadge status={service.status} />
+                        </td>
+                        <td>
+                          <HealthBadge status={service.health?.overall_status || "unknown"} />
+                        </td>
+                        <td style={{ color: "var(--studio-text-muted)" }}>{service.base_url}</td>
+                        <td style={{ textAlign: "right" }}>
+                          <div style={{ display: "flex", justifyContent: "end", gap: 8, flexWrap: "wrap" }}>
+                            <Link
+                              to={`/services/${encodeURIComponent(service.service_id)}`}
+                              style={{ ...secondaryButtonStyle, textDecoration: "none" }}
+                            >
+                              View
+                            </Link>
+                            <button type="button" onClick={() => startEdit(service)} style={secondaryButtonStyle}>
+                              Edit
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="studio-card-list studio-mobile-only">
+                {servicesState.services.map((service) => (
+                  <article key={`${service.service_id}-card`} className="studio-subcard studio-list-card">
+                    <div className="studio-list-card__top">
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <strong>{service.name}</strong>
+                        <span className="studio-inline-meta">{service.service_id}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <StatusBadge status={service.status} />
+                        <HealthBadge status={service.health?.overall_status || "unknown"} />
+                      </div>
+                    </div>
+                    <div className="studio-list-card__meta">
+                      <span className="studio-inline-meta">{service.environment}</span>
+                      <span className="studio-inline-meta">{service.base_url}</span>
+                    </div>
+                    <div className="studio-action-row">
+                      <Link
+                        to={`/services/${encodeURIComponent(service.service_id)}`}
+                        aria-label={`View ${service.service_id}`}
+                        style={{ ...secondaryButtonStyle, textDecoration: "none" }}
+                      >
+                        View
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => startEdit(service)}
+                        aria-label={`Edit ${service.service_id}`}
+                        style={secondaryButtonStyle}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
           ) : null}
         </SectionCard>
       </section>
 
-      <aside style={{ display: "grid", gap: 18 }}>
+      <aside className="studio-stack-md">
         <SectionCard
           title={editingServiceId ? "Edit Service" : "Register Service"}
           subtitle={
@@ -270,7 +312,7 @@ export function ServicesPage() {
             ) : undefined
           }
         >
-          <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
+          <form onSubmit={handleSubmit} className="studio-stack-sm">
             <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
               Service id
               <input
@@ -326,7 +368,8 @@ export function ServicesPage() {
                 style={inputStyle}
               />
             </label>
-            <section style={{ ...secondaryButtonStyle, padding: 14, display: "grid", gap: 12, cursor: "default" }}>
+
+            <section style={{ ...insetSurfaceStyle, display: "grid", gap: 12 }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: 16 }}>Log Configuration</h3>
                 <p style={mutedTextStyle}>Optional per-service Loki query settings for Studio log panels.</p>
@@ -403,6 +446,7 @@ export function ServicesPage() {
                 />
               </label>
             </section>
+
             <button type="submit" disabled={saving} style={primaryButtonStyle}>
               {saving ? "Saving..." : editingServiceId ? "Save Service" : "Register Service"}
             </button>
@@ -411,17 +455,19 @@ export function ServicesPage() {
 
         {editingServiceId ? (
           <SectionCard title="Editing Target" subtitle="Open the detail route for the service you are modifying.">
-            <Link to={`/services/${encodeURIComponent(editingServiceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
-              Open Detail Page
-            </Link>
-            <button
-              type="button"
-              onClick={() => void handleDeleteEditingService()}
-              disabled={saving}
-              style={destructiveButtonStyle}
-            >
-              {saving ? "Deleting..." : "Delete Service"}
-            </button>
+            <div className="studio-action-row">
+              <Link to={`/services/${encodeURIComponent(editingServiceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+                Open Detail Page
+              </Link>
+              <button
+                type="button"
+                onClick={() => void handleDeleteEditingService()}
+                disabled={saving}
+                style={destructiveButtonStyle}
+              >
+                {saving ? "Deleting..." : "Delete Service"}
+              </button>
+            </div>
           </SectionCard>
         ) : null}
       </aside>

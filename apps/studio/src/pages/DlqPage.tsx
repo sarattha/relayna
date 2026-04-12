@@ -59,7 +59,7 @@ export function DlqPage() {
   }
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div className="studio-stack-lg">
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
 
       <SectionCard
@@ -82,7 +82,7 @@ export function DlqPage() {
             event.preventDefault();
             void load({ ...query, cursor: null });
           }}
-          style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
+          className="studio-form-grid studio-form-grid--triple"
         >
           <input
             value={query.queue_name}
@@ -130,20 +130,21 @@ export function DlqPage() {
           <p style={mutedTextStyle}>No DLQ messages matched the current filters.</p>
         ) : null}
         {payload?.items.length ? (
-          <div style={{ display: "grid", gap: 10 }}>
+          <div className="studio-stack-sm">
             {payload.items.map((item) => (
               <article
                 key={item.dlq_id}
-                style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 14, display: "grid", gap: 8 }}
+                className="studio-subcard"
+                style={{ borderRadius: 14, padding: 14, display: "grid", gap: 8 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                <div className="studio-list-card__top">
                   <div style={{ display: "grid", gap: 4 }}>
                     <strong style={{ fontSize: 13 }}>{item.reason}</strong>
-                    <span style={{ fontSize: 12, color: "#62584b" }}>
+                    <span className="studio-inline-meta">
                       {item.queue_name} · {item.source_queue_name} · {item.state}
                     </span>
                   </div>
-                  <span style={{ fontSize: 12, color: "#62584b" }}>{formatTimestamp(item.dead_lettered_at)}</span>
+                  <span className="studio-inline-meta">{formatTimestamp(item.dead_lettered_at)}</span>
                 </div>
                 <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
                   <span>DLQ id: {item.dlq_id}</span>

@@ -139,7 +139,7 @@ export function TaskDetailPage() {
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
 
   return (
-    <div style={{ display: "grid", gap: 20 }}>
+    <div className="studio-stack-lg">
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
 
       <SectionCard
@@ -159,8 +159,8 @@ export function TaskDetailPage() {
         {loading ? <p style={mutedTextStyle}>Loading task detail...</p> : null}
         {!loading && !taskDetail ? <p style={mutedTextStyle}>No task detail is available for this task.</p> : null}
         {taskDetail ? (
-          <div style={{ display: "grid", gap: 20 }}>
-            <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+          <div className="studio-stack-lg">
+            <div className="studio-metrics-grid">
               <MetricCard label="Status" value={latestStatusValue} />
               <MetricCard label="History Events" value={String(historyCount)} />
               <MetricCard label="Timeline Events" value={String(taskTimelineItems.length)} />
@@ -168,8 +168,8 @@ export function TaskDetailPage() {
               <MetricCard label="Graph" value={graph ? `${graph.nodes.length} nodes` : "Unavailable"} />
             </div>
 
-            <div style={{ display: "grid", gap: 20, gridTemplateColumns: graph ? "minmax(0, 1.8fr) minmax(320px, 0.9fr)" : "1fr" }}>
-              <div style={{ display: "grid", gap: 18 }}>
+            <div className={graph ? "studio-content-split studio-content-split--graph" : "studio-stack-lg"}>
+              <div className="studio-stack-md">
                 {graph ? (
                   <GraphSurface graph={graph} />
                 ) : (
@@ -189,20 +189,21 @@ export function TaskDetailPage() {
                   }
                 >
                   {taskTimelineLoading ? <p style={mutedTextStyle}>Loading task timeline...</p> : null}
-                  {taskTimelineError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{taskTimelineError}</p> : null}
+                  {taskTimelineError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTimelineError}</p> : null}
                   {!taskTimelineLoading && !taskTimelineItems.length ? (
                     <p style={mutedTextStyle}>No Studio-ingested task events yet.</p>
                   ) : null}
                   {taskTimelineItems.length ? (
-                    <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto" }}>
+                    <div className="studio-stack-sm studio-surface-scroll">
                       {taskTimelineItems.map((item) => (
                         <article
                           key={item.dedupe_key}
-                          style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                          className="studio-subcard"
+                          style={{ borderRadius: 14, padding: 12 }}
                         >
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                          <div className="studio-list-card__top">
                             <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
-                            <span style={{ fontSize: 12, color: "#62584b" }}>{formatTimestamp(item.timestamp || item.ingested_at)}</span>
+                            <span className="studio-inline-meta">{formatTimestamp(item.timestamp || item.ingested_at)}</span>
                           </div>
                           <p style={{ ...mutedTextStyle, marginTop: 8 }}>
                             {item.source_kind} · {item.event_type} · {item.component || "unknown"}
@@ -215,7 +216,7 @@ export function TaskDetailPage() {
                 </SectionCard>
               </div>
 
-              <aside style={{ display: "grid", gap: 18 }}>
+              <aside className="studio-stack-md">
                 <SectionCard title="Task Metadata">
                   <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
                     <MetadataRow label="Service" value={`${taskDetail.service.name} (${taskDetail.service_id})`} />
@@ -229,7 +230,7 @@ export function TaskDetailPage() {
                     <MetadataRow label="Duration" value={formatDuration(graph?.summary.duration_ms)} />
                   </dl>
                   {identityRef?.parent_refs.length ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    <div className="studio-action-row">
                       {identityRef.parent_refs.map((pointer) => (
                         <TaskRefLink
                           key={`${pointer.service_id}-${pointer.task_id}`}
@@ -241,7 +242,7 @@ export function TaskDetailPage() {
                     </div>
                   ) : null}
                   {identityRef?.child_refs.length ? (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    <div className="studio-action-row">
                       {identityRef.child_refs.map((pointer) => (
                         <TaskRefLink
                           key={`${pointer.service_id}-${pointer.task_id}`}
@@ -263,7 +264,7 @@ export function TaskDetailPage() {
                     Reload Logs
                   </button>
                 }>
-                  <div style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1.4fr) 140px 110px" }}>
+                  <div className="studio-log-filter-grid">
                     <input
                       aria-label="Task log text filter"
                       value={taskLogQuery}
@@ -290,26 +291,27 @@ export function TaskDetailPage() {
                     <p style={mutedTextStyle}>Correlation filter unavailable for this task; Studio is filtering by task id only.</p>
                   ) : null}
                   {taskLogsLoading ? <p style={mutedTextStyle}>Loading task logs...</p> : null}
-                  {taskLogsError ? <p style={{ ...mutedTextStyle, color: "#7a2424" }}>{taskLogsError}</p> : null}
+                  {taskLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskLogsError}</p> : null}
                   {!taskLogsLoading && !taskLogsError && !(taskLogs?.items.length || 0) ? (
                     <p style={mutedTextStyle}>No task logs matched the current filters.</p>
                   ) : null}
                   {taskLogs?.items.length ? (
-                    <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto" }}>
+                    <div className="studio-stack-sm studio-surface-scroll">
                       {taskLogs.items.map((item, index) => (
                         <article
                           key={`${item.timestamp}-${item.message}-${index}`}
-                          style={{ border: "1px solid rgba(99, 83, 57, 0.14)", borderRadius: 14, padding: 12 }}
+                          className="studio-subcard"
+                          style={{ borderRadius: 14, padding: 12 }}
                         >
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                          <div className="studio-list-card__top">
                             <div style={{ display: "grid", gap: 4 }}>
                               <strong style={{ fontSize: 13 }}>{item.message}</strong>
-                              <span style={{ fontSize: 12, color: "#62584b" }}>
+                              <span className="studio-inline-meta">
                                 {formatLogLevel(item.level)}
                                 {item.correlation_id ? ` · ${item.correlation_id}` : ""}
                               </span>
                             </div>
-                            <span style={{ fontSize: 12, color: "#62584b" }}>{formatTimestamp(item.timestamp)}</span>
+                            <span className="studio-inline-meta">{formatTimestamp(item.timestamp)}</span>
                           </div>
                         </article>
                       ))}
@@ -325,7 +327,7 @@ export function TaskDetailPage() {
 
                 {taskDetail.joined_refs.length ? (
                   <SectionCard title="Joined Refs">
-                    <div style={{ display: "grid", gap: 10 }}>
+                    <div className="studio-stack-sm">
                       {taskDetail.joined_refs.map((joinRef, index) => (
                         <div key={`${joinRef.task_ref.service_id}-${joinRef.task_ref.task_id}-${index}`} style={{ display: "grid", gap: 4 }}>
                           <strong style={{ fontSize: 13 }}>
@@ -344,7 +346,7 @@ export function TaskDetailPage() {
 
                 {taskDetail.join_warnings.length ? (
                   <SectionCard title="Join Warnings">
-                    <div style={{ display: "grid", gap: 10 }}>
+                    <div className="studio-stack-sm">
                       {taskDetail.join_warnings.map((warning, index) => (
                         <div key={`${warning.code}-${index}`} style={{ display: "grid", gap: 4 }}>
                           <strong style={{ fontSize: 13 }}>
@@ -359,7 +361,7 @@ export function TaskDetailPage() {
 
                 {taskDetail.errors.length ? (
                   <SectionCard title="Section Errors">
-                    <div style={{ display: "grid", gap: 10 }}>
+                    <div className="studio-stack-sm">
                       {taskDetail.errors.map((item, index) => (
                         <article key={`${item.code}-${index}`} style={{ display: "grid", gap: 4 }}>
                           <strong style={{ fontSize: 13 }}>{item.code}</strong>
