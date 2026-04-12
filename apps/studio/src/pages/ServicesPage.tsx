@@ -243,7 +243,7 @@ export function ServicesPage() {
               <input
                 value={draft.base_url}
                 onChange={(event) => setDraft((current) => ({ ...current, base_url: event.target.value }))}
-                placeholder="https://payments.internal"
+                placeholder="https://service.example.test"
                 style={inputStyle}
               />
             </label>

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 
 import httpx
 import pytest
@@ -442,12 +444,17 @@ def test_create_studio_app_exposes_services_search_before_service_id_route(monke
         assert response.json()["items"][0]["service_id"] == "payments-api"
 
 
-@pytest.mark.parametrize(
-    ("left", "right", "expected"),
-    [
-        ("2026-04-10T10:00:00", "2026-04-10T09:00:00Z", "2026-04-10T10:00:00Z"),
-        ("2026-04-10T10:00:00Z", "2026-04-10T09:00:00", "2026-04-10T10:00:00Z"),
-    ],
-)
-def test_parse_datetime_treats_offsetless_timestamps_as_utc(left: str, right: str, expected: str) -> None:
-    assert _later_iso(left, right) == expected
+@pytest.mark.skipif(not hasattr(time, "tzset"), reason="tzset is required to validate local-time parsing")
+def test_parse_datetime_treats_offsetless_timestamps_as_local_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    previous_tz = os.environ.get("TZ")
+    monkeypatch.setenv("TZ", "Asia/Bangkok")
+    time.tzset()
+    try:
+        assert _later_iso("2026-04-10T10:00:00", "2026-04-10T09:00:00Z") == "2026-04-10T09:00:00Z"
+        assert _later_iso("2026-04-10T10:00:00Z", "2026-04-10T09:00:00") == "2026-04-10T10:00:00Z"
+    finally:
+        if previous_tz is not None:
+            monkeypatch.setenv("TZ", previous_tz)
+        else:
+            monkeypatch.delenv("TZ", raising=False)
+        time.tzset()

@@ -50,7 +50,7 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return value if value.tzinfo is not None else value.astimezone()
     normalized = value.strip()
     if not normalized:
         return None
@@ -60,7 +60,7 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return None
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    return parsed if parsed.tzinfo is not None else parsed.astimezone()
 
 
 def _isoformat(value: datetime | None) -> str | None:

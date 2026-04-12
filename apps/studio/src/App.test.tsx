@@ -451,6 +451,14 @@ describe("App", () => {
     expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
   });
 
+  it("opens the service editor with an allowlisted default base URL", async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "New Service" }));
+
+    expect(screen.getByLabelText("Base URL")).toHaveValue("https://service.example.test");
+  });
+
   it("keeps the edit context visible when service deletion fails", async () => {
     const baseImpl = fetchMock.getMockImplementation();
     fetchMock.mockImplementation(async (input, init) => {
