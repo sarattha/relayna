@@ -8,7 +8,7 @@ import pytest
 import relayna_studio.app as studio_app
 from fastapi.testclient import TestClient
 from relayna_studio import ServiceRecord, ServiceStatus, create_studio_app, get_studio_runtime
-from relayna_studio.events import RedisStudioEventStore, StudioEventEnvelope, StudioEventStream
+from relayna_studio.events import RedisStudioEventStore, StudioEventEnvelope, StudioEventStream, StudioPullSyncWorker
 
 from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
 from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
@@ -415,6 +415,31 @@ def test_studio_pull_sync_advances_existing_cursor(monkeypatch) -> None:
         assert response.json()["count"] == 2
         assert response.json()["items"][0]["event_id"] == "evt-2"
         assert asyncio.run(runtime.event_store.get_pull_cursor("payments-api")) == "evt-2"
+
+
+@pytest.mark.asyncio
+async def test_pull_sync_worker_logs_and_continues_after_sync_failure(caplog: pytest.LogCaptureFixture) -> None:
+    class FlakyIngestService:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.worker: StudioPullSyncWorker | None = None
+
+        async def sync_registered_services(self) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary sync failure")
+            assert self.worker is not None
+            self.worker.stop()
+
+    ingest_service = FlakyIngestService()
+    worker = StudioPullSyncWorker(ingest_service=ingest_service, interval_seconds=0.0)
+    ingest_service.worker = worker
+
+    with caplog.at_level("ERROR"):
+        await asyncio.wait_for(worker.run_forever(), timeout=1.0)
+
+    assert ingest_service.calls == 2
+    assert "Studio pull-sync iteration failed." in caplog.text
 
 
 @pytest.mark.asyncio

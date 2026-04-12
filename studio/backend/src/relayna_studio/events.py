@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -25,6 +26,8 @@ from .registry import ServiceNotFoundError, ServiceRecord, ServiceRegistryServic
 
 if TYPE_CHECKING:
     from .search import StudioSearchIndexer
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -478,7 +481,10 @@ class StudioPullSyncWorker:
 
     async def run_forever(self) -> None:
         while not self._stopped.is_set():
-            await self.ingest_service.sync_registered_services()
+            try:
+                await self.ingest_service.sync_registered_services()
+            except Exception:
+                LOGGER.exception("Studio pull-sync iteration failed.")
             try:
                 await asyncio.wait_for(self._stopped.wait(), timeout=self.interval_seconds)
             except TimeoutError:

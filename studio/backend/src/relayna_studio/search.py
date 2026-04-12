@@ -720,7 +720,7 @@ def _paginate_service_documents(
 
 
 def _task_document_id(service_id: str, task_id: str) -> str:
-    return f"{service_id}:{task_id}"
+    return _encode_cursor({"service_id": service_id, "task_id": task_id})
 
 
 def _decode_members(values: set[Any]) -> set[str]:

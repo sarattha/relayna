@@ -243,7 +243,9 @@ def test_search_service_prunes_expired_tasks_and_cascades_service_delete() -> No
                 payload={"status": "completed"},
             ),
         )
-        document = await search_store.get_task_document("payments-api:task-123")
+        document_ids = await search_store.list_task_document_ids()
+        assert len(document_ids) == 1
+        document = await search_store.get_task_document(next(iter(document_ids)))
         assert document is not None
         await search_store.set_task_document(document.model_copy(update={"expires_at": "2026-04-10T01:00:01Z"}))
         assert await search_service.prune_expired_task_documents() == 1
@@ -309,6 +311,91 @@ def test_search_service_backfills_from_retained_events_when_index_is_empty() -> 
         assert results.count == 1
         assert results.items[0].correlation_id == "corr-123"
         assert results.items[0].stage == "settled"
+
+    asyncio.run(scenario())
+
+
+def test_task_search_document_ids_do_not_collide_on_colon_delimited_inputs() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        registry = ServiceRegistryService(store=RedisServiceRegistryStore(redis))
+        event_store = RedisStudioEventStore(redis, prefix="studio:events", ttl_seconds=60, history_maxlen=20)
+        search_store = RedisStudioSearchStore(redis, prefix="studio:search")
+        search_service = StudioSearchService(
+            registry_service=registry,
+            event_store=event_store,
+            store=search_store,
+            task_index_ttl_seconds=600,
+        )
+        registry.set_search_indexer(search_service)
+
+        await registry.create_service(
+            CreateServiceRequest(
+                service_id="svc:a",
+                name="Service A",
+                base_url="https://service-a.example.test",
+                environment="prod",
+                tags=["core", "billing"],
+                auth_mode="internal_network",
+            )
+        )
+        await registry.create_service(
+            CreateServiceRequest(
+                service_id="svc",
+                name="Service B",
+                base_url="https://service-b.example.test",
+                environment="prod",
+                tags=["core", "billing"],
+                auth_mode="internal_network",
+            )
+        )
+
+        svc_a = await registry.get_service("svc:a")
+        svc_b = await registry.get_service("svc")
+
+        await search_service.upsert_task_document(
+            svc_a,
+            StudioControlPlaneEvent(
+                service_id="svc:a",
+                ingest_method=StudioEventIngestMethod.PULL,
+                ingested_at="2026-04-10T01:00:00Z",
+                dedupe_key="evt-1",
+                task_id="1",
+                event_type="status.processing",
+                source_kind=ServiceEventSourceKind.STATUS,
+                component="status",
+                timestamp="2026-04-10T01:00:00Z",
+                event_id="evt-1",
+                payload={"status": "processing"},
+            ),
+        )
+        await search_service.upsert_task_document(
+            svc_b,
+            StudioControlPlaneEvent(
+                service_id="svc",
+                ingest_method=StudioEventIngestMethod.PULL,
+                ingested_at="2026-04-10T02:00:00Z",
+                dedupe_key="evt-2",
+                task_id="a:1",
+                event_type="status.completed",
+                source_kind=ServiceEventSourceKind.STATUS,
+                component="status",
+                timestamp="2026-04-10T02:00:00Z",
+                event_id="evt-2",
+                payload={"status": "completed"},
+            ),
+        )
+
+        svc_a_results = await search_service.search_tasks(StudioTaskSearchQuery(service_id="svc:a"))
+        svc_b_results = await search_service.search_tasks(StudioTaskSearchQuery(service_id="svc"))
+
+        assert svc_a_results.count == 1
+        assert svc_a_results.items[0].service_id == "svc:a"
+        assert svc_a_results.items[0].task_id == "1"
+        assert svc_b_results.count == 1
+        assert svc_b_results.items[0].service_id == "svc"
+        assert svc_b_results.items[0].task_id == "a:1"
+        assert len(await search_store.list_task_document_ids()) == 2
 
     asyncio.run(scenario())
 
