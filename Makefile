@@ -86,6 +86,7 @@ snapshots-create: ## Create new inline snapshots for the SDK suite
 #  Workspace hints
 # --------------------------------------------------------------------------- #
 .PHONY: backend-help frontend-help studio-backend-docker-build studio-frontend-docker-build studio-docker-build
+.PHONY: studio-mocks-serve studio-mocks-payloads studio-mocks-register
 backend-help: ## Show Studio backend Makefile targets
 	$(MAKE) -C studio/backend help
 
@@ -101,6 +102,15 @@ studio-frontend-docker-build: ## Build the Studio frontend Docker image
 studio-docker-build: ## Build both Studio Docker images
 	$(MAKE) -C studio/backend docker-build
 	$(MAKE) -C apps/studio docker-build
+
+studio-mocks-serve: ## Serve local Relayna-compatible Studio mock services on port 9100
+	./.venv/bin/python scripts/studio_mock_services.py serve
+
+studio-mocks-payloads: ## Print mock Studio service registry payloads
+	./.venv/bin/python scripts/studio_mock_services.py payloads
+
+studio-mocks-register: ## Register/update the mock services against Studio on localhost:8000
+	./.venv/bin/python scripts/studio_mock_services.py register
 
 # --------------------------------------------------------------------------- #
 #  Misc
