@@ -5,13 +5,13 @@ from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
-
 import relayna_studio.app as studio_app
-from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
-from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
+from fastapi.testclient import TestClient
 from relayna_studio import ServiceRecord, ServiceStatus, create_studio_app, get_studio_runtime
 from relayna_studio.events import RedisStudioEventStore, StudioEventEnvelope, StudioEventStream
+
+from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
+from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
 
 
 class FakePubSub:

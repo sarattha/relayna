@@ -4,10 +4,8 @@ import asyncio
 
 import httpx
 import pytest
-from fastapi.testclient import TestClient
-
 import relayna_studio.app as studio_app
-from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
+from fastapi.testclient import TestClient
 from relayna_studio import (
     CreateServiceRequest,
     RedisServiceRegistryStore,
@@ -24,6 +22,8 @@ from relayna_studio.search import (
     StudioTaskSearchQuery,
     _later_iso,
 )
+
+from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
 
 
 class FakePipeline:

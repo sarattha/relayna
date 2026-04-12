@@ -2,6 +2,29 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import TypedDict
+
+
+class StudioAppKwargs(TypedDict):
+    redis_url: str
+    title: str
+    app_state_key: str
+    registry_prefix: str
+    capability_refresh_allowed_hosts: tuple[str, ...] | None
+    capability_refresh_allowed_networks: tuple[str, ...] | None
+    federation_timeout_seconds: float
+    event_store_prefix: str
+    event_store_ttl_seconds: int | None
+    event_history_maxlen: int
+    pull_sync_interval_seconds: float | None
+    health_store_prefix: str
+    health_refresh_interval_seconds: float | None
+    capability_stale_after_seconds: int
+    observation_stale_after_seconds: int
+    worker_heartbeat_stale_after_seconds: int
+    task_search_index_prefix: str
+    task_index_ttl_seconds: int
+    retention_prune_interval_seconds: float | None
 
 
 def _env_required(name: str) -> str:
@@ -120,7 +143,7 @@ class StudioBackendSettings:
             ),
         )
 
-    def to_app_kwargs(self) -> dict[str, object]:
+    def to_app_kwargs(self) -> StudioAppKwargs:
         return {
             "redis_url": self.redis_url,
             "title": self.title,
@@ -144,4 +167,4 @@ class StudioBackendSettings:
         }
 
 
-__all__ = ["StudioBackendSettings"]
+__all__ = ["StudioAppKwargs", "StudioBackendSettings"]

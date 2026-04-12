@@ -4,18 +4,9 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import relayna_studio.app as studio_app
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import relayna_studio.app as studio_app
-from relayna.api import (
-    AliasConfigSummary,
-    CapabilityDocument,
-    CapabilityServiceMetadata,
-    WorkerHeartbeatSummary,
-    create_worker_health_router,
-)
-from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
 from relayna_studio import (
     CapabilityRefreshError,
     RedisServiceRegistryStore,
@@ -29,6 +20,15 @@ from relayna_studio import (
     create_studio_app,
     get_studio_runtime,
 )
+
+from relayna.api import (
+    AliasConfigSummary,
+    CapabilityDocument,
+    CapabilityServiceMetadata,
+    WorkerHeartbeatSummary,
+    create_worker_health_router,
+)
+from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
 
 
 class FakePipeline:

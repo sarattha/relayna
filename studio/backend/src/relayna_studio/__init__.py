@@ -14,6 +14,7 @@ from .events import (
     create_studio_events_router,
 )
 from .execution_view import build_execution_view
+from .factory import create_app
 from .federation import (
     FederatedError,
     StudioFederationError,
@@ -65,7 +66,6 @@ from .registry import (
     create_service_registry_router,
     normalize_base_url,
 )
-from .factory import create_app
 from .run_view import build_run_view
 from .search import (
     RedisStudioSearchStore,

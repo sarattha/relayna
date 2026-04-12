@@ -4,7 +4,6 @@ import importlib
 import sys
 
 import pytest
-
 from relayna_studio.config import StudioBackendSettings
 from relayna_studio.factory import create_app
 

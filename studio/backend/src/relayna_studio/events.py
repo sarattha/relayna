@@ -20,6 +20,7 @@ from relayna.observability import (
     ServiceEventSourceKind,
     StudioEventIngestMethod,
 )
+
 from .registry import ServiceNotFoundError, ServiceRecord, ServiceRegistryService, ServiceStatus
 
 if TYPE_CHECKING:

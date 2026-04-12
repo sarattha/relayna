@@ -227,4 +227,3 @@ def test_execution_graph_mermaid_renders_nodes_and_edges() -> None:
     assert "flowchart LR" in mermaid
     assert "published_status" in mermaid
     assert 'node_task_task_123["task-123\\ntask"]' in mermaid
-

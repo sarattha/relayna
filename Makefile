@@ -1,3 +1,6 @@
+# Root SDK Makefile. Studio backend and frontend have their own Makefiles in
+# `studio/backend/` and `apps/studio/`.
+
 # --------------------------------------------------------------------------- #
 #  Variables
 # --------------------------------------------------------------------------- #
@@ -6,6 +9,7 @@ RUFF            := $(UV) ruff
 TY              := $(UV) ty
 COVERAGE        := $(UV) coverage
 PYTEST          := $(UV) pytest
+SDK_PY_PATHS     := src tests
 
 #  Ruff & Black share the same default 88-char line length.                   #
 #  Set your project-wide preference *once* here and both the linter           #
@@ -31,56 +35,76 @@ help: ## Show this help
 #  Dependency management
 # --------------------------------------------------------------------------- #
 .PHONY: sync
-sync: ## Create/refresh the local environment with all optional & dev deps
-	uv sync --all-extras --all-packages
+sync: ## Create/refresh the SDK development environment
+	uv sync --extra dev
 
 # --------------------------------------------------------------------------- #
 #  Code quality
 # --------------------------------------------------------------------------- #
 .PHONY: format
-format: ## Re-format the entire codebase (Black-style) with Ruff
-	$(RUFF) format . $(RUFF_FLAGS)
+format: ## Re-format the SDK workspace with Ruff
+	$(RUFF) format $(SDK_PY_PATHS) $(RUFF_FLAGS)
 
 .PHONY: lint
-lint: ## Run Ruff in lint-only mode (no fixes)
-	$(RUFF) check . $(RUFF_FLAGS)
+lint: ## Run Ruff in lint-only mode for the SDK workspace
+	$(RUFF) check $(SDK_PY_PATHS) $(RUFF_FLAGS)
 
 .PHONY: fix
-fix: ## Lint + safe auto-fixes (same as lint + --fix)
-	$(RUFF) check . --fix $(RUFF_FLAGS)
+fix: ## Lint + safe auto-fixes for the SDK workspace
+	$(RUFF) check $(SDK_PY_PATHS) --fix $(RUFF_FLAGS)
 
 .PHONY: typecheck
-typecheck: ## Static type analysis with ty
+typecheck: ## Static type analysis for the SDK package
 	$(TY) check src/relayna
 
 # --------------------------------------------------------------------------- #
 #  Tests & coverage
 # --------------------------------------------------------------------------- #
 .PHONY: test
-test: ## Run the test suite
-	$(PYTEST)
+test: ## Run the SDK test suite
+	$(PYTEST) tests
 
 .PHONY: coverage
-coverage: clean ## Run tests with coverage (fail if <70 %)
+coverage: clean ## Run SDK tests with coverage (fail if <70 %)
 	@echo "coverage package not installed; running pytest without coverage"
-	$(PYTEST)
+	$(PYTEST) tests
 
 # --------------------------------------------------------------------------- #
 #  Snapshot tests
 # --------------------------------------------------------------------------- #
 .PHONY: snapshots-fix
-snapshots-fix: ## Update broken inline snapshots
+snapshots-fix: ## Update broken inline snapshots for the SDK suite
 	@echo "inline-snapshot plugin not installed; running pytest without snapshot updates"
-	$(PYTEST)
+	$(PYTEST) tests
 
 .PHONY: snapshots-create
-snapshots-create: ## Create new inline snapshots from scratch
+snapshots-create: ## Create new inline snapshots for the SDK suite
 	@echo "inline-snapshot plugin not installed; running pytest without snapshot creation"
-	$(PYTEST)
+	$(PYTEST) tests
+
+# --------------------------------------------------------------------------- #
+#  Workspace hints
+# --------------------------------------------------------------------------- #
+.PHONY: backend-help frontend-help studio-backend-docker-build studio-frontend-docker-build studio-docker-build
+backend-help: ## Show Studio backend Makefile targets
+	$(MAKE) -C studio/backend help
+
+frontend-help: ## Show Studio frontend Makefile targets
+	$(MAKE) -C apps/studio help
+
+studio-backend-docker-build: ## Build the Studio backend Docker image
+	$(MAKE) -C studio/backend docker-build
+
+studio-frontend-docker-build: ## Build the Studio frontend Docker image
+	$(MAKE) -C apps/studio docker-build
+
+studio-docker-build: ## Build both Studio Docker images
+	$(MAKE) -C studio/backend docker-build
+	$(MAKE) -C apps/studio docker-build
 
 # --------------------------------------------------------------------------- #
 #  Misc
 # --------------------------------------------------------------------------- #
 .PHONY: clean
-clean: ## Remove caches & artefacts
+clean: ## Remove SDK caches & artefacts
 	rm -rf .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml

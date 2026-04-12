@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 
 import httpx
-from fastapi.testclient import TestClient
-
 import relayna_studio.app as studio_app
-from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
+from fastapi.testclient import TestClient
 from relayna_studio import ServiceRecord, ServiceStatus, create_studio_app, get_studio_runtime
+
+from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
 
 
 class FakeRedis:

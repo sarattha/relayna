@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from relayna.observability import ExecutionGraph
-from relayna.topology import build_linear_workflow_topology, topology_kind
-from relayna.workflow import WorkflowRunState
 from relayna_studio import (
     build_execution_view,
     build_run_view,
@@ -10,6 +7,10 @@ from relayna_studio import (
     create_service_registry_router,
     create_studio_app,
 )
+
+from relayna.observability import ExecutionGraph
+from relayna.topology import build_linear_workflow_topology, topology_kind
+from relayna.workflow import WorkflowRunState
 
 
 def test_backend_package_exports_runtime_surfaces() -> None:

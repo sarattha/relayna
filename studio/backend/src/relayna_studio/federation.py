@@ -19,6 +19,7 @@ from relayna.api import (
     WORKFLOW_TOPOLOGY_ROUTE_ID,
     CapabilityDocument,
 )
+
 from .identity import (
     JoinKind,
     JoinMode,

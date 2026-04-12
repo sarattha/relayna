@@ -5,8 +5,8 @@ on:
   pull_request:
 
 jobs:
-  test-and-build:
-    name: test-and-build (py${{ matrix.python-version }})
+  sdk:
+    name: sdk (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -24,37 +24,37 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Sync dependencies
-        run: uv sync --extra dev
+      - name: Sync SDK dependencies
+        run: make sync
 
-      - name: Run make format
+      - name: Run SDK format check
         run: make format
 
-      - name: Verify formatting left no changes
+      - name: Verify SDK formatting left no changes
         run: git diff --exit-code
 
-      - name: Run make fix
+      - name: Run SDK autofix check
         run: make fix
 
-      - name: Verify fixes left no changes
+      - name: Verify SDK fixes left no changes
         run: git diff --exit-code
 
-      - name: Run make lint
+      - name: Run SDK lint
         run: make lint
 
-      - name: Run make typecheck
+      - name: Run SDK typecheck
         run: make typecheck
 
-      - name: Run make test
+      - name: Run SDK tests
         run: make test
 
-      - name: Build artifacts
+      - name: Build SDK artifacts
         run: uv build
 
-      - name: Validate built distributions
+      - name: Validate built SDK distributions
         run: uv run twine check dist/*
 
-      - name: Smoke test installed wheel
+      - name: Smoke test installed SDK wheel
         run: |
           python -m venv "$RUNNER_TEMP/relayna-smoke"
           . "$RUNNER_TEMP/relayna-smoke/bin/activate"
@@ -73,9 +73,79 @@ jobs:
               "relayna.observability",
               "relayna.topology",
               "relayna.mcp",
-              "relayna.studio",
               "relayna.dlq",
           ]
           for name in modules:
               importlib.import_module(name)
           PY
+
+  studio-backend:
+    name: studio-backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync Studio backend dependencies
+        run: make -C studio/backend sync
+
+      - name: Run Studio backend format check
+        run: make -C studio/backend format
+
+      - name: Verify Studio backend formatting left no changes
+        run: git diff --exit-code
+
+      - name: Run Studio backend autofix check
+        run: make -C studio/backend fix
+
+      - name: Verify Studio backend fixes left no changes
+        run: git diff --exit-code
+
+      - name: Run Studio backend lint
+        run: make -C studio/backend lint
+
+      - name: Run Studio backend typecheck
+        run: make -C studio/backend typecheck
+
+      - name: Run Studio backend tests
+        run: make -C studio/backend test
+
+      - name: Build Studio backend wheel
+        run: make -C studio/backend build
+
+      - name: Build Studio backend Docker image
+        run: make -C studio/backend docker-build
+
+  studio-frontend:
+    name: studio-frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+
+      - name: Sync Studio frontend dependencies
+        run: make -C apps/studio sync
+
+      - name: Run Studio frontend tests
+        run: make -C apps/studio test
+
+      - name: Build Studio frontend bundle
+        run: make -C apps/studio build
+
+      - name: Build Studio frontend Docker image
+        run: make -C apps/studio docker-build
