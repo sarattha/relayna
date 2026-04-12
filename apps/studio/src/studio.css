@@ -278,7 +278,8 @@ button:hover {
   overflow-x: auto;
 }
 
-.studio-mobile-only {
+.studio-mobile-only,
+.studio-card-list.studio-mobile-only {
   display: none;
 }
 
@@ -298,11 +299,12 @@ button:hover {
 }
 
 .studio-table th {
-  padding: 0 0 10px;
+  padding: 0 18px 10px 0;
+  white-space: nowrap;
 }
 
 .studio-table td {
-  padding: 14px 8px;
+  padding: 14px 18px 14px 0;
   vertical-align: top;
 }
 
@@ -395,6 +397,10 @@ button:hover {
 
   .studio-mobile-only {
     display: block;
+  }
+
+  .studio-card-list.studio-mobile-only {
+    display: grid;
   }
 }
 

@@ -430,6 +430,7 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByText("Registered Services");
+    fireEvent.click(screen.getByRole("button", { name: "New Service" }));
     fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "payments-api" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Payments API" } });
     fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
