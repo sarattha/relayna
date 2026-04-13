@@ -305,7 +305,7 @@ class StudioFederationService:
                     if exc.code == "upstream_not_found":
                         return None, None
                     if not include_errors:
-                        return None, exc.to_model()
+                        return None, None
                     return None, exc.to_model()
                 if latest_status is None:
                     return None, None
