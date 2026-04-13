@@ -23,8 +23,10 @@ theme:
     code: JetBrains Mono
 nav:
   - Overview: index.md
-  - Migration v1 to v2: migration-v1-to-v2.md
   - Getting Started: getting-started.md
+  - Studio Backend: studio-backend.md
+  - Studio Frontend: studio-frontend.md
+  - Migration v1 to v2: migration-v1-to-v2.md
   - Components: components.md
   - Observability: observability.md
   - Execution Graphs: execution-graphs.md
