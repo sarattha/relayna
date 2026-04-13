@@ -1,13 +1,11 @@
-document.addEventListener("DOMContentLoaded", async () => {
+let mermaidInitialized = false;
+
+async function renderMermaidDiagrams() {
   if (typeof window.mermaid === "undefined") {
     return;
   }
 
   const codeBlocks = document.querySelectorAll("pre > code.language-mermaid");
-  if (codeBlocks.length === 0) {
-    return;
-  }
-
   for (const code of codeBlocks) {
     const pre = code.parentElement;
     if (!pre || !pre.parentElement) {
@@ -19,6 +17,19 @@ document.addEventListener("DOMContentLoaded", async () => {
     pre.replaceWith(container);
   }
 
-  window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+  if (!mermaidInitialized) {
+    window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+    mermaidInitialized = true;
+  }
   await window.mermaid.run({ querySelector: ".mermaid" });
-});
+}
+
+if (typeof document$ !== "undefined") {
+  document$.subscribe(() => {
+    void renderMermaidDiagrams();
+  });
+} else {
+  document.addEventListener("DOMContentLoaded", () => {
+    void renderMermaidDiagrams();
+  });
+}
