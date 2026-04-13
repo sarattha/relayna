@@ -27,16 +27,16 @@ It provides:
 
 GitHub Releases are the canonical installation source for v1.
 
-Install the wheel directly:
+Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.5/relayna-1.3.5-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.4/relayna-1.4.4-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.5/relayna-1.3.5.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.4/relayna-1.4.4.tar.gz
 ```
 
 For local development in this repository:
@@ -84,6 +84,27 @@ This setup gives you:
 - `GET /events/{task_id}` for SSE status updates
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
+
+## SDK vs Studio
+
+`relayna` is the service-side SDK. It owns:
+
+- RabbitMQ topology declarations and publish helpers
+- Worker runtimes, retry behavior, and workflow transport
+- Redis-backed status, DLQ, and observability persistence
+- FastAPI route factories for status, capabilities, workflow, execution graph,
+  events feed, and optional worker health
+
+`relayna-studio` is the separate control-plane deployment. It owns:
+
+- A centralized service registry
+- Federated reads across registered Relayna services
+- Centralized event ingestion, health refresh, and retained task search
+- The Studio backend under `studio/backend/` and the React frontend under
+  `apps/studio/`
+
+The practical boundary is simple: your service integrates `relayna`; operators
+deploy Studio separately when they want a centralized control plane.
 
 ## Execution Graphs
 
@@ -194,7 +215,8 @@ helpers, and retention behavior. It is not part of the documented public API.
 
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
-not ship under the root `relayna` distribution.
+not ship under the root `relayna` distribution. The current Studio backend
+package version is `0.1.1`, and it requires `relayna>=1.4.4`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -573,6 +595,9 @@ Studio deployment and presenter helpers now live in the separate
 ## Docs and releases
 
 - Documentation: [sarattha.github.io/relayna](https://sarattha.github.io/relayna/)
+- Getting started: [docs/getting-started.md](docs/getting-started.md)
+- Studio backend: [docs/studio-backend.md](docs/studio-backend.md)
+- Studio frontend: [docs/studio-frontend.md](docs/studio-frontend.md)
 - Observability guide: [docs/observability.md](docs/observability.md)
 - Execution graph guide: [docs/execution-graphs.md](docs/execution-graphs.md)
 - GitHub Releases: [github.com/sarattha/relayna/releases](https://github.com/sarattha/relayna/releases)
