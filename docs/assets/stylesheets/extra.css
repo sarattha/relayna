@@ -1,0 +1,132 @@
+:root {
+  --md-default-bg-color: #f6f7f5;
+  --md-default-fg-color: #18211d;
+  --md-default-fg-color--light: #51605a;
+  --md-default-fg-color--lighter: #7a8982;
+  --md-primary-fg-color: #f6f7f5;
+  --md-accent-fg-color: #0f766e;
+  --md-typeset-a-color: #0f766e;
+  --relayna-surface: #ffffff;
+  --relayna-border: rgba(24, 33, 29, 0.08);
+  --relayna-shadow: 0 16px 40px rgba(24, 33, 29, 0.06);
+}
+
+[data-md-color-scheme="default"] {
+  background: linear-gradient(180deg, #fbfcfa 0%, #f3f5f2 100%);
+}
+
+.md-header {
+  background: rgba(246, 247, 245, 0.78);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--relayna-border);
+  box-shadow: none;
+}
+
+.md-tabs {
+  background: transparent;
+  border-bottom: 1px solid var(--relayna-border);
+}
+
+.md-main {
+  background:
+    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 24rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
+}
+
+.md-main__inner {
+  margin-top: 1.25rem;
+}
+
+.md-content__inner,
+.md-sidebar__inner,
+.md-search__inner,
+.md-typeset table:not([class]) {
+  border-radius: 18px;
+}
+
+.md-content__inner {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--relayna-border);
+  box-shadow: var(--relayna-shadow);
+  padding: 2rem 2.25rem;
+}
+
+.md-sidebar__inner {
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--relayna-border);
+  padding-top: 1rem;
+}
+
+.md-nav__title,
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h1 {
+  font-weight: 800;
+  margin-bottom: 0.75rem;
+}
+
+.md-typeset h2 {
+  font-weight: 750;
+  margin-top: 2.4rem;
+}
+
+.md-typeset p,
+.md-typeset li {
+  line-height: 1.75;
+}
+
+.md-typeset code,
+.md-typeset pre code {
+  font-size: 0.84rem;
+}
+
+.md-typeset pre > code {
+  border-radius: 14px;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border: 1px solid var(--relayna-border);
+  border-radius: 16px;
+  box-shadow: none;
+}
+
+.md-typeset table:not([class]) {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--relayna-border);
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background: rgba(15, 118, 110, 0.06);
+}
+
+.md-typeset a {
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.16em;
+}
+
+.md-top {
+  border-radius: 999px;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    max-width: 84rem;
+  }
+
+  .md-content {
+    max-width: 52rem;
+  }
+}
+
+@media screen and (max-width: 76.2344em) {
+  .md-content__inner {
+    padding: 1.5rem 1.2rem;
+    border-radius: 16px;
+  }
+}

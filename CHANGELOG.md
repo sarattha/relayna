@@ -2,6 +2,193 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+## 1.4.4 - 2026-04-12
+
+### Changed
+
+- Bumped the SDK package version to `1.4.4` and the Studio backend package version to `0.1.1`.
+- Updated the Studio backend package dependency floor to require `relayna>=1.4.4`.
+
+### Fixed
+
+- Studio pull-sync background processing now logs transient `sync_registered_services()` failures and continues running instead of terminating the worker for the rest of the process lifetime.
+- Studio task search now uses an unambiguous encoded composite document id for `(service_id, task_id)`, preventing search-index collisions when either identifier contains `:`.
+
+## 1.4.3 - 2026-04-12
+
+### Added
+
+- Redis-backed Studio search and retention support via `relayna.studio.search`, including retained task/service search documents, indexed `GET /studio/tasks/search` and `GET /studio/services/search`, startup backfill from retained Studio events, and a scheduled retention pruning worker.
+- Studio frontend indexed search UX for retained task discovery and service discovery in `apps/studio/`, plus backend/frontend regression coverage for the new search contracts and retention behavior.
+
+### Changed
+
+- `create_studio_app(...)` now wires the Studio search subsystem and mounts the indexed search routes alongside the existing registry, federation, events, health, and logs surfaces.
+- The internal Studio roadmap now marks feature 10, Search and retention, as implemented.
+- Bumped the package version to `1.4.3`.
+
+### Fixed
+
+- `GET /studio/services/search` now resolves to the search handler before the catch-all `/studio/services/{service_id}` route.
+- Studio search now treats offsetless ISO timestamps as UTC-aware, preventing `datetime-local` task-search filters from mixing naive and aware datetimes at runtime.
+
+## 1.4.2 - 2026-04-12
+
+### Added
+
+- Studio health and liveness support via `relayna.studio.health`, including persisted service health documents, scheduled health refresh, service health routes, and merged health summaries on Studio service responses.
+- Optional worker-heartbeat capability support through `health.workers` and `create_worker_health_router(...)` for Relayna services that want to expose worker liveness to Studio.
+
+### Changed
+
+- Studio service activity freshness now uses monotonic service-level status and observation timestamps, preventing out-of-order event ingestion from regressing health freshness.
+- The Studio service detail page now computes “Latest observed activity” from the newer of the latest status and observation timestamps instead of always preferring status events.
+- Bumped the package version to `1.4.2`.
+
+### Fixed
+
+- `make test` roadmap assertions now match the current internal roadmap shape, including feature 11.
+- Worker-health route typing now satisfies static typechecking.
+
+## 1.4.1 - 2026-04-11
+
+### Added
+
+- Route-based Studio operator-console UI in `apps/studio/`, including dedicated `/services`, `/services/{service_id}`, `/services/{service_id}/topology`, `/services/{service_id}/dlq`, `/tasks/search`, and `/tasks/{service_id}/{task_id}` screens.
+- Shared Studio frontend API, typed route-safe models, and routed page modules for service detail, topology, DLQ exploration, task search, and federated task detail.
+- Route-oriented frontend coverage for Studio navigation, service-scoped reads, task-scoped reads, and SSE lifecycle behavior.
+
+### Changed
+
+- The Studio frontend now treats routed control-plane screens as the primary UI instead of a single-page registry plus task-inspector flow.
+- The internal Studio roadmap now marks feature 7, Control-plane UI expansion, as implemented.
+- Bumped the package version to `1.4.1`.
+
+### Fixed
+
+- Registry create and update failures in the Studio services page now surface through the operator-visible error banner instead of failing silently.
+- Failed service deletion from the Studio services page now keeps the edit context in place until the backend delete succeeds.
+
+## 1.4.0 - 2026-04-11
+
+### Added
+
+- Studio log pipeline support via `relayna.studio.logs`, including `StudioLogQuery`, `StudioLogEntry`, `StudioLogListResponse`, `StudioLogQueryService`, `create_studio_logs_router(...)`, and a first pluggable `LokiLogProvider`.
+- New Studio backend log routes at `GET /studio/services/{service_id}/logs` and `GET /studio/tasks/{service_id}/{task_id}/logs` with normalized service/task-scoped log query behavior.
+- Per-service Studio registry `log_config` support so operators can configure Loki log access separately for each registered service.
+- Studio UI log configuration fields plus service-level and task-level log panels in `apps/studio/` for querying logs alongside existing control-plane views.
+
+### Changed
+
+- `create_studio_app(...)` now wires the Studio log-query service and mounts the Studio log routes next to registry, federation, and events.
+- The internal Studio roadmap now marks feature 6, Log pipeline, as implemented.
+- Bumped the package version to `1.4.0`.
+
+## 1.3.9 - 2026-04-11
+
+### Fixed
+
+- Studio pull-sync now advances the stored `events.feed` cursor on every successful non-empty sync, so services with an existing cursor continue catching up instead of repeatedly re-reading the same page window.
+- Best-effort Studio observation forwarding now keeps the pending batch on non-2xx ingest responses and retries it on a later flush instead of silently dropping events.
+
+### Changed
+
+- Bumped the package version to `1.3.9`.
+
+## 1.3.8 - 2026-04-10
+
+### Added
+
+- Merged Relayna service event-feed primitives via `RedisServiceEventFeedStore`, `GET /events/feed`, and the `events.feed` capability route id.
+- Studio control-plane event ingestion via `POST /studio/ingest/events`, Redis-backed Studio event storage, service/task event query routes, and live SSE event streams.
+- Studio pull-sync support for healthy registered services that advertise `events.feed`, plus a best-effort observation forwarder helper for services that want push ingestion.
+- Studio UI panels for service recent activity and task-level merged timelines, including live updates from Studio-owned SSE routes.
+
+### Changed
+
+- `create_relayna_lifespan(...)` now wires an optional merged service event feed alongside status and observation persistence.
+- `create_studio_app(...)` now mounts Studio event ingest/query/SSE routes and manages a background pull-sync worker.
+- The internal Studio roadmap now marks feature 5, Aggregated event and observation ingestion, as implemented.
+
+## 1.3.7 - 2026-04-10
+
+### Added
+
+- Cross-service Studio identity primitives via `StudioTaskPointer`, `StudioTaskRef`, `StudioTaskJoin`, `StudioJoinWarning`, and `JoinMode`.
+- Additive `task_ref` normalization across federated Studio task-bearing responses, including status, history, DLQ message lists, execution graphs, task search, and task detail payloads.
+- Opt-in cross-service join support on `GET /studio/tasks/search` and `GET /studio/tasks/{service_id}/{task_id}` through `join=none|correlation|lineage|all`.
+- Studio task-detail UI panels for correlation id, parent refs, child refs, joined refs, and join warnings.
+
+### Changed
+
+- Studio federation now treats non-`capabilities_v1` services as legacy for route-level `404` detection, so legacy services fall back to history reads instead of being misclassified as missing tasks.
+- Cross-service join resolution now skips emitting joins when candidate scans are incomplete and returns an explicit warning instead of treating partial scans as uniquely resolved.
+- The internal Studio roadmap now marks feature 4, Cross-service identity model, as implemented.
+- Bumped the package version to `1.3.7`.
+
+## 1.3.6 - 2026-04-09
+
+### Added
+
+- Federated Studio control-plane reads via `relayna.studio.create_federation_router(...)` and `StudioFederationService`, including service-scoped proxy routes for status, history, workflow topology, DLQ messages, and execution graphs.
+- Cross-service exact-`task_id` search at `GET /studio/tasks/search` plus composite task detail reads at `GET /studio/tasks/{service_id}/{task_id}`.
+- Normalized Studio federation error responses and backend coverage for timeout, auth failure, unsupported route, and upstream not-found handling.
+
+### Changed
+
+- `create_studio_app(...)` now mounts the federated Studio read surface and manages one shared `httpx.AsyncClient` for upstream Relayna service reads.
+- The Studio frontend task inspector now reads task details and execution graphs through `/studio/tasks/{service_id}/{task_id}` and no longer calls arbitrary Relayna service base URLs from the browser.
+- The internal Studio roadmap now marks feature 3, Federated API aggregation layer, as implemented.
+- Bumped the package version to `1.3.6`.
+
+## 1.3.5 - 2026-04-09
+
+### Added
+
+- Redis-backed Studio service-registry primitives via `relayna.studio`, including `ServiceRecord`, `RedisServiceRegistryStore`, `create_service_registry_router(...)`, and `create_studio_app(...)`.
+- Studio backend CRUD routes at `/studio/services` plus live capability refresh at `POST /studio/services/{service_id}/refresh`.
+- Service-registry UI in `apps/studio/` for create, edit, inspect, enable, disable, mark-unavailable, and delete flows.
+- Typed capability discovery via `CapabilityDocument`, `create_capabilities_router(...)`, and `GET /relayna/capabilities`.
+- Explicit capability route-id exports and merge helpers so Relayna runtimes can declare supported status, DLQ, workflow, and execution routes without introspecting mounted FastAPI routes.
+
+### Changed
+
+- The Studio frontend now defaults to the control-plane service-registry surface while retaining the direct execution-graph inspector as a secondary tool until federated reads land.
+- Studio capability refresh now stores live capability documents, synthesizes a deterministic legacy fallback document for services that return `404`/`405`/`501` on `/relayna/capabilities`, and returns `502` without overwriting stored data on network or schema failures.
+- Shared topology-kind detection now lives in a reusable helper used by both execution-graph generation and the capability discovery route.
+- `httpx` is now a runtime dependency because Studio capability refresh performs backend HTTP fetches in production.
+- Release-install examples now reference `1.3.5`.
+- Bumped the package version to `1.3.5`.
+
+## 1.3.4 - 2026-04-06
+
+### Added
+
+- First-class runtime execution graph support for every Relayna topology through `ExecutionGraph`, `ExecutionGraphService`, `build_execution_graph(...)`, and `GET /executions/{task_id}/graph`.
+- Redis-backed observation persistence via `RedisObservationStore` plus `make_redis_observation_sink(...)` so workers can persist task-linked runtime observations for later graph reconstruction.
+- Mermaid export via `execution_graph_mermaid(...)` and Studio backend view support via `build_execution_view(...)` for app rendering and docs/debug workflows.
+
+### Changed
+
+- `create_relayna_lifespan(...)` now exposes `observation_store`, `execution_graph_service`, and new observation-store configuration fields for HTTP runtimes that want execution-graph fidelity.
+- Consumer and workflow observation events now carry the routing, retry, queue, and lineage metadata needed to reconstruct retries, DLQ edges, sharded aggregation children, and workflow stage transitions.
+- `RedisStatusStore` now indexes child task ids from `meta.parent_task_id`, which lets aggregation execution graphs stitch child task timelines back onto the parent task graph.
+- The README, observability guide, getting-started guide, component reference, and hosted docs now document execution graphs, Mermaid export, React Flow rendering, and the worker/runtime wiring required for full graphs.
+- Release-install examples now reference `1.3.4`.
+- Bumped the package version to `1.3.4`.
+
+### Added
+
+- `WorkflowStage` execution-contract fields for stage metadata, action schemas, allowed downstream stages, stage-local timeout/retry/inflight policy, and dedup key selection.
+- Shared workflow-contract validation on workflow publish and consume paths, plus Redis-backed contract-store primitives for stage dedup/idempotency bookkeeping.
+
+### Changed
+
+- Workflow topology graph export, `/workflow/stages`, `/workflow/topology`, MCP topology inspection, and studio topology views now expose stage execution-contract metadata.
+- `StageRegistry`, `StagePolicy`, and `TransitionRule` remain importable as compatibility adapters, but `WorkflowStage` is now the primary workflow contract surface.
+
 ## 1.3.3 - 2026-04-04
 
 ### Added

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from relayna.contracts import ContractAliasConfig, WorkflowEnvelope
+from relayna.contracts import ActionSchema, ContractAliasConfig, PayloadSchema, WorkflowEnvelope
 from relayna.rabbitmq import (
     RelaynaRabbitClient,
     RetryInfrastructure,
@@ -1049,7 +1049,7 @@ async def test_sharded_topology_client_initialize_works_on_python_313_slots_data
         assert url == "amqp://guest:guest@localhost:5672/?name=relayna-robust"
         return connection
 
-    monkeypatch.setattr("relayna.rabbitmq.aio_pika.connect_robust", fake_connect_robust)
+    monkeypatch.setattr("relayna.rabbitmq.client.aio_pika.connect_robust", fake_connect_robust)
 
     client = RelaynaRabbitClient(topology=topology)
 
@@ -1135,6 +1135,156 @@ def test_workflow_topology_validates_unknown_entry_stage() -> None:
                 ),
             ),
             entry_routes=(WorkflowEntryRoute(name="replanner", routing_key="replanner.in", target_stage="missing"),),
+        )
+
+
+def test_workflow_topology_accepts_stage_contract_fields() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                description="Plans tasks",
+                role="planner",
+                owner="ops",
+                tags=("core",),
+                sla_ms=1000,
+                accepted_actions=(
+                    ActionSchema(
+                        action="plan",
+                        payload=PayloadSchema(name="plan_payload", required_fields=("query",)),
+                    ),
+                ),
+                produced_actions=(
+                    ActionSchema(
+                        action="draft",
+                        payload=PayloadSchema(name="draft_payload", required_fields=("outline",)),
+                    ),
+                ),
+                allowed_next_stages=("writer",),
+                timeout_seconds=2.0,
+                max_retries=2,
+                retry_delay_ms=500,
+                max_inflight=4,
+                dedup_key_fields=("query",),
+            ),
+            WorkflowStage(
+                name="writer",
+                queue="writer.queue",
+                binding_keys=("writer.in",),
+                publish_routing_key="writer.in",
+                terminal=True,
+            ),
+        ),
+    )
+
+    stage = topology.workflow_stage("planner")
+
+    assert stage.role == "planner"
+    assert stage.accepted_actions[0].action == "plan"
+    assert stage.allowed_next_stages == ("writer",)
+    assert stage.max_inflight == 4
+
+
+def test_workflow_topology_validates_unknown_allowed_next_stage() -> None:
+    with pytest.raises(ValueError, match="unknown downstream stage"):
+        SharedStatusWorkflowTopology(
+            rabbitmq_url="amqp://guest:guest@localhost:5672/",
+            workflow_exchange="workflow.exchange",
+            status_exchange="status.exchange",
+            status_queue="status.queue",
+            stages=(
+                WorkflowStage(
+                    name="planner",
+                    queue="planner.queue",
+                    binding_keys=("planner.in",),
+                    publish_routing_key="planner.in",
+                    allowed_next_stages=("missing",),
+                ),
+            ),
+        )
+
+
+def test_workflow_topology_validates_duplicate_stage_action_definitions() -> None:
+    with pytest.raises(ValueError, match="duplicate action names"):
+        SharedStatusWorkflowTopology(
+            rabbitmq_url="amqp://guest:guest@localhost:5672/",
+            workflow_exchange="workflow.exchange",
+            status_exchange="status.exchange",
+            status_queue="status.queue",
+            stages=(
+                WorkflowStage(
+                    name="planner",
+                    queue="planner.queue",
+                    binding_keys=("planner.in",),
+                    publish_routing_key="planner.in",
+                    accepted_actions=(
+                        ActionSchema(action="plan"),
+                        ActionSchema(action="plan"),
+                    ),
+                ),
+            ),
+        )
+
+
+def test_workflow_topology_validates_terminal_stage_configuration() -> None:
+    with pytest.raises(ValueError, match="cannot be terminal"):
+        SharedStatusWorkflowTopology(
+            rabbitmq_url="amqp://guest:guest@localhost:5672/",
+            workflow_exchange="workflow.exchange",
+            status_exchange="status.exchange",
+            status_queue="status.queue",
+            stages=(
+                WorkflowStage(
+                    name="writer",
+                    queue="writer.queue",
+                    binding_keys=("writer.in",),
+                    publish_routing_key="writer.in",
+                    terminal=True,
+                    allowed_next_stages=("reviewer",),
+                ),
+                WorkflowStage(
+                    name="reviewer",
+                    queue="reviewer.queue",
+                    binding_keys=("reviewer.in",),
+                    publish_routing_key="reviewer.in",
+                ),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "match"),
+    [
+        ("sla_ms", 0, "sla_ms >= 1"),
+        ("timeout_seconds", 0, "timeout_seconds > 0"),
+        ("max_retries", -1, "max_retries >= 0"),
+        ("retry_delay_ms", 0, "retry_delay_ms > 0"),
+        ("max_inflight", 0, "max_inflight >= 1"),
+    ],
+)
+def test_workflow_topology_validates_contract_numeric_fields(field_name: str, field_value: object, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        SharedStatusWorkflowTopology(
+            rabbitmq_url="amqp://guest:guest@localhost:5672/",
+            workflow_exchange="workflow.exchange",
+            status_exchange="status.exchange",
+            status_queue="status.queue",
+            stages=(
+                WorkflowStage(
+                    name="planner",
+                    queue="planner.queue",
+                    binding_keys=("planner.in",),
+                    publish_routing_key="planner.in",
+                    **{field_name: field_value},
+                ),
+            ),
         )
 
 
@@ -1280,6 +1430,181 @@ async def test_publish_to_stage_uses_workflow_routing_key() -> None:
     assert exchange.publish_calls
     _message, routing_key = exchange.publish_calls[0]
     assert routing_key == "planner.docsearch_planner.in"
+
+
+@pytest.mark.asyncio
+async def test_publish_workflow_rejects_forbidden_stage_transition() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                allowed_next_stages=("writer",),
+                produced_actions=(ActionSchema(action="draft"),),
+            ),
+            WorkflowStage(
+                name="writer",
+                queue="writer.queue",
+                binding_keys=("writer.in",),
+                publish_routing_key="writer.in",
+            ),
+            WorkflowStage(
+                name="reviewer",
+                queue="reviewer.queue",
+                binding_keys=("reviewer.in",),
+                publish_routing_key="reviewer.in",
+            ),
+        ),
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="cannot publish to 'reviewer'"):
+        await client.publish_workflow(
+            WorkflowEnvelope(
+                task_id="task-123",
+                stage="reviewer",
+                origin_stage="planner",
+                action="draft",
+                payload={"outline": "x"},
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_workflow_rejects_terminal_stage_handoff() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="writer",
+                queue="writer.queue",
+                binding_keys=("writer.in",),
+                publish_routing_key="writer.in",
+                terminal=True,
+            ),
+            WorkflowStage(
+                name="reviewer",
+                queue="reviewer.queue",
+                binding_keys=("reviewer.in",),
+                publish_routing_key="reviewer.in",
+            ),
+        ),
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="terminal"):
+        await client.publish_workflow(
+            WorkflowEnvelope(
+                task_id="task-123",
+                stage="reviewer",
+                origin_stage="writer",
+                action="review",
+                payload={"outline": "x"},
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_workflow_rejects_unsupported_source_action() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                allowed_next_stages=("writer",),
+                produced_actions=(ActionSchema(action="draft"),),
+            ),
+            WorkflowStage(
+                name="writer",
+                queue="writer.queue",
+                binding_keys=("writer.in",),
+                publish_routing_key="writer.in",
+            ),
+        ),
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="does not support action 'review'"):
+        await client.publish_workflow(
+            WorkflowEnvelope(
+                task_id="task-123",
+                stage="writer",
+                origin_stage="planner",
+                action="review",
+                payload={"outline": "x"},
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_workflow_rejects_destination_payload_schema_mismatch() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                allowed_next_stages=("writer",),
+                produced_actions=(ActionSchema(action="draft"),),
+            ),
+            WorkflowStage(
+                name="writer",
+                queue="writer.queue",
+                binding_keys=("writer.in",),
+                publish_routing_key="writer.in",
+                accepted_actions=(
+                    ActionSchema(
+                        action="draft",
+                        payload=PayloadSchema(name="writer_payload", required_fields=("outline",)),
+                    ),
+                ),
+            ),
+        ),
+    )
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._workflow_exchange = FakeStatusExchange()
+
+    with pytest.raises(ValueError, match="rejected action 'draft'"):
+        await client.publish_workflow(
+            WorkflowEnvelope(
+                task_id="task-123",
+                stage="writer",
+                origin_stage="planner",
+                action="draft",
+                payload={"query": "x"},
+            )
+        )
 
 
 @pytest.mark.asyncio

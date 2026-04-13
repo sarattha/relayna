@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from relayna.status_store import RedisStatusStore
+from relayna.status import RedisStatusStore
 
 
 class FakePipeline:
@@ -18,6 +18,9 @@ class FakePipeline:
 
     def expire(self, key: str, ttl: int) -> None:
         self._ops.append(("expire", (key, ttl)))
+
+    def sadd(self, key: str, *values: object) -> None:
+        self._ops.append(("sadd", (key, *values)))
 
     def publish(self, channel: str, payload: str) -> None:
         self._ops.append(("publish", (channel, payload)))
@@ -38,6 +41,12 @@ class FakePipeline:
                 key, ttl = args
                 self._redis.expirations[key] = int(ttl)
                 results.append(True)
+            elif op == "sadd":
+                key, *values = args
+                members = self._redis.sets.setdefault(key, set())
+                for value in values:
+                    members.add(str(value))
+                results.append(len(values))
             elif op == "publish":
                 channel, payload = args
                 self._redis.published.append((channel, payload))
@@ -48,6 +57,7 @@ class FakePipeline:
 class FakeRedis:
     def __init__(self) -> None:
         self.history: dict[str, list[str]] = {}
+        self.sets: dict[str, set[str]] = {}
         self.expirations: dict[str, int] = {}
         self.published: list[tuple[str, str]] = []
         self._seen_keys: set[str] = set()
@@ -69,6 +79,13 @@ class FakeRedis:
         if not items:
             return None
         return items[index]
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        items = self.history.get(key, [])
+        return items[int(start) : int(stop) + 1]
+
+    async def smembers(self, key: str) -> set[str]:
+        return set(self.sets.get(key, set()))
 
 
 @pytest.mark.asyncio
@@ -125,3 +142,24 @@ async def test_get_latest_returns_none_when_no_history_exists() -> None:
     latest = await store.get_latest("missing-task")
 
     assert latest is None
+
+
+@pytest.mark.asyncio
+async def test_set_history_indexes_child_task_ids_by_parent_task_id() -> None:
+    redis = FakeRedis()
+    store = RedisStatusStore(redis, prefix="translation-status", ttl_seconds=60, history_maxlen=10)
+
+    await store.set_history(
+        "child-1",
+        {
+            "task_id": "child-1",
+            "status": "aggregating",
+            "meta": {"parent_task_id": "parent-1"},
+            "event_id": "evt-1",
+        },
+    )
+
+    child_task_ids = await store.get_child_task_ids("parent-1")
+
+    assert child_task_ids == ["child-1"]
+    assert redis.expirations[store.child_tasks_key("parent-1")] == 60

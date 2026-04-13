@@ -2,7 +2,7 @@
 
 ## Public modules
 
-These modules are part of the documented v1 API surface.
+These packages are part of the documented v2 API surface.
 
 ## `relayna.topology`
 
@@ -20,7 +20,15 @@ RabbitMQ topology definitions and routing strategies:
 - `ShardRoutingStrategy`
 - `TaskTypeRoutingStrategy`
 
-Use this module to choose the topology shape your service should run with.
+This package owns topology declarations only. Use it to choose the queue and
+exchange shape your service should run with. It does not own publishing,
+consumer runtimes, or Redis-backed status storage.
+
+For workflow topologies, `WorkflowStage` is the primary contract surface. It
+now carries both transport configuration and optional execution-contract
+metadata such as accepted/produced actions, downstream stage constraints,
+timeouts, retry overrides, local inflight limits, and dedup/idempotency keys.
+
 For sharded topologies, `aggregation_queue_template` and
 `aggregation_queue_name_prefix` let you namespace aggregation queues per
 deployment or test environment. Topology constructors also expose first-class
@@ -45,6 +53,9 @@ Canonical message envelopes and compatibility helpers:
 - `normalize_event_aliases`
 - `denormalize_document_aliases`
 
+This package owns wire-format contracts only. It does not own RabbitMQ
+transport, FastAPI routes, or worker execution.
+
 ## `relayna.rabbitmq`
 
 RabbitMQ publishing and topology helpers:
@@ -54,11 +65,10 @@ RabbitMQ publishing and topology helpers:
 - `DirectQueuePublisher`
 - `declare_stream_queue`
 
-Use this module when you want topology-driven exchange and queue declaration
-plus JSON task, workflow, status, and aggregation-status publishing. It also
-provides raw queue publishing and retry/DLQ queue declaration helpers for
-worker paths. Relayna retry metadata is carried in RabbitMQ `x-relayna-*`
-headers rather than rewriting the payload body.
+This package owns RabbitMQ transport behavior: connection lifecycle, queue and
+exchange declarations, topology-driven publishing, raw queue publishing, and
+retry/DLQ broker infrastructure. Relayna retry metadata is carried in RabbitMQ
+`x-relayna-*` headers rather than rewriting the payload body.
 
 ## `relayna.consumer`
 
@@ -86,28 +96,23 @@ outside FastAPI. `TaskConsumer`, `WorkflowConsumer`, `AggregationConsumer`, and
 `AggregationWorkerRuntime` also expose `consume_timeout_seconds` to control how
 long the local runtime waits for the next message before looping again.
 
-## `relayna.status_store`
+This package owns worker execution and handler context. It does not own the
+FastAPI runtime or the RabbitMQ topology declarations themselves.
 
-`RedisStatusStore` stores task history in Redis lists, deduplicates status
-events, and publishes live updates over Redis pubsub.
+## `relayna.status`
 
-## `relayna.status_hub`
+Status storage, hub, streaming, and stream-history readers:
 
-`StatusHub` consumes shared RabbitMQ status traffic and writes normalized events
-into `RedisStatusStore`.
+- `RedisStatusStore`
+- `StatusHub`
+- `SSEStatusStream`
+- `StreamHistoryReader`
 
-## `relayna.sse`
+This package is the unified home for user-facing progress state, Redis-backed
+history, SSE delivery, and bounded stream replay. It also owns the
+RabbitMQ-to-Redis `StatusHub` bridge.
 
-`SSEStatusStream` combines replayed Redis history with live pubsub delivery for
-client-facing SSE streams. It also supports `Last-Event-ID` resume and optional
-output adapters such as `document_output_adapter`.
-
-## `relayna.history`
-
-`StreamHistoryReader` replays status history directly from a RabbitMQ stream for
-bounded operational endpoints and debugging reads.
-
-## `relayna.fastapi`
+## `relayna.api`
 
 FastAPI integration helpers:
 
@@ -115,9 +120,70 @@ FastAPI integration helpers:
 - `get_relayna_runtime`
 - `create_status_router`
 - `sse_response`
+- `create_execution_router`
+- `create_workflow_router`
+- `create_dlq_router`
+
+This package owns FastAPI runtime composition only: lifespan setup, runtime
+lookup, and route factories. It composes the lower-level runtime packages and
+does not own RabbitMQ transport, Redis storage, or workflow contracts directly.
+
+## `relayna.workflow`
+
+Workflow control-plane helpers:
+
+- `StageRegistry`
+- `StagePolicy`
+- `WorkflowAction`
+- `TransitionRule`
+- `FanInProgress`
+- `WorkflowRunState`
+- `ReplayRequest`
+- `WorkflowDiagnosis`
+
+This package owns orchestration concepts that sit above message transport:
+fan-in state, run-state read models, replay, and operator diagnostics.
+`StageRegistry`, `StagePolicy`, and `TransitionRule` remain available as
+compatibility adapters, but `WorkflowStage` is the preferred configuration
+surface for new workflow definitions.
+
+## `relayna.mcp`
+
+MCP-facing adapters, resources, and operator tools for exposing Relayna
+runtime state to agentic clients. It sits on top of the runtime packages rather
+than owning transport or storage primitives itself.
+
+## `relayna.dlq`
+
+Dead-letter models, persistence, service operations, and replay helpers.
+
+This package owns DLQ state and replay orchestration. It is separate from
+`relayna.rabbitmq` so broker infrastructure and DLQ indexing/replay remain
+distinct concerns.
+
+Studio-specific presenter helpers and the deployable backend now live in the
+separate `relayna-studio` package.
 
 ## `relayna.observability`
 
 Structured observation types and helper functions for feeding runtime events
 into logging, metrics, tracing, or debugging sinks. See
 [Observability](observability.md) for detailed event groups and usage examples.
+This package also owns persisted task-linked observation storage and execution
+graph reconstruction:
+
+- `RedisObservationStore`
+- `make_redis_observation_sink`
+- `ExecutionGraph`
+- `ExecutionGraphNode`
+- `ExecutionGraphEdge`
+- `ExecutionGraphSummary`
+- `ExecutionGraphService`
+- `build_execution_graph`
+- `execution_graph_mermaid`
+
+## Internal packages
+
+`relayna.storage` contains internal Redis models, repository helpers, and
+retention logic shared by the public runtime packages. It is intentionally not
+part of the documented public API surface.

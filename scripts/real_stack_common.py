@@ -8,9 +8,16 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI
 
+from relayna.api import (
+    create_dlq_router,
+    create_events_router,
+    create_execution_router,
+    create_relayna_lifespan,
+    create_status_router,
+    get_relayna_runtime,
+)
 from relayna.contracts import ContractAliasConfig, TerminalStatusSet
 from relayna.dlq import DLQService
-from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.topology import (
     RelaynaTopology,
     SharedStatusWorkflowTopology,
@@ -94,6 +101,10 @@ def build_app(
     *,
     sse_terminal_statuses: TerminalStatusSet | None = None,
     dlq_store_prefix: str | None = None,
+    observation_store_prefix: str | None = None,
+    observation_store_ttl_seconds: int | None = None,
+    observation_history_maxlen: int = 500,
+    include_execution_router: bool = False,
     alias_config: ContractAliasConfig | None = None,
 ) -> FastAPI:
     app = FastAPI(
@@ -103,6 +114,9 @@ def build_app(
             store_prefix=f"relayna-smoke-{suffix}",
             sse_terminal_statuses=sse_terminal_statuses,
             dlq_store_prefix=dlq_store_prefix,
+            observation_store_prefix=observation_store_prefix,
+            observation_store_ttl_seconds=observation_store_ttl_seconds,
+            observation_history_maxlen=observation_history_maxlen,
             alias_config=alias_config,
         )
     )
@@ -115,6 +129,8 @@ def build_app(
             alias_config=alias_config,
         )
     )
+    if runtime.service_event_store is not None:
+        app.include_router(create_events_router(service_event_store=runtime.service_event_store))
     if runtime.dlq_store is not None:
         app.include_router(
             create_dlq_router(
@@ -123,6 +139,13 @@ def build_app(
                     dlq_store=runtime.dlq_store,
                     status_store=runtime.store,
                 ),
+                alias_config=alias_config,
+            )
+        )
+    if include_execution_router:
+        app.include_router(
+            create_execution_router(
+                execution_graph_service=runtime.execution_graph_service,
                 alias_config=alias_config,
             )
         )
@@ -181,3 +204,29 @@ async def fetch_latest_status(client: httpx.AsyncClient, task_id: str) -> dict[s
     response = await client.get(f"/status/{task_id}")
     response.raise_for_status()
     return response.json()
+
+
+async def poll_execution_graph(
+    client: httpx.AsyncClient,
+    *,
+    task_id: str,
+    expected_node_kinds: set[str],
+    timeout_seconds: float = 10.0,
+) -> dict[str, object]:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_response: dict[str, object] | None = None
+    while asyncio.get_running_loop().time() < deadline:
+        response = await client.get(f"/executions/{task_id}/graph")
+        if response.status_code == 404:
+            await asyncio.sleep(0.1)
+            continue
+        response.raise_for_status()
+        payload = response.json()
+        last_response = payload
+        node_kinds = {str(node["kind"]) for node in payload.get("nodes", [])}
+        if expected_node_kinds <= node_kinds:
+            return payload
+        await asyncio.sleep(0.1)
+    raise TimeoutError(
+        f"Timed out waiting for execution graph kinds {sorted(expected_node_kinds)}. Last response: {last_response}"
+    )

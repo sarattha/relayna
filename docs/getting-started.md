@@ -1,4 +1,33 @@
-# Getting started
+# Getting Started
+
+This guide is the primary integration document for teams embedding the
+`relayna` SDK into an application service. It focuses on three things:
+
+- wiring RabbitMQ, Redis, and FastAPI correctly
+- exposing the route surface Studio expects to federate
+- avoiding configuration drift across environments
+
+If you are deploying the centralized Relayna Studio control plane itself, see
+[Studio Backend](studio-backend.md) and [Studio Frontend](studio-frontend.md).
+
+## What Belongs To The SDK vs Studio
+
+`relayna` is the service-side runtime package. It owns:
+
+- RabbitMQ topology declarations and publishing
+- worker runtimes and retry behavior
+- Redis-backed latest status, history, DLQ, and observability storage
+- FastAPI route factories for status, capabilities, workflow, execution graph,
+  DLQ, events feed, and worker health
+
+Relayna Studio is the separate control plane. It owns:
+
+- a central registry of Relayna-enabled services
+- a backend that federates reads across those services
+- a frontend SPA that only talks to the Studio backend under `/studio/*`
+
+The practical boundary is simple: your service integrates `relayna`; Studio
+registers that service and reads the public Relayna endpoints it exposes.
 
 ## Requirements
 
@@ -7,45 +36,107 @@ You need:
 - Python `>=3.13`
 - RabbitMQ
 - Redis
+- FastAPI for HTTP integration
 
-## Install from GitHub Releases
+## Install
+
+GitHub Releases are the canonical source for SDK artifacts.
 
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.5/relayna-1.3.5-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.3.3/relayna-1.3.3.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.3.5/relayna-1.3.5.tar.gz
 ```
 
-For local work in this repository:
+For local development in this repository:
 
 ```bash
 uv sync --extra dev
 ```
 
-## Topology overview
+## Topology Overview
 
-`relayna` now uses named topology classes as the primary RabbitMQ configuration
+`relayna` uses named topology classes as the primary RabbitMQ configuration
 API.
 
-- `SharedTasksSharedStatusTopology`: one shared task queue and one shared status
-  queue/stream.
-- `SharedTasksSharedStatusShardedAggregationTopology`: the same shared task and
-  shared status plane, plus shard-bound aggregation worker queues on the status
-  exchange.
-- `RoutedTasksSharedStatusTopology`: task queues are bound by `task_type`, while
-  status stays on one shared queue/stream.
-- `RoutedTasksSharedStatusShardedAggregationTopology`: routed task queues plus
-  shard-bound aggregation worker queues on the shared status exchange.
-- `SharedStatusWorkflowTopology`: one workflow topic exchange, one durable inbox
-  queue per consuming stage, and one shared status queue/stream.
+- `SharedTasksSharedStatusTopology`
+  One shared task queue and one shared status queue or stream.
+- `SharedTasksSharedStatusShardedAggregationTopology`
+  The same shared task and shared status plane, plus shard-bound aggregation
+  worker queues on the status exchange.
+- `RoutedTasksSharedStatusTopology`
+  Task queues are bound by `task_type`, while status stays on one shared
+  queue or stream.
+- `RoutedTasksSharedStatusShardedAggregationTopology`
+  Routed task queues plus shard-bound aggregation worker queues on the shared
+  status exchange.
+- `SharedStatusWorkflowTopology`
+  One workflow topic exchange, one durable inbox queue per consuming stage, and
+  one shared status queue or stream.
 
-## Topology naming guidance
+## Package Map
+
+The v2 API is organized by responsibility. In practice:
+
+- import topology classes and graph helpers from `relayna.topology`
+- import task, status, and workflow envelopes from `relayna.contracts`
+- import publishing and declaration helpers from `relayna.rabbitmq`
+- import worker runtimes and handler contexts from `relayna.consumer`
+- import Redis-backed latest/history storage, `StatusHub`, SSE, and stream
+  replay from `relayna.status`
+- import FastAPI lifespan and route helpers from `relayna.api`
+- import DLQ indexing and replay services from `relayna.dlq`
+- import workflow control-plane helpers from `relayna.workflow`
+- import observation events and exporters from `relayna.observability`
+
+`relayna.storage` is internal support code and is not part of the documented
+public API.
+
+## Integration Path
+
+The recommended integration order for a new service is:
+
+1. Choose a topology from `relayna.topology`.
+2. Construct a `RelaynaRabbitClient` for task publishing.
+3. Attach `create_relayna_lifespan(...)` to your FastAPI app.
+4. Read the runtime with `get_relayna_runtime(app)`.
+5. Expose the status endpoints your callers need.
+6. Add optional route surfaces that unlock Studio features.
+7. Run a worker consumer with the same topology and Redis assumptions.
+
+The minimum app usually needs:
+
+- one topology shared between publishers, API, and workers
+- one Redis URL for status and optional observability stores
+- one status router for live SSE, bounded history replay, and latest status
+
+## Choose A Topology
+
+`relayna` uses named topology classes as the primary RabbitMQ configuration API.
+
+- `SharedTasksSharedStatusTopology`
+  One shared task queue and one shared status queue or stream. This is the
+  simplest default for most services.
+- `SharedTasksSharedStatusShardedAggregationTopology`
+  Adds shard-bound aggregation queues on top of the shared task and status
+  plane.
+- `RoutedTasksSharedStatusTopology`
+  Routes task queues by `task_type` while keeping shared status.
+- `RoutedTasksSharedStatusShardedAggregationTopology`
+  Adds routed task queues plus sharded aggregation.
+- `SharedStatusWorkflowTopology`
+  Adds stage inbox queues and workflow topology metadata for multi-stage flows.
+
+If you do not have a strong reason to route by task type or use workflow stages,
+start with `SharedTasksSharedStatusTopology`.
+
+## Topology Naming Guidance
 
 Shared topology resources are usually namespaced by exchange, queue, and Redis
 prefix values. For sharded topologies, remember that the default aggregation
@@ -54,7 +145,37 @@ queue names such as `aggregation.queue.0` and
 deployments, smoke tests, or local stacks share one RabbitMQ vhost, give the
 aggregation queues a deployment-specific prefix too.
 
-## Queue argument configuration
+In practice, choose names that make collisions impossible across:
+
+- environments such as `dev`, `staging`, and `prod`
+- multiple local stacks sharing one broker or Redis instance
+- smoke tests that create durable resources
+
+Recommended pattern:
+
+- exchanges prefixed with service and environment
+- queues prefixed with service, environment, and queue role
+- Redis prefixes prefixed with service and environment
+
+Example:
+
+```text
+orders.dev.tasks.exchange
+orders.dev.tasks.queue
+orders.dev.status.exchange
+orders.dev.status.queue
+orders.dev.relayna
+orders.dev.relayna-observations
+orders.dev.relayna-dlq
+orders.dev.aggregation.queue.0
+orders.dev.aggregation.queue.shards.1-3
+```
+
+This matters even more when Studio is part of the operating model, because
+stable queue and prefix naming makes capability refresh, task identity, DLQ
+inspection, and operational debugging much easier to reason about.
+
+## Queue Argument Configuration
 
 Topology constructors include a small curated set of first-class RabbitMQ queue
 arguments for worker-owned queues:
@@ -193,40 +314,92 @@ topology = SharedTasksSharedStatusTopology(
 Relayna raises `ValueError` when the same RabbitMQ argument key is configured
 through more than one source for the same queue family.
 
-## Example: shared tasks + shared status
+## End-To-End Service Example
 
-This is the default setup for task workers, shared status history, and FastAPI
-status endpoints.
+The example below shows the most common shape for a service:
+
+- one topology
+- one FastAPI app
+- status, capabilities, DLQ, execution graph, events feed, and worker health
+- one publisher client
+- one worker consumer
 
 ```python
 from fastapi import FastAPI
+from redis.asyncio import Redis
 
+from relayna.api import (
+    DLQ_CAPABILITY_ROUTE_IDS,
+    EVENTS_CAPABILITY_ROUTE_IDS,
+    EXECUTION_CAPABILITY_ROUTE_IDS,
+    HEALTH_CAPABILITY_ROUTE_IDS,
+    STATUS_CAPABILITY_ROUTE_IDS,
+    create_capabilities_router,
+    create_dlq_router,
+    create_events_router,
+    create_execution_router,
+    create_relayna_lifespan,
+    create_status_router,
+    create_worker_health_router,
+    get_relayna_runtime,
+    merge_capability_route_ids,
+)
+from relayna.consumer import RetryPolicy, TaskConsumer
 from relayna.dlq import DLQService
-from relayna.fastapi import create_dlq_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.observability import RedisObservationStore, make_redis_observation_sink
 from relayna.rabbitmq import RelaynaRabbitClient
 from relayna.topology import SharedTasksSharedStatusTopology
 
+RABBITMQ_URL = "amqp://guest:guest@localhost:5672/"
+REDIS_URL = "redis://localhost:6379/0"
+OBSERVATION_STORE_PREFIX = "orders-observations"
+
 topology = SharedTasksSharedStatusTopology(
-    rabbitmq_url="amqp://guest:guest@localhost:5672/",
-    tasks_exchange="tasks.exchange",
-    tasks_queue="tasks.queue",
-    tasks_routing_key="task.request",
-    status_exchange="status.exchange",
-    status_queue="status.queue",
+    rabbitmq_url=RABBITMQ_URL,
+    tasks_exchange="orders.tasks.exchange",
+    tasks_queue="orders.tasks.queue",
+    tasks_routing_key="orders.task.request",
+    status_exchange="orders.status.exchange",
+    status_queue="orders.status.queue",
     task_consumer_timeout_ms=600000,
 )
 
-client = RelaynaRabbitClient(topology=topology)
-await client.initialize()
-await client.publish_task({"task_id": "task-123", "payload": {"kind": "demo"}})
+publisher = RelaynaRabbitClient(topology=topology)
+worker_observation_store = RedisObservationStore(
+    Redis.from_url(REDIS_URL),
+    prefix=OBSERVATION_STORE_PREFIX,
+    ttl_seconds=86400,
+    history_maxlen=500,
+)
+
+
+async def handle_task(message: dict) -> None:
+    # Replace this with real application logic.
+    print(f"processing {message['task_id']}")
+
+
+consumer = TaskConsumer(
+    rabbitmq=publisher,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    observation_sink=make_redis_observation_sink(worker_observation_store),
+)
+
 
 app = FastAPI(
+    title="Orders Service",
     lifespan=create_relayna_lifespan(
         topology=topology,
-        redis_url="redis://localhost:6379/0",
-    )
+        redis_url=REDIS_URL,
+        store_prefix="orders-relayna",
+        dlq_store_prefix="orders-dlq",
+        observation_store_prefix=OBSERVATION_STORE_PREFIX,
+        service_event_store_prefix="orders-service-events",
+    ),
 )
+
 runtime = get_relayna_runtime(app)
+
 app.include_router(
     create_status_router(
         sse_stream=runtime.sse_stream,
@@ -234,6 +407,21 @@ app.include_router(
         latest_status_store=runtime.store,
     )
 )
+
+app.include_router(
+    create_capabilities_router(
+        topology=topology,
+        supported_routes=merge_capability_route_ids(
+            STATUS_CAPABILITY_ROUTE_IDS,
+            DLQ_CAPABILITY_ROUTE_IDS,
+            EXECUTION_CAPABILITY_ROUTE_IDS,
+            EVENTS_CAPABILITY_ROUTE_IDS,
+            HEALTH_CAPABILITY_ROUTE_IDS,
+        ),
+        service_title="Orders Service",
+    )
+)
+
 if runtime.dlq_store is not None:
     app.include_router(
         create_dlq_router(
@@ -241,19 +429,398 @@ if runtime.dlq_store is not None:
                 rabbitmq=runtime.rabbitmq,
                 dlq_store=runtime.dlq_store,
                 status_store=runtime.store,
-            ),
-            broker_dlq_queue_names=["tasks.queue.dlq", "aggregation.queue.0.dlq"],
+            )
         )
     )
+
+if runtime.service_event_store is not None:
+    app.include_router(create_events_router(service_event_store=runtime.service_event_store))
+
+app.include_router(create_execution_router(execution_graph_service=runtime.execution_graph_service))
+app.include_router(create_worker_health_router(heartbeat_provider=lambda: []))
+
+
+async def publish_example() -> None:
+    await publisher.initialize()
+    try:
+        await publisher.publish_task(
+            {
+                "task_id": "task-123",
+                "task_type": "order.capture",
+                "payload": {"order_id": "ord-123"},
+            }
+        )
+    finally:
+        await publisher.close()
 ```
 
-This exposes:
+Notes:
+
+- `create_relayna_lifespan(...)` creates and owns the Relayna FastAPI runtime.
+- `get_relayna_runtime(app)` gives you the initialized stores, stream, history
+  reader, and execution graph service for route wiring.
+- `RelaynaRabbitClient` is used by producers and also by the runtime to connect
+  to RabbitMQ.
+- If you enable `observation_store_prefix`, execution graphs and the events feed
+  become materially more useful in Studio.
+
+## Worker Setup
+
+HTTP route wiring and worker consumption are separate concerns. A typical worker
+process uses the same topology and a `TaskConsumer`.
+
+Minimal worker shape:
+
+```python
+import asyncio
+
+from redis.asyncio import Redis
+
+from relayna.consumer import RetryPolicy, TaskConsumer
+from relayna.observability import RedisObservationStore, make_redis_observation_sink
+from relayna.rabbitmq import RelaynaRabbitClient
+from relayna.topology import SharedTasksSharedStatusTopology
+
+topology = SharedTasksSharedStatusTopology(
+    rabbitmq_url="amqp://guest:guest@localhost:5672/",
+    tasks_exchange="orders.tasks.exchange",
+    tasks_queue="orders.tasks.queue",
+    tasks_routing_key="orders.task.request",
+    status_exchange="orders.status.exchange",
+    status_queue="orders.status.queue",
+)
+
+
+async def handle_task(message: dict) -> None:
+    print(message)
+
+
+async def main() -> None:
+    rabbit = RelaynaRabbitClient(topology=topology)
+    await rabbit.initialize()
+    observation_store = RedisObservationStore(
+        Redis.from_url("redis://localhost:6379/0"),
+        prefix="orders-observations",
+        ttl_seconds=86400,
+    )
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handle_task,
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+        observation_sink=make_redis_observation_sink(observation_store),
+    )
+    try:
+        await consumer.run_forever()
+    finally:
+        await rabbit.close()
+        await observation_store.redis.aclose()
+
+
+asyncio.run(main())
+```
+
+Keep the topology names, queue settings, and Redis prefixes aligned between
+service code, workers, and deployment manifests.
+
+## FastAPI Route Surface
+
+### Baseline routes
+
+These are the common service-facing routes created by `create_status_router(...)`:
 
 - `GET /events/{task_id}`
+  Server-Sent Events for live status updates.
 - `GET /history`
+  Bounded replay from the shared status stream.
 - `GET /status/{task_id}`
+  Latest Redis-backed status snapshot.
 
-For a detailed observability walkthrough, see [Observability](observability.md).
+### Optional routes
+
+Add these when you need richer operations or Studio federation:
+
+- `GET /relayna/capabilities`
+  Exposed by `create_capabilities_router(...)`.
+- `GET /dlq/queues`
+- `GET /dlq/messages`
+- `GET /dlq/messages/{dlq_id}`
+- `POST /dlq/messages/{dlq_id}/replay`
+- `GET /executions/{task_id}/graph`
+- `GET /events/feed`
+- `GET /relayna/health/workers`
+- `GET /workflow/topology`
+- `GET /workflow/stages`
+
+Only include workflow routes when your service uses
+`SharedStatusWorkflowTopology`.
+
+### Worker Health For Studio
+
+Studio reads worker health from:
+
+- `GET /relayna/health/workers`
+
+The Studio backend calls that route during service health refresh. If the
+service capability document includes `health.workers`, Studio fetches the
+payload, computes the latest worker heartbeat timestamp, and marks worker health
+as healthy, stale, unsupported, or unhealthy based on the response and the
+backend-side staleness threshold. See
+[Studio Backend](studio-backend.md) for the corresponding
+`RELAYNA_STUDIO_WORKER_HEARTBEAT_STALE_AFTER_SECONDS` setting.
+
+The service-side contract is created with `create_worker_health_router(...)`.
+Your `heartbeat_provider` can return:
+
+- a list of `WorkerHeartbeatSummary`
+- a list of plain dicts with the same fields
+- an async function returning either of the above
+
+The response shape is:
+
+```json
+{
+  "reported_at": "2026-04-13T10:00:00+00:00",
+  "workers": [
+    {
+      "worker_name": "task-consumer-1",
+      "running": true,
+      "last_heartbeat_at": "2026-04-13T09:59:55+00:00"
+    }
+  ]
+}
+```
+
+At minimum, each worker item should include:
+
+- `worker_name`
+- `running`
+- `last_heartbeat_at`
+
+Example: static wiring with one provider function:
+
+```python
+from datetime import UTC, datetime
+
+from fastapi import FastAPI
+
+from relayna.api import WorkerHeartbeatSummary, create_worker_health_router
+
+
+def heartbeat_provider() -> list[WorkerHeartbeatSummary]:
+    return [
+        WorkerHeartbeatSummary(
+            worker_name="aggregation-1",
+            running=True,
+            last_heartbeat_at=datetime.now(UTC),
+        )
+    ]
+
+
+app = FastAPI()
+app.include_router(create_worker_health_router(heartbeat_provider=heartbeat_provider))
+```
+
+In a real service, do not hard-code the timestamp. Instead, keep worker state in
+shared memory, Redis, or another runtime-owned store and have the provider
+materialize the current snapshot.
+
+Example: in-process worker registry shared with FastAPI:
+
+```python
+import asyncio
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+from fastapi import FastAPI
+
+from relayna.api import WorkerHeartbeatSummary, create_worker_health_router
+
+
+@dataclass
+class WorkerState:
+    running: bool
+    last_heartbeat_at: datetime | None = None
+
+
+worker_state: dict[str, WorkerState] = {
+    "task-consumer-1": WorkerState(running=False),
+    "aggregation-1": WorkerState(running=False),
+}
+
+
+async def heartbeat_loop(worker_name: str) -> None:
+    worker_state[worker_name].running = True
+    try:
+        while True:
+            worker_state[worker_name].last_heartbeat_at = datetime.now(UTC)
+            await asyncio.sleep(5)
+    finally:
+        worker_state[worker_name].running = False
+
+
+def heartbeat_provider() -> list[WorkerHeartbeatSummary]:
+    return [
+        WorkerHeartbeatSummary(
+            worker_name=name,
+            running=state.running,
+            last_heartbeat_at=state.last_heartbeat_at,
+        )
+        for name, state in worker_state.items()
+    ]
+
+
+app = FastAPI()
+app.include_router(create_worker_health_router(heartbeat_provider=heartbeat_provider))
+```
+
+Operational guidance:
+
+- update `last_heartbeat_at` more frequently than the Studio stale threshold
+- keep worker names stable so operators can recognize them across refreshes
+- return `running=False` when a worker is intentionally stopped
+- expose the route only when the service can provide meaningful heartbeat data
+
+To make Studio actually use this route, include `HEALTH_CAPABILITY_ROUTE_IDS` in
+the capability document you expose through `create_capabilities_router(...)`.
+
+Example:
+
+```python
+from relayna.api import (
+    HEALTH_CAPABILITY_ROUTE_IDS,
+    STATUS_CAPABILITY_ROUTE_IDS,
+    create_capabilities_router,
+    create_worker_health_router,
+    merge_capability_route_ids,
+)
+
+app.include_router(
+    create_capabilities_router(
+        topology=topology,
+        supported_routes=merge_capability_route_ids(
+            STATUS_CAPABILITY_ROUTE_IDS,
+            HEALTH_CAPABILITY_ROUTE_IDS,
+        ),
+        service_title="Orders Service",
+    )
+)
+app.include_router(create_worker_health_router(heartbeat_provider=heartbeat_provider))
+```
+
+Verification:
+
+```bash
+curl -s http://localhost:8000/relayna/health/workers
+curl -s http://localhost:8000/relayna/capabilities
+```
+
+Studio-side verification:
+
+1. Register the service in Studio.
+2. Refresh capabilities so the backend sees `health.workers`.
+3. Run `POST /studio/services/{service_id}/health/refresh`.
+4. Confirm `worker_health.state` becomes `healthy` instead of `unsupported`.
+
+## Execution Graph API
+
+Relayna can reconstruct a runtime execution graph for a task from:
+
+- Redis status history
+- persisted observation events
+- persisted DLQ records
+- parent-child aggregation lineage indexed from status `meta.parent_task_id`
+
+The graph API is topology-aware:
+
+- shared-task topologies produce task-attempt graphs
+- sharded aggregation topologies attach child tasks and `aggregated_into` edges
+- workflow topologies add explicit `workflow_message` and `stage_attempt` nodes
+
+Wire it into FastAPI like this:
+
+```python
+from fastapi import FastAPI
+from redis.asyncio import Redis
+
+from relayna.api import create_execution_router, create_relayna_lifespan, get_relayna_runtime
+from relayna.consumer import RetryPolicy, TaskConsumer
+from relayna.observability import RedisObservationStore, make_redis_observation_sink
+
+observation_store_prefix = "relayna-observations"
+worker_observation_store = RedisObservationStore(
+    Redis.from_url("redis://localhost:6379/0"),
+    prefix=observation_store_prefix,
+    ttl_seconds=86400,
+    history_maxlen=500,
+)
+
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    observation_sink=make_redis_observation_sink(worker_observation_store),
+)
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        observation_store_prefix=observation_store_prefix,
+        observation_store_ttl_seconds=86400,
+        observation_history_maxlen=500,
+    )
+)
+runtime = get_relayna_runtime(app)
+app.include_router(create_execution_router(execution_graph_service=runtime.execution_graph_service))
+```
+
+This adds:
+
+- `GET /executions/{task_id}/graph`
+
+Route behavior:
+
+- returns `404` only when Relayna has no status history, no observations, and
+  no DLQ records for that task
+- returns `summary.graph_completeness="full"` when persisted observations were
+  available
+- returns `summary.graph_completeness="partial"` when it had to fall back to
+  status and DLQ data only
+
+The response contains:
+
+- `task_id`
+- `topology_kind`
+- `summary`
+- `nodes`
+- `edges`
+- `annotations`
+- `related_task_ids`
+
+Standard node kinds:
+
+- `task`
+- `task_attempt`
+- `workflow_message`
+- `stage_attempt`
+- `status_event`
+- `retry`
+- `dlq_record`
+- `aggregation_child`
+
+Standard edge kinds:
+
+- `received_by`
+- `published_status`
+- `retried_as`
+- `dead_lettered_to`
+- `manual_retry_to`
+- `entered_stage`
+- `stage_transitioned_to`
+- `aggregated_into`
+
+For full route examples, Mermaid output, and Studio rendering guidance, see
+[Execution Graphs](execution-graphs.md).
 
 ### Contract aliases
 
@@ -705,7 +1272,7 @@ from redis.asyncio import Redis
 
 from relayna.consumer import RetryPolicy, TaskConsumer
 from relayna.dlq import DLQService, RedisDLQStore
-from relayna.fastapi import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
+from relayna.api import create_dlq_router, create_relayna_lifespan, get_relayna_runtime
 
 dlq_store_prefix = "relayna-dlq"
 worker_dlq_store = RedisDLQStore(Redis.from_url("redis://localhost:6379/0"), prefix=dlq_store_prefix)
@@ -878,6 +1445,7 @@ flowchart LR
 ### Constructing the topology
 
 ```python
+from relayna.contracts import ActionSchema, PayloadSchema
 from relayna.topology import SharedStatusWorkflowTopology, WorkflowEntryRoute, WorkflowStage
 
 topology = SharedStatusWorkflowTopology(
@@ -893,6 +1461,20 @@ topology = SharedStatusWorkflowTopology(
             queue="cq.topic_planner.in_queue",
             binding_keys=("planner.topic_planner.in",),
             publish_routing_key="planner.topic_planner.in",
+            role="planner",
+            description="Initial workflow planning stage",
+            accepted_actions=(
+                ActionSchema(
+                    action="plan",
+                    payload=PayloadSchema(name="plan_payload", required_fields=("query",)),
+                ),
+            ),
+            produced_actions=(ActionSchema(action="draft"),),
+            allowed_next_stages=("docsearch_planner", "planner_assembler"),
+            timeout_seconds=30.0,
+            max_retries=3,
+            retry_delay_ms=1000,
+            max_inflight=8,
         ),
         WorkflowStage(
             name="docsearch_planner",
@@ -1522,7 +2104,7 @@ terminate correctly.
 
 ```python
 from relayna.contracts import TerminalStatusSet
-from relayna.fastapi import create_relayna_lifespan
+from relayna.api import create_relayna_lifespan
 
 app = FastAPI(
     lifespan=create_relayna_lifespan(
@@ -1538,7 +2120,7 @@ app = FastAPI(
 ```python
 from redis.asyncio import Redis
 
-from relayna.status_store import RedisStatusStore
+from relayna.status import RedisStatusStore
 
 redis = Redis.from_url("redis://localhost:6379/0")
 store = RedisStatusStore(redis, prefix="relayna", ttl_seconds=86400, history_maxlen=50)
@@ -1547,7 +2129,7 @@ store = RedisStatusStore(redis, prefix="relayna", ttl_seconds=86400, history_max
 ## Status bridge
 
 ```python
-from relayna.status_hub import StatusHub
+from relayna.status import StatusHub
 
 hub = StatusHub(rabbitmq=client, store=store)
 await hub.run_forever()
@@ -1582,3 +2164,169 @@ PYTHONPATH=src ./.venv/bin/python scripts/real_workflow_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_sharded_aggregation_smoke.py
 PYTHONPATH=src ./.venv/bin/python scripts/real_queue_args_smoke.py
 ```
+
+## Studio Compatibility
+
+Studio is deliberately conservative: it reads what your service declares and
+degrades when routes are not available. The more complete your route surface,
+the richer the Studio experience.
+
+### Why expose `GET /relayna/capabilities`
+
+Studio uses the capability document to determine:
+
+- Relayna version
+- topology kind
+- supported route IDs
+- alias config summary
+- service metadata such as capability path and compatibility mode
+
+Without that endpoint, Studio falls back to a legacy compatibility document with
+unknown version and no declared route support. The service can still be
+registered, but refresh, federation, and UI affordances are less predictable.
+
+### What Studio expects from a service
+
+At minimum for useful federation:
+
+- a stable `service_id` in Studio registry
+- a valid `base_url` reachable from the Studio backend
+- accurate `environment` and `auth_mode` metadata
+- `GET /relayna/capabilities`
+- `GET /events/{task_id}` and `GET /status/{task_id}` for task inspection
+
+For fuller functionality:
+
+- `GET /history` for bounded status replay
+- `GET /events/feed` for aggregated control-plane ingestion
+- `GET /executions/{task_id}/graph` for execution graph panels
+- `GET /workflow/topology` and `GET /workflow/stages` for workflow views
+- DLQ routes for operator replay and queue inspection
+- `GET /relayna/health/workers` for worker liveness snapshots
+
+For log panels, Studio does not read logs from Relayna directly. Instead, the
+service record in Studio can carry a `log_config` pointing at a supported log
+backend such as Loki. The service should still emit stable task and correlation
+identifiers into logs if you want useful joins.
+
+### Metadata that should stay stable
+
+Keep these values stable across deploys unless you intentionally migrate them:
+
+- `service_id`
+- `base_url`
+- `environment`
+- `auth_mode`
+- exchange names
+- queue names
+- Redis prefixes
+- task and correlation identifier semantics
+
+Changing these casually is the fastest way to break Studio joins, search, or
+operator expectations.
+
+## Operational Guidance
+
+### Naming and prefixing
+
+Use deployment-specific names for broker and Redis resources. A practical
+pattern is:
+
+- RabbitMQ exchange names prefixed by service and environment
+- queue names prefixed by service, environment, and role
+- Redis prefixes prefixed by service and environment
+
+Example:
+
+```text
+orders.dev.tasks.exchange
+orders.dev.tasks.queue
+orders.dev.status.exchange
+orders.dev.status.queue
+orders.dev.relayna
+orders.dev.relayna-observations
+orders.dev.relayna-dlq
+```
+
+This matters most when many local stacks or smoke tests share one RabbitMQ vhost
+or one Redis instance.
+
+### Queue arguments and collision avoidance
+
+Topology constructors expose first-class fields for common RabbitMQ queue
+arguments such as:
+
+- `task_consumer_timeout_ms`
+- `task_single_active_consumer`
+- `task_max_priority`
+- `task_queue_type`
+- `aggregation_consumer_timeout_ms`
+- `aggregation_single_active_consumer`
+- `aggregation_max_priority`
+- `aggregation_queue_type`
+
+They also expose explicit mapping escape hatches:
+
+- `task_queue_arguments_overrides`
+- `task_queue_kwargs`
+- `aggregation_queue_arguments_overrides`
+- `aggregation_queue_kwargs`
+- `status_queue_arguments_overrides`
+- `status_queue_kwargs`
+
+Do not define the same broker argument through more than one path for the same
+queue family. Relayna raises `ValueError` when overlapping configuration is
+supplied.
+
+### Optional features that unlock Studio
+
+These are optional in the SDK, but strongly recommended when Studio is part of
+your operating model:
+
+- `observation_store_prefix`
+  Improves execution graphs and event-driven task views.
+- `service_event_store_prefix`
+  Enables `GET /events/feed` for centralized event ingestion.
+- worker heartbeat route
+  Lets Studio show `/relayna/health/workers`.
+- `make_logging_sink(...)`
+  Gives you a structured path to push Relayna observation metadata into your
+  logging backend.
+
+## Verification Checklist
+
+After wiring your service, verify the route surface directly.
+
+### Status and capabilities
+
+```bash
+curl -N http://localhost:8000/events/task-123
+curl -s http://localhost:8000/status/task-123
+curl -s "http://localhost:8000/history?task_id=task-123&max_scan=50"
+curl -s http://localhost:8000/relayna/capabilities
+```
+
+### Optional operator routes
+
+```bash
+curl -s http://localhost:8000/events/feed
+curl -s http://localhost:8000/executions/task-123/graph
+curl -s http://localhost:8000/relayna/health/workers
+curl -s http://localhost:8000/dlq/queues
+curl -s http://localhost:8000/workflow/topology
+curl -s http://localhost:8000/workflow/stages
+```
+
+### Studio-ready definition
+
+A service is effectively Studio-ready when:
+
+- Studio can register it with a stable `service_id`
+- the Studio backend can reach the service `base_url`
+- capability refresh succeeds
+- task detail can be fetched through the Studio backend
+- events, execution views, health, workflow, and DLQ panels degrade only when
+  those routes were intentionally omitted
+
+For Studio deployment and runtime details, continue with
+[Studio Backend](studio-backend.md) and [Studio Frontend](studio-frontend.md).

@@ -1,7 +1,7 @@
 """relayna package root.
 
-Import concrete functionality from submodules such as ``relayna.rabbitmq``
-or ``relayna.status_store`` rather than from the package root.
+Import concrete functionality from subpackages such as ``relayna.rabbitmq``
+or ``relayna.status`` rather than from the package root.
 """
 
 from importlib.metadata import PackageNotFoundError, version

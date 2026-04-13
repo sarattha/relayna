@@ -5,6 +5,14 @@ callbacks. The library emits typed dataclass events from long-running loops such
 as SSE streaming, worker consumption, and status fanout, but it does not ship a
 logging backend, metrics registry, or tracing exporter.
 
+`relayna.observability` owns the event model plus collector and exporter
+helpers. It does not own status storage, FastAPI routes, or worker runtime
+execution; those live in `relayna.status`, `relayna.api`, and
+`relayna.consumer`.
+
+It now also owns the persisted observation store and execution-graph
+reconstruction helpers that sit on top of those event streams.
+
 ## How it works
 
 Observability in `relayna` is built around two public concepts from
@@ -28,6 +36,9 @@ Important behavior:
 - sink failures are suppressed by Relayna
 - observations are best-effort and never block the main workflow intentionally
 - Relayna does not include raw message bodies in observation events
+- execution graphs become `full` only when task-linked observations were
+  persisted; otherwise the graph service falls back to status and DLQ data and
+  marks the graph `partial`
 
 ## Basic usage
 
@@ -57,12 +68,55 @@ The same sink pattern works with:
 - `SSEStatusStream`
 - `StatusHub`
 
+## Persisting observations for execution graphs
+
+Plain observation sinks are enough for logging and metrics, but execution
+graphs need durable observation history that can be joined later with status
+history and DLQ records.
+
+Use `RedisObservationStore` and `make_redis_observation_sink(...)` when you
+want Relayna to reconstruct what happened for a task after the worker has
+already finished:
+
+```python
+from redis.asyncio import Redis
+
+from relayna.consumer import RetryPolicy, TaskConsumer
+from relayna.observability import RedisObservationStore, make_redis_observation_sink
+
+redis = Redis.from_url("redis://localhost:6379/0")
+observation_store = RedisObservationStore(
+    redis,
+    prefix="relayna-observations",
+    ttl_seconds=86400,
+    history_maxlen=500,
+)
+
+consumer = TaskConsumer(
+    rabbitmq=client,
+    handler=handle_task,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30000),
+    observation_sink=make_redis_observation_sink(observation_store),
+)
+await consumer.run_forever()
+```
+
+Important behavior:
+
+- only observations with a non-empty `task_id` are persisted
+- persistence is deduplicated per task and event payload
+- history is bounded by `history_maxlen`
+- store retention follows `ttl_seconds`
+- FastAPI and workers must use the same Redis instance and observation-store
+  prefix if you want `GET /executions/{task_id}/graph` to return `full`
+  execution graphs
+
 Example with multiple components:
 
 ```python
 from relayna.consumer import TaskConsumer
-from relayna.sse import SSEStatusStream
-from relayna.status_hub import StatusHub
+from relayna.status import SSEStatusStream
+from relayna.status import StatusHub
 
 
 async def sink(event) -> None:
@@ -157,11 +211,17 @@ Use these when you want to understand:
 - `ConsumerDeadLetterPublished`
 - `ConsumerDLQRecordPersistFailed`
 
-`AggregationConsumer` and `AggregationWorkerRuntime` currently share the retry
-and dead-letter observation events:
+`AggregationConsumer` and `AggregationWorkerRuntime` also emit aggregation-
+specific task-linked events:
 
-- `ConsumerRetryScheduled`
-- `ConsumerDeadLetterPublished`
+- `AggregationMessageReceived`
+- `AggregationMessageAcked`
+- `AggregationHandlerFailed`
+- `AggregationRetryScheduled`
+- `AggregationDeadLetterPublished`
+
+They still share the generic DLQ persistence failure event:
+
 - `ConsumerDLQRecordPersistFailed`
 
 Use these when you want to monitor:
@@ -171,7 +231,21 @@ Use these when you want to monitor:
 - handler exceptions
 - lifecycle status automation
 - retry and DLQ volume
+- aggregation child-task lineage
 - DLQ publish success paired with Redis index write failures
+
+Workflow runtimes emit richer stage and message lineage events:
+
+- `WorkflowStageStarted`
+- `WorkflowMessageReceived`
+- `WorkflowMessagePublished`
+- `WorkflowStageAcked`
+- `WorkflowStageFailed`
+
+Those workflow-specific observations are what let the execution graph layer
+produce explicit `workflow_message`, `stage_attempt`, `entered_stage`, and
+`stage_transitioned_to` structures instead of flattening the workflow into one
+generic task-attempt timeline.
 
 ### Status hub events
 
@@ -216,8 +290,11 @@ async def sink(event) -> None:
 
 - Observability is opt-in. Relayna does nothing unless you pass an
   `observation_sink=...`.
-- The FastAPI lifespan helper does not currently accept observation sinks
-  directly. If you want observability there, construct `StatusHub` or
-  `SSEStatusStream` manually and pass the sink yourself.
+- The FastAPI lifespan helper does not accept a generic observation sink
+  directly, but it now can provision `runtime.observation_store` and
+  `runtime.execution_graph_service` when `observation_store_prefix=...` is
+  configured.
 - Observation dataclasses are intended for operational use, not as a stable
   wire protocol between services.
+- For the full runtime graph model, route behavior, node kinds, and rendering
+  options, see [Execution graphs](execution-graphs.md).
