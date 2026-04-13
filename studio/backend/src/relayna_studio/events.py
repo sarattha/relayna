@@ -56,11 +56,11 @@ def _parse_timestamp(value: str | None) -> datetime | None:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
-def _timestamp_key(value: str | None) -> tuple[int, datetime, str]:
+def _timestamp_key(value: str | None) -> tuple[int, datetime]:
     parsed = _parse_timestamp(value)
     if parsed is None:
-        return (0, datetime.min.replace(tzinfo=UTC), value or "")
-    return (1, parsed, value or "")
+        return (0, datetime.min.replace(tzinfo=UTC))
+    return (1, parsed)
 
 
 class StudioEventEnvelope(BaseModel):
