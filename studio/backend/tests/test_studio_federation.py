@@ -819,20 +819,17 @@ def test_task_detail_join_skips_when_candidate_scan_is_incomplete(monkeypatch) -
 
         assert response.status_code == 200
         payload = response.json()
-        assert payload["joined_refs"] == [
+        assert payload["joined_refs"] == []
+        assert payload["join_warnings"] == [
             {
-                "task_ref": {
-                    "service_id": "billing-api",
-                    "task_id": "corr-123",
-                    "correlation_id": None,
-                    "parent_refs": [],
-                    "child_refs": [],
-                },
+                "code": "incomplete_join_candidate_scan",
+                "detail": (
+                    "Skipped correlation_id join for 'corr-123' because one or more services could not be scanned."
+                ),
                 "join_kind": "correlation_id",
                 "matched_value": "corr-123",
             }
         ]
-        assert payload["join_warnings"] == []
 
 
 def test_service_scoped_status_and_graph_encode_reserved_task_id_characters(monkeypatch) -> None:
