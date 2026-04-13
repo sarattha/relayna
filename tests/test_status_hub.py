@@ -175,6 +175,35 @@ async def test_status_hub_emits_malformed_message_observation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_status_hub_acks_non_mapping_json_payload_before_skipping() -> None:
+    observed: list[object] = []
+    topology = make_topology()
+    hub: StatusHub | None = None
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    def stop_hub() -> None:
+        assert hub is not None
+        hub.stop()
+
+    message = FakeMessage(b"[]", on_ack=stop_hub)
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
+    store = FakeStore()
+    hub = StatusHub(rabbitmq=rabbit, store=store, observation_sink=sink)
+
+    await hub.run_forever()
+
+    assert message.acked is True
+    malformed = [event for event in observed if isinstance(event, StatusHubMalformedMessage)]
+    assert malformed
+    assert malformed[0].reason == "payload_not_mapping"
+    assert not any(isinstance(event, StatusHubLoopError) for event in observed)
+    assert store.stored == []
+
+
+@pytest.mark.asyncio
 async def test_status_hub_emits_store_write_failed_observation() -> None:
     observed: list[object] = []
     topology = make_topology()

@@ -25,17 +25,20 @@ def _utcnow() -> datetime:
 
 
 def _parse_datetime(value: datetime | str | None) -> datetime | None:
-    if value is None or isinstance(value, datetime):
-        return value
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
     normalized = value.strip()
     if not normalized:
         return None
     if normalized.endswith("Z"):
         normalized = f"{normalized[:-1]}+00:00"
     try:
-        return datetime.fromisoformat(normalized)
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def _latest_datetime(*values: datetime | None) -> datetime | None:

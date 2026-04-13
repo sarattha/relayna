@@ -395,6 +395,54 @@ def test_studio_health_service_reports_stale_heartbeat() -> None:
     asyncio.run(scenario())
 
 
+def test_studio_health_service_accepts_naive_worker_heartbeat_timestamp() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        store = RedisServiceRegistryStore(redis)
+        registry = ServiceRegistryService(
+            store=store,
+            capability_fetcher=FakeCapabilityFetcher(
+                make_capability_document(supported_routes=["status.latest", "health.workers"])
+            ),
+        )
+        await store.create(make_record(status=ServiceStatus.HEALTHY))
+        event_store = RedisStudioEventStore(redis, ttl_seconds=60, history_maxlen=10)
+        await insert_service_event(
+            event_store,
+            service_id="payments-api",
+            source_kind=ServiceEventSourceKind.STATUS,
+            timestamp=datetime.now(UTC).isoformat(),
+        )
+
+        naive_heartbeat = datetime.now(UTC).replace(tzinfo=None).isoformat()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/relayna/health/workers"
+            return httpx.Response(
+                200,
+                json={
+                    "reported_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+                    "workers": [
+                        {"worker_name": "aggregation-1", "running": True, "last_heartbeat_at": naive_heartbeat}
+                    ],
+                },
+            )
+
+        health = StudioHealthRefreshService(
+            registry_service=registry,
+            health_store=RedisStudioHealthStore(redis),
+            activity_reader=event_store,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+        document = await health.refresh_health("payments-api")
+        assert document.worker_health.state == "healthy"
+        assert document.worker_health.latest_heartbeat_at is not None
+        assert document.worker_health.latest_heartbeat_at.tzinfo == UTC
+
+    asyncio.run(scenario())
+
+
 def test_studio_health_service_marks_unreachable_and_preserves_last_successful_capability() -> None:
     async def scenario() -> None:
         redis = FakeRedis()

@@ -41,8 +41,26 @@ def _normalize_string(value: Any) -> str | None:
     return normalized or None
 
 
-def _timestamp_key(value: str | None) -> str:
-    return value or ""
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _timestamp_key(value: str | None) -> tuple[int, datetime]:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return (0, datetime.min.replace(tzinfo=UTC))
+    return (1, parsed)
 
 
 class StudioEventEnvelope(BaseModel):

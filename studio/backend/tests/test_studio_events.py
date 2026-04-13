@@ -275,6 +275,100 @@ def test_studio_ingest_route_dedupes_and_marks_out_of_order(monkeypatch) -> None
         assert service_events.json()["items"][0]["source_kind"] == "observation"
 
 
+def test_event_store_compares_mixed_offset_timestamps_chronologically() -> None:
+    async def scenario() -> None:
+        store = RedisStudioEventStore(FakeRedis(), prefix="studio-events", ttl_seconds=60, history_maxlen=10)
+
+        first = StudioEventEnvelope(
+            service_id="payments-api",
+            ingest_method=StudioEventIngestMethod.PUSH,
+            event=RelaynaServiceEvent(
+                cursor="evt-1",
+                task_id="task-123",
+                event_type="status.processing",
+                source_kind=ServiceEventSourceKind.STATUS,
+                component="status",
+                timestamp="2026-04-10T01:00:00+02:00",
+                event_id="evt-1",
+                payload={"status": "processing"},
+            ),
+        )
+        second = StudioEventEnvelope(
+            service_id="payments-api",
+            ingest_method=StudioEventIngestMethod.PUSH,
+            event=RelaynaServiceEvent(
+                cursor="evt-2",
+                task_id="task-123",
+                event_type="status.completed",
+                source_kind=ServiceEventSourceKind.STATUS,
+                component="status",
+                timestamp="2026-04-09T23:30:00Z",
+                event_id="evt-2",
+                payload={"status": "completed"},
+            ),
+        )
+
+        assert await store.insert_event(first) is True
+        assert await store.insert_event(second) is True
+
+        snapshot = await store.get_service_activity_snapshot("payments-api")
+        events = await store.list_task_events("payments-api", "task-123")
+
+        assert snapshot.latest_status_event_at == "2026-04-09T23:30:00Z"
+        assert events.items[0].event_id == "evt-2"
+        assert events.items[0].out_of_order is False
+        assert events.items[1].event_id == "evt-1"
+
+    asyncio.run(scenario())
+
+
+def test_event_store_treats_equal_instants_with_different_offsets_as_equal() -> None:
+    async def scenario() -> None:
+        store = RedisStudioEventStore(FakeRedis(), prefix="studio-events", ttl_seconds=60, history_maxlen=10)
+
+        first = StudioEventEnvelope(
+            service_id="payments-api",
+            ingest_method=StudioEventIngestMethod.PUSH,
+            event=RelaynaServiceEvent(
+                cursor="evt-1",
+                task_id="task-123",
+                event_type="status.processing",
+                source_kind=ServiceEventSourceKind.STATUS,
+                component="status",
+                timestamp="2026-04-10T01:30:00+02:00",
+                event_id="evt-1",
+                payload={"status": "processing"},
+            ),
+        )
+        second = StudioEventEnvelope(
+            service_id="payments-api",
+            ingest_method=StudioEventIngestMethod.PUSH,
+            event=RelaynaServiceEvent(
+                cursor="evt-2",
+                task_id="task-123",
+                event_type="status.completed",
+                source_kind=ServiceEventSourceKind.STATUS,
+                component="status",
+                timestamp="2026-04-09T23:30:00Z",
+                event_id="evt-2",
+                payload={"status": "completed"},
+            ),
+        )
+
+        assert await store.insert_event(first) is True
+        assert await store.insert_event(second) is True
+
+        snapshot = await store.get_service_activity_snapshot("payments-api")
+        events = await store.list_task_events("payments-api", "task-123")
+
+        assert snapshot.latest_status_event_at == "2026-04-10T01:30:00+02:00"
+        assert events.items[0].event_id == "evt-2"
+        assert events.items[0].out_of_order is False
+        assert events.items[1].event_id == "evt-1"
+
+    asyncio.run(scenario())
+
+
 def test_studio_pull_sync_ingests_service_feed(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 

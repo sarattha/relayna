@@ -77,7 +77,21 @@ class StatusHub:
                             )
                             continue
 
-                        data = normalize_contract_aliases(payload, self._alias_config, drop_aliases=True)
+                        await message.ack()
+                        if not isinstance(payload, Mapping):
+                            await emit_observation(
+                                self._observation_sink,
+                                StatusHubMalformedMessage(reason="payload_not_mapping"),
+                            )
+                            continue
+                        try:
+                            data = normalize_contract_aliases(payload, self._alias_config, drop_aliases=True)
+                        except Exception:
+                            await emit_observation(
+                                self._observation_sink,
+                                StatusHubMalformedMessage(reason="alias_normalization_failed"),
+                            )
+                            continue
                         meta = data.get("meta")
                         if isinstance(meta, Mapping):
                             sanitized_meta = dict(meta)
@@ -86,7 +100,6 @@ class StatusHub:
                             data["meta"] = sanitized_meta
 
                         task_id = str(data.get("task_id", "")).strip()
-                        await message.ack()
                         if not task_id:
                             continue
                         try:
