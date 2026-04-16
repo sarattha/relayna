@@ -48,6 +48,7 @@ export function ServiceDetailPage() {
   const [serviceLogQuery, setServiceLogQuery] = useState("");
   const [serviceLogLevel, setServiceLogLevel] = useState("");
   const [serviceLogLimit, setServiceLogLimit] = useState("20");
+  const [refreshingService, setRefreshingService] = useState(false);
 
   useEffect(() => {
     if (!serviceId) {
@@ -119,6 +120,20 @@ export function ServiceDetailPage() {
     }
   }
 
+  async function handleRefreshService() {
+    if (!service || refreshingService) {
+      return;
+    }
+    setRefreshingService(true);
+    try {
+      await servicesState.refresh(service.service_id);
+    } catch {
+      // Shared services context populates the error banner for failed mutations.
+    } finally {
+      setRefreshingService(false);
+    }
+  }
+
   const filteredServiceEvents = (serviceEvents?.items || []).filter((item) => {
     if (serviceEventTaskFilter.trim() && !item.task_id.includes(serviceEventTaskFilter.trim())) {
       return false;
@@ -179,6 +194,9 @@ export function ServiceDetailPage() {
           <Link to={`/tasks/search?service_id=${encodeURIComponent(service.service_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             Task Search
           </Link>
+          <button type="button" onClick={() => void handleRefreshService()} style={secondaryButtonStyle} disabled={refreshingService}>
+            {refreshingService ? "Refreshing..." : "Refresh"}
+          </button>
           <button type="button" onClick={() => void servicesState.runHealthCheck(service.service_id)} style={secondaryButtonStyle}>
             Run Health Check
           </button>
