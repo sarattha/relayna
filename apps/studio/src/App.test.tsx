@@ -95,8 +95,8 @@ function serviceListResponse(services: MockServiceRecord[]) {
   return jsonResponse({ count: services.length, services });
 }
 
-const services: MockServiceRecord[] = [
-  {
+function buildMockService(): MockServiceRecord {
+  return {
     service_id: "payments-api",
     name: "Payments API",
     base_url: "https://payments.example.test",
@@ -111,9 +111,9 @@ const services: MockServiceRecord[] = [
       registry_status: "registered",
       http_status: { state: "reachable", checked_at: "2026-04-08T12:00:00Z", error_detail: null },
       capability_status: {
-        state: "fresh",
+        state: "unknown",
         checked_at: "2026-04-08T12:00:00Z",
-        last_successful_at: "2026-04-08T12:00:00Z",
+        last_successful_at: null,
         error_detail: null,
       },
       observation_freshness: {
@@ -123,14 +123,14 @@ const services: MockServiceRecord[] = [
         latest_ingested_at: "2026-04-08T12:00:01Z",
       },
       worker_health: {
-        state: "unsupported",
+        state: "unknown",
         reported_at: null,
         latest_heartbeat_at: null,
         workers: [],
-        detail: null,
+        detail: "unknown",
       },
       last_checked_at: "2026-04-08T12:00:00Z",
-      overall_status: "healthy",
+      overall_status: "unknown",
     },
     log_config: {
       provider: "loki",
@@ -140,8 +140,10 @@ const services: MockServiceRecord[] = [
       correlation_id_label: "correlation_id",
       level_label: "level",
     },
-  },
-];
+  };
+}
+
+const services: MockServiceRecord[] = [buildMockService()];
 
 function taskDetailResponse() {
   return {
@@ -252,6 +254,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     window.history.replaceState({}, "", "/");
+    services.splice(0, services.length, buildMockService());
 
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
@@ -277,6 +280,33 @@ describe("App", () => {
           ],
           next_cursor: null,
         });
+      }
+      if (url === "/studio/services/payments-api/refresh" && method === "POST") {
+        services[0] = {
+          ...services[0],
+          status: "healthy",
+          last_seen_at: "2026-04-08T12:45:00Z",
+          health: {
+            ...services[0].health,
+            registry_status: "healthy",
+            capability_status: {
+              state: "fresh",
+              checked_at: "2026-04-08T12:45:00Z",
+              last_successful_at: "2026-04-08T12:45:00Z",
+              error_detail: null,
+            },
+            worker_health: {
+              state: "healthy",
+              reported_at: "2026-04-08T12:44:59Z",
+              latest_heartbeat_at: "2026-04-08T12:44:59Z",
+              workers: [],
+              detail: null,
+            },
+            last_checked_at: "2026-04-08T12:45:00Z",
+            overall_status: "healthy",
+          },
+        };
+        return jsonResponse(services[0]);
       }
       if (url === "/studio/services/payments-api/workflow/topology" && method === "GET") {
         return jsonResponse({
@@ -449,6 +479,21 @@ describe("App", () => {
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
     expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
+  });
+
+  it("refreshes a registered service from the detail page", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByText("Refreshed 'payments-api'.")).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/refresh", { method: "POST" }));
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
   });
 
   it("opens the service editor with an allowlisted default base URL", async () => {
