@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Source-aware Studio log pipeline support via `log_config.source_label`, normalized `source` fields on Studio log entries, and exact-match `source` filtering on `GET /studio/services/{service_id}/logs` and `GET /studio/tasks/{service_id}/{task_id}/logs`.
+- Source badges and ANSI-rendered log message presentation in Studio service and task log panels, plus regression coverage for source-aware filtering and rendered log output.
+
+### Changed
+
+- The internal Studio roadmap now marks feature 6, Log pipeline, as implemented, and marks the overlapping source-aware log UI items in feature 7 complete.
+
 ## 1.4.4 - 2026-04-12
 
 ### Changed

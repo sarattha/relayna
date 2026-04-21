@@ -42,6 +42,7 @@ const emptyDraft: ServiceDraft = {
   log_base_url: "",
   log_tenant_id: "",
   log_service_selector_labels: "",
+  log_source_label: "",
   log_task_id_label: "",
   log_correlation_id_label: "",
   log_level_label: "",

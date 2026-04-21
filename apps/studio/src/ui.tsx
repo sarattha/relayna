@@ -132,6 +132,13 @@ export function formatLogLevel(value?: string | null) {
   return value;
 }
 
+export function formatLogSource(value?: string | null) {
+  if (!value) {
+    return "unknown";
+  }
+  return value;
+}
+
 export function supportsCapability(capabilities: Record<string, unknown> | null | undefined, capabilityId: string) {
   const routes = capabilities && typeof capabilities === "object" ? capabilities.supported_routes : null;
   return Array.isArray(routes) && routes.includes(capabilityId);
@@ -381,6 +388,151 @@ export function HealthBadge({ status }: { status: HealthStatus }) {
     >
       {status}
     </span>
+  );
+}
+
+export function LogSourceBadge({ source }: { source?: string | null }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        borderRadius: 999,
+        padding: "4px 8px",
+        border: "1px solid rgba(39, 136, 126, 0.2)",
+        background: "rgba(228, 247, 242, 0.96)",
+        color: "var(--studio-secondary-strong)",
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: 0.4,
+      }}
+    >
+      {formatLogSource(source)}
+    </span>
+  );
+}
+
+type AnsiSegment = {
+  text: string;
+  color?: string;
+  fontWeight?: CSSProperties["fontWeight"];
+};
+
+const ansiRegex = /\x1b\[([0-9;]*)m/g;
+const remainingAnsiRegex = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const ansiColorMap: Record<number, string> = {
+  30: "#2b2722",
+  31: "#a83c28",
+  32: "#1d7a63",
+  33: "#9f6a10",
+  34: "#2f64a8",
+  35: "#8d4d91",
+  36: "#0f7c7b",
+  37: "#d8ddd8",
+  90: "#6f7775",
+  91: "#d4553c",
+  92: "#24966f",
+  93: "#c68f1a",
+  94: "#4a7fd4",
+  95: "#aa66b0",
+  96: "#2c9c9a",
+  97: "#f4f7f4",
+};
+
+function stripAnsi(value: string) {
+  return value.replace(remainingAnsiRegex, "");
+}
+
+function applyAnsiCode(state: Required<Pick<AnsiSegment, "color" | "fontWeight">>, rawCode: number) {
+  if (rawCode === 0) {
+    state.color = "";
+    state.fontWeight = 400;
+    return;
+  }
+  if (rawCode === 1) {
+    state.fontWeight = 700;
+    return;
+  }
+  if (rawCode === 22) {
+    state.fontWeight = 400;
+    return;
+  }
+  if (rawCode === 39) {
+    state.color = "";
+    return;
+  }
+  if (ansiColorMap[rawCode]) {
+    state.color = ansiColorMap[rawCode];
+  }
+}
+
+function parseAnsiSegments(value: string): AnsiSegment[] {
+  const state: Required<Pick<AnsiSegment, "color" | "fontWeight">> = {
+    color: "",
+    fontWeight: 400,
+  };
+  const segments: AnsiSegment[] = [];
+  let lastIndex = 0;
+
+  function pushSegment(text: string) {
+    const normalized = stripAnsi(text);
+    if (!normalized) {
+      return;
+    }
+    segments.push({
+      text: normalized,
+      color: state.color || undefined,
+      fontWeight: state.fontWeight,
+    });
+  }
+
+  for (const match of value.matchAll(ansiRegex)) {
+    const index = match.index ?? 0;
+    pushSegment(value.slice(lastIndex, index));
+    const codes = (match[1] || "0")
+      .split(";")
+      .map((item) => Number.parseInt(item || "0", 10))
+      .filter((item) => Number.isFinite(item));
+    for (const code of codes.length ? codes : [0]) {
+      applyAnsiCode(state, code);
+    }
+    lastIndex = index + match[0].length;
+  }
+
+  pushSegment(value.slice(lastIndex));
+  return segments.length ? segments : [{ text: stripAnsi(value), fontWeight: 400 }];
+}
+
+export function AnsiLogMessage({ message }: { message: string }) {
+  const segments = parseAnsiSegments(message);
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: 12,
+        borderRadius: 12,
+        background: "rgba(246, 251, 249, 0.96)",
+        border: "1px solid rgba(111, 146, 145, 0.18)",
+        fontFamily: "'SFMono-Regular', Menlo, monospace",
+        fontSize: 12,
+        lineHeight: 1.6,
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+      }}
+    >
+      {segments.map((segment, index) => (
+        <span
+          key={`${index}-${segment.text}`}
+          style={{
+            color: segment.color,
+            fontWeight: segment.fontWeight,
+          }}
+        >
+          {segment.text}
+        </span>
+      ))}
+    </div>
   );
 }
 

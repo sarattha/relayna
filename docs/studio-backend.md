@@ -298,7 +298,13 @@ curl -s http://localhost:8000/studio/tasks/my-service/task-123
 curl -s http://localhost:8000/studio/services/my-service/workflow/topology
 curl -s http://localhost:8000/studio/services/my-service/dlq/messages
 curl -s "http://localhost:8000/studio/services/my-service/broker/dlq/messages?task_id=task-123"
+curl -s "http://localhost:8000/studio/services/my-service/logs?limit=20&source=runtime-worker"
+curl -s "http://localhost:8000/studio/tasks/my-service/task-123/logs?limit=50&source=api"
 ```
+
+Studio log queries normalize a required `source` field on each log entry, sourced from the service's configured `log_config.source_label` when present and falling back to `"unknown"` per entry when the upstream stream omits that label. Both service-scoped and task-scoped log routes also accept an optional exact-match `source` query parameter; requesting it without `log_config.source_label` configured returns `422`.
+
+Studio renders ANSI-styled log messages in the browser without changing the raw backend payload. Escape sequences remain in the API response and are interpreted only by the frontend log panels.
 
 Broker DLQ inspection is intentionally separate from indexed DLQ reads:
 

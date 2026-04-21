@@ -136,6 +136,7 @@ function buildMockService(): MockServiceRecord {
       provider: "loki",
       base_url: "https://loki.example.test",
       service_selector_labels: { app: "payments-api" },
+      source_label: "component",
       task_id_label: "task_id",
       correlation_id_label: "correlation_id",
       level_label: "level",
@@ -278,7 +279,24 @@ describe("App", () => {
               service_id: "payments-api",
               timestamp: "2026-04-08T10:00:00Z",
               level: "info",
-              message: "service log line",
+              source: "runtime-worker",
+              message: "\u001b[32mservice log line\u001b[0m\nsecond line",
+              fields: {},
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/services/payments-api/logs?limit=20&source=runtime-worker" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-08T10:00:00Z",
+              level: "info",
+              source: "runtime-worker",
+              message: "\u001b[32mservice log line\u001b[0m\nsecond line",
               fields: {},
             },
           ],
@@ -457,7 +475,26 @@ describe("App", () => {
               correlation_id: "corr-123",
               timestamp: "2026-04-08T10:00:00Z",
               level: "info",
-              message: "task log line",
+              source: "api",
+              message: "\u001b[31mtask log line\u001b[0m",
+              fields: {},
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/tasks/payments-api/task-123/logs?limit=50&source=api&correlation_id=corr-123" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-08T10:00:00Z",
+              level: "info",
+              source: "api",
+              message: "\u001b[31mtask log line\u001b[0m",
               fields: {},
             },
           ],
@@ -503,6 +540,44 @@ describe("App", () => {
     expect(window.location.pathname).toBe("/services");
   });
 
+  it("includes source_label in the service log configuration payload", async () => {
+    let observedPayload: { log_config?: { source_label?: string | null } | null } | null = null;
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "POST") {
+        observedPayload = JSON.parse(String(init?.body || "{}"));
+        const created = {
+          ...buildMockService(),
+          service_id: "orders-api",
+          name: "Orders API",
+          log_config: observedPayload?.log_config ?? null,
+        };
+        services.push(created);
+        return jsonResponse(created);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    await screen.findByText("Registered Services");
+    fireEvent.click(screen.getByRole("button", { name: "New Service" }));
+    fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "orders-api" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Orders API" } });
+    fireEvent.change(screen.getByLabelText("Source label"), { target: { value: "component" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
+
+    await screen.findByText("Registered service 'orders-api'.");
+    expect(observedPayload).not.toBeNull();
+    if (!observedPayload) {
+      throw new Error("Expected the service create payload to be captured.");
+    }
+    const capturedPayload = observedPayload as { log_config?: { source_label?: string | null } | null };
+    expect(capturedPayload.log_config?.source_label).toBe("component");
+  });
+
   it("navigates from the service list to the routed service detail page", async () => {
     render(<App />);
 
@@ -513,6 +588,24 @@ describe("App", () => {
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
     expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
+    expect(screen.getByText("runtime-worker")).toBeInTheDocument();
+    expect(screen.getByText("service log line")).toBeInTheDocument();
+    expect(screen.getByText("second line")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("\u001b[32m");
+  });
+
+  it("applies the service log source filter through the Studio route", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Service log source"), { target: { value: "runtime-worker" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/logs?limit=20&source=runtime-worker", undefined),
+    );
   });
 
   it("refreshes a registered service from the detail page", async () => {
@@ -629,6 +722,9 @@ describe("App", () => {
     expect(screen.getByText("Joined Refs")).toBeInTheDocument();
     expect(screen.getByText("Join Warnings")).toBeInTheDocument();
     expect(screen.getByText("Section Errors")).toBeInTheDocument();
+    expect(screen.getByText("api")).toBeInTheDocument();
+    expect(screen.getByText("task log line")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("\u001b[31m");
     expect(MockEventSource.instances.some((item) => item.url === "/studio/tasks/payments-api/task-123/events/stream")).toBe(true);
 
     MockEventSource.instances[0]?.emit("event", {
@@ -650,6 +746,23 @@ describe("App", () => {
     unmount();
 
     expect(MockEventSource.instances[0]?.closed).toBe(true);
+  });
+
+  it("applies the task log source filter through the Studio route", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Task log source"), { target: { value: "api" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/studio/tasks/payments-api/task-123/logs?limit=50&source=api&correlation_id=corr-123",
+        undefined,
+      ),
+    );
   });
 
   it("shows a broker inspection CTA in task detail when indexed DLQ data is empty", async () => {

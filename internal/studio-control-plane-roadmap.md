@@ -11,7 +11,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 3 | Federated API aggregation layer | implemented | 2026-04-21 |
 | 4 | Cross-service identity model | implemented | 2026-04-10 |
 | 5 | Aggregated event and observation ingestion | implemented | 2026-04-10 |
-| 6 | Log pipeline | partially_implemented | 2026-04-21 |
+| 6 | Log pipeline | implemented | 2026-04-21 |
 | 7 | Control-plane UI expansion | partially_implemented | 2026-04-21 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
 | 9 | Health and liveness model | implemented | 2026-04-21 |
@@ -233,11 +233,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 6. Log Pipeline
 
-- Status: partially_implemented
+- Status: implemented
 - last_updated: 2026-04-21
 - Goal: Let Studio expose logs alongside Relayna task and observation views without conflating the two.
 - Why it exists: Operators will expect logs in the control plane, but Relayna observations are not a full log backend.
-- Current state in repo: Relayna provides `make_logging_sink(...)` and event serialization helpers in `src/relayna/observability/exporters.py`, while Studio now ships a pluggable read-only log query surface with per-service `log_config`, a Loki provider, normalized `/studio/services/{service_id}/logs` and `/studio/tasks/{service_id}/{task_id}/logs` routes, and service/task log panels in `apps/studio/src/App.tsx`. Studio already supports Loki-backed service/task log queries, but logs are still shown as one unlabeled list and raw ANSI styling from `rich` is not rendered.
+- Current state in repo: Relayna provides `make_logging_sink(...)` and event serialization helpers in `src/relayna/observability/exporters.py`, while Studio now ships a pluggable read-only log query surface with per-service `log_config`, a Loki provider, normalized `/studio/services/{service_id}/logs` and `/studio/tasks/{service_id}/{task_id}/logs` routes, source-aware service/task log panels, and ANSI-safe browser rendering in `apps/studio/src/`.
 - Target end state: Studio supports a pluggable log backend contract, can query logs scoped by service and task context, can distinguish log sources in one time-ordered operator view, and can render ANSI-styled log bodies safely in the browser.
 - Planned API/interface additions:
   - Studio log provider abstraction
@@ -280,12 +280,12 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - [x] Add at least one pluggable provider implementation
   - [x] Add task-scoped and service-scoped log views
   - [x] Add tests for provider errors and missing correlation keys
-  - [ ] Add source-label configuration to Studio service `log_config`
-  - [ ] Add normalized `source` field to Studio log responses
-  - [ ] Add `source` filter support to service/task log queries
-  - [ ] Add source badges or grouping controls in Studio log panels
-  - [ ] Add ANSI renderer for log message display
-  - [ ] Add regression tests for source-aware and ANSI-rendered log views
+  - [x] Add source-label configuration to Studio service `log_config`
+  - [x] Add normalized `source` field to Studio log responses
+  - [x] Add `source` filter support to service/task log queries
+  - [x] Add source badges or grouping controls in Studio log panels
+  - [x] Add ANSI renderer for log message display
+  - [x] Add regression tests for source-aware and ANSI-rendered log views
 
 ## 7. Control-Plane UI Expansion
 
@@ -336,8 +336,10 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - [x] Add tests for navigation and service-scoped fetching
   - [ ] Add frontend polling in `StudioServicesProvider` for registered-services auto-refresh
   - [x] Add DLQ explorer broker-inspection mode
-  - [ ] Add source-filter controls in service and task log panels
-  - [ ] Add UI tests for auto-refresh, DLQ mode switching, and source-aware log presentation
+  - [x] Add source-filter controls in service and task log panels
+  - [ ] Add UI tests for auto-refresh
+  - [x] Add UI tests for DLQ mode switching
+  - [x] Add UI tests for source-aware log presentation
 
 ## 8. Auth, Trust, And Operator Controls
 

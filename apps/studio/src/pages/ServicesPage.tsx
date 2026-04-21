@@ -322,6 +322,15 @@ export function ServicesPage() {
                   />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Source label
+                  <input
+                    value={draft.log_source_label}
+                    onChange={(event) => setDraft((current) => ({ ...current, log_source_label: event.target.value }))}
+                    placeholder="component"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Task id label
                   <input
                     value={draft.log_task_id_label}

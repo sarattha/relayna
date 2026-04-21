@@ -3,8 +3,10 @@ import { Link, useParams } from "react-router-dom";
 
 import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs } from "../api";
 import {
+  AnsiLogMessage,
   GraphSurface,
   InlineCodeBox,
+  LogSourceBadge,
   MetadataRow,
   MetricCard,
   NoticeBanner,
@@ -40,6 +42,7 @@ export function TaskDetailPage() {
   const [taskLogsError, setTaskLogsError] = useState<string | null>(null);
   const [taskLogQuery, setTaskLogQuery] = useState("");
   const [taskLogLevel, setTaskLogLevel] = useState("");
+  const [taskLogSource, setTaskLogSource] = useState("");
   const [taskLogLimit, setTaskLogLimit] = useState("50");
 
   useEffect(() => {
@@ -50,6 +53,7 @@ export function TaskDetailPage() {
   }, [serviceId, taskId]);
 
   useEffect(() => {
+    setTaskLogSource("");
     if (!taskDetail) {
       setTaskTimeline(null);
       setTaskLogs(null);
@@ -120,6 +124,7 @@ export function TaskDetailPage() {
       const payload = await fetchTaskLogs(targetServiceId, targetTaskId, {
         query: taskLogQuery,
         level: taskLogLevel,
+        source: taskLogSource,
         limit: parseLimit(taskLogLimit, 50),
         correlation_id: correlationId,
       });
@@ -295,6 +300,14 @@ export function TaskDetailPage() {
                       style={inputStyle}
                     />
                     <input
+                      aria-label="Task log source"
+                      value={taskLogSource}
+                      onChange={(event) => setTaskLogSource(event.target.value)}
+                      placeholder={taskDetail.service.log_config?.source_label || "source"}
+                      disabled={!taskDetail.service.log_config?.source_label}
+                      style={inputStyle}
+                    />
+                    <input
                       aria-label="Task log limit"
                       value={taskLogLimit}
                       onChange={(event) => setTaskLogLimit(event.target.value)}
@@ -305,6 +318,11 @@ export function TaskDetailPage() {
                   {!taskDetail.task_ref.correlation_id ? (
                     <p style={mutedTextStyle}>Correlation filter unavailable for this task; Studio is filtering by task id only.</p>
                   ) : null}
+                  {!taskDetail.service.log_config?.source_label ? (
+                    <p style={mutedTextStyle}>Source filtering is unavailable until this service sets `log_config.source_label`.</p>
+                  ) : (
+                    <p style={mutedTextStyle}>Source filter matches the configured `{taskDetail.service.log_config.source_label}` Loki label exactly.</p>
+                  )}
                   {taskLogsLoading ? <p style={mutedTextStyle}>Loading task logs...</p> : null}
                   {taskLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskLogsError}</p> : null}
                   {!taskLogsLoading && !taskLogsError && !(taskLogs?.items.length || 0) ? (
@@ -320,14 +338,17 @@ export function TaskDetailPage() {
                         >
                           <div className="studio-list-card__top">
                             <div style={{ display: "grid", gap: 4 }}>
-                              <strong style={{ fontSize: 13 }}>{item.message}</strong>
-                              <span className="studio-inline-meta">
-                                {formatLogLevel(item.level)}
-                                {item.correlation_id ? ` · ${item.correlation_id}` : ""}
-                              </span>
+                              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                                <LogSourceBadge source={item.source} />
+                                <span className="studio-inline-meta">
+                                  {formatLogLevel(item.level)}
+                                  {item.correlation_id ? ` · ${item.correlation_id}` : ""}
+                                </span>
+                              </div>
                             </div>
                             <span className="studio-inline-meta">{formatTimestamp(item.timestamp)}</span>
                           </div>
+                          <AnsiLogMessage message={item.message} />
                         </article>
                       ))}
                     </div>

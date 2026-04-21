@@ -55,6 +55,7 @@ export type ServiceLogConfig = {
   base_url: string;
   tenant_id?: string | null;
   service_selector_labels: Record<string, string>;
+  source_label?: string | null;
   task_id_label?: string | null;
   correlation_id_label?: string | null;
   level_label?: string | null;
@@ -90,6 +91,7 @@ export type ServiceDraft = {
   log_base_url: string;
   log_tenant_id: string;
   log_service_selector_labels: string;
+  log_source_label: string;
   log_task_id_label: string;
   log_correlation_id_label: string;
   log_level_label: string;
@@ -350,6 +352,7 @@ export type StudioLogEntry = {
   correlation_id?: string | null;
   timestamp: string;
   level?: string | null;
+  source: string;
   message: string;
   fields: Record<string, unknown>;
 };
