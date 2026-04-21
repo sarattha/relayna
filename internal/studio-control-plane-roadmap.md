@@ -12,7 +12,7 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 | 4 | Cross-service identity model | implemented | 2026-04-10 |
 | 5 | Aggregated event and observation ingestion | implemented | 2026-04-10 |
 | 6 | Log pipeline | implemented | 2026-04-21 |
-| 7 | Control-plane UI expansion | partially_implemented | 2026-04-21 |
+| 7 | Control-plane UI expansion | implemented | 2026-04-21 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
 | 9 | Health and liveness model | implemented | 2026-04-21 |
 | 10 | Search and retention | implemented | 2026-04-12 |
@@ -289,11 +289,11 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 7. Control-Plane UI Expansion
 
-- Status: partially_implemented
+- Status: implemented
 - last_updated: 2026-04-21
 - Goal: Expand Studio from a single execution-graph page into a full operator console.
 - Why it exists: A control plane must show services, topology, DLQ, task search, task detail, live events, and graphs in one consistent UI.
-- Current state in repo: Studio now ships a route-based operator console in `apps/studio/src/` backed entirely by `/studio/*` backend routes, including routed service list/detail, topology, DLQ explorer, task search, and federated task detail screens with logs, timelines, execution graph rendering, and deep-link navigation. The DLQ explorer now supports explicit indexed versus broker-backed inspection modes with task-detail deep links into broker mode, while the registered-services panel still depends on manual browser refresh to reflect scheduled backend health refreshes.
+- Current state in repo: Studio now ships a route-based operator console in `apps/studio/src/` backed entirely by `/studio/*` backend routes, including routed service list/detail, topology, DLQ explorer, task search, and federated task detail screens with logs, timelines, execution graph rendering, deep-link navigation, and shared registered-services polling that refreshes backend health summaries without manual browser reloads. The DLQ explorer supports explicit indexed versus broker-backed inspection modes with task-detail deep links into broker mode, and route-level frontend coverage now includes the registered-services auto-refresh behavior.
 - Target end state: Studio UI has service list, service detail, topology diagrams, task search, task detail, DLQ explorer, live event timeline, execution graph, operator action surfaces, an auto-refreshing registered-services health panel, DLQ explorer support for broker-backed inspection, and source-aware ANSI-rendered log presentation in service and task views.
 - Planned API/interface additions:
   - Frontend routes:
@@ -334,10 +334,10 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - [x] Add task detail view with status, timeline, graph, and logs
   - [x] Add DLQ explorer UI
   - [x] Add tests for navigation and service-scoped fetching
-  - [ ] Add frontend polling in `StudioServicesProvider` for registered-services auto-refresh
+  - [x] Add frontend polling in `StudioServicesProvider` for registered-services auto-refresh
   - [x] Add DLQ explorer broker-inspection mode
   - [x] Add source-filter controls in service and task log panels
-  - [ ] Add UI tests for auto-refresh
+  - [x] Add UI tests for auto-refresh
   - [x] Add UI tests for DLQ mode switching
   - [x] Add UI tests for source-aware log presentation
 

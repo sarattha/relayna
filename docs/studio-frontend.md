@@ -174,6 +174,12 @@ The UI manages service records with fields including:
 These are not cosmetic fields. They determine how the backend resolves and
 federates the service.
 
+The registered-services screen reads this data through the shared
+`StudioServicesProvider`, which polls `/studio/services` roughly every 60
+seconds so backend health-refresh results appear without a manual browser
+reload. The explicit `Reload List` action remains available for operator-driven
+refreshes.
+
 ### Task search and task detail
 
 The UI addresses tasks as:
@@ -239,6 +245,7 @@ Then check in the browser:
 
 - `/services`
   - service list renders and can create or edit service records
+  - registry and health badges refresh automatically after backend health updates
 - `/tasks/search`
   - task search page loads without direct service-origin calls
 - task detail pages

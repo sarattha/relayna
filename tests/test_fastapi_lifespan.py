@@ -16,8 +16,8 @@ from relayna.dlq import (
     DLQRecordState,
     DLQReplayConflict,
     DLQService,
-    build_dlq_record,
     broker_message_from_management_payload,
+    build_dlq_record,
 )
 from relayna.topology import SharedTasksSharedStatusTopology
 

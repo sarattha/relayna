@@ -93,7 +93,7 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RELAYNA_STUDIO_HEALTH_STORE_PREFIX` | `studio:health` | Redis prefix for service health snapshots. |
-| `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS` | `60.0` | Interval for health refresh polling. Use `none`, `null`, or `off` to disable. |
+| `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS` | `60.0` | Interval for health refresh polling. The default Studio frontend services screen polls `/studio/services` on a similar cadence so updated health summaries appear without a manual page reload. Use `none`, `null`, or `off` to disable. |
 | `RELAYNA_STUDIO_OBSERVATION_STALE_AFTER_SECONDS` | `300` | Threshold after which ingested observations are considered stale. |
 | `RELAYNA_STUDIO_WORKER_HEARTBEAT_STALE_AFTER_SECONDS` | `90` | Threshold after which worker heartbeats are considered stale. |
 
@@ -232,6 +232,7 @@ The backend can run three periodic workers:
 - health refresh worker
   - refreshes service health snapshots and staleness state
   - controlled by `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS`
+  - its updated summaries are surfaced in the Studio services screen through frontend polling of `/studio/services`
 - retention worker
   - prunes search-related retained state
   - controlled by `RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS`

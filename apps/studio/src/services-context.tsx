@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createService,
@@ -49,34 +49,83 @@ const emptyDraft: ServiceDraft = {
 };
 
 const ServicesContext = createContext<ServicesContextValue | null>(null);
+const SERVICE_REFRESH_INTERVAL_MS = 60_000;
 
 export function StudioServicesProvider({ children }: { children: ReactNode }) {
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const servicesRef = useRef<ServiceRecord[]>([]);
+  const hasLoadedServicesRef = useRef(false);
+  const reloadInFlightRef = useRef<Promise<ServiceRecord[]> | null>(null);
 
   function setMutationError(fetchError: unknown, fallback: string) {
     setNotice(null);
     setError(fetchError instanceof Error ? fetchError.message : fallback);
   }
 
-  async function reload() {
-    setLoading(true);
-    try {
-      const payload = await listServices();
-      setServices(payload.services || []);
-      setError(null);
-    } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
-    } finally {
-      setLoading(false);
+  const loadServices = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
+    if (reloadInFlightRef.current) {
+      return reloadInFlightRef.current;
     }
-  }
+
+    const request = (async () => {
+      if (!background && mountedRef.current) {
+        setLoading(true);
+      }
+      try {
+        const payload = await listServices();
+        const nextServices = payload.services || [];
+        servicesRef.current = nextServices;
+        hasLoadedServicesRef.current = true;
+        if (mountedRef.current) {
+          setServices(nextServices);
+          setError(null);
+        }
+        return nextServices;
+      } catch (fetchError) {
+        if (mountedRef.current && (!background || !hasLoadedServicesRef.current)) {
+          setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
+        }
+        return servicesRef.current;
+      } finally {
+        if (!background && mountedRef.current) {
+          setLoading(false);
+        }
+        reloadInFlightRef.current = null;
+      }
+    })();
+
+    reloadInFlightRef.current = request;
+    return request;
+  }, []);
+
+  const reload = useCallback(
+    async (_preferredServiceId?: string | null) => {
+      await loadServices();
+    },
+    [loadServices],
+  );
 
   useEffect(() => {
-    void reload();
-  }, []);
+    servicesRef.current = services;
+  }, [services]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void loadServices();
+
+    const intervalId = window.setInterval(() => {
+      void loadServices({ background: true });
+    }, SERVICE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      mountedRef.current = false;
+      window.clearInterval(intervalId);
+    };
+  }, [loadServices]);
 
   const value = useMemo<ServicesContextValue>(
     () => ({
@@ -171,7 +220,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
         setNotice(null);
       },
     }),
-    [services, loading, error, notice],
+    [services, loading, error, notice, reload],
   );
 
   return <ServicesContext.Provider value={value}>{children}</ServicesContext.Provider>;

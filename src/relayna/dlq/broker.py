@@ -24,7 +24,7 @@ def _default_async_client_factory(timeout_seconds: float) -> httpx.AsyncClient:
 def _parse_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
         return value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return datetime.fromtimestamp(float(value), tz=UTC)
     if not isinstance(value, str):
         return None
@@ -215,8 +215,12 @@ class RabbitMQManagementDLQInspector:
         normalized_limit = max(1, min(int(limit), 200))
         client = self.client_factory(self.timeout_seconds)
         try:
+            queue_url = (
+                f"{self.base_url.rstrip('/')}/api/queues/"
+                f"{quote(self.vhost, safe='')}/{quote(normalized_queue_name, safe='')}/get"
+            )
             response = await client.post(
-                f"{self.base_url.rstrip('/')}/api/queues/{quote(self.vhost, safe='')}/{quote(normalized_queue_name, safe='')}/get",
+                queue_url,
                 auth=(self.username, self.password),
                 json={
                     "count": normalized_limit,

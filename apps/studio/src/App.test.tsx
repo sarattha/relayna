@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -506,6 +506,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -515,6 +516,81 @@ describe("App", () => {
     expect(await screen.findByText("Registered Services")).toBeInTheDocument();
     await waitFor(() => expect(window.location.pathname).toBe("/services"));
     expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
+  });
+
+  it("polls the registered services list silently and stops after unmount", async () => {
+    vi.useFakeTimers();
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let serviceListCalls = 0;
+    let resolveRefresh: ((response: Response) => void) | null = null;
+    async function flushServicesRender() {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url === "/studio/services" && method === "GET") {
+        serviceListCalls += 1;
+        if (serviceListCalls === 1) {
+          return serviceListResponse(services);
+        }
+        if (serviceListCalls === 2) {
+          return await new Promise<Response>((resolve) => {
+            resolveRefresh = resolve;
+          });
+        }
+      }
+
+      return await baseImpl!(input, init);
+    });
+
+    const { unmount } = render(<App />);
+
+    expect(screen.getByText("Registered Services")).toBeInTheDocument();
+    await flushServicesRender();
+
+    expect(serviceListCalls).toBe(1);
+    expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Loading services...")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(serviceListCalls).toBe(2);
+    expect(screen.queryByText("Loading services...")).not.toBeInTheDocument();
+
+    services[0] = {
+      ...services[0],
+      status: "healthy",
+      health: {
+        ...services[0].health,
+        registry_status: "healthy",
+        overall_status: "healthy",
+      },
+    };
+    await act(async () => {
+      resolveRefresh?.(serviceListResponse(services));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Loading services...")).not.toBeInTheDocument();
+
+    unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(serviceListCalls).toBe(2);
   });
 
   it("surfaces registry save failures instead of silently swallowing them", async () => {
