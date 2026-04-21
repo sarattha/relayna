@@ -132,6 +132,11 @@ export function formatLogLevel(value?: string | null) {
   return value;
 }
 
+export function supportsCapability(capabilities: Record<string, unknown> | null | undefined, capabilityId: string) {
+  const routes = capabilities && typeof capabilities === "object" ? capabilities.supported_routes : null;
+  return Array.isArray(routes) && routes.includes(capabilityId);
+}
+
 export function sortControlPlaneEvents(items: StudioControlPlaneEvent[]) {
   return [...items].sort((left, right) => {
     const leftKey = `${left.timestamp || ""}|${left.ingested_at}|${left.dedupe_key}`;

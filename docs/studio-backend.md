@@ -272,6 +272,7 @@ The main operator surfaces are:
 - federated workflow and DLQ reads
   - `/studio/services/{service_id}/workflow/topology`
   - `/studio/services/{service_id}/dlq/messages`
+  - `/studio/services/{service_id}/broker/dlq/messages`
 - federated execution view
   - `/studio/services/{service_id}/executions/{task_id}/graph`
 
@@ -296,7 +297,19 @@ curl -s -X POST http://localhost:8000/studio/services/my-service/health/refresh
 curl -s http://localhost:8000/studio/tasks/my-service/task-123
 curl -s http://localhost:8000/studio/services/my-service/workflow/topology
 curl -s http://localhost:8000/studio/services/my-service/dlq/messages
+curl -s "http://localhost:8000/studio/services/my-service/broker/dlq/messages?task_id=task-123"
 ```
+
+Broker DLQ inspection is intentionally separate from indexed DLQ reads:
+
+- `/studio/services/{service_id}/dlq/messages`
+  - reads indexed Relayna DLQ records
+  - includes replay/index metadata such as `dlq_id` and replay state
+  - supports cursor pagination and indexed filters
+- `/studio/services/{service_id}/broker/dlq/messages`
+  - reads live broker messages through the registered service
+  - is available only when the service advertises `broker.dlq.messages`
+  - returns a read-only broker payload shape without `dlq_id`, replay state, or cursor pagination
 
 ## Troubleshooting
 

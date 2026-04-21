@@ -104,7 +104,7 @@ function buildMockService(): MockServiceRecord {
     tags: ["core", "money"],
     auth_mode: "internal_network",
     status: "registered",
-    capabilities: { supported_routes: ["status", "workflow"] },
+    capabilities: { supported_routes: ["status.latest", "workflow.topology", "broker.dlq.messages"] },
     last_seen_at: "2026-04-08T12:00:00Z",
     health: {
       service_id: "payments-api",
@@ -145,24 +145,45 @@ function buildMockService(): MockServiceRecord {
 
 const services: MockServiceRecord[] = [buildMockService()];
 
-function taskDetailResponse() {
+function taskDetailResponse(options?: { taskId?: string; dlqItems?: Array<Record<string, unknown>> }) {
+  const taskId = options?.taskId || "task-123";
+  const dlqItems =
+    options?.dlqItems ||
+    [
+      {
+        service_id: "payments-api",
+        dlq_id: "dlq-1",
+        queue_name: "payments.dlq",
+        source_queue_name: "payments.stage",
+        retry_queue_name: "payments.retry",
+        task_id: taskId,
+        correlation_id: "corr-123",
+        reason: "upstream_timeout",
+        retry_attempt: 2,
+        max_retries: 5,
+        body_encoding: "json",
+        dead_lettered_at: "2026-04-08T10:00:00Z",
+        state: "dead_lettered",
+        replay_count: 0,
+      },
+    ];
   return {
     service: services[0],
     service_id: "payments-api",
-    task_id: "task-123",
+    task_id: taskId,
     task_ref: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       correlation_id: "corr-123",
       parent_refs: [{ service_id: "upstream-api", task_id: "parent-1" }],
       child_refs: [{ service_id: "payments-api", task_id: "child-1" }],
     },
     latest_status: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       task_ref: {
         service_id: "payments-api",
-        task_id: "task-123",
+        task_id: taskId,
         correlation_id: "corr-123",
         parent_refs: [],
         child_refs: [],
@@ -171,38 +192,21 @@ function taskDetailResponse() {
     },
     history: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       count: 2,
-      events: [{ task_id: "task-123", status: "queued" }, { task_id: "task-123", status: "running" }],
+      events: [{ task_id: taskId, status: "queued" }, { task_id: taskId, status: "running" }],
     },
     dlq_messages: {
       service_id: "payments-api",
-      items: [
-        {
-          service_id: "payments-api",
-          dlq_id: "dlq-1",
-          queue_name: "payments.dlq",
-          source_queue_name: "payments.stage",
-          retry_queue_name: "payments.retry",
-          task_id: "task-123",
-          correlation_id: "corr-123",
-          reason: "upstream_timeout",
-          retry_attempt: 2,
-          max_retries: 5,
-          body_encoding: "json",
-          dead_lettered_at: "2026-04-08T10:00:00Z",
-          state: "dead_lettered",
-          replay_count: 0,
-        },
-      ],
+      items: dlqItems,
       next_cursor: null,
     },
     execution_graph: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       task_ref: {
         service_id: "payments-api",
-        task_id: "task-123",
+        task_id: taskId,
         correlation_id: "corr-123",
         parent_refs: [],
         child_refs: [],
@@ -216,12 +220,12 @@ function taskDetailResponse() {
         graph_completeness: "complete",
       },
       nodes: [
-        { id: "task", kind: "task", label: "task-123", task_id: "task-123" },
-        { id: "attempt", kind: "task_attempt", label: "attempt-1", task_id: "task-123" },
+        { id: "task", kind: "task", label: taskId, task_id: taskId },
+        { id: "attempt", kind: "task_attempt", label: "attempt-1", task_id: taskId },
       ],
       edges: [{ source: "task", target: "attempt", kind: "stage_transitioned_to" }],
       annotations: {},
-      related_task_ids: ["task-123", "child-1"],
+      related_task_ids: [taskId, "child-1"],
     },
     joined_refs: [
       {
@@ -365,6 +369,36 @@ describe("App", () => {
       }
       if (url === "/studio/services/payments-api/dlq/messages?limit=50&cursor=cursor-2" && method === "GET") {
         return jsonResponse({ service_id: "payments-api", items: [], next_cursor: null });
+      }
+      if (url === "/studio/services/payments-api/broker/dlq/messages?limit=50&task_id=task-123" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          items: [
+            {
+              service_id: "payments-api",
+              queue_name: "payments.dlq",
+              message_key: "msg-1",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              reason: "broker_rejected",
+              source_queue_name: "payments.stage",
+              content_type: "application/json",
+              body_encoding: "json",
+              dead_lettered_at: "2026-04-08T10:00:00Z",
+              headers: { task_id: "task-123" },
+              body: { task_id: "task-123" },
+              raw_body_b64: "eyJ0YXNrX2lkIjoidGFzay0xMjMifQ==",
+              redelivered: false,
+              task_ref: {
+                service_id: "payments-api",
+                task_id: "task-123",
+                correlation_id: "corr-123",
+                parent_refs: [],
+                child_refs: [],
+              },
+            },
+          ],
+        });
       }
       if (url === "/studio/tasks/search?task_id=task-123&limit=50" && method === "GET") {
         return jsonResponse({
@@ -551,6 +585,26 @@ describe("App", () => {
     );
   });
 
+  it("switches the DLQ explorer into broker mode and hides indexed-only affordances", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/dlq?mode=broker&task_id=task-123");
+
+    render(<App />);
+
+    expect(await screen.findByText("DLQ Explorer")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/studio/services/payments-api/broker/dlq/messages?limit=50&task_id=task-123",
+        undefined,
+      ),
+    );
+    expect(screen.getByText(/Live broker inspection mode is active/)).toBeInTheDocument();
+    expect(screen.getByText("broker_rejected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load Next Page" })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Reason")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Source queue")).toBeDisabled();
+    expect(screen.getByPlaceholderText("State")).toBeDisabled();
+  });
+
   it("submits task search and renders indexed task results", async () => {
     window.history.replaceState({}, "", "/tasks/search");
 
@@ -596,5 +650,32 @@ describe("App", () => {
     unmount();
 
     expect(MockEventSource.instances[0]?.closed).toBe(true);
+  });
+
+  it("shows a broker inspection CTA in task detail when indexed DLQ data is empty", async () => {
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/tasks/payments-api/task-empty-dlq?join=all" && method === "GET") {
+        return jsonResponse(taskDetailResponse({ taskId: "task-empty-dlq", dlqItems: [] }));
+      }
+      if (url === "/studio/tasks/payments-api/task-empty-dlq/events?limit=50" && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url === "/studio/tasks/payments-api/task-empty-dlq/logs?limit=50&correlation_id=corr-123" && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      return await baseImpl!(input, init);
+    });
+    window.history.replaceState({}, "", "/tasks/payments-api/task-empty-dlq");
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Inspect live broker DLQ messages" })).toHaveAttribute(
+      "href",
+      "/services/payments-api/dlq?mode=broker&task_id=task-empty-dlq",
+    );
   });
 });

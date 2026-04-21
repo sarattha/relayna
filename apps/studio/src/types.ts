@@ -238,6 +238,29 @@ export type DlqMessageListResponse = {
   next_cursor?: string | null;
 };
 
+export type BrokerDlqMessage = {
+  service_id: string;
+  queue_name: string;
+  message_key: string;
+  task_id?: string | null;
+  correlation_id?: string | null;
+  reason?: string | null;
+  source_queue_name?: string | null;
+  content_type?: string | null;
+  body_encoding: string;
+  dead_lettered_at?: string | null;
+  headers: Record<string, unknown>;
+  body: unknown;
+  raw_body_b64: string;
+  redelivered?: boolean | null;
+  task_ref?: StudioTaskRef | null;
+};
+
+export type BrokerDlqMessageListResponse = {
+  service_id: string;
+  items: BrokerDlqMessage[];
+};
+
 export type TaskDlqMessagesPayload = {
   service_id: string;
   items: DlqMessageSummary[];
@@ -384,6 +407,8 @@ export type StudioLogQuery = {
   limit?: number;
   correlation_id?: string | null;
 };
+
+export type DlqMode = "indexed" | "broker";
 
 export type DlqQueryState = {
   queue_name: string;

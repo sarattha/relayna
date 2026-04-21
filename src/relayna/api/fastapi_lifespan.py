@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from redis.asyncio import Redis
 
 from ..contracts import ContractAliasConfig, TerminalStatusSet, public_output_aliases
-from ..dlq import DLQService, RedisDLQStore
+from ..dlq import BrokerDLQMessageInspector, DLQService, RedisDLQStore
 from ..observability import ExecutionGraphService, RedisObservationStore, RedisServiceEventFeedStore
 from ..rabbitmq import RelaynaRabbitClient
 from ..status.history import StreamHistoryReader
@@ -37,6 +37,7 @@ class RelaynaRuntime:
     sse_stream: SSEStatusStream
     history_reader: StreamHistoryReader
     execution_graph_service: ExecutionGraphService
+    broker_message_inspector: BrokerDLQMessageInspector | None = None
     hub_task: asyncio.Task[None] | None = None
 
 
@@ -67,6 +68,7 @@ class _RelaynaLifespan:
         service_event_feed_maxlen: int,
         app_state_key: str,
         alias_config: ContractAliasConfig | None,
+        broker_message_inspector: BrokerDLQMessageInspector | None,
     ) -> None:
         self._topology = topology
         self._redis_url = redis_url
@@ -91,6 +93,7 @@ class _RelaynaLifespan:
         self._service_event_feed_maxlen = service_event_feed_maxlen
         self._app_state_key = app_state_key
         self._alias_config = alias_config
+        self._broker_message_inspector = broker_message_inspector
         self._runtime: RelaynaRuntime | None = None
 
     @property
@@ -200,6 +203,7 @@ class _RelaynaLifespan:
                 sse_stream=sse_stream,
                 history_reader=history_reader,
                 execution_graph_service=execution_graph_service,
+                broker_message_inspector=self._broker_message_inspector,
             )
         return self._runtime
 
@@ -267,6 +271,7 @@ def create_relayna_lifespan(
     service_event_feed_maxlen: int = 5000,
     app_state_key: str = "relayna",
     alias_config: ContractAliasConfig | None = None,
+    broker_message_inspector: BrokerDLQMessageInspector | None = None,
 ) -> _RelaynaLifespan:
     return _RelaynaLifespan(
         topology=topology,
@@ -292,6 +297,7 @@ def create_relayna_lifespan(
         service_event_feed_maxlen=service_event_feed_maxlen,
         app_state_key=app_state_key,
         alias_config=alias_config,
+        broker_message_inspector=broker_message_inspector,
     )
 
 

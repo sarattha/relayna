@@ -10,7 +10,15 @@ from fastapi.testclient import TestClient
 import relayna.api.fastapi_lifespan as relayna_fastapi
 from relayna.api import create_dlq_router, create_status_router
 from relayna.contracts import ContractAliasConfig
-from relayna.dlq import DLQRecord, DLQRecordState, DLQReplayConflict, DLQService, build_dlq_record
+from relayna.dlq import (
+    BrokerDLQMessage,
+    DLQRecord,
+    DLQRecordState,
+    DLQReplayConflict,
+    DLQService,
+    build_dlq_record,
+    broker_message_from_management_payload,
+)
 from relayna.topology import SharedTasksSharedStatusTopology
 
 
@@ -313,6 +321,16 @@ class FakeDLQStore:
         )
         await self.add(updated)
         return updated
+
+
+class FakeBrokerInspector:
+    def __init__(self, items_by_queue: dict[str, list[BrokerDLQMessage]]) -> None:
+        self.items_by_queue = items_by_queue
+        self.calls: list[dict[str, object]] = []
+
+    async def list_messages(self, queue_name: str, *, limit: int = 50) -> list[BrokerDLQMessage]:
+        self.calls.append({"queue_name": queue_name, "limit": limit})
+        return list(self.items_by_queue.get(queue_name, []))[:limit]
 
 
 @pytest.fixture(autouse=True)
@@ -931,3 +949,117 @@ def test_dlq_router_does_not_discover_broker_only_queues_via_indexed_endpoints(
                 }
             ]
         }
+
+
+def test_dlq_router_lists_live_broker_messages_when_broker_inspector_is_configured(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            dlq_store_prefix="relayna-dlq",
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    assert runtime.dlq_store is not None
+    inspector = FakeBrokerInspector(
+        {
+            "broker.only.dlq": [
+                BrokerDLQMessage(
+                    queue_name="broker.only.dlq",
+                    message_key="msg-1",
+                    task_id="task-123",
+                    correlation_id="corr-123",
+                    reason="rejected",
+                    source_queue_name="tasks.queue",
+                    content_type="application/json",
+                    body_encoding="json",
+                    dead_lettered_at=None,
+                    headers={"task_id": "task-123"},
+                    body={"task_id": "task-123"},
+                    raw_body_b64="eyJ0YXNrX2lkIjoidGFzay0xMjMifQ==",
+                    redelivered=False,
+                )
+            ]
+        }
+    )
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+                broker_message_inspector=inspector,
+            ),
+            broker_dlq_queue_names=["broker.only.dlq"],
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/broker/dlq/messages", params={"task_id": "task-123", "limit": 10})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "queue_name": "broker.only.dlq",
+                "message_key": "msg-1",
+                "task_id": "task-123",
+                "correlation_id": "corr-123",
+                "reason": "rejected",
+                "source_queue_name": "tasks.queue",
+                "content_type": "application/json",
+                "body_encoding": "json",
+                "dead_lettered_at": None,
+                "headers": {"task_id": "task-123"},
+                "body": {"task_id": "task-123"},
+                "raw_body_b64": "eyJ0YXNrX2lkIjoidGFzay0xMjMifQ==",
+                "redelivered": False,
+            }
+        ]
+    }
+    assert inspector.calls == [{"queue_name": "broker.only.dlq", "limit": 10}]
+
+
+def test_broker_message_from_management_payload_derives_best_effort_metadata() -> None:
+    item = broker_message_from_management_payload(
+        "tasks.queue.dlq",
+        {
+            "payload": '{"task_id":"task-123","correlation_id":"corr-123"}',
+            "payload_encoding": "string",
+            "redelivered": True,
+            "properties": {
+                "content_type": "application/json",
+                "correlation_id": "corr-123",
+                "message_id": "msg-123",
+                "timestamp": "2026-04-21T10:00:00Z",
+                "headers": {
+                    "x-first-death-reason": "rejected",
+                    "x-first-death-queue": "tasks.queue",
+                    "task_id": "task-123",
+                },
+            },
+        },
+    )
+
+    assert item.model_dump(mode="json") == {
+        "queue_name": "tasks.queue.dlq",
+        "message_key": "msg-123",
+        "task_id": "task-123",
+        "correlation_id": "corr-123",
+        "reason": "rejected",
+        "source_queue_name": "tasks.queue",
+        "content_type": "application/json",
+        "body_encoding": "json",
+        "dead_lettered_at": "2026-04-21T10:00:00Z",
+        "headers": {
+            "x-first-death-reason": "rejected",
+            "x-first-death-queue": "tasks.queue",
+            "task_id": "task-123",
+        },
+        "body": {"task_id": "task-123", "correlation_id": "corr-123"},
+        "raw_body_b64": "eyJ0YXNrX2lkIjoidGFzay0xMjMiLCJjb3JyZWxhdGlvbl9pZCI6ImNvcnItMTIzIn0=",
+        "redelivered": True,
+    }

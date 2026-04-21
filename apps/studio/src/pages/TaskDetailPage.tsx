@@ -22,6 +22,7 @@ import {
   mutedTextStyle,
   parseLimit,
   secondaryButtonStyle,
+  supportsCapability,
 } from "../ui";
 import type { StudioControlPlaneEvent, StudioEventListResponse, StudioLogListResponse, StudioTaskDetail } from "../types";
 
@@ -137,6 +138,7 @@ export function TaskDetailPage() {
   const dlqCount = taskDetail?.dlq_messages?.items.length ?? 0;
   const taskTimelineItems = taskTimeline?.items || [];
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
+  const brokerDlqSupported = supportsCapability(taskDetail?.service.capabilities || null, "broker.dlq.messages");
 
   return (
     <div className="studio-stack-lg">
@@ -229,6 +231,19 @@ export function TaskDetailPage() {
                     <MetadataRow label="DLQ messages" value={String(dlqCount)} />
                     <MetadataRow label="Duration" value={formatDuration(graph?.summary.duration_ms)} />
                   </dl>
+                  {brokerDlqSupported && dlqCount === 0 ? (
+                    <div style={{ marginTop: 14 }}>
+                      <NoticeBanner>
+                        Indexed DLQ data is empty for this task.{" "}
+                        <Link
+                          to={`/services/${encodeURIComponent(taskDetail.service_id)}/dlq?mode=broker&task_id=${encodeURIComponent(taskDetail.task_id)}`}
+                        >
+                          Inspect live broker DLQ messages
+                        </Link>
+                        .
+                      </NoticeBanner>
+                    </div>
+                  ) : null}
                   {identityRef?.parent_refs.length ? (
                     <div className="studio-action-row">
                       {identityRef.parent_refs.map((pointer) => (

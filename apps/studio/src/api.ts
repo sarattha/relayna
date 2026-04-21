@@ -1,4 +1,5 @@
 import type {
+  BrokerDlqMessageListResponse,
   DlqMessageListResponse,
   DlqQueryState,
   ServiceDraft,
@@ -296,5 +297,18 @@ export async function fetchDlq(serviceId: string, state: DlqQueryState) {
   }
   return requestJson<DlqMessageListResponse>(
     `/studio/services/${encodeURIComponent(serviceId)}/dlq/messages?${params.toString()}`,
+  );
+}
+
+export async function fetchBrokerDlq(serviceId: string, state: Pick<DlqQueryState, "queue_name" | "task_id" | "limit">) {
+  const params = new URLSearchParams({ limit: state.limit || "50" });
+  if (state.queue_name.trim()) {
+    params.set("queue_name", state.queue_name.trim());
+  }
+  if (state.task_id.trim()) {
+    params.set("task_id", state.task_id.trim());
+  }
+  return requestJson<BrokerDlqMessageListResponse>(
+    `/studio/services/${encodeURIComponent(serviceId)}/broker/dlq/messages?${params.toString()}`,
   );
 }
