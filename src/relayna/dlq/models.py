@@ -80,6 +80,26 @@ class DLQMessageList(BaseModel):
     next_cursor: str | None = None
 
 
+class BrokerDLQMessage(BaseModel):
+    queue_name: str
+    message_key: str
+    task_id: str | None = None
+    correlation_id: str | None = None
+    reason: str | None = None
+    source_queue_name: str | None = None
+    content_type: str | None = None
+    body_encoding: str
+    dead_lettered_at: datetime | None = None
+    headers: dict[str, Any] = Field(default_factory=dict)
+    body: Any
+    raw_body_b64: str
+    redelivered: bool | None = None
+
+
+class BrokerDLQMessageList(BaseModel):
+    items: list[BrokerDLQMessage]
+
+
 class DLQQueueSummary(BaseModel):
     queue_name: str
     indexed_count: int
@@ -181,6 +201,8 @@ def build_dlq_record(
 
 
 __all__ = [
+    "BrokerDLQMessage",
+    "BrokerDLQMessageList",
     "DLQMessageDetail",
     "DLQMessageList",
     "DLQMessageSummary",

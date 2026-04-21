@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import relayna
 from relayna.api import (
+    BROKER_DLQ_CAPABILITY_ROUTE_IDS,
     STATUS_CAPABILITY_ROUTE_IDS,
     WORKFLOW_CAPABILITY_ROUTE_IDS,
     create_capabilities_router,
@@ -129,3 +130,27 @@ def test_capabilities_route_snapshots_one_shot_iterables() -> None:
     assert second.json()["supported_routes"] == list(STATUS_CAPABILITY_ROUTE_IDS)
     assert first.json()["feature_flags"] == ["federated_reads"]
     assert second.json()["feature_flags"] == ["federated_reads"]
+
+
+def test_capabilities_route_can_explicitly_advertise_broker_dlq_messages_when_configured() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    app = FastAPI()
+    app.include_router(
+        create_capabilities_router(
+            topology=topology,
+            supported_routes=merge_capability_route_ids(STATUS_CAPABILITY_ROUTE_IDS, BROKER_DLQ_CAPABILITY_ROUTE_IDS),
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get("/relayna/capabilities")
+
+    assert response.status_code == 200
+    assert "broker.dlq.messages" in response.json()["supported_routes"]

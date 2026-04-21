@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -104,7 +104,7 @@ function buildMockService(): MockServiceRecord {
     tags: ["core", "money"],
     auth_mode: "internal_network",
     status: "registered",
-    capabilities: { supported_routes: ["status", "workflow"] },
+    capabilities: { supported_routes: ["status.latest", "workflow.topology", "broker.dlq.messages"] },
     last_seen_at: "2026-04-08T12:00:00Z",
     health: {
       service_id: "payments-api",
@@ -136,6 +136,7 @@ function buildMockService(): MockServiceRecord {
       provider: "loki",
       base_url: "https://loki.example.test",
       service_selector_labels: { app: "payments-api" },
+      source_label: "component",
       task_id_label: "task_id",
       correlation_id_label: "correlation_id",
       level_label: "level",
@@ -145,24 +146,45 @@ function buildMockService(): MockServiceRecord {
 
 const services: MockServiceRecord[] = [buildMockService()];
 
-function taskDetailResponse() {
+function taskDetailResponse(options?: { taskId?: string; dlqItems?: Array<Record<string, unknown>> }) {
+  const taskId = options?.taskId || "task-123";
+  const dlqItems =
+    options?.dlqItems ||
+    [
+      {
+        service_id: "payments-api",
+        dlq_id: "dlq-1",
+        queue_name: "payments.dlq",
+        source_queue_name: "payments.stage",
+        retry_queue_name: "payments.retry",
+        task_id: taskId,
+        correlation_id: "corr-123",
+        reason: "upstream_timeout",
+        retry_attempt: 2,
+        max_retries: 5,
+        body_encoding: "json",
+        dead_lettered_at: "2026-04-08T10:00:00Z",
+        state: "dead_lettered",
+        replay_count: 0,
+      },
+    ];
   return {
     service: services[0],
     service_id: "payments-api",
-    task_id: "task-123",
+    task_id: taskId,
     task_ref: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       correlation_id: "corr-123",
       parent_refs: [{ service_id: "upstream-api", task_id: "parent-1" }],
       child_refs: [{ service_id: "payments-api", task_id: "child-1" }],
     },
     latest_status: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       task_ref: {
         service_id: "payments-api",
-        task_id: "task-123",
+        task_id: taskId,
         correlation_id: "corr-123",
         parent_refs: [],
         child_refs: [],
@@ -171,38 +193,21 @@ function taskDetailResponse() {
     },
     history: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       count: 2,
-      events: [{ task_id: "task-123", status: "queued" }, { task_id: "task-123", status: "running" }],
+      events: [{ task_id: taskId, status: "queued" }, { task_id: taskId, status: "running" }],
     },
     dlq_messages: {
       service_id: "payments-api",
-      items: [
-        {
-          service_id: "payments-api",
-          dlq_id: "dlq-1",
-          queue_name: "payments.dlq",
-          source_queue_name: "payments.stage",
-          retry_queue_name: "payments.retry",
-          task_id: "task-123",
-          correlation_id: "corr-123",
-          reason: "upstream_timeout",
-          retry_attempt: 2,
-          max_retries: 5,
-          body_encoding: "json",
-          dead_lettered_at: "2026-04-08T10:00:00Z",
-          state: "dead_lettered",
-          replay_count: 0,
-        },
-      ],
+      items: dlqItems,
       next_cursor: null,
     },
     execution_graph: {
       service_id: "payments-api",
-      task_id: "task-123",
+      task_id: taskId,
       task_ref: {
         service_id: "payments-api",
-        task_id: "task-123",
+        task_id: taskId,
         correlation_id: "corr-123",
         parent_refs: [],
         child_refs: [],
@@ -216,12 +221,12 @@ function taskDetailResponse() {
         graph_completeness: "complete",
       },
       nodes: [
-        { id: "task", kind: "task", label: "task-123", task_id: "task-123" },
-        { id: "attempt", kind: "task_attempt", label: "attempt-1", task_id: "task-123" },
+        { id: "task", kind: "task", label: taskId, task_id: taskId },
+        { id: "attempt", kind: "task_attempt", label: "attempt-1", task_id: taskId },
       ],
       edges: [{ source: "task", target: "attempt", kind: "stage_transitioned_to" }],
       annotations: {},
-      related_task_ids: ["task-123", "child-1"],
+      related_task_ids: [taskId, "child-1"],
     },
     joined_refs: [
       {
@@ -274,7 +279,24 @@ describe("App", () => {
               service_id: "payments-api",
               timestamp: "2026-04-08T10:00:00Z",
               level: "info",
-              message: "service log line",
+              source: "runtime-worker",
+              message: "\u001b[32mservice log line\u001b[0m\nsecond line",
+              fields: {},
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/services/payments-api/logs?limit=20&source=runtime-worker" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-08T10:00:00Z",
+              level: "info",
+              source: "runtime-worker",
+              message: "\u001b[32mservice log line\u001b[0m\nsecond line",
               fields: {},
             },
           ],
@@ -366,6 +388,36 @@ describe("App", () => {
       if (url === "/studio/services/payments-api/dlq/messages?limit=50&cursor=cursor-2" && method === "GET") {
         return jsonResponse({ service_id: "payments-api", items: [], next_cursor: null });
       }
+      if (url === "/studio/services/payments-api/broker/dlq/messages?limit=50&task_id=task-123" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          items: [
+            {
+              service_id: "payments-api",
+              queue_name: "payments.dlq",
+              message_key: "msg-1",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              reason: "broker_rejected",
+              source_queue_name: "payments.stage",
+              content_type: "application/json",
+              body_encoding: "json",
+              dead_lettered_at: "2026-04-08T10:00:00Z",
+              headers: { task_id: "task-123" },
+              body: { task_id: "task-123" },
+              raw_body_b64: "eyJ0YXNrX2lkIjoidGFzay0xMjMifQ==",
+              redelivered: false,
+              task_ref: {
+                service_id: "payments-api",
+                task_id: "task-123",
+                correlation_id: "corr-123",
+                parent_refs: [],
+                child_refs: [],
+              },
+            },
+          ],
+        });
+      }
       if (url === "/studio/tasks/search?task_id=task-123&limit=50" && method === "GET") {
         return jsonResponse({
           count: 1,
@@ -423,7 +475,26 @@ describe("App", () => {
               correlation_id: "corr-123",
               timestamp: "2026-04-08T10:00:00Z",
               level: "info",
-              message: "task log line",
+              source: "api",
+              message: "\u001b[31mtask log line\u001b[0m",
+              fields: {},
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/tasks/payments-api/task-123/logs?limit=50&source=api&correlation_id=corr-123" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-08T10:00:00Z",
+              level: "info",
+              source: "api",
+              message: "\u001b[31mtask log line\u001b[0m",
               fields: {},
             },
           ],
@@ -435,6 +506,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -444,6 +516,81 @@ describe("App", () => {
     expect(await screen.findByText("Registered Services")).toBeInTheDocument();
     await waitFor(() => expect(window.location.pathname).toBe("/services"));
     expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
+  });
+
+  it("polls the registered services list silently and stops after unmount", async () => {
+    vi.useFakeTimers();
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let serviceListCalls = 0;
+    let resolveRefresh: ((response: Response) => void) | null = null;
+    async function flushServicesRender() {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url === "/studio/services" && method === "GET") {
+        serviceListCalls += 1;
+        if (serviceListCalls === 1) {
+          return serviceListResponse(services);
+        }
+        if (serviceListCalls === 2) {
+          return await new Promise<Response>((resolve) => {
+            resolveRefresh = resolve;
+          });
+        }
+      }
+
+      return await baseImpl!(input, init);
+    });
+
+    const { unmount } = render(<App />);
+
+    expect(screen.getByText("Registered Services")).toBeInTheDocument();
+    await flushServicesRender();
+
+    expect(serviceListCalls).toBe(1);
+    expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Loading services...")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(serviceListCalls).toBe(2);
+    expect(screen.queryByText("Loading services...")).not.toBeInTheDocument();
+
+    services[0] = {
+      ...services[0],
+      status: "healthy",
+      health: {
+        ...services[0].health,
+        registry_status: "healthy",
+        overall_status: "healthy",
+      },
+    };
+    await act(async () => {
+      resolveRefresh?.(serviceListResponse(services));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Loading services...")).not.toBeInTheDocument();
+
+    unmount();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(serviceListCalls).toBe(2);
   });
 
   it("surfaces registry save failures instead of silently swallowing them", async () => {
@@ -469,6 +616,44 @@ describe("App", () => {
     expect(window.location.pathname).toBe("/services");
   });
 
+  it("includes source_label in the service log configuration payload", async () => {
+    let observedPayload: { log_config?: { source_label?: string | null } | null } | null = null;
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services" && method === "POST") {
+        observedPayload = JSON.parse(String(init?.body || "{}"));
+        const created = {
+          ...buildMockService(),
+          service_id: "orders-api",
+          name: "Orders API",
+          log_config: observedPayload?.log_config ?? null,
+        };
+        services.push(created);
+        return jsonResponse(created);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    await screen.findByText("Registered Services");
+    fireEvent.click(screen.getByRole("button", { name: "New Service" }));
+    fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "orders-api" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Orders API" } });
+    fireEvent.change(screen.getByLabelText("Source label"), { target: { value: "component" } });
+    fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
+
+    await screen.findByText("Registered service 'orders-api'.");
+    expect(observedPayload).not.toBeNull();
+    if (!observedPayload) {
+      throw new Error("Expected the service create payload to be captured.");
+    }
+    const capturedPayload = observedPayload as { log_config?: { source_label?: string | null } | null };
+    expect(capturedPayload.log_config?.source_label).toBe("component");
+  });
+
   it("navigates from the service list to the routed service detail page", async () => {
     render(<App />);
 
@@ -479,6 +664,24 @@ describe("App", () => {
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
     expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
+    expect(screen.getByText("runtime-worker")).toBeInTheDocument();
+    expect(screen.getByText("service log line")).toBeInTheDocument();
+    expect(screen.getByText("second line")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("\u001b[32m");
+  });
+
+  it("applies the service log source filter through the Studio route", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Service log source"), { target: { value: "runtime-worker" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/logs?limit=20&source=runtime-worker", undefined),
+    );
   });
 
   it("refreshes a registered service from the detail page", async () => {
@@ -493,6 +696,73 @@ describe("App", () => {
 
     expect(await screen.findByText("Refreshed 'payments-api'.")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/refresh", { method: "POST" }));
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+  });
+
+  it("supersedes a stale background services poll when a mutation triggers reload", async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let serviceListCalls = 0;
+    let resolveBackgroundPoll: ((response: Response) => void) | null = null;
+    const staleServices = [buildMockService()];
+    async function flushRender() {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url === "/studio/services" && method === "GET") {
+        serviceListCalls += 1;
+        if (serviceListCalls === 1) {
+          return serviceListResponse(services);
+        }
+        if (serviceListCalls === 2) {
+          return await new Promise<Response>((resolve) => {
+            resolveBackgroundPoll = resolve;
+          });
+        }
+        if (serviceListCalls === 3) {
+          return serviceListResponse(services);
+        }
+      }
+
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    await flushRender();
+
+    expect(screen.getByText("Service Detail")).toBeInTheDocument();
+    expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(serviceListCalls).toBe(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await flushRender();
+
+    expect(screen.getByText("Refreshed 'payments-api'.")).toBeInTheDocument();
+    expect(serviceListCalls).toBe(3);
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      resolveBackgroundPoll?.(serviceListResponse(staleServices));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
     expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
   });
 
@@ -551,6 +821,26 @@ describe("App", () => {
     );
   });
 
+  it("switches the DLQ explorer into broker mode and hides indexed-only affordances", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/dlq?mode=broker&task_id=task-123");
+
+    render(<App />);
+
+    expect(await screen.findByText("DLQ Explorer")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/studio/services/payments-api/broker/dlq/messages?limit=50&task_id=task-123",
+        undefined,
+      ),
+    );
+    expect(screen.getByText(/Live broker inspection mode is active/)).toBeInTheDocument();
+    expect(screen.getByText("broker_rejected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load Next Page" })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Reason")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Source queue")).toBeDisabled();
+    expect(screen.getByPlaceholderText("State")).toBeDisabled();
+  });
+
   it("submits task search and renders indexed task results", async () => {
     window.history.replaceState({}, "", "/tasks/search");
 
@@ -575,6 +865,9 @@ describe("App", () => {
     expect(screen.getByText("Joined Refs")).toBeInTheDocument();
     expect(screen.getByText("Join Warnings")).toBeInTheDocument();
     expect(screen.getByText("Section Errors")).toBeInTheDocument();
+    expect(screen.getByText("api")).toBeInTheDocument();
+    expect(screen.getByText("task log line")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("\u001b[31m");
     expect(MockEventSource.instances.some((item) => item.url === "/studio/tasks/payments-api/task-123/events/stream")).toBe(true);
 
     MockEventSource.instances[0]?.emit("event", {
@@ -596,5 +889,49 @@ describe("App", () => {
     unmount();
 
     expect(MockEventSource.instances[0]?.closed).toBe(true);
+  });
+
+  it("applies the task log source filter through the Studio route", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Task log source"), { target: { value: "api" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/studio/tasks/payments-api/task-123/logs?limit=50&source=api&correlation_id=corr-123",
+        undefined,
+      ),
+    );
+  });
+
+  it("shows a broker inspection CTA in task detail when indexed DLQ data is empty", async () => {
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/tasks/payments-api/task-empty-dlq?join=all" && method === "GET") {
+        return jsonResponse(taskDetailResponse({ taskId: "task-empty-dlq", dlqItems: [] }));
+      }
+      if (url === "/studio/tasks/payments-api/task-empty-dlq/events?limit=50" && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url === "/studio/tasks/payments-api/task-empty-dlq/logs?limit=50&correlation_id=corr-123" && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      return await baseImpl!(input, init);
+    });
+    window.history.replaceState({}, "", "/tasks/payments-api/task-empty-dlq");
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Inspect live broker DLQ messages" })).toHaveAttribute(
+      "href",
+      "/services/payments-api/dlq?mode=broker&task_id=task-empty-dlq",
+    );
   });
 });

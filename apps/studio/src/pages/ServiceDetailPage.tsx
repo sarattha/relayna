@@ -4,8 +4,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchServiceEvents, fetchServiceLogs } from "../api";
 import { useStudioServices } from "../services-context";
 import {
+  AnsiLogMessage,
   HealthBadge,
   InlineCodeBox,
+  LogSourceBadge,
   MetadataRow,
   NoticeBanner,
   SectionCard,
@@ -47,6 +49,7 @@ export function ServiceDetailPage() {
   const [serviceLogsError, setServiceLogsError] = useState<string | null>(null);
   const [serviceLogQuery, setServiceLogQuery] = useState("");
   const [serviceLogLevel, setServiceLogLevel] = useState("");
+  const [serviceLogSource, setServiceLogSource] = useState("");
   const [serviceLogLimit, setServiceLogLimit] = useState("20");
   const [refreshingService, setRefreshingService] = useState(false);
 
@@ -58,6 +61,7 @@ export function ServiceDetailPage() {
   }, [serviceId]);
 
   useEffect(() => {
+    setServiceLogSource("");
     if (!service?.log_config) {
       setServiceLogs(null);
       setServiceLogsError(service ? "No log provider configured for this service." : null);
@@ -110,6 +114,7 @@ export function ServiceDetailPage() {
       const payload = await fetchServiceLogs(service.service_id, {
         query: serviceLogQuery,
         level: serviceLogLevel,
+        source: serviceLogSource,
         limit: parseLimit(serviceLogLimit, 20),
       });
       setServiceLogs(payload);
@@ -373,6 +378,14 @@ export function ServiceDetailPage() {
               style={inputStyle}
             />
             <input
+              aria-label="Service log source"
+              value={serviceLogSource}
+              onChange={(event) => setServiceLogSource(event.target.value)}
+              placeholder={service.log_config?.source_label || "source"}
+              disabled={!service.log_config?.source_label}
+              style={inputStyle}
+            />
+            <input
               aria-label="Service log limit"
               value={serviceLogLimit}
               onChange={(event) => setServiceLogLimit(event.target.value)}
@@ -380,6 +393,11 @@ export function ServiceDetailPage() {
               style={inputStyle}
             />
           </div>
+          {!service.log_config?.source_label ? (
+            <p style={mutedTextStyle}>Source filtering is unavailable until this service sets `log_config.source_label`.</p>
+          ) : (
+            <p style={mutedTextStyle}>Source filter matches the configured `{service.log_config.source_label}` Loki label exactly.</p>
+          )}
           {serviceLogsLoading ? <p style={mutedTextStyle}>Loading service logs...</p> : null}
           {serviceLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceLogsError}</p> : null}
           {!serviceLogsLoading && !serviceLogsError && !(serviceLogs?.items.length || 0) ? (
@@ -395,13 +413,16 @@ export function ServiceDetailPage() {
                 >
                   <div className="studio-list-card__top">
                     <div style={{ display: "grid", gap: 4 }}>
-                      <strong style={{ fontSize: 13 }}>{item.message}</strong>
-                      <span className="studio-inline-meta">
-                        {formatLogLevel(item.level)} · {item.task_id || "service scope"}
-                      </span>
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                        <LogSourceBadge source={item.source} />
+                        <span className="studio-inline-meta">
+                          {formatLogLevel(item.level)} · {item.task_id || "service scope"}
+                        </span>
+                      </div>
                     </div>
                     <span className="studio-inline-meta">{formatTimestamp(item.timestamp)}</span>
                   </div>
+                  <AnsiLogMessage message={item.message} />
                 </article>
               ))}
             </div>

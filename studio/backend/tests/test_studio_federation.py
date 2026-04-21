@@ -261,6 +261,132 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
         assert graph_response.json()["task_ref"]["task_id"] == "task-123"
 
 
+def test_service_broker_dlq_messages_proxy_and_normalize_task_refs(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/broker/dlq/messages":
+            observed_params["broker_dlq"] = str(request.url.query)
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "queue_name": "payments.dlq",
+                            "message_key": "msg-1",
+                            "task_id": "task-123",
+                            "correlation_id": "corr-123",
+                            "reason": "rejected",
+                            "source_queue_name": "payments.authorize",
+                            "content_type": "application/json",
+                            "body_encoding": "json",
+                            "dead_lettered_at": "2026-04-21T10:00:00Z",
+                            "headers": {"attemptId": "task-123"},
+                            "body": {"attemptId": "task-123"},
+                            "raw_body_b64": "eyJhdHRlbXB0SWQiOiJ0YXNrLTEyMyJ9",
+                            "redelivered": False,
+                        }
+                    ]
+                },
+            )
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(
+                    supported_routes=["broker.dlq.messages"],
+                    http_aliases={"task_id": "attemptId"},
+                ),
+            ),
+        )
+
+        response = client.get(
+            "/studio/services/payments-api/broker/dlq/messages",
+            params={"task_id": "task-123", "limit": 10},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "attemptId=task-123" in observed_params["broker_dlq"]
+    assert payload == {
+        "service_id": "payments-api",
+        "items": [
+            {
+                "service_id": "payments-api",
+                "queue_name": "payments.dlq",
+                "message_key": "msg-1",
+                "task_id": "task-123",
+                "correlation_id": "corr-123",
+                "reason": "rejected",
+                "source_queue_name": "payments.authorize",
+                "content_type": "application/json",
+                "body_encoding": "json",
+                "dead_lettered_at": "2026-04-21T10:00:00Z",
+                "headers": {"attemptId": "task-123"},
+                "body": {"attemptId": "task-123"},
+                "raw_body_b64": "eyJhdHRlbXB0SWQiOiJ0YXNrLTEyMyJ9",
+                "redelivered": False,
+                "task_ref": {
+                    "service_id": "payments-api",
+                    "task_id": "task-123",
+                    "correlation_id": "corr-123",
+                    "parent_refs": [],
+                    "child_refs": [],
+                },
+            }
+        ],
+    }
+
+
+def test_service_broker_dlq_messages_returns_unsupported_route_when_capability_missing(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=["dlq.messages"]),
+            ),
+        )
+
+        response = client.get("/studio/services/payments-api/broker/dlq/messages")
+
+    assert response.status_code == 501
+    assert response.json() == {
+        "detail": "Service 'payments-api' does not support Relayna route 'broker.dlq.messages'.",
+        "code": "unsupported_route",
+        "service_id": "payments-api",
+        "upstream_status": None,
+        "retryable": False,
+    }
+
+
 def test_task_search_returns_retained_indexed_matches(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 
