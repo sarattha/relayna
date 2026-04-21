@@ -263,9 +263,7 @@ class LokiLogProvider:
                     "loki_cursor": cursor,
                 }
                 source = (
-                    normalized_labels.get(config.source_label or "", "unknown")
-                    if config.source_label
-                    else "unknown"
+                    normalized_labels.get(config.source_label or "", "unknown") if config.source_label else "unknown"
                 )
                 entries_with_cursor.append(
                     (
