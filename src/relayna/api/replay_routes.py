@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from ..contracts import ContractAliasConfig
 from ..dlq import DLQRecordState, DLQReplayConflict, DLQService
 from .capabilities_routes import (
+    BROKER_DLQ_MESSAGES_ROUTE_ID,
     DLQ_CAPABILITY_ROUTE_IDS,
     DLQ_MESSAGE_DETAIL_ROUTE_ID,
     DLQ_MESSAGES_ROUTE_ID,
@@ -22,6 +23,7 @@ def create_dlq_router(
     dlq_service: DLQService,
     queues_path: str = "/dlq/queues",
     broker_queues_path: str = "/broker/dlq/queues",
+    broker_messages_path: str = "/broker/dlq/messages",
     messages_path: str = "/dlq/messages",
     message_path: str = "/dlq/messages/{dlq_id}",
     replay_path: str = "/dlq/messages/{dlq_id}/replay",
@@ -42,6 +44,25 @@ def create_dlq_router(
         async def broker_queues() -> JSONResponse:
             items = await dlq_service.get_broker_queue_summaries(broker_dlq_queue_names)
             return JSONResponse({"queues": [item.model_dump(mode="json") for item in items]})
+
+    if broker_dlq_queue_names is not None and dlq_service.supports_broker_message_reads:
+
+        @router.get(broker_messages_path)
+        async def broker_messages(
+            queue_name: str | None = None,
+            task_id: str | None = Query(default=None, alias=task_http_name),
+            limit: int = Query(default=50, ge=1, le=200),
+        ) -> JSONResponse:
+            try:
+                payload = await dlq_service.list_broker_messages(
+                    broker_dlq_queue_names,
+                    queue_name=queue_name,
+                    task_id=task_id,
+                    limit=limit,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return JSONResponse(payload.model_dump(mode="json"))
 
     @router.get(messages_path)
     async def messages(
@@ -94,6 +115,7 @@ __all__ = [
     "DLQ_MESSAGE_DETAIL_ROUTE_ID",
     "DLQ_QUEUES_ROUTE_ID",
     "DLQ_REPLAY_ROUTE_ID",
+    "BROKER_DLQ_MESSAGES_ROUTE_ID",
     "create_dlq_router",
     "create_replay_router",
 ]

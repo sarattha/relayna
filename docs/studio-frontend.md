@@ -134,6 +134,7 @@ Primary requests include:
 - `/studio/tasks/{service_id}/{task_id}/logs`
 - `/studio/services/{service_id}/workflow/topology`
 - `/studio/services/{service_id}/dlq/messages`
+- `/studio/services/{service_id}/broker/dlq/messages`
 
 Important constraint:
 
@@ -173,6 +174,12 @@ The UI manages service records with fields including:
 These are not cosmetic fields. They determine how the backend resolves and
 federates the service.
 
+The registered-services screen reads this data through the shared
+`StudioServicesProvider`, which polls `/studio/services` roughly every 60
+seconds so backend health-refresh results appear without a manual browser
+reload. The explicit `Reload List` action remains available for operator-driven
+refreshes.
+
 ### Task search and task detail
 
 The UI addresses tasks as:
@@ -201,6 +208,20 @@ These views depend on backend support:
 - event views depend on Studio event ingestion or service-scoped event reads
 - DLQ pages depend on service DLQ routes
 
+DLQ views now have two explicit modes:
+
+- indexed mode
+  - uses `/studio/services/{service_id}/dlq/messages`
+  - shows indexed Relayna DLQ records with pagination and replay/index metadata
+- broker mode
+  - uses `/studio/services/{service_id}/broker/dlq/messages`
+  - is enabled only when the service capability document advertises `broker.dlq.messages`
+  - is a live emergency inspection path and does not show `dlq_id`, replay state, or pagination
+
+Task detail remains indexed-first. When indexed DLQ data is empty and broker
+inspection is supported, the UI links operators into broker mode instead of
+automatically replacing the indexed view.
+
 The frontend is intentionally thin here: if the backend cannot provide a route,
 the UI should degrade rather than invent client-side service calls.
 
@@ -224,6 +245,7 @@ Then check in the browser:
 
 - `/services`
   - service list renders and can create or edit service records
+  - registry and health badges refresh automatically after backend health updates
 - `/tasks/search`
   - task search page loads without direct service-origin calls
 - task detail pages

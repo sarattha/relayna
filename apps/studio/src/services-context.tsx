@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createService,
@@ -42,40 +42,113 @@ const emptyDraft: ServiceDraft = {
   log_base_url: "",
   log_tenant_id: "",
   log_service_selector_labels: "",
+  log_source_label: "",
   log_task_id_label: "",
   log_correlation_id_label: "",
   log_level_label: "",
 };
 
 const ServicesContext = createContext<ServicesContextValue | null>(null);
+const SERVICE_REFRESH_INTERVAL_MS = 60_000;
+
+type InFlightServicesRequest = {
+  background: boolean;
+  promise: Promise<ServiceRecord[]>;
+  token: number;
+};
 
 export function StudioServicesProvider({ children }: { children: ReactNode }) {
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const servicesRef = useRef<ServiceRecord[]>([]);
+  const hasLoadedServicesRef = useRef(false);
+  const reloadInFlightRef = useRef<InFlightServicesRequest | null>(null);
+  const latestRequestTokenRef = useRef(0);
 
   function setMutationError(fetchError: unknown, fallback: string) {
     setNotice(null);
     setError(fetchError instanceof Error ? fetchError.message : fallback);
   }
 
-  async function reload() {
-    setLoading(true);
-    try {
-      const payload = await listServices();
-      setServices(payload.services || []);
-      setError(null);
-    } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
-    } finally {
-      setLoading(false);
+  const loadServices = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
+    const currentRequest = reloadInFlightRef.current;
+    if (currentRequest) {
+      if (background || !currentRequest.background) {
+        return currentRequest.promise;
+      }
     }
-  }
+
+    const token = latestRequestTokenRef.current + 1;
+    latestRequestTokenRef.current = token;
+
+    const request = (async () => {
+      if (!background && mountedRef.current) {
+        setLoading(true);
+      }
+      try {
+        const payload = await listServices();
+        const nextServices = payload.services || [];
+        const isLatestRequest = latestRequestTokenRef.current === token;
+        if (isLatestRequest) {
+          servicesRef.current = nextServices;
+          hasLoadedServicesRef.current = true;
+        }
+        if (mountedRef.current && isLatestRequest) {
+          setServices(nextServices);
+          setError(null);
+        }
+        return isLatestRequest ? nextServices : servicesRef.current;
+      } catch (fetchError) {
+        if (
+          mountedRef.current &&
+          latestRequestTokenRef.current === token &&
+          (!background || !hasLoadedServicesRef.current)
+        ) {
+          setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
+        }
+        return servicesRef.current;
+      } finally {
+        const isCurrentRequest = reloadInFlightRef.current?.token === token;
+        if (!background && mountedRef.current && isCurrentRequest) {
+          setLoading(false);
+        }
+        if (isCurrentRequest) {
+          reloadInFlightRef.current = null;
+        }
+      }
+    })();
+
+    reloadInFlightRef.current = { background, promise: request, token };
+    return request;
+  }, []);
+
+  const reload = useCallback(
+    async (_preferredServiceId?: string | null) => {
+      await loadServices();
+    },
+    [loadServices],
+  );
 
   useEffect(() => {
-    void reload();
-  }, []);
+    servicesRef.current = services;
+  }, [services]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void loadServices();
+
+    const intervalId = window.setInterval(() => {
+      void loadServices({ background: true });
+    }, SERVICE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      mountedRef.current = false;
+      window.clearInterval(intervalId);
+    };
+  }, [loadServices]);
 
   const value = useMemo<ServicesContextValue>(
     () => ({
@@ -170,7 +243,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
         setNotice(null);
       },
     }),
-    [services, loading, error, notice],
+    [services, loading, error, notice, reload],
   );
 
   return <ServicesContext.Provider value={value}>{children}</ServicesContext.Provider>;

@@ -93,7 +93,7 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RELAYNA_STUDIO_HEALTH_STORE_PREFIX` | `studio:health` | Redis prefix for service health snapshots. |
-| `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS` | `60.0` | Interval for health refresh polling. Use `none`, `null`, or `off` to disable. |
+| `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS` | `60.0` | Interval for health refresh polling. The default Studio frontend services screen polls `/studio/services` on a similar cadence so updated health summaries appear without a manual page reload. Use `none`, `null`, or `off` to disable. |
 | `RELAYNA_STUDIO_OBSERVATION_STALE_AFTER_SECONDS` | `300` | Threshold after which ingested observations are considered stale. |
 | `RELAYNA_STUDIO_WORKER_HEARTBEAT_STALE_AFTER_SECONDS` | `90` | Threshold after which worker heartbeats are considered stale. |
 
@@ -232,6 +232,7 @@ The backend can run three periodic workers:
 - health refresh worker
   - refreshes service health snapshots and staleness state
   - controlled by `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS`
+  - its updated summaries are surfaced in the Studio services screen through frontend polling of `/studio/services`
 - retention worker
   - prunes search-related retained state
   - controlled by `RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS`
@@ -272,6 +273,7 @@ The main operator surfaces are:
 - federated workflow and DLQ reads
   - `/studio/services/{service_id}/workflow/topology`
   - `/studio/services/{service_id}/dlq/messages`
+  - `/studio/services/{service_id}/broker/dlq/messages`
 - federated execution view
   - `/studio/services/{service_id}/executions/{task_id}/graph`
 
@@ -296,7 +298,25 @@ curl -s -X POST http://localhost:8000/studio/services/my-service/health/refresh
 curl -s http://localhost:8000/studio/tasks/my-service/task-123
 curl -s http://localhost:8000/studio/services/my-service/workflow/topology
 curl -s http://localhost:8000/studio/services/my-service/dlq/messages
+curl -s "http://localhost:8000/studio/services/my-service/broker/dlq/messages?task_id=task-123"
+curl -s "http://localhost:8000/studio/services/my-service/logs?limit=20&source=runtime-worker"
+curl -s "http://localhost:8000/studio/tasks/my-service/task-123/logs?limit=50&source=api"
 ```
+
+Studio log queries normalize a required `source` field on each log entry, sourced from the service's configured `log_config.source_label` when present and falling back to `"unknown"` per entry when the upstream stream omits that label. Both service-scoped and task-scoped log routes also accept an optional exact-match `source` query parameter; requesting it without `log_config.source_label` configured returns `422`.
+
+Studio renders ANSI-styled log messages in the browser without changing the raw backend payload. Escape sequences remain in the API response and are interpreted only by the frontend log panels.
+
+Broker DLQ inspection is intentionally separate from indexed DLQ reads:
+
+- `/studio/services/{service_id}/dlq/messages`
+  - reads indexed Relayna DLQ records
+  - includes replay/index metadata such as `dlq_id` and replay state
+  - supports cursor pagination and indexed filters
+- `/studio/services/{service_id}/broker/dlq/messages`
+  - reads live broker messages through the registered service
+  - is available only when the service advertises `broker.dlq.messages`
+  - returns a read-only broker payload shape without `dlq_id`, replay state, or cursor pagination
 
 ## Troubleshooting
 

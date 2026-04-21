@@ -1,4 +1,7 @@
+from .broker import BrokerDLQMessageInspector, RabbitMQManagementDLQInspector, broker_message_from_management_payload
 from .models import (
+    BrokerDLQMessage,
+    BrokerDLQMessageList,
     DLQMessageDetail,
     DLQMessageList,
     DLQMessageSummary,
@@ -14,6 +17,9 @@ from .service import DLQReplayConflict, DLQService
 from .store import DLQRecorder, DLQStore, RedisDLQStore
 
 __all__ = [
+    "BrokerDLQMessage",
+    "BrokerDLQMessageInspector",
+    "BrokerDLQMessageList",
     "DLQMessageDetail",
     "DLQMessageList",
     "DLQMessageSummary",
@@ -25,8 +31,10 @@ __all__ = [
     "DLQRecorder",
     "DLQService",
     "DLQStore",
+    "RabbitMQManagementDLQInspector",
     "RedisDLQStore",
     "build_dlq_record",
+    "broker_message_from_management_payload",
     "inspect_dead_letter_body",
     "replay_dlq_message",
 ]
