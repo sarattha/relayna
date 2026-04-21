@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.5 - 2026-04-21
+
+### Added
+
+- Registered-services auto-refresh in the Studio frontend via shared `StudioServicesProvider` polling, keeping the control-plane registry view aligned with scheduled backend health refreshes without manual browser reloads.
+- Source-aware Studio log pipeline support via `log_config.source_label`, normalized `source` fields on Studio log entries, and exact-match `source` filtering on `GET /studio/services/{service_id}/logs` and `GET /studio/tasks/{service_id}/{task_id}/logs`.
+- Source badges and ANSI-rendered log message presentation in Studio service and task log panels, plus regression coverage for source-aware filtering and rendered log output.
+- Route-level Studio UI regression coverage for registered-services polling, including silent background refresh and timer cleanup on unmount.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.5` and the Studio backend package version to `0.1.2`.
+- Updated the Studio backend package dependency floor to require `relayna>=1.4.5`.
+- Release-install documentation and mock service capability payloads now reference `relayna 1.4.5`.
+- The internal Studio roadmap now marks feature 6, Log pipeline, as implemented, and marks the overlapping source-aware log UI items in feature 7 complete.
+- The internal Studio roadmap now marks feature 7, Control-plane UI expansion, as implemented after the remaining registered-services auto-refresh items landed.
+
+### Fixed
+
+- SDK lint regressions in broker DLQ inspection and FastAPI lifespan test imports so the root quality gates pass cleanly again.
+
 ## 1.4.4 - 2026-04-12
 
 ### Changed

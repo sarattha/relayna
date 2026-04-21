@@ -86,6 +86,7 @@ def make_log_config(
     *,
     base_url: str = "https://loki.example.test",
     tenant_id: str | None = None,
+    source_label: str | None = "component",
     task_id_label: str | None = "task_id",
     correlation_id_label: str | None = "correlation_id",
     level_label: str | None = "level",
@@ -95,6 +96,7 @@ def make_log_config(
         base_url=base_url,
         tenant_id=tenant_id,
         service_selector_labels={"app": "payments-api", "namespace": "prod"},
+        source_label=source_label,
         task_id_label=task_id_label,
         correlation_id_label=correlation_id_label,
         level_label=level_label,
@@ -134,6 +136,7 @@ def loki_success_response() -> dict[str, object]:
                         "task_id": "task-123",
                         "correlation_id": "corr-123",
                         "level": "info",
+                        "component": "runtime-worker",
                     },
                     "values": [
                         ["1712797201000000000", "processed task-123"],
@@ -158,6 +161,7 @@ def loki_same_timestamp_response() -> dict[str, object]:
                         "task_id": "task-123",
                         "correlation_id": "corr-123",
                         "level": "info",
+                        "component": "api",
                         "stream": "a",
                     },
                     "values": [
@@ -171,6 +175,7 @@ def loki_same_timestamp_response() -> dict[str, object]:
                         "task_id": "task-123",
                         "correlation_id": "corr-123",
                         "level": "info",
+                        "component": "runtime-worker",
                         "stream": "b",
                     },
                     "values": [
@@ -208,10 +213,11 @@ def test_registry_service_accepts_lists_and_patches_log_config() -> None:
 
         updated = await service.update_service(
             "payments-api",
-            UpdateServiceRequest(log_config=make_log_config(level_label="severity")),
+            UpdateServiceRequest(log_config=make_log_config(level_label="severity", source_label="service")),
         )
         assert updated.log_config is not None
         assert updated.log_config.level_label == "severity"
+        assert updated.log_config.source_label == "service"
 
         cleared = await service.update_service("payments-api", UpdateServiceRequest(log_config=None))
         assert cleared.log_config is None
@@ -260,12 +266,14 @@ def test_loki_provider_builds_expected_query_and_normalizes_entries() -> None:
     assert response.items[0].message == "processed task-123"
     assert response.items[0].task_id == "task-123"
     assert response.items[0].correlation_id == "corr-123"
+    assert response.items[0].source == "runtime-worker"
     assert response.items[0].fields["labels"] == {
         "app": "payments-api",
         "namespace": "prod",
         "task_id": "task-123",
         "correlation_id": "corr-123",
         "level": "info",
+        "component": "runtime-worker",
     }
     assert response.next_cursor == "1712797201000000000"
 
@@ -287,6 +295,62 @@ def test_loki_provider_omits_missing_task_and_correlation_label_filters() -> Non
     )
 
     assert observed_query["query"] == '{app="payments-api",level="info",namespace="prod"}'
+
+
+def test_loki_provider_applies_source_filter_from_configured_source_label() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config(source_label="component")),
+            config=make_log_config(source_label="component"),
+            query=StudioLogQuery(source="api", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == '{app="payments-api",component="api",namespace="prod"}'
+
+
+def test_loki_provider_raises_for_source_filter_without_source_label() -> None:
+    provider = LokiLogProvider(
+        http_client=TrackingAsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=loki_success_response())),
+            timeout=5.0,
+        )
+    )
+
+    with pytest.raises(StudioLogConfigError):
+        asyncio.run(
+            provider.query_logs(
+                service=make_record(log_config=make_log_config(source_label=None)),
+                config=make_log_config(source_label=None),
+                query=StudioLogQuery(source="api", limit=10),
+            )
+        )
+
+
+def test_loki_provider_falls_back_to_unknown_source_when_label_missing_from_stream() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        payload = loki_success_response()
+        payload["data"]["result"][0]["stream"].pop("component")  # type: ignore[index]
+        return httpx.Response(200, json=payload)
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    response = asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config(source_label="component")),
+            config=make_log_config(source_label="component"),
+            query=StudioLogQuery(limit=10),
+        )
+    )
+
+    assert response.items[0].source == "unknown"
 
 
 def test_loki_provider_preserves_shared_timestamp_page_boundaries() -> None:
@@ -363,6 +427,7 @@ def test_service_log_route_returns_normalized_entries(monkeypatch) -> None:
     payload = response.json()
     assert payload["count"] == 1
     assert payload["items"][0]["service_id"] == "payments-api"
+    assert payload["items"][0]["source"] == "runtime-worker"
     assert payload["items"][0]["message"] == "processed task-123"
     assert payload["next_cursor"] == "1712797201000000000"
 
@@ -389,12 +454,13 @@ def test_task_log_route_scopes_task_id_and_correlation_id(monkeypatch) -> None:
         install_service(app, make_record(log_config=make_log_config()))
         response = client.get(
             "/studio/tasks/payments-api/task-123/logs",
-            params={"correlation_id": "corr-123", "before": "2026-04-11T10:00:00Z"},
+            params={"correlation_id": "corr-123", "source": "runtime-worker", "before": "2026-04-11T10:00:00Z"},
         )
 
     assert response.status_code == 200
     assert 'task_id="task-123"' in observed_params["query"]
     assert 'correlation_id="corr-123"' in observed_params["query"]
+    assert 'component="runtime-worker"' in observed_params["query"]
     assert observed_params["end"].isdigit()
 
 
@@ -417,6 +483,17 @@ def test_service_log_route_returns_501_when_log_config_is_missing(monkeypatch) -
         response = client.get("/studio/services/payments-api/logs")
 
     assert response.status_code == 501
+
+
+def test_service_log_route_returns_422_for_source_filter_without_source_label(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    app = create_studio_app(redis_url="redis://studio-test/0", pull_sync_interval_seconds=None)
+
+    with TestClient(app) as client:
+        install_service(app, make_record(log_config=make_log_config(source_label=None)))
+        response = client.get("/studio/services/payments-api/logs", params={"source": "runtime-worker"})
+
+    assert response.status_code == 422
 
 
 def test_service_log_route_returns_422_for_invalid_before(monkeypatch) -> None:

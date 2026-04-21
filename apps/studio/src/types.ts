@@ -55,6 +55,7 @@ export type ServiceLogConfig = {
   base_url: string;
   tenant_id?: string | null;
   service_selector_labels: Record<string, string>;
+  source_label?: string | null;
   task_id_label?: string | null;
   correlation_id_label?: string | null;
   level_label?: string | null;
@@ -90,6 +91,7 @@ export type ServiceDraft = {
   log_base_url: string;
   log_tenant_id: string;
   log_service_selector_labels: string;
+  log_source_label: string;
   log_task_id_label: string;
   log_correlation_id_label: string;
   log_level_label: string;
@@ -238,6 +240,29 @@ export type DlqMessageListResponse = {
   next_cursor?: string | null;
 };
 
+export type BrokerDlqMessage = {
+  service_id: string;
+  queue_name: string;
+  message_key: string;
+  task_id?: string | null;
+  correlation_id?: string | null;
+  reason?: string | null;
+  source_queue_name?: string | null;
+  content_type?: string | null;
+  body_encoding: string;
+  dead_lettered_at?: string | null;
+  headers: Record<string, unknown>;
+  body: unknown;
+  raw_body_b64: string;
+  redelivered?: boolean | null;
+  task_ref?: StudioTaskRef | null;
+};
+
+export type BrokerDlqMessageListResponse = {
+  service_id: string;
+  items: BrokerDlqMessage[];
+};
+
 export type TaskDlqMessagesPayload = {
   service_id: string;
   items: DlqMessageSummary[];
@@ -327,6 +352,7 @@ export type StudioLogEntry = {
   correlation_id?: string | null;
   timestamp: string;
   level?: string | null;
+  source: string;
   message: string;
   fields: Record<string, unknown>;
 };
@@ -384,6 +410,8 @@ export type StudioLogQuery = {
   limit?: number;
   correlation_id?: string | null;
 };
+
+export type DlqMode = "indexed" | "broker";
 
 export type DlqQueryState = {
   queue_name: string;

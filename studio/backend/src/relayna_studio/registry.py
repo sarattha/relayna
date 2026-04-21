@@ -40,6 +40,7 @@ class LokiLogConfig(BaseModel):
     base_url: str
     tenant_id: str | None = None
     service_selector_labels: dict[str, str] = Field(default_factory=dict)
+    source_label: str | None = None
     task_id_label: str | None = None
     correlation_id_label: str | None = None
     level_label: str | None = None
@@ -49,7 +50,7 @@ class LokiLogConfig(BaseModel):
     def _normalize_base_url(cls, value: Any) -> str:
         return normalize_base_url(value)
 
-    @field_validator("tenant_id", "task_id_label", "correlation_id_label", "level_label", mode="before")
+    @field_validator("tenant_id", "source_label", "task_id_label", "correlation_id_label", "level_label", mode="before")
     @classmethod
     def _normalize_optional_strings(cls, value: Any) -> str | None:
         return _normalize_optional_string(value)

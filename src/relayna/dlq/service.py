@@ -7,7 +7,9 @@ from typing import Any
 
 from ..rabbitmq import RelaynaRabbitClient
 from ..status.store import RedisStatusStore
+from .broker import BrokerDLQMessageInspector
 from .models import (
+    BrokerDLQMessageList,
     DLQMessageDetail,
     DLQMessageList,
     DLQMessageSummary,
@@ -30,6 +32,7 @@ class DLQService:
     rabbitmq: RelaynaRabbitClient
     dlq_store: DLQStore
     status_store: RedisStatusStore | None = None
+    broker_message_inspector: BrokerDLQMessageInspector | None = None
 
     async def get_queue_summaries(self) -> list[DLQQueueSummary]:
         return await self._build_queue_summaries(await self.dlq_store.summarize_queues())
@@ -55,6 +58,10 @@ class DLQService:
         if inspection is None:
             return QueueInspectionResult(queue_name=queue_name, exists=False, message_count=None)
         return QueueInspectionResult(queue_name=queue_name, exists=True, message_count=inspection.message_count)
+
+    @property
+    def supports_broker_message_reads(self) -> bool:
+        return self.broker_message_inspector is not None
 
     async def list_messages(
         self,
@@ -95,6 +102,44 @@ class DLQService:
             latest_status=latest_status,
             status_history=status_history,
         )
+
+    async def list_broker_messages(
+        self,
+        candidate_queue_names,
+        *,
+        queue_name: str | None = None,
+        task_id: str | None = None,
+        limit: int = 50,
+    ) -> BrokerDLQMessageList:
+        if self.broker_message_inspector is None:
+            raise RuntimeError("Broker DLQ message inspection is not configured.")
+        normalized_limit = max(1, min(int(limit), 200))
+        allowed_queue_names: list[str] = []
+        allowed_queue_name_set: set[str] = set()
+        for candidate in candidate_queue_names:
+            normalized = str(candidate).strip()
+            if normalized and normalized not in allowed_queue_name_set:
+                allowed_queue_name_set.add(normalized)
+                allowed_queue_names.append(normalized)
+        ordered_queue_names: list[str] = []
+        if queue_name is not None and str(queue_name).strip():
+            normalized_queue_name = str(queue_name).strip()
+            if normalized_queue_name not in allowed_queue_name_set:
+                allowed = ", ".join(sorted(allowed_queue_names)) if allowed_queue_names else "none"
+                raise ValueError(f"Unsupported broker DLQ queue '{normalized_queue_name}'. Allowed queues: {allowed}.")
+            ordered_queue_names.append(normalized_queue_name)
+        else:
+            ordered_queue_names.extend(allowed_queue_names)
+        items = []
+        for current_queue_name in ordered_queue_names:
+            queue_items = await self.broker_message_inspector.list_messages(current_queue_name, limit=normalized_limit)
+            for item in queue_items:
+                if task_id and item.task_id != task_id:
+                    continue
+                items.append(item)
+                if len(items) >= normalized_limit:
+                    return BrokerDLQMessageList(items=items)
+        return BrokerDLQMessageList(items=items)
 
     async def replay_message(self, dlq_id: str, *, force: bool = False) -> DLQReplayResult | None:
         record = await self.dlq_store.claim_replay(dlq_id, force=force)

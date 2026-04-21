@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from relayna.api import (
+    BROKER_DLQ_MESSAGES_ROUTE_ID,
     DLQ_MESSAGES_ROUTE_ID,
     EXECUTION_GRAPH_ROUTE_ID,
     STATUS_HISTORY_ROUTE_ID,
@@ -36,6 +37,7 @@ SERVICE_STATUS_PATH = "/status/{task_id}"
 SERVICE_HISTORY_PATH = "/history"
 SERVICE_WORKFLOW_TOPOLOGY_PATH = "/workflow/topology"
 SERVICE_DLQ_MESSAGES_PATH = "/dlq/messages"
+SERVICE_BROKER_DLQ_MESSAGES_PATH = "/broker/dlq/messages"
 SERVICE_EXECUTION_GRAPH_PATH = "/executions/{task_id}/graph"
 TASK_SEARCH_QUERY = Query(min_length=1)
 JOIN_MODE_QUERY = Query(default=JoinMode.NONE)
@@ -195,6 +197,22 @@ class StudioFederationService:
             source_queue_name=source_queue_name,
             state=state,
             cursor=cursor,
+            limit=limit,
+        )
+
+    async def get_service_broker_dlq_messages(
+        self,
+        service_id: str,
+        *,
+        queue_name: str | None = None,
+        task_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        service = await self._get_proxyable_service(service_id)
+        return await self._fetch_broker_dlq_messages(
+            service,
+            queue_name=queue_name,
+            task_id=task_id,
             limit=limit,
         )
 
@@ -621,6 +639,27 @@ class StudioFederationService:
         )
         return self._normalize_dlq_messages_payload(service, payload)
 
+    async def _fetch_broker_dlq_messages(
+        self,
+        service: ServiceRecord,
+        *,
+        queue_name: str | None = None,
+        task_id: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        payload = await self._request_json(
+            service,
+            capability_id=BROKER_DLQ_MESSAGES_ROUTE_ID,
+            path=SERVICE_BROKER_DLQ_MESSAGES_PATH,
+            params={
+                "queue_name": queue_name,
+                "task_id": task_id,
+                "limit": limit,
+            },
+            missing_route_404=True,
+        )
+        return self._normalize_broker_dlq_messages_payload(service, payload)
+
     async def _fetch_execution_graph(self, service: ServiceRecord, task_id: str) -> dict[str, Any]:
         path = SERVICE_EXECUTION_GRAPH_PATH.format(task_id=_quote_path_segment(task_id))
         payload = await self._request_json(
@@ -701,6 +740,25 @@ class StudioFederationService:
                 ).model_dump(mode="json")
             items.append(normalized_item)
         return dict(payload) | {"service_id": service.service_id, "items": items}
+
+    def _normalize_broker_dlq_messages_payload(self, service: ServiceRecord, payload: dict[str, Any]) -> dict[str, Any]:
+        items: list[Any] = []
+        for item in payload.get("items", []):
+            if not isinstance(item, dict):
+                items.append(item)
+                continue
+            normalized_item = dict(item) | {"service_id": service.service_id}
+            task_id = self._payload_value(service, item, "task_id") or _normalize_string(item.get("correlation_id"))
+            correlation_id = _normalize_string(item.get("correlation_id"))
+            if task_id is not None:
+                normalized_item["task_id"] = task_id
+                normalized_item["task_ref"] = build_task_ref(
+                    service_id=service.service_id,
+                    task_id=task_id,
+                    correlation_id=correlation_id,
+                ).model_dump(mode="json")
+            items.append(normalized_item)
+        return {"service_id": service.service_id, "items": items}
 
     def _normalize_execution_graph_payload(
         self,
@@ -1081,6 +1139,24 @@ def create_federation_router(
             return exc.to_response()
         return JSONResponse(payload)
 
+    @router.get(f"{prefix}/services/{{service_id}}/broker/dlq/messages")
+    async def service_broker_dlq_messages(
+        service_id: str,
+        queue_name: str | None = Query(default=None),
+        task_id: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ):
+        try:
+            payload = await federation_service.get_service_broker_dlq_messages(
+                service_id,
+                queue_name=queue_name,
+                task_id=task_id,
+                limit=limit,
+            )
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(payload)
+
     @router.get(f"{prefix}/services/{{service_id}}/executions/{{task_id}}/graph")
     async def service_execution_graph(service_id: str, task_id: str):
         try:
@@ -1273,6 +1349,7 @@ def _dedupe_join_warnings(warnings: Iterable[StudioJoinWarning]) -> list[StudioJ
 
 __all__ = [
     "FederatedError",
+    "SERVICE_BROKER_DLQ_MESSAGES_PATH",
     "SERVICE_DLQ_MESSAGES_PATH",
     "SERVICE_EXECUTION_GRAPH_PATH",
     "SERVICE_HISTORY_PATH",

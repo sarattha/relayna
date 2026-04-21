@@ -486,7 +486,7 @@ wheels = [
 
 [[package]]
 name = "relayna"
-version = "1.4.4"
+version = "1.4.5"
 source = { editable = "../../" }
 dependencies = [
     { name = "aio-pika" },
@@ -522,7 +522,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "relayna-studio"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

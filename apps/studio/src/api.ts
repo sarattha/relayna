@@ -1,4 +1,5 @@
 import type {
+  BrokerDlqMessageListResponse,
   DlqMessageListResponse,
   DlqQueryState,
   ServiceDraft,
@@ -64,6 +65,7 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     log_base_url: service.log_config?.base_url || "",
     log_tenant_id: service.log_config?.tenant_id || "",
     log_service_selector_labels: formatLabelPairs(service.log_config?.service_selector_labels || {}),
+    log_source_label: service.log_config?.source_label || "",
     log_task_id_label: service.log_config?.task_id_label || "",
     log_correlation_id_label: service.log_config?.correlation_id_label || "",
     log_level_label: service.log_config?.level_label || "",
@@ -75,6 +77,7 @@ export function buildServicePayload(draft: ServiceDraft) {
     draft.log_provider ||
       draft.log_base_url.trim() ||
       draft.log_service_selector_labels.trim() ||
+      draft.log_source_label.trim() ||
       draft.log_task_id_label.trim() ||
       draft.log_correlation_id_label.trim() ||
       draft.log_level_label.trim() ||
@@ -97,6 +100,7 @@ export function buildServicePayload(draft: ServiceDraft) {
           base_url: draft.log_base_url.trim(),
           tenant_id: draft.log_tenant_id.trim() || null,
           service_selector_labels: parseLabelPairs(draft.log_service_selector_labels),
+          source_label: draft.log_source_label.trim() || null,
           task_id_label: draft.log_task_id_label.trim() || null,
           correlation_id_label: draft.log_correlation_id_label.trim() || null,
           level_label: draft.log_level_label.trim() || null,
@@ -175,7 +179,7 @@ export async function fetchTaskEvents(serviceId: string, taskId: string, limit =
 
 export async function fetchServiceLogs(
   serviceId: string,
-  query: { query?: string; level?: string; limit?: number },
+  query: { query?: string; level?: string; source?: string; limit?: number },
 ) {
   const params = new URLSearchParams({ limit: String(query.limit || 20) });
   if (query.query?.trim()) {
@@ -183,6 +187,9 @@ export async function fetchServiceLogs(
   }
   if (query.level?.trim()) {
     params.set("level", query.level.trim());
+  }
+  if (query.source?.trim()) {
+    params.set("source", query.source.trim());
   }
   return requestJson<StudioLogListResponse>(
     `/studio/services/${encodeURIComponent(serviceId)}/logs?${params.toString()}`,
@@ -192,7 +199,7 @@ export async function fetchServiceLogs(
 export async function fetchTaskLogs(
   serviceId: string,
   taskId: string,
-  query: { query?: string; level?: string; limit?: number; correlation_id?: string | null },
+  query: { query?: string; level?: string; source?: string; limit?: number; correlation_id?: string | null },
 ) {
   const params = new URLSearchParams({ limit: String(query.limit || 50) });
   if (query.query?.trim()) {
@@ -200,6 +207,9 @@ export async function fetchTaskLogs(
   }
   if (query.level?.trim()) {
     params.set("level", query.level.trim());
+  }
+  if (query.source?.trim()) {
+    params.set("source", query.source.trim());
   }
   if (query.correlation_id?.trim()) {
     params.set("correlation_id", query.correlation_id.trim());
@@ -296,5 +306,18 @@ export async function fetchDlq(serviceId: string, state: DlqQueryState) {
   }
   return requestJson<DlqMessageListResponse>(
     `/studio/services/${encodeURIComponent(serviceId)}/dlq/messages?${params.toString()}`,
+  );
+}
+
+export async function fetchBrokerDlq(serviceId: string, state: Pick<DlqQueryState, "queue_name" | "task_id" | "limit">) {
+  const params = new URLSearchParams({ limit: state.limit || "50" });
+  if (state.queue_name.trim()) {
+    params.set("queue_name", state.queue_name.trim());
+  }
+  if (state.task_id.trim()) {
+    params.set("task_id", state.task_id.trim());
+  }
+  return requestJson<BrokerDlqMessageListResponse>(
+    `/studio/services/${encodeURIComponent(serviceId)}/broker/dlq/messages?${params.toString()}`,
   );
 }

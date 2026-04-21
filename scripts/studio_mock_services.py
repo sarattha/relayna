@@ -160,7 +160,7 @@ class MockService:
 
     def capability_document(self) -> dict[str, Any]:
         return {
-            "relayna_version": "1.4.4",
+            "relayna_version": "1.4.5",
             "topology_kind": "shared_tasks_shared_status",
             "alias_config_summary": {
                 "aliasing_enabled": False,
