@@ -133,11 +133,11 @@ def loki_success_response() -> dict[str, object]:
                     "stream": {
                         "app": "payments-api",
                         "namespace": "prod",
-                    "task_id": "task-123",
-                    "correlation_id": "corr-123",
-                    "level": "info",
-                    "component": "runtime-worker",
-                },
+                        "task_id": "task-123",
+                        "correlation_id": "corr-123",
+                        "level": "info",
+                        "component": "runtime-worker",
+                    },
                     "values": [
                         ["1712797201000000000", "processed task-123"],
                         ["1712797200000000000", "received task-123"],

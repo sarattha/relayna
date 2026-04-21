@@ -262,6 +262,11 @@ class LokiLogProvider:
                     "labels": normalized_labels,
                     "loki_cursor": cursor,
                 }
+                source = (
+                    normalized_labels.get(config.source_label or "", "unknown")
+                    if config.source_label
+                    else "unknown"
+                )
                 entries_with_cursor.append(
                     (
                         cursor,
@@ -271,7 +276,7 @@ class LokiLogProvider:
                             correlation_id=normalized_labels.get(config.correlation_id_label or ""),
                             timestamp=_loki_ns_to_iso(cursor),
                             level=normalized_labels.get(config.level_label or ""),
-                            source=normalized_labels.get(config.source_label or "", "unknown") if config.source_label else "unknown",
+                            source=source,
                             message=line,
                             fields=fields,
                         ),
