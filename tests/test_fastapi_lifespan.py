@@ -1053,9 +1053,7 @@ def test_dlq_router_rejects_unknown_broker_queue_name(
         response = client.get("/broker/dlq/messages", params={"queue_name": "typo.dlq"})
 
     assert response.status_code == 400
-    assert response.json() == {
-        "detail": "Unsupported broker DLQ queue 'typo.dlq'. Allowed queues: broker.only.dlq."
-    }
+    assert response.json() == {"detail": "Unsupported broker DLQ queue 'typo.dlq'. Allowed queues: broker.only.dlq."}
     assert inspector.calls == []
 
 

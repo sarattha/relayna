@@ -126,9 +126,7 @@ class DLQService:
             normalized_queue_name = str(queue_name).strip()
             if normalized_queue_name not in allowed_queue_name_set:
                 allowed = ", ".join(sorted(allowed_queue_names)) if allowed_queue_names else "none"
-                raise ValueError(
-                    f"Unsupported broker DLQ queue '{normalized_queue_name}'. Allowed queues: {allowed}."
-                )
+                raise ValueError(f"Unsupported broker DLQ queue '{normalized_queue_name}'. Allowed queues: {allowed}.")
             ordered_queue_names.append(normalized_queue_name)
         else:
             ordered_queue_names.extend(allowed_queue_names)
