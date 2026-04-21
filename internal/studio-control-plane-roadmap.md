@@ -6,15 +6,15 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 | # | Feature | Status | Last Updated |
 | --- | --- | --- | --- |
-| 1 | Service registry | partially_implemented | 2026-04-08 |
+| 1 | Service registry | implemented | 2026-04-10 |
 | 2 | Capability discovery and version handshake | implemented | 2026-04-09 |
-| 3 | Federated API aggregation layer | implemented | 2026-04-09 |
+| 3 | Federated API aggregation layer | partially_implemented | 2026-04-21 |
 | 4 | Cross-service identity model | implemented | 2026-04-10 |
 | 5 | Aggregated event and observation ingestion | implemented | 2026-04-10 |
-| 6 | Log pipeline | implemented | 2026-04-11 |
-| 7 | Control-plane UI expansion | implemented | 2026-04-11 |
+| 6 | Log pipeline | partially_implemented | 2026-04-21 |
+| 7 | Control-plane UI expansion | partially_implemented | 2026-04-21 |
 | 8 | Auth, trust, and operator controls | planned | 2026-04-08 |
-| 9 | Health and liveness model | implemented | 2026-04-12 |
+| 9 | Health and liveness model | implemented | 2026-04-21 |
 | 10 | Search and retention | implemented | 2026-04-12 |
 | 11 | Studio deployment packaging | implemented | 2026-04-12 |
 
@@ -111,22 +111,25 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 3. Federated API Aggregation Layer
 
-- Status: implemented
-- last_updated: 2026-04-09
+- Status: partially_implemented
+- last_updated: 2026-04-21
 - Goal: Make Studio backend the single read surface for multi-service Relayna operations.
 - Why it exists: Browsers should not coordinate direct calls to many services, normalize response shapes, or handle cross-service failures.
-- Current state in repo: Studio now exposes a federated backend read surface for registered Relayna services, including service-scoped status/history/workflow/DLQ/execution-graph reads, exact-`task_id` cross-service search, and a composite task detail endpoint. The Studio frontend task inspector now reads via `/studio/tasks/{service_id}/{task_id}` instead of calling service base URLs directly. See `studio/backend/src/relayna_studio/federation.py`, `studio/backend/src/relayna_studio/app.py`, and `apps/studio/src/App.tsx`.
-- Target end state: Studio backend exposes a normalized API that proxies and aggregates Relayna reads from registered services.
+- Current state in repo: Studio now exposes a federated backend read surface for registered Relayna services, including service-scoped status/history/workflow/indexed-DLQ/execution-graph reads, exact-`task_id` cross-service search, and a composite task detail endpoint. Indexed DLQ reads flow through `/studio/services/{service_id}/dlq/messages`, but broker-backed DLQ visibility is currently limited to queue inspection and does not support live message reads when Redis-backed DLQ records are unavailable. The Studio frontend task inspector now reads via `/studio/tasks/{service_id}/{task_id}` instead of calling service base URLs directly. See `studio/backend/src/relayna_studio/federation.py`, `studio/backend/src/relayna_studio/app.py`, and `apps/studio/src/App.tsx`.
+- Target end state: Studio backend exposes a normalized API that proxies and aggregates Relayna reads from registered services, including indexed DLQ reads for normal operation and federated emergency broker-DLQ read support for live inspection when Redis-backed DLQ records are missing.
 - Planned API/interface additions:
   - Service-scoped read endpoints:
     - `GET /studio/services/{service_id}/status/{task_id}`
     - `GET /studio/services/{service_id}/history`
     - `GET /studio/services/{service_id}/workflow/topology`
     - `GET /studio/services/{service_id}/dlq/messages`
+    - `GET /studio/services/{service_id}/broker/dlq/messages`
     - `GET /studio/services/{service_id}/executions/{task_id}/graph`
   - Cross-service read endpoints:
     - `GET /studio/tasks/search`
     - `GET /studio/tasks/{service_id}/{task_id}`
+  - Capability advertisement for broker-DLQ message-read support
+  - Separate broker-backed DLQ message shape that does not depend on indexed `dlq_id` or replay state
 - Implementation phases:
   - Phase 1: Add Studio backend HTTP client and normalized error model
   - Phase 2: Add service-scoped proxy routes
@@ -139,21 +142,28 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - Partial failure across services
   - Inconsistent latency and auth behavior
   - Alias config mismatch across services
+  - RabbitMQ management API dependency for live broker-DLQ reads
+  - Payload decoding limits or partial metadata when inspecting live broker messages
+  - Operator confusion between indexed DLQ views and broker-backed emergency inspection views
 - Acceptance criteria:
   - Studio frontend only talks to Studio backend for control-plane reads
   - Studio backend can proxy Relayna endpoints for any registered service
   - Cross-service search returns normalized response items with `service_id`
+  - Studio can read live DLQ messages through the broker path when Redis-backed DLQ records are missing
 - Checklist:
   - [x] Define Studio backend service client abstraction
   - [x] Define normalized error shape
   - [x] Add service-scoped proxy routes
   - [x] Add cross-service task search route
   - [x] Add tests for timeout, 404, and auth failure normalization
+  - [ ] Add broker-backed DLQ message-read capability advertisement
+  - [ ] Add Studio federation route for broker-backed DLQ message reads
+  - [ ] Add tests for broker-read fallback when Redis-backed DLQ data is absent
 
 ## 4. Cross-Service Identity Model
 
-- Status: partially_implemented
-- last_updated: 2026-04-08
+- Status: implemented
+- last_updated: 2026-04-10
 - Goal: Establish the identity rules Studio uses to connect task status, lineage, retries, and graphs across services.
 - Why it exists: Per-service `task_id` alone is not enough for a federated control plane.
 - Current state in repo: Studio now exposes additive task identity models and normalized `task_ref` payloads across federated status/history/DLQ/execution-graph/task-search/task-detail responses. Cross-service joins are opt-in on `/studio/tasks/search` and `/studio/tasks/{service_id}/{task_id}` via `join=none|correlation|lineage|all`, with conservative request-time matching, ambiguity warnings, and frontend rendering in `apps/studio/src/App.tsx`.
@@ -223,22 +233,26 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 
 ## 6. Log Pipeline
 
-- Status: implemented
-- last_updated: 2026-04-11
+- Status: partially_implemented
+- last_updated: 2026-04-21
 - Goal: Let Studio expose logs alongside Relayna task and observation views without conflating the two.
 - Why it exists: Operators will expect logs in the control plane, but Relayna observations are not a full log backend.
-- Current state in repo: Relayna provides `make_logging_sink(...)` and event serialization helpers in `src/relayna/observability/exporters.py`, while Studio now ships a pluggable read-only log query surface with per-service `log_config`, a Loki provider, normalized `/studio/services/{service_id}/logs` and `/studio/tasks/{service_id}/{task_id}/logs` routes, and service/task log panels in `apps/studio/src/App.tsx`.
-- Target end state: Studio supports a pluggable log backend contract and can query logs scoped by service and task context.
+- Current state in repo: Relayna provides `make_logging_sink(...)` and event serialization helpers in `src/relayna/observability/exporters.py`, while Studio now ships a pluggable read-only log query surface with per-service `log_config`, a Loki provider, normalized `/studio/services/{service_id}/logs` and `/studio/tasks/{service_id}/{task_id}/logs` routes, and service/task log panels in `apps/studio/src/App.tsx`. Studio already supports Loki-backed service/task log queries, but logs are still shown as one unlabeled list and raw ANSI styling from `rich` is not rendered.
+- Target end state: Studio supports a pluggable log backend contract, can query logs scoped by service and task context, can distinguish log sources in one time-ordered operator view, and can render ANSI-styled log bodies safely in the browser.
 - Planned API/interface additions:
   - Studio log provider abstraction
+  - Service registry `log_config` field for the Loki source/component label
   - Normalized log query shape:
     - `service_id`
     - `task_id`
     - `correlation_id`
     - `timestamp`
     - `level`
+    - `source`
     - `message`
     - `fields`
+  - Optional `source` filter on service-scoped and task-scoped log queries
+  - UI-safe ANSI rendering behavior for log message display
   - Service registry field for log backend configuration if needed
 - Implementation phases:
   - Phase 1: Define log provider interface and Studio-side query normalization
@@ -251,25 +265,36 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - Open risks:
   - Different log backends have incompatible query capabilities
   - Log lines may not carry `task_id` or `correlation_id`
+  - Missing source labels on some services or emitters
+  - Inconsistent source labeling across API, runtime-worker, and aggregation-runtime emitters
+  - Unsupported ANSI codes degrading rendering behavior
 - Acceptance criteria:
   - Studio can show logs for a service even though Relayna itself is not the log store
   - Log queries are clearly separate from Relayna status and observation queries
   - Missing log correlation does not break the rest of the control plane
+  - Operators can view API, runtime-worker, and aggregation-runtime logs in one time-ordered list while distinguishing their source
+  - ANSI escape sequences render legibly in Studio without changing raw backend log payloads
 - Checklist:
   - [x] Define Studio log provider interface
   - [x] Define normalized log response schema
   - [x] Add at least one pluggable provider implementation
   - [x] Add task-scoped and service-scoped log views
   - [x] Add tests for provider errors and missing correlation keys
+  - [ ] Add source-label configuration to Studio service `log_config`
+  - [ ] Add normalized `source` field to Studio log responses
+  - [ ] Add `source` filter support to service/task log queries
+  - [ ] Add source badges or grouping controls in Studio log panels
+  - [ ] Add ANSI renderer for log message display
+  - [ ] Add regression tests for source-aware and ANSI-rendered log views
 
 ## 7. Control-Plane UI Expansion
 
-- Status: implemented
-- last_updated: 2026-04-11
+- Status: partially_implemented
+- last_updated: 2026-04-21
 - Goal: Expand Studio from a single execution-graph page into a full operator console.
 - Why it exists: A control plane must show services, topology, DLQ, task search, task detail, live events, and graphs in one consistent UI.
-- Current state in repo: Studio now ships a route-based operator console in `apps/studio/src/` backed entirely by `/studio/*` backend routes, including routed service list/detail, topology, DLQ explorer, task search, and federated task detail screens with logs, timelines, execution graph rendering, and deep-link navigation.
-- Target end state: Studio UI has service list, service detail, topology diagrams, task search, task detail, DLQ explorer, live event timeline, execution graph, and operator action surfaces.
+- Current state in repo: Studio now ships a route-based operator console in `apps/studio/src/` backed entirely by `/studio/*` backend routes, including routed service list/detail, topology, DLQ explorer, task search, and federated task detail screens with logs, timelines, execution graph rendering, and deep-link navigation. The registered-services panel still depends on manual browser refresh to reflect scheduled backend health refreshes, and the DLQ explorer only exposes indexed DLQ reads.
+- Target end state: Studio UI has service list, service detail, topology diagrams, task search, task detail, DLQ explorer, live event timeline, execution graph, operator action surfaces, an auto-refreshing registered-services health panel, DLQ explorer support for broker-backed inspection, and source-aware ANSI-rendered log presentation in service and task views.
 - Planned API/interface additions:
   - Frontend routes:
     - `/services`
@@ -279,6 +304,8 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
     - `/tasks/search`
     - `/tasks/:serviceId/:taskId`
   - Shared UI state model scoped by `service_id`
+  - Shared frontend polling state for registered-services auto-refresh
+  - DLQ explorer mode selection for indexed versus broker-backed inspection
 - Implementation phases:
   - Phase 1: Replace manual base URL input with Studio backend-driven service selection
   - Phase 2: Add service and topology pages
@@ -290,10 +317,15 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - Open risks:
   - UI complexity expanding faster than backend normalization
   - Live updates requiring more than request/response polling
+  - Duplicated polling across shared frontend state and per-page reload flows
+  - Noisy reload UX if background refresh is too visible to operators
+  - Operator misunderstanding between indexed DLQ data and broker-backed inspection data
 - Acceptance criteria:
   - Operators can navigate from service to task to graph without entering raw base URLs
   - Topology and execution graph are both available in Studio
   - DLQ and task search are first-class screens, not ad hoc debug forms
+  - The registered-services panel updates automatically roughly every minute without manual operator action
+  - DLQ and log views expose broker-backed DLQ inspection, source-aware log presentation, and ANSI-rendered log bodies cleanly
 - Checklist:
   - [x] Add service list UI
   - [x] Add service detail UI
@@ -302,6 +334,10 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
   - [x] Add task detail view with status, timeline, graph, and logs
   - [x] Add DLQ explorer UI
   - [x] Add tests for navigation and service-scoped fetching
+  - [ ] Add frontend polling in `StudioServicesProvider` for registered-services auto-refresh
+  - [ ] Add DLQ explorer broker-inspection mode
+  - [ ] Add source-filter controls in service and task log panels
+  - [ ] Add UI tests for auto-refresh, DLQ mode switching, and source-aware log presentation
 
 ## 8. Auth, Trust, And Operator Controls
 
@@ -354,10 +390,10 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 ## 9. Health And Liveness Model
 
 - Status: implemented
-- last_updated: 2026-04-12
+- last_updated: 2026-04-21
 - Goal: Give Studio a reliable model for service health, runtime freshness, and control-plane reachability.
 - Why it exists: Operators need to distinguish “service down”, “worker unhealthy”, “relayna route unavailable”, and “data stale”.
-- Current state in repo: Relayna now ships Studio-owned health documents, Redis-backed health storage, scheduled health refresh, service health routes, optional `health.workers` capability support, and Studio UI health panels/badges. Service freshness is derived from Studio-ingested events and capability refresh timestamps, while worker heartbeat support remains optional. See `studio/backend/src/relayna_studio/health.py`, `studio/backend/src/relayna_studio/events.py`, `src/relayna/api/health_routes.py`, and `apps/studio/src/pages/ServiceDetailPage.tsx`.
+- Current state in repo: Relayna now ships Studio-owned health documents, Redis-backed health storage, scheduled health refresh, service health routes, optional `health.workers` capability support, and Studio UI health panels/badges. The backend already runs `StudioHealthRefreshWorker` on a default 60-second interval. Service freshness is derived from Studio-ingested events and capability refresh timestamps, while worker heartbeat support remains optional. The remaining gap for “automatic health checks in the registered services panel” is frontend presentation work under feature 7, not missing backend health-refresh capability. See `studio/backend/src/relayna_studio/health.py`, `studio/backend/src/relayna_studio/events.py`, `src/relayna/api/health_routes.py`, and `apps/studio/src/pages/ServiceDetailPage.tsx`.
 - Target end state: Studio tracks service reachability, last capability refresh, observation freshness, and optional worker heartbeat information in a unified health model.
 - Planned API/interface additions:
   - Studio service health document:
@@ -507,3 +543,5 @@ This internal-only file is the source of truth for the Relayna Studio control-pl
 - 2026-04-11: Added feature 11 to separate `relayna` SDK packaging from central `relayna studio` deployment, with source-built frontend and backend Docker images behind a single public origin and image publication left out of scope.
 - 2026-04-12: Shipped feature 9 with Studio-owned service health documents, scheduled health refresh, merged runtime-health summaries on Studio service reads, optional `health.workers` support for Relayna services, and UI health badges/panels for service reachability and freshness.
 - 2026-04-12: Shipped feature 11 with a hard SDK/Studio package split, a new `relayna-studio` backend package in `studio/backend/`, separate backend/frontend Dockerfiles, Nginx-based same-origin `/studio/*` routing, and internal source-build deployment instructions.
+- 2026-04-21: Expanded roadmap scope for feature 3, feature 6, and feature 7 to track broker-backed DLQ message inspection, frontend auto-refresh for registered-service health display, source-aware Loki log presentation, and ANSI rendering for `rich`-styled log output.
+- 2026-04-21: Recorded explicitly that scheduled backend health refresh already exists via `StudioHealthRefreshWorker` and that the remaining gap for automatic registered-services health updates is UI auto-refresh under feature 7.
