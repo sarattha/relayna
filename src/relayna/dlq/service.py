@@ -114,14 +114,24 @@ class DLQService:
         if self.broker_message_inspector is None:
             raise RuntimeError("Broker DLQ message inspection is not configured.")
         normalized_limit = max(1, min(int(limit), 200))
+        allowed_queue_names: list[str] = []
+        allowed_queue_name_set: set[str] = set()
+        for candidate in candidate_queue_names:
+            normalized = str(candidate).strip()
+            if normalized and normalized not in allowed_queue_name_set:
+                allowed_queue_name_set.add(normalized)
+                allowed_queue_names.append(normalized)
         ordered_queue_names: list[str] = []
         if queue_name is not None and str(queue_name).strip():
-            ordered_queue_names.append(str(queue_name).strip())
+            normalized_queue_name = str(queue_name).strip()
+            if normalized_queue_name not in allowed_queue_name_set:
+                allowed = ", ".join(sorted(allowed_queue_names)) if allowed_queue_names else "none"
+                raise ValueError(
+                    f"Unsupported broker DLQ queue '{normalized_queue_name}'. Allowed queues: {allowed}."
+                )
+            ordered_queue_names.append(normalized_queue_name)
         else:
-            for candidate in candidate_queue_names:
-                normalized = str(candidate).strip()
-                if normalized and normalized not in ordered_queue_names:
-                    ordered_queue_names.append(normalized)
+            ordered_queue_names.extend(allowed_queue_names)
         items = []
         for current_queue_name in ordered_queue_names:
             queue_items = await self.broker_message_inspector.list_messages(current_queue_name, limit=normalized_limit)

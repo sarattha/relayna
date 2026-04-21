@@ -699,6 +699,73 @@ describe("App", () => {
     expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
   });
 
+  it("supersedes a stale background services poll when a mutation triggers reload", async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let serviceListCalls = 0;
+    let resolveBackgroundPoll: ((response: Response) => void) | null = null;
+    const staleServices = [buildMockService()];
+    async function flushRender() {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url === "/studio/services" && method === "GET") {
+        serviceListCalls += 1;
+        if (serviceListCalls === 1) {
+          return serviceListResponse(services);
+        }
+        if (serviceListCalls === 2) {
+          return await new Promise<Response>((resolve) => {
+            resolveBackgroundPoll = resolve;
+          });
+        }
+        if (serviceListCalls === 3) {
+          return serviceListResponse(services);
+        }
+      }
+
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    await flushRender();
+
+    expect(screen.getByText("Service Detail")).toBeInTheDocument();
+    expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(serviceListCalls).toBe(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await flushRender();
+
+    expect(screen.getByText("Refreshed 'payments-api'.")).toBeInTheDocument();
+    expect(serviceListCalls).toBe(3);
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+
+    await act(async () => {
+      resolveBackgroundPoll?.(serviceListResponse(staleServices));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+  });
+
   it("opens the service editor with an allowlisted default base URL", async () => {
     render(<App />);
 

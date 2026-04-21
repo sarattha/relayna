@@ -1023,6 +1023,42 @@ def test_dlq_router_lists_live_broker_messages_when_broker_inspector_is_configur
     assert inspector.calls == [{"queue_name": "broker.only.dlq", "limit": 10}]
 
 
+def test_dlq_router_rejects_unknown_broker_queue_name(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            dlq_store_prefix="relayna-dlq",
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    assert runtime.dlq_store is not None
+    inspector = FakeBrokerInspector({"broker.only.dlq": []})
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+                broker_message_inspector=inspector,
+            ),
+            broker_dlq_queue_names=["broker.only.dlq"],
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/broker/dlq/messages", params={"queue_name": "typo.dlq"})
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Unsupported broker DLQ queue 'typo.dlq'. Allowed queues: broker.only.dlq."
+    }
+    assert inspector.calls == []
+
+
 def test_broker_message_from_management_payload_derives_best_effort_metadata() -> None:
     item = broker_message_from_management_payload(
         "tasks.queue.dlq",

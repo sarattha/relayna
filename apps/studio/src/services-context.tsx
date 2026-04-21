@@ -51,6 +51,12 @@ const emptyDraft: ServiceDraft = {
 const ServicesContext = createContext<ServicesContextValue | null>(null);
 const SERVICE_REFRESH_INTERVAL_MS = 60_000;
 
+type InFlightServicesRequest = {
+  background: boolean;
+  promise: Promise<ServiceRecord[]>;
+  token: number;
+};
+
 export function StudioServicesProvider({ children }: { children: ReactNode }) {
   const [services, setServices] = useState<ServiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +65,8 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
   const mountedRef = useRef(false);
   const servicesRef = useRef<ServiceRecord[]>([]);
   const hasLoadedServicesRef = useRef(false);
-  const reloadInFlightRef = useRef<Promise<ServiceRecord[]> | null>(null);
+  const reloadInFlightRef = useRef<InFlightServicesRequest | null>(null);
+  const latestRequestTokenRef = useRef(0);
 
   function setMutationError(fetchError: unknown, fallback: string) {
     setNotice(null);
@@ -67,9 +74,15 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
   }
 
   const loadServices = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
-    if (reloadInFlightRef.current) {
-      return reloadInFlightRef.current;
+    const currentRequest = reloadInFlightRef.current;
+    if (currentRequest) {
+      if (background || !currentRequest.background) {
+        return currentRequest.promise;
+      }
     }
+
+    const token = latestRequestTokenRef.current + 1;
+    latestRequestTokenRef.current = token;
 
     const request = (async () => {
       if (!background && mountedRef.current) {
@@ -78,27 +91,37 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
       try {
         const payload = await listServices();
         const nextServices = payload.services || [];
-        servicesRef.current = nextServices;
-        hasLoadedServicesRef.current = true;
-        if (mountedRef.current) {
+        const isLatestRequest = latestRequestTokenRef.current === token;
+        if (isLatestRequest) {
+          servicesRef.current = nextServices;
+          hasLoadedServicesRef.current = true;
+        }
+        if (mountedRef.current && isLatestRequest) {
           setServices(nextServices);
           setError(null);
         }
-        return nextServices;
+        return isLatestRequest ? nextServices : servicesRef.current;
       } catch (fetchError) {
-        if (mountedRef.current && (!background || !hasLoadedServicesRef.current)) {
+        if (
+          mountedRef.current &&
+          latestRequestTokenRef.current === token &&
+          (!background || !hasLoadedServicesRef.current)
+        ) {
           setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
         }
         return servicesRef.current;
       } finally {
-        if (!background && mountedRef.current) {
+        const isCurrentRequest = reloadInFlightRef.current?.token === token;
+        if (!background && mountedRef.current && isCurrentRequest) {
           setLoading(false);
         }
-        reloadInFlightRef.current = null;
+        if (isCurrentRequest) {
+          reloadInFlightRef.current = null;
+        }
       }
     })();
 
-    reloadInFlightRef.current = request;
+    reloadInFlightRef.current = { background, promise: request, token };
     return request;
   }, []);
 

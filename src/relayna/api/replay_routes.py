@@ -53,12 +53,15 @@ def create_dlq_router(
             task_id: str | None = Query(default=None, alias=task_http_name),
             limit: int = Query(default=50, ge=1, le=200),
         ) -> JSONResponse:
-            payload = await dlq_service.list_broker_messages(
-                broker_dlq_queue_names,
-                queue_name=queue_name,
-                task_id=task_id,
-                limit=limit,
-            )
+            try:
+                payload = await dlq_service.list_broker_messages(
+                    broker_dlq_queue_names,
+                    queue_name=queue_name,
+                    task_id=task_id,
+                    limit=limit,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             return JSONResponse(payload.model_dump(mode="json"))
 
     @router.get(messages_path)
