@@ -222,6 +222,195 @@ Capability refresh guardrails:
 If these are set too tightly, refresh attempts can fail even when the service is
 otherwise healthy.
 
+### Loki `log_config` for AKS service/app/task views
+
+Studio log queries are backend-driven. The browser never talks to Loki
+directly. Instead, each registered service may carry a `log_config` that tells
+the Studio backend how to query Loki for that service.
+
+For the AKS deployment pattern introduced in the latest log-scoping feature,
+the intended mapping is:
+
+- one stable `service` label for the logical Relayna service
+- one `app` label for the concrete emitter or workload, such as API, worker,
+  aggregator, or scaled-job pods
+- task IDs embedded in log line text when they are not available as Loki labels
+
+Recommended registration shape:
+
+```json
+{
+  "service_id": "checker-service",
+  "name": "Checker Service",
+  "base_url": "http://checker-service-api.default.svc.cluster.local:8000",
+  "environment": "prod-aks",
+  "tags": ["checker", "aks"],
+  "auth_mode": "internal_network",
+  "log_config": {
+    "provider": "loki",
+    "base_url": "http://loki.default.svc.cluster.local:3100",
+    "tenant_id": null,
+    "service_selector_labels": {
+      "service": "checker-service"
+    },
+    "source_label": "app",
+    "task_match_mode": "contains",
+    "task_match_template": "{task_id}",
+    "task_id_label": null,
+    "correlation_id_label": "correlation_id",
+    "level_label": "level"
+  }
+}
+```
+
+Field-by-field guidance:
+
+- `service_selector_labels`
+  - the base Loki selector for service-scoped reads
+  - for AKS, this is usually `{ "service": "<logical-service-name>" }`
+- `source_label`
+  - the Loki label used to distinguish emitters inside one service scope
+  - for AKS, this is usually `"app"`
+- `task_match_mode`
+  - `"label"` when `task_id` exists as a Loki label
+  - `"contains"` when the task ID appears as plain text in the log line
+  - `"regex"` when task matching requires a structured log pattern
+- `task_match_template`
+  - optional template rendered with `{task_id}`
+  - default behavior is effectively the raw task id when omitted
+- `correlation_id_label`
+  - optional exact-match Loki label for correlation-scoped narrowing
+- `level_label`
+  - optional exact-match Loki label for level filtering
+
+How the backend turns that config into Loki queries:
+
+- service page, all logs for the service:
+  - `{service="checker-service"}`
+- service page, filtered to one app:
+  - `{app="checker-service-api",service="checker-service"}`
+- task page, task ID inside line text:
+  - `{service="checker-service"} |= "checker_endjdbdgsjmaksdhdsdsdd"`
+- task page, bounded to a lifecycle window:
+  - same query plus Loki `start` and `end` derived from the task timeline or
+    manual operator overrides
+
+Important operational behavior:
+
+- the backend merges all matching Loki streams into one time-ordered response
+- source/app suggestions in the UI are discovered from returned log entries; the
+  backend does not maintain a separate app catalog
+- task pages now pass optional `from` and `to` values to the backend, which the
+  Loki provider maps to `start` and `end`
+- when `task_match_mode` is `"contains"` or `"regex"`, Studio does not require
+  `task_id_label`
+
+### Broker DLQ setup for Studio federation
+
+Studio can federate live broker DLQ inspection through:
+
+- `/studio/services/{service_id}/broker/dlq/messages`
+
+That only works when the registered Relayna service exposes:
+
+- `GET /broker/dlq/messages`
+- a capability document advertising `broker.dlq.messages`
+
+Minimal service-side setup:
+
+```python
+from fastapi import FastAPI
+
+from relayna.api import (
+    BROKER_DLQ_CAPABILITY_ROUTE_IDS,
+    DLQ_CAPABILITY_ROUTE_IDS,
+    STATUS_CAPABILITY_ROUTE_IDS,
+    create_capabilities_router,
+    create_dlq_router,
+    create_relayna_lifespan,
+    get_relayna_runtime,
+    merge_capability_route_ids,
+)
+from relayna.dlq import DLQService, RabbitMQManagementDLQInspector
+
+BROKER_DLQ_QUEUE_NAMES = [
+    "checker.tasks.queue.dlq",
+    "checker.aggregation.queue.0.dlq",
+]
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        dlq_store_prefix="checker-dlq",
+        broker_message_inspector=RabbitMQManagementDLQInspector(
+            base_url="http://rabbitmq:15672",
+            username="guest",
+            password="guest",
+            vhost="/",
+        ),
+    )
+)
+runtime = get_relayna_runtime(app)
+
+app.include_router(
+    create_capabilities_router(
+        topology=topology,
+        supported_routes=merge_capability_route_ids(
+            STATUS_CAPABILITY_ROUTE_IDS,
+            DLQ_CAPABILITY_ROUTE_IDS,
+            BROKER_DLQ_CAPABILITY_ROUTE_IDS,
+        ),
+        service_title="Checker Service",
+    )
+)
+
+if runtime.dlq_store is not None:
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+                broker_message_inspector=runtime.broker_message_inspector,
+            ),
+            broker_dlq_queue_names=BROKER_DLQ_QUEUE_NAMES,
+        )
+    )
+```
+
+What each part does:
+
+- `broker_message_inspector=RabbitMQManagementDLQInspector(...)`
+  - enables live message reads from RabbitMQ Management API
+- `broker_dlq_queue_names=[...]`
+  - allowlists the DLQ queues the route may inspect
+- `BROKER_DLQ_CAPABILITY_ROUTE_IDS`
+  - advertises `broker.dlq.messages` in the service capability document so
+    Studio can enable broker mode in the UI
+
+Example service-side verification:
+
+```bash
+curl -s "http://localhost:8000/broker/dlq/messages?limit=20"
+curl -s "http://localhost:8000/broker/dlq/messages?queue_name=checker.tasks.queue.dlq&limit=20"
+curl -s "http://localhost:8000/broker/dlq/messages?task_id=task-123&limit=20"
+curl -s http://localhost:8000/relayna/capabilities
+```
+
+Example Studio-side verification after registration:
+
+```bash
+curl -s "http://localhost:8000/studio/services/checker-service/broker/dlq/messages?task_id=task-123&limit=20"
+```
+
+Broker-mode reminders:
+
+- this route is emergency/live inspection, not the indexed DLQ source of truth
+- responses do not contain indexed `dlq_id`, replay state, or cursor pagination
+- indexed `/studio/services/{service_id}/dlq/messages` should remain the default
+  operator view when Redis-backed DLQ indexing is healthy
+
 ## Background Workers
 
 The backend can run three periodic workers:
@@ -300,10 +489,15 @@ curl -s http://localhost:8000/studio/services/my-service/workflow/topology
 curl -s http://localhost:8000/studio/services/my-service/dlq/messages
 curl -s "http://localhost:8000/studio/services/my-service/broker/dlq/messages?task_id=task-123"
 curl -s "http://localhost:8000/studio/services/my-service/logs?limit=20&source=runtime-worker"
-curl -s "http://localhost:8000/studio/tasks/my-service/task-123/logs?limit=50&source=api"
+curl -s "http://localhost:8000/studio/tasks/my-service/task-123/logs?limit=50&source=api&from=2026-04-22T10:00:00Z&to=2026-04-22T10:15:00Z"
 ```
 
 Studio log queries normalize a required `source` field on each log entry, sourced from the service's configured `log_config.source_label` when present and falling back to `"unknown"` per entry when the upstream stream omits that label. Both service-scoped and task-scoped log routes also accept an optional exact-match `source` query parameter; requesting it without `log_config.source_label` configured returns `422`.
+
+Task-scoped log routes also accept optional `from` and `to` timestamps. Studio
+uses these automatically on the task detail page when it can derive a queued to
+terminal lifecycle window from status history or timeline events, and operators
+can override that window manually in the UI.
 
 Studio renders ANSI-styled log messages in the browser without changing the raw backend payload. Escape sequences remain in the API response and are interpreted only by the frontend log panels.
 

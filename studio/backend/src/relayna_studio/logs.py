@@ -6,7 +6,7 @@ from typing import Any, Protocol, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .registry import LokiLogConfig, ServiceNotFoundError, ServiceRecord, ServiceRegistryService
 
@@ -84,12 +84,16 @@ class StudioLogListResponse(BaseModel):
 
 
 class StudioLogQuery(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     task_id: str | None = None
     correlation_id: str | None = None
     level: str | None = None
     source: str | None = None
     query: str | None = None
     before: str | None = None
+    from_time: str | None = Field(default=None, alias="from")
+    to_time: str | None = Field(default=None, alias="to")
     limit: int = Field(default=100, ge=1, le=200)
 
     @field_validator("task_id", "correlation_id", "level", "source", "query", mode="before")
@@ -105,6 +109,21 @@ class StudioLogQuery(BaseModel):
             return None
         parsed_cursor, skip_count = _parse_page_cursor(normalized)
         return _encode_page_cursor(cursor=parsed_cursor, skip_count=skip_count)
+
+    @field_validator("from_time", "to_time", mode="before")
+    @classmethod
+    def _normalize_time_bounds(cls, value: Any) -> str | None:
+        normalized = _normalize_optional_string(value)
+        if normalized is None:
+            return None
+        return _parse_cursor_timestamp(normalized)
+
+    @model_validator(mode="after")
+    def _validate_time_bounds(self) -> StudioLogQuery:
+        if self.from_time is not None and self.to_time is not None:
+            if int(_iso_to_loki_ns(self.from_time)) > int(_iso_to_loki_ns(self.to_time)):
+                raise ValueError("from must be earlier than or equal to to")
+        return self
 
 
 class StudioLogProviderError(Exception):
@@ -158,6 +177,10 @@ class LokiLogProvider:
             "limit": str(query.limit + skip_boundary_count + 1),
             "direction": "backward",
         }
+        if query.from_time is not None:
+            params["start"] = _iso_to_loki_ns(query.from_time)
+        if query.to_time is not None:
+            params["end"] = _iso_to_loki_ns(query.to_time)
         if before_cursor is not None:
             params["end"] = _iso_to_loki_ns(before_cursor)
         headers = {"Accept": "application/json"}
@@ -210,7 +233,7 @@ class LokiLogProvider:
             if not config.source_label:
                 raise StudioLogConfigError("Log source filtering requires log_config.source_label for this service.")
             label_filters[config.source_label] = query.source
-        if config.task_id_label and query.task_id:
+        if config.task_match_mode == "label" and config.task_id_label and query.task_id:
             label_filters[config.task_id_label] = query.task_id
         if config.correlation_id_label and query.correlation_id:
             label_filters[config.correlation_id_label] = query.correlation_id
@@ -218,9 +241,33 @@ class LokiLogProvider:
             label_filters[config.level_label] = query.level
         selector = ",".join(f'{key}="{_escape_logql_string(value)}"' for key, value in sorted(label_filters.items()))
         expression = f"{{{selector}}}"
+        task_filter = self._build_task_filter(config=config, query=query)
+        if task_filter is not None:
+            operator, rendered_filter = task_filter
+            expression = f'{expression} {operator} "{_escape_logql_string(rendered_filter)}"'
         if query.query:
             expression = f'{expression} |= "{_escape_logql_string(query.query)}"'
         return expression
+
+    def _build_task_filter(
+        self,
+        *,
+        config: LokiLogConfig,
+        query: StudioLogQuery,
+    ) -> tuple[str, str] | None:
+        if not query.task_id:
+            return None
+        if config.task_match_mode == "label":
+            if config.task_id_label:
+                return None
+            return None
+        template = config.task_match_template or "{task_id}"
+        rendered_filter = template.replace("{task_id}", query.task_id)
+        if config.task_match_mode == "contains":
+            return ("|=", rendered_filter)
+        if config.task_match_mode == "regex":
+            return ("|~", rendered_filter)
+        raise StudioLogConfigError(f"Unsupported task_match_mode '{config.task_match_mode}'.")
 
     def _normalize_response(
         self,
@@ -345,6 +392,8 @@ def create_studio_logs_router(
         source: str | None,
         query: str | None,
         before: str | None,
+        from_time: str | None,
+        to_time: str | None,
         limit: int,
     ) -> StudioLogQuery:
         try:
@@ -355,6 +404,8 @@ def create_studio_logs_router(
                 source=source,
                 query=query,
                 before=before,
+                from_time=from_time,
+                to_time=to_time,
                 limit=limit,
             )
         except ValidationError as exc:
@@ -376,6 +427,8 @@ def create_studio_logs_router(
         source: str | None = None,
         query: str | None = None,
         before: str | None = None,
+        from_time: str | None = Query(default=None, alias="from"),
+        to_time: str | None = Query(default=None, alias="to"),
         limit: int = Query(default=100, ge=1, le=200),
     ) -> StudioLogListResponse:
         request_query = _build_query(
@@ -385,6 +438,8 @@ def create_studio_logs_router(
             source=source,
             query=query,
             before=before,
+            from_time=from_time,
+            to_time=to_time,
             limit=limit,
         )
         try:
@@ -407,6 +462,8 @@ def create_studio_logs_router(
         source: str | None = None,
         query: str | None = None,
         before: str | None = None,
+        from_time: str | None = Query(default=None, alias="from"),
+        to_time: str | None = Query(default=None, alias="to"),
         limit: int = Query(default=100, ge=1, le=200),
     ) -> StudioLogListResponse:
         request_query = _build_query(
@@ -416,6 +473,8 @@ def create_studio_logs_router(
             source=source,
             query=query,
             before=before,
+            from_time=from_time,
+            to_time=to_time,
             limit=limit,
         )
         try:

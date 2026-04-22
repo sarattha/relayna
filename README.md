@@ -30,13 +30,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.5/relayna-1.4.5-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.6/relayna-1.4.6-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.5/relayna-1.4.5.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.6/relayna-1.4.6.tar.gz
 ```
 
 For local development in this repository:
@@ -216,7 +216,7 @@ helpers, and retention behavior. It is not part of the documented public API.
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
-package version is `0.1.2`, and it requires `relayna>=1.4.5`.
+package version is `0.1.3`, and it requires `relayna>=1.4.6`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -367,6 +367,198 @@ If you need broader visibility, configure `broker_dlq_queue_names=...` and use
 `GET /broker/dlq/queues`. That endpoint inspects the configured candidate queue
 names plus any queue names already present in the DLQ index. Broker-only queues
 appear with `indexed_count=0` and `last_indexed_at=null`.
+
+### Broker DLQ message API
+
+`GET /broker/dlq/messages` is the live-message counterpart to the indexed DLQ
+API.
+
+Use it when:
+
+- the queue definitely contains dead-lettered messages
+- Redis-backed DLQ indexing is missing, delayed, or intentionally disabled
+- you need to inspect the raw broker message body and headers before replay or
+  root-cause analysis
+
+To enable it, you need both:
+
+1. a configured broker message inspector
+2. an allowlist of DLQ queue names that the route may inspect
+
+Example:
+
+```python
+from fastapi import FastAPI
+
+from relayna.api import (
+    BROKER_DLQ_CAPABILITY_ROUTE_IDS,
+    DLQ_CAPABILITY_ROUTE_IDS,
+    STATUS_CAPABILITY_ROUTE_IDS,
+    create_capabilities_router,
+    create_dlq_router,
+    create_relayna_lifespan,
+    get_relayna_runtime,
+    merge_capability_route_ids,
+)
+from relayna.dlq import DLQService, RabbitMQManagementDLQInspector
+
+BROKER_DLQ_QUEUE_NAMES = [
+    "orders.tasks.queue.dlq",
+    "orders.aggregation.queue.0.dlq",
+]
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        dlq_store_prefix="orders-dlq",
+        broker_message_inspector=RabbitMQManagementDLQInspector(
+            base_url="http://rabbitmq:15672",
+            username="guest",
+            password="guest",
+            vhost="/",
+        ),
+    )
+)
+
+runtime = get_relayna_runtime(app)
+
+app.include_router(
+    create_capabilities_router(
+        topology=topology,
+        supported_routes=merge_capability_route_ids(
+            STATUS_CAPABILITY_ROUTE_IDS,
+            DLQ_CAPABILITY_ROUTE_IDS,
+            BROKER_DLQ_CAPABILITY_ROUTE_IDS,
+        ),
+        service_title="Orders Service",
+    )
+)
+
+if runtime.dlq_store is not None:
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+                broker_message_inspector=runtime.broker_message_inspector,
+            ),
+            broker_dlq_queue_names=BROKER_DLQ_QUEUE_NAMES,
+        )
+    )
+```
+
+Important details:
+
+- the route only exists when `broker_dlq_queue_names` is passed into
+  `create_dlq_router(...)`
+- the route only returns payloads when `DLQService` has
+  `broker_message_inspector=...`
+- the capability document should advertise `broker.dlq.messages`; Studio uses
+  that signal before enabling broker-mode inspection
+- broker message reads are read-only inspection; they do not create indexed
+  `dlq_id` records and they do not provide replay metadata
+
+Example requests:
+
+```bash
+curl -s "http://localhost:8000/broker/dlq/messages?limit=50"
+curl -s "http://localhost:8000/broker/dlq/messages?queue_name=orders.tasks.queue.dlq&limit=20"
+curl -s "http://localhost:8000/broker/dlq/messages?task_id=task-123&limit=20"
+```
+
+The broker message payload shape is intentionally different from indexed
+`/dlq/messages`:
+
+- broker messages return `message_key`, raw headers, parsed body, `raw_body_b64`,
+  and best-effort `task_id` / `correlation_id`
+- indexed DLQ records return `dlq_id`, replay state, replay count, and retained
+  dead-letter metadata from Redis
+
+If you want Studio to federate this route later, keep the queue names stable and
+include `BROKER_DLQ_CAPABILITY_ROUTE_IDS` in the capability document so Studio
+can detect support automatically.
+
+## Studio Loki log configuration
+
+Studio does not pull logs from Relayna service routes. Instead, the registered
+service record in Studio carries a `log_config` that tells Studio how to query a
+supported log backend such as Loki.
+
+For AKS deployments, the common pattern is:
+
+- one stable `service` label shared by all pods that belong to a logical Relayna
+  service
+- one `app` label that distinguishes emitters such as API, worker, and
+  aggregation pods
+- task identifiers embedded in the log line text instead of a Loki label
+
+Example registration payload for a checker service:
+
+```json
+{
+  "service_id": "checker-service",
+  "name": "Checker Service",
+  "base_url": "http://checker-service-api.default.svc.cluster.local:8000",
+  "environment": "prod-aks",
+  "tags": ["checker", "aks"],
+  "auth_mode": "internal_network",
+  "log_config": {
+    "provider": "loki",
+    "base_url": "http://loki.default.svc.cluster.local:3100",
+    "tenant_id": null,
+    "service_selector_labels": {
+      "service": "checker-service"
+    },
+    "source_label": "app",
+    "task_match_mode": "contains",
+    "task_match_template": "{task_id}",
+    "task_id_label": null,
+    "correlation_id_label": "correlation_id",
+    "level_label": "level"
+  }
+}
+```
+
+That configuration means:
+
+- service page log queries start from `{service="checker-service"}`
+- source/app filtering adds `app="checker-service-api"` or another discovered
+  app value
+- task page log queries match the task id inside the line text, for example
+  `{service="checker-service"} |= "task-123"`
+- Studio can still layer `correlation_id`, `level`, `from`, and `to` filters on
+  top when those fields are available
+
+Example Studio log queries generated from that config:
+
+```bash
+curl -s "http://localhost:8000/studio/services/checker-service/logs?limit=20"
+curl -s "http://localhost:8000/studio/services/checker-service/logs?limit=20&source=checker-service-api"
+curl -s "http://localhost:8000/studio/tasks/checker-service/task-123/logs?limit=50&from=2026-04-22T10:00:00Z&to=2026-04-22T10:15:00Z"
+```
+
+Operator guidance:
+
+- on the service page, Studio first queries at service scope, then discovers
+  app/source values from the returned log streams
+- on the task page, Studio derives an automatic time window from the task
+  lifecycle when it can identify a queued-to-terminal period
+- operators can override the task log time window manually when the automatic
+  window is too narrow or no timeline data is available
+- if your logs do not carry `task_id` as a Loki label, use
+  `task_match_mode="contains"` or `task_match_mode="regex"` instead of
+  `task_id_label`
+
+The Studio registration UI exposes AKS-friendly fields for:
+
+- service label key
+- service label value
+- app label key
+
+Under the hood those map back into the generic `log_config` fields shown above,
+so non-AKS deployments can still use the same backend contract.
 
 ## Topologies
 

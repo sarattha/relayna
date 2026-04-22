@@ -53,7 +53,29 @@ export function formatLabelPairs(value: Record<string, string>) {
     .join(", ");
 }
 
+function splitServiceSelectorLabels(value: Record<string, string>) {
+  const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+  const preferredEntry = entries.find(([key]) => key === "service") || entries[0] || null;
+  if (!preferredEntry) {
+    return {
+      serviceLabelKey: "",
+      serviceLabelValue: "",
+      additionalSelectorLabels: "",
+    };
+  }
+  const [serviceLabelKey, serviceLabelValue] = preferredEntry;
+  const additionalSelectorLabels = formatLabelPairs(
+    Object.fromEntries(entries.filter(([key]) => key !== serviceLabelKey)),
+  );
+  return {
+    serviceLabelKey,
+    serviceLabelValue,
+    additionalSelectorLabels,
+  };
+}
+
 export function serviceToDraft(service: ServiceRecord): ServiceDraft {
+  const selectorLabels = splitServiceSelectorLabels(service.log_config?.service_selector_labels || {});
   return {
     service_id: service.service_id,
     name: service.name,
@@ -64,23 +86,37 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     log_provider: service.log_config?.provider || "",
     log_base_url: service.log_config?.base_url || "",
     log_tenant_id: service.log_config?.tenant_id || "",
-    log_service_selector_labels: formatLabelPairs(service.log_config?.service_selector_labels || {}),
+    log_service_label_key: selectorLabels.serviceLabelKey,
+    log_service_label_value: selectorLabels.serviceLabelValue,
+    log_app_label_key: service.log_config?.source_label || "",
+    log_service_selector_labels: selectorLabels.additionalSelectorLabels,
     log_source_label: service.log_config?.source_label || "",
     log_task_id_label: service.log_config?.task_id_label || "",
     log_correlation_id_label: service.log_config?.correlation_id_label || "",
     log_level_label: service.log_config?.level_label || "",
+    log_task_match_mode: service.log_config?.task_match_mode || "label",
+    log_task_match_template: service.log_config?.task_match_template || "",
   };
 }
 
 export function buildServicePayload(draft: ServiceDraft) {
+  const mergedSelectorLabels = parseLabelPairs(draft.log_service_selector_labels);
+  if (draft.log_service_label_key.trim() && draft.log_service_label_value.trim()) {
+    mergedSelectorLabels[draft.log_service_label_key.trim()] = draft.log_service_label_value.trim();
+  }
   const hasLogConfig = Boolean(
     draft.log_provider ||
       draft.log_base_url.trim() ||
+      draft.log_service_label_key.trim() ||
+      draft.log_service_label_value.trim() ||
+      draft.log_app_label_key.trim() ||
       draft.log_service_selector_labels.trim() ||
       draft.log_source_label.trim() ||
       draft.log_task_id_label.trim() ||
       draft.log_correlation_id_label.trim() ||
       draft.log_level_label.trim() ||
+      draft.log_task_match_template.trim() ||
+      draft.log_task_match_mode !== "label" ||
       draft.log_tenant_id.trim(),
   );
 
@@ -95,15 +131,17 @@ export function buildServicePayload(draft: ServiceDraft) {
       .filter(Boolean),
     auth_mode: draft.auth_mode.trim(),
     log_config: hasLogConfig
-      ? {
+        ? {
           provider: (draft.log_provider || "loki") as "loki",
           base_url: draft.log_base_url.trim(),
           tenant_id: draft.log_tenant_id.trim() || null,
-          service_selector_labels: parseLabelPairs(draft.log_service_selector_labels),
-          source_label: draft.log_source_label.trim() || null,
+          service_selector_labels: mergedSelectorLabels,
+          source_label: draft.log_app_label_key.trim() || draft.log_source_label.trim() || null,
           task_id_label: draft.log_task_id_label.trim() || null,
           correlation_id_label: draft.log_correlation_id_label.trim() || null,
           level_label: draft.log_level_label.trim() || null,
+          task_match_mode: draft.log_task_match_mode || "label",
+          task_match_template: draft.log_task_match_template.trim() || null,
         }
       : null,
   };
@@ -179,7 +217,7 @@ export async function fetchTaskEvents(serviceId: string, taskId: string, limit =
 
 export async function fetchServiceLogs(
   serviceId: string,
-  query: { query?: string; level?: string; source?: string; limit?: number },
+  query: { query?: string; level?: string; source?: string; limit?: number; from?: string; to?: string },
 ) {
   const params = new URLSearchParams({ limit: String(query.limit || 20) });
   if (query.query?.trim()) {
@@ -191,6 +229,12 @@ export async function fetchServiceLogs(
   if (query.source?.trim()) {
     params.set("source", query.source.trim());
   }
+  if (query.from?.trim()) {
+    params.set("from", query.from.trim());
+  }
+  if (query.to?.trim()) {
+    params.set("to", query.to.trim());
+  }
   return requestJson<StudioLogListResponse>(
     `/studio/services/${encodeURIComponent(serviceId)}/logs?${params.toString()}`,
   );
@@ -199,7 +243,15 @@ export async function fetchServiceLogs(
 export async function fetchTaskLogs(
   serviceId: string,
   taskId: string,
-  query: { query?: string; level?: string; source?: string; limit?: number; correlation_id?: string | null },
+  query: {
+    query?: string;
+    level?: string;
+    source?: string;
+    limit?: number;
+    correlation_id?: string | null;
+    from?: string;
+    to?: string;
+  },
 ) {
   const params = new URLSearchParams({ limit: String(query.limit || 50) });
   if (query.query?.trim()) {
@@ -213,6 +265,12 @@ export async function fetchTaskLogs(
   }
   if (query.correlation_id?.trim()) {
     params.set("correlation_id", query.correlation_id.trim());
+  }
+  if (query.from?.trim()) {
+    params.set("from", query.from.trim());
+  }
+  if (query.to?.trim()) {
+    params.set("to", query.to.trim());
   }
   return requestJson<StudioLogListResponse>(
     `/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/logs?${params.toString()}`,
