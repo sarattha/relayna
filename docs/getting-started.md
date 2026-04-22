@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.5/relayna-1.4.5-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.6/relayna-1.4.6-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.5/relayna-1.4.5.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.6/relayna-1.4.6.tar.gz
 ```
 
 For local development in this repository:
@@ -329,6 +329,7 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 
 from relayna.api import (
+    BROKER_DLQ_CAPABILITY_ROUTE_IDS,
     DLQ_CAPABILITY_ROUTE_IDS,
     EVENTS_CAPABILITY_ROUTE_IDS,
     EXECUTION_CAPABILITY_ROUTE_IDS,
@@ -345,7 +346,7 @@ from relayna.api import (
     merge_capability_route_ids,
 )
 from relayna.consumer import RetryPolicy, TaskConsumer
-from relayna.dlq import DLQService
+from relayna.dlq import DLQService, RabbitMQManagementDLQInspector
 from relayna.observability import RedisObservationStore, make_redis_observation_sink
 from relayna.rabbitmq import RelaynaRabbitClient
 from relayna.topology import SharedTasksSharedStatusTopology
@@ -353,6 +354,7 @@ from relayna.topology import SharedTasksSharedStatusTopology
 RABBITMQ_URL = "amqp://guest:guest@localhost:5672/"
 REDIS_URL = "redis://localhost:6379/0"
 OBSERVATION_STORE_PREFIX = "orders-observations"
+BROKER_DLQ_QUEUE_NAMES = ["orders.tasks.queue.dlq", "orders.aggregation.queue.0.dlq"]
 
 topology = SharedTasksSharedStatusTopology(
     rabbitmq_url=RABBITMQ_URL,
@@ -395,6 +397,12 @@ app = FastAPI(
         dlq_store_prefix="orders-dlq",
         observation_store_prefix=OBSERVATION_STORE_PREFIX,
         service_event_store_prefix="orders-service-events",
+        broker_message_inspector=RabbitMQManagementDLQInspector(
+            base_url="http://rabbitmq:15672",
+            username="guest",
+            password="guest",
+            vhost="/",
+        ),
     ),
 )
 
@@ -414,6 +422,7 @@ app.include_router(
         supported_routes=merge_capability_route_ids(
             STATUS_CAPABILITY_ROUTE_IDS,
             DLQ_CAPABILITY_ROUTE_IDS,
+            BROKER_DLQ_CAPABILITY_ROUTE_IDS,
             EXECUTION_CAPABILITY_ROUTE_IDS,
             EVENTS_CAPABILITY_ROUTE_IDS,
             HEALTH_CAPABILITY_ROUTE_IDS,
@@ -429,7 +438,9 @@ if runtime.dlq_store is not None:
                 rabbitmq=runtime.rabbitmq,
                 dlq_store=runtime.dlq_store,
                 status_store=runtime.store,
-            )
+                broker_message_inspector=runtime.broker_message_inspector,
+            ),
+            broker_dlq_queue_names=BROKER_DLQ_QUEUE_NAMES,
         )
     )
 
@@ -1312,6 +1323,8 @@ This exposes:
 - `GET /dlq/messages/{dlq_id}`
 - `POST /dlq/messages/{dlq_id}/replay`
 - `GET /broker/dlq/queues` when `broker_dlq_queue_names=...` is configured
+- `GET /broker/dlq/messages` when both `broker_dlq_queue_names=...` and
+  `broker_message_inspector=...` are configured
 
 Important limitation:
 
@@ -1329,6 +1342,85 @@ and use `GET /broker/dlq/queues`. That endpoint inspects the configured
 candidate queue names together with queue names already present in the DLQ
 index. Broker-only queues appear with `indexed_count=0` and
 `last_indexed_at=null`.
+
+### Live broker DLQ message inspection
+
+If you also want to inspect live dead-letter message payloads through the
+service API, configure a broker message inspector and advertise the capability
+explicitly.
+
+```python
+from relayna.api import (
+    BROKER_DLQ_CAPABILITY_ROUTE_IDS,
+    DLQ_CAPABILITY_ROUTE_IDS,
+    STATUS_CAPABILITY_ROUTE_IDS,
+    create_capabilities_router,
+    create_dlq_router,
+    merge_capability_route_ids,
+)
+from relayna.dlq import DLQService, RabbitMQManagementDLQInspector
+
+BROKER_DLQ_QUEUE_NAMES = [
+    "orders.tasks.queue.dlq",
+    "orders.aggregation.queue.0.dlq",
+]
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://localhost:6379/0",
+        dlq_store_prefix="orders-dlq",
+        broker_message_inspector=RabbitMQManagementDLQInspector(
+            base_url="http://rabbitmq:15672",
+            username="guest",
+            password="guest",
+            vhost="/",
+        ),
+    )
+)
+runtime = get_relayna_runtime(app)
+
+app.include_router(
+    create_capabilities_router(
+        topology=topology,
+        supported_routes=merge_capability_route_ids(
+            STATUS_CAPABILITY_ROUTE_IDS,
+            DLQ_CAPABILITY_ROUTE_IDS,
+            BROKER_DLQ_CAPABILITY_ROUTE_IDS,
+        ),
+    )
+)
+
+if runtime.dlq_store is not None:
+    app.include_router(
+        create_dlq_router(
+            dlq_service=DLQService(
+                rabbitmq=runtime.rabbitmq,
+                dlq_store=runtime.dlq_store,
+                status_store=runtime.store,
+                broker_message_inspector=runtime.broker_message_inspector,
+            ),
+            broker_dlq_queue_names=BROKER_DLQ_QUEUE_NAMES,
+        )
+    )
+```
+
+This enables:
+
+- `GET /broker/dlq/messages?limit=50`
+- `GET /broker/dlq/messages?queue_name=orders.tasks.queue.dlq&limit=20`
+- `GET /broker/dlq/messages?task_id=task-123&limit=20`
+
+Important behavior:
+
+- the route is read-only and does not create indexed DLQ records
+- the route only searches the queue names listed in
+  `broker_dlq_queue_names=...`
+- the capability document should include `BROKER_DLQ_CAPABILITY_ROUTE_IDS` so
+  Studio knows that broker-mode inspection is available
+- the response shape is different from indexed `/dlq/messages`; broker reads
+  return best-effort fields like `message_key`, `headers`, `body`, and
+  `raw_body_b64`
 
 ## Example: multi-stage workflow + shared status
 
@@ -2208,6 +2300,31 @@ For log panels, Studio does not read logs from Relayna directly. Instead, the
 service record in Studio can carry a `log_config` pointing at a supported log
 backend such as Loki. The service should still emit stable task and correlation
 identifiers into logs if you want useful joins.
+
+For AKS-style Loki setups, a practical `log_config` looks like:
+
+```json
+{
+  "provider": "loki",
+  "base_url": "http://loki.default.svc.cluster.local:3100",
+  "service_selector_labels": {
+    "service": "checker-service"
+  },
+  "source_label": "app",
+  "task_match_mode": "contains",
+  "task_match_template": "{task_id}",
+  "correlation_id_label": "correlation_id",
+  "level_label": "level"
+}
+```
+
+That means:
+
+- Studio service pages query all logs matching the shared `service` label
+- Studio source filtering uses the `app` label to distinguish API, worker, and
+  aggregation emitters
+- Studio task pages search for the current task id inside the log line text
+  instead of requiring a Loki `task_id` label
 
 ### Metadata that should stay stable
 

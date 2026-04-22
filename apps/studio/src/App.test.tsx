@@ -140,6 +140,8 @@ function buildMockService(): MockServiceRecord {
       task_id_label: "task_id",
       correlation_id_label: "correlation_id",
       level_label: "level",
+      task_match_mode: "label",
+      task_match_template: null,
     },
   };
 }
@@ -271,9 +273,14 @@ describe("App", () => {
       if (url === "/studio/services/payments-api/events?limit=20" && method === "GET") {
         return jsonResponse({ count: 0, items: [], next_cursor: null });
       }
-      if (url === "/studio/services/payments-api/logs?limit=20" && method === "GET") {
+      if (url.startsWith("/studio/services/payments-api/logs?") && method === "GET") {
+        const parsed = new URL(url, "http://studio.test");
+        const source = parsed.searchParams.get("source");
+        if (source && source !== "runtime-worker") {
+          throw new Error(`Unhandled service log source filter: ${source}`);
+        }
         return jsonResponse({
-          count: 1,
+          count: 2,
           items: [
             {
               service_id: "payments-api",
@@ -283,20 +290,12 @@ describe("App", () => {
               message: "\u001b[32mservice log line\u001b[0m\nsecond line",
               fields: {},
             },
-          ],
-          next_cursor: null,
-        });
-      }
-      if (url === "/studio/services/payments-api/logs?limit=20&source=runtime-worker" && method === "GET") {
-        return jsonResponse({
-          count: 1,
-          items: [
             {
               service_id: "payments-api",
-              timestamp: "2026-04-08T10:00:00Z",
+              timestamp: "2026-04-08T10:01:00Z",
               level: "info",
-              source: "runtime-worker",
-              message: "\u001b[32mservice log line\u001b[0m\nsecond line",
+              source: "api",
+              message: "api log line",
               fields: {},
             },
           ],
@@ -465,7 +464,7 @@ describe("App", () => {
           next_cursor: null,
         });
       }
-      if (url === "/studio/tasks/payments-api/task-123/logs?limit=50&correlation_id=corr-123" && method === "GET") {
+      if (url.startsWith("/studio/tasks/payments-api/task-123/logs?") && method === "GET") {
         return jsonResponse({
           count: 1,
           items: [
@@ -483,23 +482,8 @@ describe("App", () => {
           next_cursor: null,
         });
       }
-      if (url === "/studio/tasks/payments-api/task-123/logs?limit=50&source=api&correlation_id=corr-123" && method === "GET") {
-        return jsonResponse({
-          count: 1,
-          items: [
-            {
-              service_id: "payments-api",
-              task_id: "task-123",
-              correlation_id: "corr-123",
-              timestamp: "2026-04-08T10:00:00Z",
-              level: "info",
-              source: "api",
-              message: "\u001b[31mtask log line\u001b[0m",
-              fields: {},
-            },
-          ],
-          next_cursor: null,
-        });
+      if (url.startsWith("/studio/tasks/payments-api/task-empty-dlq/logs?") && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
       }
       throw new Error(`Unhandled fetch: ${method} ${url}`);
     });
@@ -616,8 +600,15 @@ describe("App", () => {
     expect(window.location.pathname).toBe("/services");
   });
 
-  it("includes source_label in the service log configuration payload", async () => {
-    let observedPayload: { log_config?: { source_label?: string | null } | null } | null = null;
+  it("maps AKS-friendly app and service labels into the generic log configuration payload", async () => {
+    let observedPayload:
+      | {
+          log_config?: {
+            source_label?: string | null;
+            service_selector_labels?: Record<string, string>;
+          } | null;
+        }
+      | null = null;
     const baseImpl = fetchMock.getMockImplementation();
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
@@ -642,7 +633,9 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "New Service" }));
     fireEvent.change(screen.getByLabelText("Service id"), { target: { value: "orders-api" } });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Orders API" } });
-    fireEvent.change(screen.getByLabelText("Source label"), { target: { value: "component" } });
+    fireEvent.change(screen.getByLabelText("Service label key"), { target: { value: "service" } });
+    fireEvent.change(screen.getByLabelText("Service label value"), { target: { value: "orders-service" } });
+    fireEvent.change(screen.getByLabelText("App label key"), { target: { value: "app" } });
     fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
 
     await screen.findByText("Registered service 'orders-api'.");
@@ -650,8 +643,58 @@ describe("App", () => {
     if (!observedPayload) {
       throw new Error("Expected the service create payload to be captured.");
     }
-    const capturedPayload = observedPayload as { log_config?: { source_label?: string | null } | null };
-    expect(capturedPayload.log_config?.source_label).toBe("component");
+    const capturedPayload = observedPayload as {
+      log_config?: { source_label?: string | null; service_selector_labels?: Record<string, string> } | null;
+    };
+    expect(capturedPayload.log_config?.source_label).toBe("app");
+    expect(capturedPayload.log_config?.service_selector_labels).toEqual({ service: "orders-service" });
+  });
+
+  it("clears source_label when the app label key is removed in the editor", async () => {
+    let observedPayload:
+      | {
+          log_config?: {
+            source_label?: string | null;
+            service_selector_labels?: Record<string, string>;
+          } | null;
+        }
+      | null = null;
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "PATCH") {
+        observedPayload = JSON.parse(String(init?.body || "{}"));
+        const updated = {
+          ...services[0],
+          log_config: observedPayload?.log_config ?? null,
+        };
+        services[0] = updated;
+        return jsonResponse(updated);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    await screen.findByText("Registered Services");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("App label key"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Service" }));
+
+    await screen.findByText("Updated service 'payments-api'.");
+    expect(observedPayload).not.toBeNull();
+    if (!observedPayload) {
+      throw new Error("Expected the service update payload to be captured.");
+    }
+    const capturedPayload: {
+      log_config?: {
+        source_label?: string | null;
+        service_selector_labels?: Record<string, string>;
+      } | null;
+    } = observedPayload;
+    expect(capturedPayload.log_config?.source_label).toBeNull();
+    expect(capturedPayload.log_config?.service_selector_labels).toEqual({ app: "payments-api" });
   });
 
   it("navigates from the service list to the routed service detail page", async () => {
@@ -682,6 +725,19 @@ describe("App", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/logs?limit=20&source=runtime-worker", undefined),
     );
+  });
+
+  it("derives service log source options from returned log entries", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    const discoveredOptions = Array.from(
+      document.querySelectorAll("#service-log-sources-payments-api option"),
+    ).map((item) => item.getAttribute("value"));
+    expect(discoveredOptions).toContain("api");
+    expect(discoveredOptions).toContain("runtime-worker");
   });
 
   it("refreshes a registered service from the detail page", async () => {
@@ -900,12 +956,108 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Task log source"), { target: { value: "api" } });
     fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/studio/tasks/payments-api/task-123/logs?limit=50&source=api&correlation_id=corr-123",
-        undefined,
-      ),
-    );
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          parsed.searchParams.get("source") === "api" &&
+          parsed.searchParams.get("correlation_id") === "corr-123" &&
+          parsed.searchParams.get("from") === "2026-04-08T10:00:00Z" &&
+          Boolean(parsed.searchParams.get("to"))
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+  });
+
+  it("auto-derives the task log window from the task lifecycle", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          parsed.searchParams.get("correlation_id") === "corr-123" &&
+          parsed.searchParams.get("from") === "2026-04-08T10:00:00Z" &&
+          Boolean(parsed.searchParams.get("to"))
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+    expect(screen.getByText(/Auto window:/)).toBeInTheDocument();
+  });
+
+  it("uses the manual task log window override when provided", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Task log window mode"), { target: { value: "manual" } });
+    fireEvent.change(screen.getByLabelText("Task log from"), { target: { value: "2026-04-08T09:55:00Z" } });
+    fireEvent.change(screen.getByLabelText("Task log to"), { target: { value: "2026-04-08T10:06:00Z" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          parsed.searchParams.get("from") === "2026-04-08T09:55:00Z" &&
+          parsed.searchParams.get("to") === "2026-04-08T10:06:00Z"
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+  });
+
+  it("advances the auto task log window end when reload logs is clicked on a running task", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T10:01:00Z"));
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    async function flushRender() {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    render(<App />);
+
+    await flushRender();
+    expect(screen.getByText("Task Detail")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          parsed.searchParams.get("to") === "2026-04-08T10:01:00.000Z"
+        );
+      }),
+    ).toBeTruthy();
+
+    fetchMock.mockClear();
+    await act(async () => {
+      vi.setSystemTime(new Date("2026-04-08T10:03:00Z"));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+    await flushRender();
+
+    expect(
+      fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          parsed.searchParams.get("to") === "2026-04-08T10:03:00.000Z"
+        )
+      }),
+    ).toBeTruthy();
   });
 
   it("shows a broker inspection CTA in task detail when indexed DLQ data is empty", async () => {
@@ -917,9 +1069,6 @@ describe("App", () => {
         return jsonResponse(taskDetailResponse({ taskId: "task-empty-dlq", dlqItems: [] }));
       }
       if (url === "/studio/tasks/payments-api/task-empty-dlq/events?limit=50" && method === "GET") {
-        return jsonResponse({ count: 0, items: [], next_cursor: null });
-      }
-      if (url === "/studio/tasks/payments-api/task-empty-dlq/logs?limit=50&correlation_id=corr-123" && method === "GET") {
         return jsonResponse({ count: 0, items: [], next_cursor: null });
       }
       return await baseImpl!(input, init);

@@ -151,6 +151,7 @@ export function ServiceDetailPage() {
     }
     return true;
   });
+  const serviceLogSourceOptions = Array.from(new Set((serviceLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
 
   if (servicesState.error) {
     return <NoticeBanner tone="error">{servicesState.error}</NoticeBanner>;
@@ -381,6 +382,7 @@ export function ServiceDetailPage() {
               aria-label="Service log source"
               value={serviceLogSource}
               onChange={(event) => setServiceLogSource(event.target.value)}
+              list={`service-log-sources-${service.service_id}`}
               placeholder={service.log_config?.source_label || "source"}
               disabled={!service.log_config?.source_label}
               style={inputStyle}
@@ -393,10 +395,20 @@ export function ServiceDetailPage() {
               style={inputStyle}
             />
           </div>
+          {serviceLogSourceOptions.length ? (
+            <datalist id={`service-log-sources-${service.service_id}`}>
+              {serviceLogSourceOptions.map((source) => (
+                <option key={source} value={source} />
+              ))}
+            </datalist>
+          ) : null}
           {!service.log_config?.source_label ? (
             <p style={mutedTextStyle}>Source filtering is unavailable until this service sets `log_config.source_label`.</p>
           ) : (
-            <p style={mutedTextStyle}>Source filter matches the configured `{service.log_config.source_label}` Loki label exactly.</p>
+            <p style={mutedTextStyle}>
+              Source filter matches the configured `{service.log_config.source_label}` Loki label exactly.
+              {serviceLogSourceOptions.length ? ` Discovered values: ${serviceLogSourceOptions.join(", ")}.` : ""}
+            </p>
           )}
           {serviceLogsLoading ? <p style={mutedTextStyle}>Loading service logs...</p> : null}
           {serviceLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceLogsError}</p> : null}

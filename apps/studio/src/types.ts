@@ -59,6 +59,8 @@ export type ServiceLogConfig = {
   task_id_label?: string | null;
   correlation_id_label?: string | null;
   level_label?: string | null;
+  task_match_mode?: "label" | "contains" | "regex";
+  task_match_template?: string | null;
 };
 
 export type ServiceRecord = {
@@ -90,11 +92,16 @@ export type ServiceDraft = {
   log_provider: "" | "loki";
   log_base_url: string;
   log_tenant_id: string;
+  log_service_label_key: string;
+  log_service_label_value: string;
+  log_app_label_key: string;
   log_service_selector_labels: string;
   log_source_label: string;
   log_task_id_label: string;
   log_correlation_id_label: string;
   log_level_label: string;
+  log_task_match_mode: "label" | "contains" | "regex";
+  log_task_match_template: string;
 };
 
 export type StudioTaskPointer = {

@@ -1023,6 +1023,86 @@ def test_dlq_router_lists_live_broker_messages_when_broker_inspector_is_configur
     assert inspector.calls == [{"queue_name": "broker.only.dlq", "limit": 10}]
 
 
+def test_dlq_router_applies_alias_config_to_live_broker_messages(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    alias_config = ContractAliasConfig(field_aliases={"task_id": "attempt_id"})
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            dlq_store_prefix="relayna-dlq",
+            alias_config=alias_config,
+        )
+    )
+
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+    assert runtime.dlq_store is not None
+    inspector = FakeBrokerInspector(
+        {
+            "broker.only.dlq": [
+                BrokerDLQMessage(
+                    queue_name="broker.only.dlq",
+                    message_key="msg-1",
+                    task_id="attempt-123",
+                    correlation_id="corr-123",
+                    reason="rejected",
+                    source_queue_name="tasks.queue",
+                    content_type="application/json",
+                    body_encoding="json",
+                    dead_lettered_at=None,
+                    headers={"task_id": "attempt-123"},
+                    body={"task_id": "attempt-123"},
+                    raw_body_b64="eyJ0YXNrX2lkIjoiYXR0ZW1wdC0xMjMifQ==",
+                    redelivered=False,
+                )
+            ]
+        }
+    )
+    router = create_dlq_router(
+        dlq_service=DLQService(
+            rabbitmq=runtime.rabbitmq,
+            dlq_store=runtime.dlq_store,
+            status_store=runtime.store,
+            broker_message_inspector=inspector,
+        ),
+        broker_dlq_queue_names=["broker.only.dlq"],
+        alias_config=alias_config,
+    )
+    app.include_router(router)
+
+    broker_messages_route = next(route for route in router.routes if route.path == "/broker/dlq/messages")
+    assert {param.alias for param in broker_messages_route.dependant.query_params} >= {"attempt_id"}
+
+    with TestClient(app) as client:
+        response = client.get("/broker/dlq/messages", params={"attempt_id": "attempt-123", "limit": 10})
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload == {
+        "items": [
+            {
+                "queue_name": "broker.only.dlq",
+                "message_key": "msg-1",
+                "attempt_id": "attempt-123",
+                "correlation_id": "corr-123",
+                "reason": "rejected",
+                "source_queue_name": "tasks.queue",
+                "content_type": "application/json",
+                "body_encoding": "json",
+                "dead_lettered_at": None,
+                "headers": {"task_id": "attempt-123"},
+                "body": {"attempt_id": "attempt-123"},
+                "raw_body_b64": "eyJ0YXNrX2lkIjoiYXR0ZW1wdC0xMjMifQ==",
+                "redelivered": False,
+            }
+        ]
+    }
+    assert "task_id" not in payload["items"][0]
+    assert "task_id" not in payload["items"][0]["body"]
+    assert inspector.calls == [{"queue_name": "broker.only.dlq", "limit": 10}]
+
+
 def test_dlq_router_rejects_unknown_broker_queue_name(
     topology: SharedTasksSharedStatusTopology,
 ) -> None:

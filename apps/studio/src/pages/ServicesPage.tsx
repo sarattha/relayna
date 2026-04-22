@@ -311,22 +311,44 @@ export function ServicesPage() {
                   />
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                  Service selector labels
+                  Service label key
+                  <input
+                    value={draft.log_service_label_key}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, log_service_label_key: event.target.value }))
+                    }
+                    placeholder="service"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Service label value
+                  <input
+                    value={draft.log_service_label_value}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, log_service_label_value: event.target.value }))
+                    }
+                    placeholder="checker-service"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  App label key
+                  <input
+                    value={draft.log_app_label_key}
+                    onChange={(event) => setDraft((current) => ({ ...current, log_app_label_key: event.target.value }))}
+                    placeholder="app"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Additional selector labels
                   <input
                     value={draft.log_service_selector_labels}
                     onChange={(event) =>
                       setDraft((current) => ({ ...current, log_service_selector_labels: event.target.value }))
                     }
-                    placeholder="app=payments-api, namespace=prod"
-                    style={inputStyle}
-                  />
-                </label>
-                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
-                  Source label
-                  <input
-                    value={draft.log_source_label}
-                    onChange={(event) => setDraft((current) => ({ ...current, log_source_label: event.target.value }))}
-                    placeholder="component"
+                    placeholder="namespace=prod"
                     style={inputStyle}
                   />
                 </label>
@@ -356,6 +378,34 @@ export function ServicesPage() {
                     value={draft.log_level_label}
                     onChange={(event) => setDraft((current) => ({ ...current, log_level_label: event.target.value }))}
                     placeholder="level"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Task match mode
+                  <select
+                    value={draft.log_task_match_mode}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        log_task_match_mode: event.target.value as "label" | "contains" | "regex",
+                      }))
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="label">label</option>
+                    <option value="contains">contains</option>
+                    <option value="regex">regex</option>
+                  </select>
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Task match template
+                  <input
+                    value={draft.log_task_match_template}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, log_task_match_template: event.target.value }))
+                    }
+                    placeholder="{task_id}"
                     style={inputStyle}
                   />
                 </label>

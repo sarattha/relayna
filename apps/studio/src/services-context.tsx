@@ -41,11 +41,16 @@ const emptyDraft: ServiceDraft = {
   log_provider: "",
   log_base_url: "",
   log_tenant_id: "",
+  log_service_label_key: "",
+  log_service_label_value: "",
+  log_app_label_key: "",
   log_service_selector_labels: "",
   log_source_label: "",
   log_task_id_label: "",
   log_correlation_id_label: "",
   log_level_label: "",
+  log_task_match_mode: "label",
+  log_task_match_template: "",
 };
 
 const ServicesContext = createContext<ServicesContextValue | null>(null);
