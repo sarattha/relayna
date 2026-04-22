@@ -111,7 +111,6 @@ export function buildServicePayload(draft: ServiceDraft) {
       draft.log_service_label_value.trim() ||
       draft.log_app_label_key.trim() ||
       draft.log_service_selector_labels.trim() ||
-      draft.log_source_label.trim() ||
       draft.log_task_id_label.trim() ||
       draft.log_correlation_id_label.trim() ||
       draft.log_level_label.trim() ||
@@ -136,7 +135,7 @@ export function buildServicePayload(draft: ServiceDraft) {
           base_url: draft.log_base_url.trim(),
           tenant_id: draft.log_tenant_id.trim() || null,
           service_selector_labels: mergedSelectorLabels,
-          source_label: draft.log_app_label_key.trim() || draft.log_source_label.trim() || null,
+          source_label: draft.log_app_label_key.trim() || null,
           task_id_label: draft.log_task_id_label.trim() || null,
           correlation_id_label: draft.log_correlation_id_label.trim() || null,
           level_label: draft.log_level_label.trim() || null,

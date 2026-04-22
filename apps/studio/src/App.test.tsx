@@ -650,6 +650,53 @@ describe("App", () => {
     expect(capturedPayload.log_config?.service_selector_labels).toEqual({ service: "orders-service" });
   });
 
+  it("clears source_label when the app label key is removed in the editor", async () => {
+    let observedPayload:
+      | {
+          log_config?: {
+            source_label?: string | null;
+            service_selector_labels?: Record<string, string>;
+          } | null;
+        }
+      | null = null;
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "PATCH") {
+        observedPayload = JSON.parse(String(init?.body || "{}"));
+        const updated = {
+          ...services[0],
+          log_config: observedPayload?.log_config ?? null,
+        };
+        services[0] = updated;
+        return jsonResponse(updated);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    await screen.findByText("Registered Services");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("App label key"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Service" }));
+
+    await screen.findByText("Updated service 'payments-api'.");
+    expect(observedPayload).not.toBeNull();
+    if (!observedPayload) {
+      throw new Error("Expected the service update payload to be captured.");
+    }
+    const capturedPayload: {
+      log_config?: {
+        source_label?: string | null;
+        service_selector_labels?: Record<string, string>;
+      } | null;
+    } = observedPayload;
+    expect(capturedPayload.log_config?.source_label).toBeNull();
+    expect(capturedPayload.log_config?.service_selector_labels).toEqual({ app: "payments-api" });
+  });
+
   it("navigates from the service list to the routed service detail page", async () => {
     render(<App />);
 
@@ -967,6 +1014,50 @@ describe("App", () => {
       });
       expect(matchingCall).toBeTruthy();
     });
+  });
+
+  it("advances the auto task log window end when reload logs is clicked on a running task", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T10:01:00Z"));
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    async function flushRender() {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    render(<App />);
+
+    await flushRender();
+    expect(screen.getByText("Task Detail")).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          parsed.searchParams.get("to") === "2026-04-08T10:01:00.000Z"
+        );
+      }),
+    ).toBeTruthy();
+
+    fetchMock.mockClear();
+    await act(async () => {
+      vi.setSystemTime(new Date("2026-04-08T10:03:00Z"));
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+    await flushRender();
+
+    expect(
+      fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          parsed.searchParams.get("to") === "2026-04-08T10:03:00.000Z"
+        )
+      }),
+    ).toBeTruthy();
   });
 
   it("shows a broker inspection CTA in task detail when indexed DLQ data is empty", async () => {

@@ -187,11 +187,9 @@ export function TaskDetailPage() {
     if (!taskDetail || taskTimelineLoading) {
       return;
     }
+    const window = getTaskLogWindow();
     if (taskDetail.service.log_config) {
-      void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, {
-        from: activeTaskLogFrom,
-        to: activeTaskLogTo,
-      });
+      void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, window);
     } else {
       setTaskLogs(null);
       setTaskLogsError("No log provider configured for this service.");
@@ -202,6 +200,24 @@ export function TaskDetailPage() {
     taskTimeline?.count,
     taskLogWindowMode,
   ]);
+
+  function getTaskLogWindow({ refreshAutoNow = false }: { refreshAutoNow?: boolean } = {}) {
+    if (taskLogWindowMode === "manual") {
+      return {
+        from: activeTaskLogFrom,
+        to: activeTaskLogTo,
+      };
+    }
+    const autoNow = refreshAutoNow ? new Date().toISOString() : taskLogAutoNow;
+    if (refreshAutoNow) {
+      setTaskLogAutoNow(autoNow);
+    }
+    const window = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, autoNow) : null;
+    return {
+      from: window?.from || "",
+      to: window?.to || "",
+    };
+  }
 
   useEffect(() => {
     if (typeof EventSource === "undefined" || !serviceId || !taskId) {
@@ -422,8 +438,7 @@ export function TaskDetailPage() {
                     type="button"
                     onClick={() =>
                       void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, {
-                        from: activeTaskLogFrom,
-                        to: activeTaskLogTo,
+                        ...getTaskLogWindow({ refreshAutoNow: true }),
                       })
                     }
                     style={secondaryButtonStyle}
