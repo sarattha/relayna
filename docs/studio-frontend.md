@@ -180,6 +180,38 @@ seconds so backend health-refresh results appear without a manual browser
 reload. The explicit `Reload List` action remains available for operator-driven
 refreshes.
 
+For Loki-backed log views, the service editor now exposes AKS-friendly inputs in
+addition to the raw generic contract:
+
+- `service label key`
+- `service label value`
+- `app label key`
+- `task match mode`
+- `task match template`
+
+The UI maps those inputs back into the backend `log_config`:
+
+- `service label key` + `service label value`
+  - become one entry in `service_selector_labels`
+- `app label key`
+  - becomes `source_label`
+- `task match mode`
+  - controls whether task detail logs use a Loki label, plain-text contains
+    query, or regex query
+- `task match template`
+  - is rendered with `{task_id}` when task matching uses `contains` or `regex`
+
+Recommended AKS example:
+
+- `service label key`: `service`
+- `service label value`: `checker-service`
+- `app label key`: `app`
+- `task match mode`: `contains`
+- `task match template`: `{task_id}`
+
+That lets the service page query all logs under the shared `service` label while
+the task page finds logs whose line text mentions the current task ID.
+
 ### Task search and task detail
 
 The UI addresses tasks as:
@@ -198,6 +230,16 @@ Task views may also render:
 - event timelines
 - execution graphs
 - logs
+
+Task detail log behavior is now intentionally lifecycle-aware:
+
+- the page derives an automatic `from` / `to` window from queued-to-terminal
+  task activity when possible
+- the page still allows a manual override when the automatic window is too
+  narrow or no usable timestamps are available
+- when the service has `source_label` configured, source/app suggestions are
+  discovered from the returned logs and exposed as input suggestions rather than
+  a hard-coded list
 
 ### Workflow, logs, events, and DLQ views
 
@@ -221,6 +263,29 @@ DLQ views now have two explicit modes:
 Task detail remains indexed-first. When indexed DLQ data is empty and broker
 inspection is supported, the UI links operators into broker mode instead of
 automatically replacing the indexed view.
+
+### How operators use the broker DLQ mode
+
+From the UI point of view, broker mode is a separate inspection path:
+
+1. open `/services/:serviceId/dlq`
+2. switch to broker mode, or follow the task-detail CTA when indexed DLQ data
+   is empty
+3. optionally filter by `task_id`
+4. inspect live message headers and bodies coming from
+   `/studio/services/{service_id}/broker/dlq/messages`
+
+The frontend does not infer broker support on its own. It waits for the service
+capability document to advertise `broker.dlq.messages`, then enables the broker
+mode affordances.
+
+Expectations to communicate to operators:
+
+- indexed mode is the normal operational view
+- broker mode is the emergency or drift-recovery view
+- broker mode does not provide `dlq_id`, replay state, or pagination because
+  the underlying service route is reading live broker messages rather than the
+  indexed Redis model
 
 The frontend is intentionally thin here: if the backend cannot provide a route,
 the UI should degrade rather than invent client-side service calls.

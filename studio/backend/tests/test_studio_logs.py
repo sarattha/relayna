@@ -90,6 +90,8 @@ def make_log_config(
     task_id_label: str | None = "task_id",
     correlation_id_label: str | None = "correlation_id",
     level_label: str | None = "level",
+    task_match_mode: str = "label",
+    task_match_template: str | None = None,
 ) -> LokiLogConfig:
     return LokiLogConfig(
         provider="loki",
@@ -100,6 +102,8 @@ def make_log_config(
         task_id_label=task_id_label,
         correlation_id_label=correlation_id_label,
         level_label=level_label,
+        task_match_mode=task_match_mode,
+        task_match_template=task_match_template,
     )
 
 
@@ -278,6 +282,48 @@ def test_loki_provider_builds_expected_query_and_normalizes_entries() -> None:
     assert response.next_cursor == "1712797201000000000"
 
 
+def test_loki_provider_uses_contains_task_matching() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(
+                log_config=make_log_config(task_match_mode="contains", task_match_template="checker_{task_id}")
+            ),
+            config=make_log_config(task_match_mode="contains", task_match_template="checker_{task_id}"),
+            query=StudioLogQuery(task_id="task-123", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == '{app="payments-api",namespace="prod"} |= "checker_task-123"'
+
+
+def test_loki_provider_uses_regex_task_matching() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(
+                log_config=make_log_config(task_match_mode="regex", task_match_template="checker_(?:{task_id})")
+            ),
+            config=make_log_config(task_match_mode="regex", task_match_template="checker_(?:{task_id})"),
+            query=StudioLogQuery(task_id="task-123", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == '{app="payments-api",namespace="prod"} |~ "checker_(?:task-123)"'
+
+
 def test_loki_provider_omits_missing_task_and_correlation_label_filters() -> None:
     observed_query: dict[str, str] = {}
 
@@ -438,6 +484,7 @@ def test_task_log_route_scopes_task_id_and_correlation_id(monkeypatch) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         observed_params["query"] = request.url.params["query"]
+        observed_params["start"] = request.url.params["start"]
         observed_params["end"] = request.url.params["end"]
         return httpx.Response(200, json=loki_success_response())
 
@@ -454,14 +501,49 @@ def test_task_log_route_scopes_task_id_and_correlation_id(monkeypatch) -> None:
         install_service(app, make_record(log_config=make_log_config()))
         response = client.get(
             "/studio/tasks/payments-api/task-123/logs",
-            params={"correlation_id": "corr-123", "source": "runtime-worker", "before": "2026-04-11T10:00:00Z"},
+            params={
+                "correlation_id": "corr-123",
+                "source": "runtime-worker",
+                "before": "2026-04-11T10:00:00Z",
+                "from": "2026-04-11T09:00:00Z",
+                "to": "2026-04-11T09:30:00Z",
+            },
         )
 
     assert response.status_code == 200
     assert 'task_id="task-123"' in observed_params["query"]
     assert 'correlation_id="corr-123"' in observed_params["query"]
     assert 'component="runtime-worker"' in observed_params["query"]
+    assert observed_params["start"].isdigit()
     assert observed_params["end"].isdigit()
+
+
+def test_task_log_route_uses_contains_matching_when_configured(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_params["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(log_config=make_log_config(task_match_mode="contains", task_match_template="{task_id}")),
+        )
+        response = client.get("/studio/tasks/payments-api/task-123/logs")
+
+    assert response.status_code == 200
+    assert observed_params["query"] == '{app="payments-api",namespace="prod"} |= "task-123"'
 
 
 def test_service_log_route_returns_404_for_unknown_service(monkeypatch) -> None:
@@ -503,6 +585,20 @@ def test_service_log_route_returns_422_for_invalid_before(monkeypatch) -> None:
     with TestClient(app) as client:
         install_service(app, make_record(log_config=make_log_config()))
         response = client.get("/studio/services/payments-api/logs", params={"before": "not-a-timestamp"})
+
+    assert response.status_code == 422
+
+
+def test_service_log_route_returns_422_for_invalid_time_range(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    app = create_studio_app(redis_url="redis://studio-test/0", pull_sync_interval_seconds=None)
+
+    with TestClient(app) as client:
+        install_service(app, make_record(log_config=make_log_config()))
+        response = client.get(
+            "/studio/services/payments-api/logs",
+            params={"from": "2026-04-11T11:00:00Z", "to": "2026-04-11T10:00:00Z"},
+        )
 
     assert response.status_code == 422
 

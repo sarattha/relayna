@@ -28,6 +28,113 @@ import {
 } from "../ui";
 import type { StudioControlPlaneEvent, StudioEventListResponse, StudioLogListResponse, StudioTaskDetail } from "../types";
 
+const TASK_QUEUED_STATUSES = new Set(["queued"]);
+const TASK_TERMINAL_STATUSES = new Set([
+  "cancelled",
+  "canceled",
+  "complete",
+  "completed",
+  "dead_lettered",
+  "dead-lettered",
+  "error",
+  "errored",
+  "failed",
+  "timeout",
+  "timed_out",
+  "timed-out",
+]);
+
+function normalizeStatusValue(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function parseTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function extractRecordTimestamp(record: Record<string, unknown> | null | undefined) {
+  if (!record) {
+    return null;
+  }
+  for (const key of ["timestamp", "event_timestamp", "created_at", "updated_at", "ingested_at"]) {
+    const value = record[key];
+    if (typeof value === "string" && parseTimestamp(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function statusFromTimelineEvent(item: StudioControlPlaneEvent) {
+  const payloadStatus =
+    item.payload && typeof item.payload === "object" ? normalizeStatusValue((item.payload as Record<string, unknown>).status) : "";
+  if (payloadStatus) {
+    return payloadStatus;
+  }
+  const eventType = normalizeStatusValue(item.event_type);
+  if (!eventType) {
+    return "";
+  }
+  const segments = eventType.split(".");
+  return segments[segments.length - 1] || eventType;
+}
+
+function deriveTaskLogWindow(taskDetail: StudioTaskDetail, taskTimeline: StudioEventListResponse | null, fallbackNow: string) {
+  const taskId = taskDetail.task_id;
+  const timelineItems = (taskTimeline?.items || [])
+    .filter((item) => item.task_id === taskId)
+    .map((item) => ({ item, timestamp: item.timestamp || item.ingested_at || null }))
+    .filter((item): item is { item: StudioControlPlaneEvent; timestamp: string } => Boolean(item.timestamp))
+    .sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
+
+  const queuedTimeline = timelineItems.find(({ item }) => TASK_QUEUED_STATUSES.has(statusFromTimelineEvent(item)))?.timestamp || null;
+  const earliestTimeline = timelineItems[0]?.timestamp || null;
+  const terminalTimeline =
+    timelineItems.find(
+      ({ item, timestamp }) =>
+        TASK_TERMINAL_STATUSES.has(statusFromTimelineEvent(item)) &&
+        (!queuedTimeline || new Date(timestamp).getTime() >= new Date(queuedTimeline).getTime()),
+    )?.timestamp || null;
+
+  const historyEvents = (taskDetail.history?.events || []).filter(
+    (event): event is Record<string, unknown> => Boolean(event) && typeof event === "object",
+  );
+  const queuedHistory =
+    historyEvents.find(
+      (event) =>
+        String(event.task_id || taskId) === taskId && TASK_QUEUED_STATUSES.has(normalizeStatusValue(event.status)),
+    ) || null;
+  const earliestHistory = historyEvents.find((event) => String(event.task_id || taskId) === taskId) || null;
+
+  const start =
+    queuedTimeline ||
+    extractRecordTimestamp(queuedHistory) ||
+    earliestTimeline ||
+    extractRecordTimestamp(earliestHistory) ||
+    taskDetail.execution_graph?.summary.started_at ||
+    null;
+
+  if (!start) {
+    return {
+      from: "",
+      to: "",
+      warning: "Studio could not derive a task log window from this task yet. Logs will stay unbounded until you provide one manually.",
+    };
+  }
+
+  const endedAt = taskDetail.execution_graph?.summary.ended_at || null;
+  const end = terminalTimeline || endedAt || fallbackNow;
+  return {
+    from: start,
+    to: end,
+    warning: null,
+  };
+}
+
 export function TaskDetailPage() {
   const { serviceId = "", taskId = "" } = useParams();
   const [taskDetail, setTaskDetail] = useState<StudioTaskDetail | null>(null);
@@ -44,6 +151,10 @@ export function TaskDetailPage() {
   const [taskLogLevel, setTaskLogLevel] = useState("");
   const [taskLogSource, setTaskLogSource] = useState("");
   const [taskLogLimit, setTaskLogLimit] = useState("50");
+  const [taskLogWindowMode, setTaskLogWindowMode] = useState<"auto" | "manual">("auto");
+  const [taskLogManualFrom, setTaskLogManualFrom] = useState("");
+  const [taskLogManualTo, setTaskLogManualTo] = useState("");
+  const [taskLogAutoNow, setTaskLogAutoNow] = useState(() => new Date().toISOString());
 
   useEffect(() => {
     if (!serviceId || !taskId) {
@@ -54,20 +165,59 @@ export function TaskDetailPage() {
 
   useEffect(() => {
     setTaskLogSource("");
+    setTaskLogWindowMode("auto");
+    setTaskLogManualFrom("");
+    setTaskLogManualTo("");
+    setTaskLogAutoNow(new Date().toISOString());
     if (!taskDetail) {
       setTaskTimeline(null);
       setTaskLogs(null);
       setTaskLogsError(null);
       return;
     }
+    setTaskTimeline(null);
     void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id);
+  }, [taskDetail]);
+
+  const derivedTaskLogWindow = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, taskLogAutoNow) : null;
+  const activeTaskLogFrom = taskLogWindowMode === "manual" ? taskLogManualFrom.trim() : derivedTaskLogWindow?.from || "";
+  const activeTaskLogTo = taskLogWindowMode === "manual" ? taskLogManualTo.trim() : derivedTaskLogWindow?.to || "";
+
+  useEffect(() => {
+    if (!taskDetail || taskTimelineLoading) {
+      return;
+    }
+    const window = getTaskLogWindow();
     if (taskDetail.service.log_config) {
-      void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null);
+      void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, window);
     } else {
       setTaskLogs(null);
       setTaskLogsError("No log provider configured for this service.");
     }
-  }, [taskDetail]);
+  }, [
+    taskDetail,
+    taskTimelineLoading,
+    taskTimeline?.count,
+    taskLogWindowMode,
+  ]);
+
+  function getTaskLogWindow({ refreshAutoNow = false }: { refreshAutoNow?: boolean } = {}) {
+    if (taskLogWindowMode === "manual") {
+      return {
+        from: activeTaskLogFrom,
+        to: activeTaskLogTo,
+      };
+    }
+    const autoNow = refreshAutoNow ? new Date().toISOString() : taskLogAutoNow;
+    if (refreshAutoNow) {
+      setTaskLogAutoNow(autoNow);
+    }
+    const window = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, autoNow) : null;
+    return {
+      from: window?.from || "",
+      to: window?.to || "",
+    };
+  }
 
   useEffect(() => {
     if (typeof EventSource === "undefined" || !serviceId || !taskId) {
@@ -117,7 +267,12 @@ export function TaskDetailPage() {
     }
   }
 
-  async function loadTaskLogs(targetServiceId: string, targetTaskId: string, correlationId?: string | null) {
+  async function loadTaskLogs(
+    targetServiceId: string,
+    targetTaskId: string,
+    correlationId?: string | null,
+    window?: { from?: string; to?: string },
+  ) {
     setTaskLogsLoading(true);
     setTaskLogsError(null);
     try {
@@ -127,6 +282,8 @@ export function TaskDetailPage() {
         source: taskLogSource,
         limit: parseLimit(taskLogLimit, 50),
         correlation_id: correlationId,
+        from: window?.from,
+        to: window?.to,
       });
       setTaskLogs(payload);
     } catch (fetchError) {
@@ -144,6 +301,7 @@ export function TaskDetailPage() {
   const taskTimelineItems = taskTimeline?.items || [];
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
   const brokerDlqSupported = supportsCapability(taskDetail?.service.capabilities || null, "broker.dlq.messages");
+  const taskLogSourceOptions = Array.from(new Set((taskLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
 
   return (
     <div className="studio-stack-lg">
@@ -278,7 +436,11 @@ export function TaskDetailPage() {
                 <SectionCard title="Task Logs" action={
                   <button
                     type="button"
-                    onClick={() => void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null)}
+                    onClick={() =>
+                      void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, {
+                        ...getTaskLogWindow({ refreshAutoNow: true }),
+                      })
+                    }
                     style={secondaryButtonStyle}
                   >
                     Reload Logs
@@ -303,6 +465,7 @@ export function TaskDetailPage() {
                       aria-label="Task log source"
                       value={taskLogSource}
                       onChange={(event) => setTaskLogSource(event.target.value)}
+                      list={`task-log-sources-${taskDetail.service_id}-${taskDetail.task_id}`}
                       placeholder={taskDetail.service.log_config?.source_label || "source"}
                       disabled={!taskDetail.service.log_config?.source_label}
                       style={inputStyle}
@@ -315,13 +478,66 @@ export function TaskDetailPage() {
                       style={inputStyle}
                     />
                   </div>
+                  {taskLogSourceOptions.length ? (
+                    <datalist id={`task-log-sources-${taskDetail.service_id}-${taskDetail.task_id}`}>
+                      {taskLogSourceOptions.map((source) => (
+                        <option key={source} value={source} />
+                      ))}
+                    </datalist>
+                  ) : null}
+                  <div className="studio-log-filter-grid" style={{ marginTop: 12 }}>
+                    <select
+                      aria-label="Task log window mode"
+                      value={taskLogWindowMode}
+                      onChange={(event) => {
+                        const nextMode = event.target.value as "auto" | "manual";
+                        if (nextMode === "manual") {
+                          setTaskLogManualFrom(activeTaskLogFrom);
+                          setTaskLogManualTo(activeTaskLogTo);
+                        }
+                        setTaskLogWindowMode(nextMode);
+                      }}
+                      style={inputStyle}
+                    >
+                      <option value="auto">Auto task window</option>
+                      <option value="manual">Manual override</option>
+                    </select>
+                    <input
+                      aria-label="Task log from"
+                      value={taskLogWindowMode === "manual" ? taskLogManualFrom : activeTaskLogFrom}
+                      onChange={(event) => setTaskLogManualFrom(event.target.value)}
+                      placeholder="from (ISO-8601)"
+                      readOnly={taskLogWindowMode !== "manual"}
+                      style={inputStyle}
+                    />
+                    <input
+                      aria-label="Task log to"
+                      value={taskLogWindowMode === "manual" ? taskLogManualTo : activeTaskLogTo}
+                      onChange={(event) => setTaskLogManualTo(event.target.value)}
+                      placeholder="to (ISO-8601)"
+                      readOnly={taskLogWindowMode !== "manual"}
+                      style={inputStyle}
+                    />
+                  </div>
+                  {taskLogWindowMode === "auto" ? (
+                    <p style={mutedTextStyle}>
+                      {derivedTaskLogWindow?.warning
+                        ? derivedTaskLogWindow.warning
+                        : `Auto window: ${activeTaskLogFrom || "unbounded"} to ${activeTaskLogTo || "unbounded"}.`}
+                    </p>
+                  ) : (
+                    <p style={mutedTextStyle}>Manual window override is active. Leave either bound empty to keep that side unbounded.</p>
+                  )}
                   {!taskDetail.task_ref.correlation_id ? (
                     <p style={mutedTextStyle}>Correlation filter unavailable for this task; Studio is filtering by task id only.</p>
                   ) : null}
                   {!taskDetail.service.log_config?.source_label ? (
                     <p style={mutedTextStyle}>Source filtering is unavailable until this service sets `log_config.source_label`.</p>
                   ) : (
-                    <p style={mutedTextStyle}>Source filter matches the configured `{taskDetail.service.log_config.source_label}` Loki label exactly.</p>
+                    <p style={mutedTextStyle}>
+                      Source filter matches the configured `{taskDetail.service.log_config.source_label}` Loki label exactly.
+                      {taskLogSourceOptions.length ? ` Discovered values: ${taskLogSourceOptions.join(", ")}.` : ""}
+                    </p>
                   )}
                   {taskLogsLoading ? <p style={mutedTextStyle}>Loading task logs...</p> : null}
                   {taskLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskLogsError}</p> : null}

@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.6 - 2026-04-22
+
+### Added
+
+- Detailed operator and integration documentation for Studio AKS Loki log configuration, including service-scoped app discovery, task-text matching, and task-window usage in the service and task views.
+- Expanded broker DLQ documentation across the README and Studio guides, including service-side setup, capability advertisement, Studio federation expectations, and example requests for `/broker/dlq/messages`.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.6` and the Studio backend package version to `0.1.3`.
+- Updated the Studio backend package dependency floor to require `relayna>=1.4.6`.
+- Release-install documentation now references `relayna 1.4.6` and `relayna-studio 0.1.3`.
+
 ## 1.4.5 - 2026-04-21
 
 ### Added
