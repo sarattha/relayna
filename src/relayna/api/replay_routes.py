@@ -62,7 +62,7 @@ def create_dlq_router(
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-            return JSONResponse(payload.model_dump(mode="json"))
+            return JSONResponse(public_dlq_payload(payload.model_dump(mode="json"), alias_config))
 
     @router.get(messages_path)
     async def messages(
