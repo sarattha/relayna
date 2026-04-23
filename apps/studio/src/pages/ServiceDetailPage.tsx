@@ -4,10 +4,10 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchServiceEvents, fetchServiceLogs } from "../api";
 import { useStudioServices } from "../services-context";
 import {
-  AnsiLogMessage,
   HealthBadge,
   InlineCodeBox,
   LogSourceBadge,
+  LogMessage,
   MetadataRow,
   NoticeBanner,
   SectionCard,
@@ -43,6 +43,9 @@ export function ServiceDetailPage() {
   const [serviceEventTaskFilter, setServiceEventTaskFilter] = useState("");
   const [serviceEventSourceFilter, setServiceEventSourceFilter] = useState<"" | ServiceEventSourceKind>("");
   const [serviceEventTypeFilter, setServiceEventTypeFilter] = useState("");
+  const [serviceEventWindowMode, setServiceEventWindowMode] = useState<"auto" | "manual">("auto");
+  const [serviceEventManualFrom, setServiceEventManualFrom] = useState("");
+  const [serviceEventManualTo, setServiceEventManualTo] = useState("");
 
   const [serviceLogs, setServiceLogs] = useState<StudioLogListResponse | null>(null);
   const [serviceLogsLoading, setServiceLogsLoading] = useState(false);
@@ -51,17 +54,29 @@ export function ServiceDetailPage() {
   const [serviceLogLevel, setServiceLogLevel] = useState("");
   const [serviceLogSource, setServiceLogSource] = useState("");
   const [serviceLogLimit, setServiceLogLimit] = useState("20");
+  const [serviceLogWindowMode, setServiceLogWindowMode] = useState<"auto" | "manual">("auto");
+  const [serviceLogManualFrom, setServiceLogManualFrom] = useState("");
+  const [serviceLogManualTo, setServiceLogManualTo] = useState("");
   const [refreshingService, setRefreshingService] = useState(false);
 
   useEffect(() => {
     if (!serviceId) {
       return;
     }
+    setServiceEventWindowMode("auto");
+    setServiceEventManualFrom("");
+    setServiceEventManualTo("");
     void loadServiceEvents(serviceId);
   }, [serviceId]);
 
+  const activeServiceEventFrom = serviceEventWindowMode === "manual" ? serviceEventManualFrom.trim() : "";
+  const activeServiceEventTo = serviceEventWindowMode === "manual" ? serviceEventManualTo.trim() : "";
+
   useEffect(() => {
     setServiceLogSource("");
+    setServiceLogWindowMode("auto");
+    setServiceLogManualFrom("");
+    setServiceLogManualTo("");
     if (!service?.log_config) {
       setServiceLogs(null);
       setServiceLogsError(service ? "No log provider configured for this service." : null);
@@ -69,6 +84,9 @@ export function ServiceDetailPage() {
     }
     void loadServiceLogs();
   }, [service?.service_id, service?.log_config]);
+
+  const activeServiceLogFrom = serviceLogWindowMode === "manual" ? serviceLogManualFrom.trim() : "";
+  const activeServiceLogTo = serviceLogWindowMode === "manual" ? serviceLogManualTo.trim() : "";
 
   useEffect(() => {
     if (typeof EventSource === "undefined" || !serviceId) {
@@ -95,7 +113,11 @@ export function ServiceDetailPage() {
     setServiceEventsLoading(true);
     setServiceEventsError(null);
     try {
-      const payload = await fetchServiceEvents(targetServiceId);
+      const payload = await fetchServiceEvents(targetServiceId, {
+        limit: 20,
+        from: activeServiceEventFrom,
+        to: activeServiceEventTo,
+      });
       setServiceEvents(payload);
     } catch (fetchError) {
       setServiceEventsError(fetchError instanceof Error ? fetchError.message : "Unable to load service activity.");
@@ -116,6 +138,8 @@ export function ServiceDetailPage() {
         level: serviceLogLevel,
         source: serviceLogSource,
         limit: parseLimit(serviceLogLimit, 20),
+        from: activeServiceLogFrom,
+        to: activeServiceLogTo,
       });
       setServiceLogs(payload);
     } catch (fetchError) {
@@ -313,6 +337,38 @@ export function ServiceDetailPage() {
               style={inputStyle}
             />
           </div>
+          <div className="studio-log-filter-grid" style={{ marginTop: 12 }}>
+            <select
+              aria-label="Service event window mode"
+              value={serviceEventWindowMode}
+              onChange={(event) => setServiceEventWindowMode(event.target.value as "auto" | "manual")}
+              style={inputStyle}
+            >
+              <option value="auto">Auto activity window</option>
+              <option value="manual">Manual override</option>
+            </select>
+            <input
+              aria-label="Service event from"
+              value={serviceEventWindowMode === "manual" ? serviceEventManualFrom : ""}
+              onChange={(event) => setServiceEventManualFrom(event.target.value)}
+              placeholder="from (ISO-8601)"
+              readOnly={serviceEventWindowMode !== "manual"}
+              style={inputStyle}
+            />
+            <input
+              aria-label="Service event to"
+              value={serviceEventWindowMode === "manual" ? serviceEventManualTo : ""}
+              onChange={(event) => setServiceEventManualTo(event.target.value)}
+              placeholder="to (ISO-8601)"
+              readOnly={serviceEventWindowMode !== "manual"}
+              style={inputStyle}
+            />
+          </div>
+          {serviceEventWindowMode === "auto" ? (
+            <p style={mutedTextStyle}>Auto window: unbounded to unbounded.</p>
+          ) : (
+            <p style={mutedTextStyle}>Manual window override is active. Leave either bound empty to keep that side unbounded.</p>
+          )}
           {serviceEventsLoading ? <p style={mutedTextStyle}>Loading service activity...</p> : null}
           {serviceEventsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceEventsError}</p> : null}
           {!serviceEventsLoading && !serviceEventsError && !filteredServiceEvents.length ? (
@@ -395,6 +451,38 @@ export function ServiceDetailPage() {
               style={inputStyle}
             />
           </div>
+          <div className="studio-log-filter-grid" style={{ marginTop: 12 }}>
+            <select
+              aria-label="Service log window mode"
+              value={serviceLogWindowMode}
+              onChange={(event) => setServiceLogWindowMode(event.target.value as "auto" | "manual")}
+              style={inputStyle}
+            >
+              <option value="auto">Auto service window</option>
+              <option value="manual">Manual override</option>
+            </select>
+            <input
+              aria-label="Service log from"
+              value={serviceLogWindowMode === "manual" ? serviceLogManualFrom : ""}
+              onChange={(event) => setServiceLogManualFrom(event.target.value)}
+              placeholder="from (ISO-8601)"
+              readOnly={serviceLogWindowMode !== "manual"}
+              style={inputStyle}
+            />
+            <input
+              aria-label="Service log to"
+              value={serviceLogWindowMode === "manual" ? serviceLogManualTo : ""}
+              onChange={(event) => setServiceLogManualTo(event.target.value)}
+              placeholder="to (ISO-8601)"
+              readOnly={serviceLogWindowMode !== "manual"}
+              style={inputStyle}
+            />
+          </div>
+          {serviceLogWindowMode === "auto" ? (
+            <p style={mutedTextStyle}>Auto window: unbounded to unbounded.</p>
+          ) : (
+            <p style={mutedTextStyle}>Manual window override is active. Leave either bound empty to keep that side unbounded.</p>
+          )}
           {serviceLogSourceOptions.length ? (
             <datalist id={`service-log-sources-${service.service_id}`}>
               {serviceLogSourceOptions.map((source) => (
@@ -434,7 +522,7 @@ export function ServiceDetailPage() {
                     </div>
                     <span className="studio-inline-meta">{formatTimestamp(item.timestamp)}</span>
                   </div>
-                  <AnsiLogMessage message={item.message} />
+                  <LogMessage message={item.message} />
                 </article>
               ))}
             </div>

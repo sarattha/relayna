@@ -159,21 +159,25 @@ async def sink(event) -> None:
 
 ## Structured logging example
 
-If you want simple structured logs, convert dataclasses with `dataclasses.asdict`
-before handing them to your logger.
+If you want JSON logs that Loki can aggregate and Studio can render as
+structured payloads, `structlog` is a practical default.
 
 ```python
-from dataclasses import asdict, is_dataclass
-import json
+import structlog
+
+from relayna.observability import make_logging_sink
+
+logger = structlog.get_logger("relayna")
 
 
 async def sink(event) -> None:
-    payload = asdict(event) if is_dataclass(event) else {"event": repr(event)}
-    print(json.dumps(payload, default=str))
+    await make_logging_sink(logger)(event)
 ```
 
-This is a good default when you want observability quickly without introducing a
-metrics or tracing dependency.
+Configure `structlog` with a JSON renderer in your service so each emitted log
+line stays parseable upstream. Studio log panels will pretty-print parseable
+JSON objects and arrays, and fall back to plain-text/ANSI-safe rendering for
+all other lines.
 
 ## Event groups
 

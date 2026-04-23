@@ -419,6 +419,19 @@ type AnsiSegment = {
   fontWeight?: CSSProperties["fontWeight"];
 };
 
+const logMessageSurfaceStyle: CSSProperties = {
+  marginTop: 10,
+  padding: 12,
+  borderRadius: 12,
+  background: "rgba(246, 251, 249, 0.96)",
+  border: "1px solid rgba(111, 146, 145, 0.18)",
+  fontFamily: "'SFMono-Regular', Menlo, monospace",
+  fontSize: 12,
+  lineHeight: 1.6,
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word",
+};
+
 const ansiRegex = /\x1b\[([0-9;]*)m/g;
 const remainingAnsiRegex = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const ansiColorMap: Record<number, string> = {
@@ -504,23 +517,26 @@ function parseAnsiSegments(value: string): AnsiSegment[] {
   return segments.length ? segments : [{ text: stripAnsi(value), fontWeight: 400 }];
 }
 
-export function AnsiLogMessage({ message }: { message: string }) {
+function renderStructuredLogMessage(message: string): string | null {
+  const candidate = message.trim();
+  if (!candidate) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(candidate);
+    if (parsed && typeof parsed === "object") {
+      return JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function AnsiLogMessage({ message }: { message: string }) {
   const segments = parseAnsiSegments(message);
   return (
-    <div
-      style={{
-        marginTop: 10,
-        padding: 12,
-        borderRadius: 12,
-        background: "rgba(246, 251, 249, 0.96)",
-        border: "1px solid rgba(111, 146, 145, 0.18)",
-        fontFamily: "'SFMono-Regular', Menlo, monospace",
-        fontSize: 12,
-        lineHeight: 1.6,
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-      }}
-    >
+    <div style={logMessageSurfaceStyle}>
       {segments.map((segment, index) => (
         <span
           key={`${index}-${segment.text}`}
@@ -534,6 +550,18 @@ export function AnsiLogMessage({ message }: { message: string }) {
       ))}
     </div>
   );
+}
+
+export function LogMessage({ message }: { message: string }) {
+  const structuredMessage = renderStructuredLogMessage(message);
+  if (structuredMessage) {
+    return (
+      <pre style={{ ...logMessageSurfaceStyle, margin: "10px 0 0" }}>
+        <code>{structuredMessage}</code>
+      </pre>
+    );
+  }
+  return <AnsiLogMessage message={message} />;
 }
 
 export function MetadataRow({ label, value }: { label: string; value: ReactNode }) {

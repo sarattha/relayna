@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## Studio Backend 0.1.4 - 2026-04-23
+
+### Added
+
+- JSON-aware Studio log rendering in both service and task panels: parseable JSON objects and arrays are pretty-printed, while plain-text and ANSI-styled logs continue to render unchanged.
+- Operator documentation now recommends `structlog` JSON output for Loki-backed services so Studio can display structured logs directly.
+- Manual `from`/`to` time-window controls for Studio service logs and service activity timelines, with matching backend query support on `GET /studio/services/{service_id}/events`.
+
+### Changed
+
+- Bumped the Studio backend package version to `0.1.4`.
+- Kept the SDK package version at `1.4.6` while updating Studio-only functionality and documentation.
+- Kept the Studio backend dependency floor at `relayna>=1.4.6`.
+- Release-install documentation now references `relayna 1.4.6` and `relayna-studio 0.1.4`.
+- Removed the direct `rich` dev dependency from the SDK project; `rich` remains only where pulled transitively by other tooling.
+
 ## 1.4.6 - 2026-04-22
 
 ### Added
