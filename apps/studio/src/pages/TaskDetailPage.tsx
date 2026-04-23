@@ -3,10 +3,10 @@ import { Link, useParams } from "react-router-dom";
 
 import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs } from "../api";
 import {
-  AnsiLogMessage,
   GraphSurface,
   InlineCodeBox,
   LogSourceBadge,
+  LogMessage,
   MetadataRow,
   MetricCard,
   NoticeBanner,
@@ -564,7 +564,7 @@ export function TaskDetailPage() {
                             </div>
                             <span className="studio-inline-meta">{formatTimestamp(item.timestamp)}</span>
                           </div>
-                          <AnsiLogMessage message={item.message} />
+                          <LogMessage message={item.message} />
                         </article>
                       ))}
                     </div>

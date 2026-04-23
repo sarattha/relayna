@@ -63,6 +63,22 @@ def _timestamp_key(value: str | None) -> tuple[int, datetime]:
     return (1, parsed)
 
 
+def _parse_required_timestamp(value: str | None, *, field_name: str) -> datetime | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    parsed = _parse_timestamp(normalized)
+    if parsed is None:
+        raise ValueError(f"{field_name} must be a valid ISO-8601 timestamp")
+    return parsed
+
+
+def _event_filter_timestamp(item: StudioControlPlaneEvent) -> datetime:
+    return _parse_timestamp(item.timestamp) or _parse_timestamp(item.ingested_at) or datetime.min.replace(tzinfo=UTC)
+
+
 class StudioEventEnvelope(BaseModel):
     service_id: str = Field(min_length=1)
     ingest_method: StudioEventIngestMethod
@@ -119,6 +135,8 @@ class StudioEventStore(Protocol):
         task_id: str | None = None,
         source_kind: ServiceEventSourceKind | None = None,
         event_type: str | None = None,
+        from_time: str | None = None,
+        to_time: str | None = None,
         before: str | None = None,
         limit: int = 100,
     ) -> StudioEventListResponse: ...
@@ -287,16 +305,22 @@ class RedisStudioEventStore:
         task_id: str | None = None,
         source_kind: ServiceEventSourceKind | None = None,
         event_type: str | None = None,
+        from_time: str | None = None,
+        to_time: str | None = None,
         before: str | None = None,
         limit: int = 100,
     ) -> StudioEventListResponse:
         items = await self._load_history(self.service_history_key(service_id))
+        from_dt = _parse_timestamp(from_time)
+        to_dt = _parse_timestamp(to_time)
         filtered = [
             item
             for item in items
             if (task_id is None or item.task_id == task_id)
             and (source_kind is None or item.source_kind == source_kind)
             and (event_type is None or item.event_type == event_type)
+            and (from_dt is None or _event_filter_timestamp(item) >= from_dt)
+            and (to_dt is None or _event_filter_timestamp(item) <= to_dt)
         ]
         return _page_events(filtered, before=before, limit=limit)
 
@@ -412,6 +436,8 @@ class StudioEventIngestService:
         task_id: str | None = None,
         source_kind: ServiceEventSourceKind | None = None,
         event_type: str | None = None,
+        from_time: str | None = None,
+        to_time: str | None = None,
         before: str | None = None,
         limit: int = 100,
     ) -> StudioEventListResponse:
@@ -421,6 +447,8 @@ class StudioEventIngestService:
             task_id=task_id,
             source_kind=source_kind,
             event_type=event_type,
+            from_time=from_time,
+            to_time=to_time,
             before=before,
             limit=limit,
         )
@@ -583,18 +611,30 @@ def create_studio_events_router(
         task_id: Annotated[str | None, Query()] = None,
         source_kind: Annotated[ServiceEventSourceKind | None, Query()] = None,
         event_type: Annotated[str | None, Query()] = None,
+        from_time: Annotated[str | None, Query(alias="from")] = None,
+        to_time: Annotated[str | None, Query(alias="to")] = None,
         before: Annotated[str | None, Query()] = None,
         limit: Annotated[int, Query(ge=1, le=500)] = 100,
     ) -> StudioEventListResponse:
         try:
+            normalized_from = from_time.strip() if from_time else None
+            normalized_to = to_time.strip() if to_time else None
+            parsed_from = _parse_required_timestamp(normalized_from, field_name="from")
+            parsed_to = _parse_required_timestamp(normalized_to, field_name="to")
+            if parsed_from is not None and parsed_to is not None and parsed_from > parsed_to:
+                raise HTTPException(status_code=422, detail="from must be earlier than or equal to to")
             return await ingest_service.list_service_events(
                 service_id,
                 task_id=task_id,
                 source_kind=source_kind,
                 event_type=event_type,
+                from_time=normalized_from,
+                to_time=normalized_to,
                 before=before,
                 limit=limit,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except ServiceNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 

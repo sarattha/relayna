@@ -216,7 +216,7 @@ helpers, and retention behavior. It is not part of the documented public API.
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
-package version is `0.1.3`, and it requires `relayna>=1.4.6`.
+package version is `0.1.4`, and it requires `relayna>=1.4.6`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -550,6 +550,9 @@ Operator guidance:
 - if your logs do not carry `task_id` as a Loki label, use
   `task_match_mode="contains"` or `task_match_mode="regex"` instead of
   `task_id_label`
+- for Loki-backed services, prefer JSON log output such as `structlog` with a
+  JSON renderer so Studio can pretty-print structured log objects and arrays
+  while still falling back to plain text for legacy log lines
 
 The Studio registration UI exposes AKS-friendly fields for:
 

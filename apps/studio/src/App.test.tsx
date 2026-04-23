@@ -270,7 +270,7 @@ describe("App", () => {
       if (url === "/studio/services" && method === "GET") {
         return serviceListResponse(services);
       }
-      if (url === "/studio/services/payments-api/events?limit=20" && method === "GET") {
+      if (url.startsWith("/studio/services/payments-api/events?") && method === "GET") {
         return jsonResponse({ count: 0, items: [], next_cursor: null });
       }
       if (url.startsWith("/studio/services/payments-api/logs?") && method === "GET") {
@@ -280,7 +280,7 @@ describe("App", () => {
           throw new Error(`Unhandled service log source filter: ${source}`);
         }
         return jsonResponse({
-          count: 2,
+          count: 6,
           items: [
             {
               service_id: "payments-api",
@@ -296,6 +296,38 @@ describe("App", () => {
               level: "info",
               source: "api",
               message: "api log line",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-08T10:02:00Z",
+              level: "info",
+              source: "runtime-worker",
+              message: "{\"event\":\"service_json\",\"details\":{\"attempt\":2,\"status\":\"ok\"}}",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-08T10:03:00Z",
+              level: "info",
+              source: "runtime-worker",
+              message: "[{\"step\":\"queued\"},{\"step\":\"running\"}]",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-08T10:04:00Z",
+              level: "warn",
+              source: "api",
+              message: "{\"broken\": true",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-08T10:05:00Z",
+              level: "info",
+              source: "api",
+              message: "  true  ",
               fields: {},
             },
           ],
@@ -466,7 +498,7 @@ describe("App", () => {
       }
       if (url.startsWith("/studio/tasks/payments-api/task-123/logs?") && method === "GET") {
         return jsonResponse({
-          count: 1,
+          count: 5,
           items: [
             {
               service_id: "payments-api",
@@ -476,6 +508,46 @@ describe("App", () => {
               level: "info",
               source: "api",
               message: "\u001b[31mtask log line\u001b[0m",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-08T10:01:00Z",
+              level: "info",
+              source: "api",
+              message: "{\"event\":\"task_json\",\"details\":{\"retry\":1,\"status\":\"running\"}}",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-08T10:02:00Z",
+              level: "info",
+              source: "api",
+              message: "[{\"stage\":\"received\"},{\"stage\":\"running\"}]",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-08T10:03:00Z",
+              level: "warn",
+              source: "api",
+              message: "{\"oops\":",
+              fields: {},
+            },
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-08T10:04:00Z",
+              level: "info",
+              source: "api",
+              message: "  null  ",
               fields: {},
             },
           ],
@@ -707,9 +779,15 @@ describe("App", () => {
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
     expect(screen.getByText(new Date("2026-04-08T12:34:56Z").toLocaleString())).toBeInTheDocument();
-    expect(screen.getByText("runtime-worker")).toBeInTheDocument();
+    expect(screen.getAllByText("runtime-worker").length).toBeGreaterThan(0);
     expect(screen.getByText("service log line")).toBeInTheDocument();
     expect(screen.getByText("second line")).toBeInTheDocument();
+    expect(screen.getByText(/"event": "service_json"/)).toBeInTheDocument();
+    expect(screen.getByText(/"attempt": 2/)).toBeInTheDocument();
+    expect(screen.getByText(/"step": "queued"/)).toBeInTheDocument();
+    expect(screen.getByText("{\"broken\": true")).toBeInTheDocument();
+    expect(screen.getByText("true")).toBeInTheDocument();
+    expect(screen.getAllByText(/Auto window:/).length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toContain("\u001b[32m");
   });
 
@@ -725,6 +803,54 @@ describe("App", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/logs?limit=20&source=runtime-worker", undefined),
     );
+  });
+
+  it("uses the manual service log window override when provided", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Service log window mode"), { target: { value: "manual" } });
+    fireEvent.change(screen.getByLabelText("Service log from"), { target: { value: "2026-04-08T09:50:00Z" } });
+    fireEvent.change(screen.getByLabelText("Service log to"), { target: { value: "2026-04-08T10:10:00Z" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/logs" &&
+          parsed.searchParams.get("from") === "2026-04-08T09:50:00Z" &&
+          parsed.searchParams.get("to") === "2026-04-08T10:10:00Z"
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+  });
+
+  it("uses the manual service activity window override when provided", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Service event window mode"), { target: { value: "manual" } });
+    fireEvent.change(screen.getByLabelText("Service event from"), { target: { value: "2026-04-08T09:45:00Z" } });
+    fireEvent.change(screen.getByLabelText("Service event to"), { target: { value: "2026-04-08T10:15:00Z" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Activity" }));
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/events" &&
+          parsed.searchParams.get("from") === "2026-04-08T09:45:00Z" &&
+          parsed.searchParams.get("to") === "2026-04-08T10:15:00Z"
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
   });
 
   it("derives service log source options from returned log entries", async () => {
@@ -921,8 +1047,13 @@ describe("App", () => {
     expect(screen.getByText("Joined Refs")).toBeInTheDocument();
     expect(screen.getByText("Join Warnings")).toBeInTheDocument();
     expect(screen.getByText("Section Errors")).toBeInTheDocument();
-    expect(screen.getByText("api")).toBeInTheDocument();
+    expect(screen.getAllByText("api").length).toBeGreaterThan(0);
     expect(screen.getByText("task log line")).toBeInTheDocument();
+    expect(screen.getByText(/"event": "task_json"/)).toBeInTheDocument();
+    expect(screen.getByText(/"retry": 1/)).toBeInTheDocument();
+    expect(screen.getByText(/"stage": "received"/)).toBeInTheDocument();
+    expect(screen.getByText("{\"oops\":")).toBeInTheDocument();
+    expect(screen.getAllByText("null").length).toBeGreaterThan(0);
     expect(document.body.textContent).not.toContain("\u001b[31m");
     expect(MockEventSource.instances.some((item) => item.url === "/studio/tasks/payments-api/task-123/events/stream")).toBe(true);
 

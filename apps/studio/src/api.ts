@@ -200,9 +200,19 @@ export async function deleteService(serviceId: string) {
   });
 }
 
-export async function fetchServiceEvents(serviceId: string, limit = 20) {
+export async function fetchServiceEvents(
+  serviceId: string,
+  query: { limit?: number; from?: string; to?: string } = {},
+) {
+  const params = new URLSearchParams({ limit: String(query.limit || 20) });
+  if (query.from?.trim()) {
+    params.set("from", query.from.trim());
+  }
+  if (query.to?.trim()) {
+    params.set("to", query.to.trim());
+  }
   return requestJson<StudioEventListResponse>(
-    `/studio/services/${encodeURIComponent(serviceId)}/events?${new URLSearchParams({ limit: String(limit) }).toString()}`,
+    `/studio/services/${encodeURIComponent(serviceId)}/events?${params.toString()}`,
   );
 }
 

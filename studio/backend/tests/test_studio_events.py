@@ -274,6 +274,14 @@ def test_studio_ingest_route_dedupes_and_marks_out_of_order(monkeypatch) -> None
         assert service_events.json()["count"] == 1
         assert service_events.json()["items"][0]["source_kind"] == "observation"
 
+        ranged_service_events = client.get(
+            "/studio/services/payments-api/events",
+            params={"from": "2026-04-10T00:45:00Z", "to": "2026-04-10T01:15:00Z"},
+        )
+        assert ranged_service_events.status_code == 200
+        assert ranged_service_events.json()["count"] == 1
+        assert ranged_service_events.json()["items"][0]["event_type"] == "status.completed"
+
 
 def test_event_store_compares_mixed_offset_timestamps_chronologically() -> None:
     async def scenario() -> None:

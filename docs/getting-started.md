@@ -2325,6 +2325,8 @@ That means:
   aggregation emitters
 - Studio task pages search for the current task id inside the log line text
   instead of requiring a Loki `task_id` label
+- if your service emits JSON logs, Studio pretty-prints parseable objects and
+  arrays in both log panels and falls back to plain-text rendering for the rest
 
 ### Metadata that should stay stable
 
@@ -2408,7 +2410,8 @@ your operating model:
   Lets Studio show `/relayna/health/workers`.
 - `make_logging_sink(...)`
   Gives you a structured path to push Relayna observation metadata into your
-  logging backend.
+  logging backend. For Loki-backed services, pair it with `structlog` JSON
+  rendering so Studio can display structured log entries directly.
 
 ## Verification Checklist
 
