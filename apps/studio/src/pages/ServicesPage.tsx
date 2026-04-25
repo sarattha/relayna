@@ -10,6 +10,7 @@ import {
   MetricCard,
   NoticeBanner,
   SectionCard,
+  StudioIcon,
   StatusBadge,
   destructiveButtonStyle,
   insetSurfaceStyle,
@@ -103,6 +104,18 @@ export function ServicesPage() {
     }
   }
 
+  function clearServiceSearch() {
+    setSearchDraft({
+      query: "",
+      environment: "",
+      status: "",
+      health: "",
+      tag: "",
+    });
+    setSearchError(null);
+    setSearchResults(null);
+  }
+
   const unreachableCount = servicesState.services.filter((service) => service.health?.overall_status === "unreachable").length;
   const staleOrDegradedCount = servicesState.services.filter((service) =>
     service.health ? ["stale", "degraded"].includes(service.health.overall_status) : false,
@@ -117,55 +130,95 @@ export function ServicesPage() {
       <SectionCard
         title="Registry Overview"
         subtitle="The Studio backend serves the registry from `/studio/services`."
+        className="studio-section-card--compact"
         action={
           <button type="button" onClick={() => void servicesState.reload()} style={secondaryButtonStyle}>
+            <StudioIcon name="refresh" />
             Reload List
           </button>
         }
       >
-        <div className="studio-metrics-grid studio-metrics-grid--4">
-          <MetricCard label="Services" value={String(servicesState.services.length)} />
-          <MetricCard label="Unreachable" value={String(unreachableCount)} />
-          <MetricCard label="Stale / Degraded" value={String(staleOrDegradedCount)} />
-          <MetricCard label="Disabled" value={String(disabledCount)} />
+        <div className="studio-metrics-grid studio-metrics-grid--4 studio-metrics-grid--compact">
+          <MetricCard label="Services" value={String(servicesState.services.length)} className="studio-metric-card--compact" />
+          <MetricCard label="Unreachable" value={String(unreachableCount)} className="studio-metric-card--compact" />
+          <MetricCard label="Stale / Degraded" value={String(staleOrDegradedCount)} className="studio-metric-card--compact" />
+          <MetricCard label="Disabled" value={String(disabledCount)} className="studio-metric-card--compact" />
         </div>
       </SectionCard>
 
-      <SectionCard title="Service Search" subtitle="Search registered services with lightweight fuzzy matching plus structured filters.">
+      <SectionCard
+        title="Service Search"
+        subtitle="Find services by name, id, environment, registry state, runtime health, or tag."
+        className="studio-section-card--compact"
+      >
         <form onSubmit={handleServiceSearch} className="studio-form-grid studio-form-grid--service-search">
-          <input
-            value={searchDraft.query}
-            onChange={(event) => setSearchDraft((current) => ({ ...current, query: event.target.value }))}
-            placeholder="query"
-            style={inputStyle}
-          />
-          <input
-            value={searchDraft.environment}
-            onChange={(event) => setSearchDraft((current) => ({ ...current, environment: event.target.value }))}
-            placeholder="environment"
-            style={inputStyle}
-          />
-          <input
-            value={searchDraft.status}
-            onChange={(event) => setSearchDraft((current) => ({ ...current, status: event.target.value }))}
-            placeholder="status"
-            style={inputStyle}
-          />
-          <input
-            value={searchDraft.health}
-            onChange={(event) => setSearchDraft((current) => ({ ...current, health: event.target.value }))}
-            placeholder="health"
-            style={inputStyle}
-          />
-          <input
-            value={searchDraft.tag}
-            onChange={(event) => setSearchDraft((current) => ({ ...current, tag: event.target.value }))}
-            placeholder="tag"
-            style={inputStyle}
-          />
-          <button type="submit" style={primaryButtonStyle}>
-            Search Services
-          </button>
+          <label className="studio-filter-field studio-filter-field--wide">
+            <span>Keyword</span>
+            <input
+              value={searchDraft.query}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, query: event.target.value }))}
+              placeholder="orders, payments, base URL"
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>Environment</span>
+            <input
+              value={searchDraft.environment}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, environment: event.target.value }))}
+              placeholder="mock, prod"
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>Registry</span>
+            <select
+              value={searchDraft.status}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, status: event.target.value }))}
+              style={inputStyle}
+            >
+              <option value="">Any registry state</option>
+              <option value="registered">Registered</option>
+              <option value="healthy">Healthy</option>
+              <option value="unavailable">Unavailable</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+          <label className="studio-filter-field">
+            <span>Runtime Health</span>
+            <select
+              value={searchDraft.health}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, health: event.target.value }))}
+              style={inputStyle}
+            >
+              <option value="">Any health</option>
+              <option value="healthy">Healthy</option>
+              <option value="degraded">Degraded</option>
+              <option value="stale">Stale</option>
+              <option value="unreachable">Unreachable</option>
+              <option value="disabled">Disabled</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
+          <label className="studio-filter-field">
+            <span>Tag</span>
+            <input
+              value={searchDraft.tag}
+              onChange={(event) => setSearchDraft((current) => ({ ...current, tag: event.target.value }))}
+              placeholder="core, checkout"
+              style={inputStyle}
+            />
+          </label>
+          <div className="studio-search-actions">
+            <button type="submit" style={primaryButtonStyle}>
+              <StudioIcon name="search" />
+              Search Services
+            </button>
+            <button type="button" onClick={clearServiceSearch} style={secondaryButtonStyle}>
+              <StudioIcon name="clear" />
+              Clear
+            </button>
+          </div>
         </form>
         {searchError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{searchError}</p> : null}
         {searchLoading ? <p style={mutedTextStyle}>Searching services...</p> : null}
@@ -181,6 +234,7 @@ export function ServicesPage() {
                 <div className="studio-list-card__top">
                   <strong>{service.name}</strong>
                   <Link to={`/services/${encodeURIComponent(service.service_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+                    <StudioIcon name="open" />
                     Open
                   </Link>
                 </div>
@@ -209,10 +263,12 @@ export function ServicesPage() {
             <div className="studio-action-row">
               {editingServiceId ? (
                 <button type="button" onClick={startCreate} style={secondaryButtonStyle}>
+                  <StudioIcon name="add" />
                   New Draft
                 </button>
               ) : null}
               <button type="button" onClick={closeEditor} style={secondaryButtonStyle}>
+                <StudioIcon name="clear" />
                 Close
               </button>
             </div>
@@ -413,6 +469,7 @@ export function ServicesPage() {
             </details>
 
             <button type="submit" disabled={saving} style={primaryButtonStyle}>
+              <StudioIcon name="save" />
               {saving ? "Saving..." : editingServiceId ? "Save Service" : "Register Service"}
             </button>
           </form>
@@ -421,6 +478,7 @@ export function ServicesPage() {
             <SectionCard title="Editing Target" subtitle="Open the detail route for the service you are modifying.">
               <div className="studio-action-row">
                 <Link to={`/services/${encodeURIComponent(editingServiceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+                  <StudioIcon name="open" />
                   Open Detail Page
                 </Link>
                 <button
@@ -429,6 +487,7 @@ export function ServicesPage() {
                   disabled={saving}
                   style={destructiveButtonStyle}
                 >
+                  <StudioIcon name="delete" />
                   {saving ? "Deleting..." : "Delete Service"}
                 </button>
               </div>
@@ -440,8 +499,10 @@ export function ServicesPage() {
       <SectionCard
         title="Registered Services"
         subtitle="Choose a service to open the routed detail view, topology page, or DLQ explorer."
+        className="studio-section-card--featured"
         action={
           <button type="button" onClick={startCreate} style={secondaryButtonStyle}>
+            <StudioIcon name="add" />
             New Service
           </button>
         }
@@ -487,9 +548,11 @@ export function ServicesPage() {
                             to={`/services/${encodeURIComponent(service.service_id)}`}
                             style={{ ...secondaryButtonStyle, textDecoration: "none" }}
                           >
+                            <StudioIcon name="open" />
                             View
                           </Link>
                           <button type="button" onClick={() => startEdit(service)} style={secondaryButtonStyle}>
+                            <StudioIcon name="edit" />
                             Edit
                           </button>
                         </div>
@@ -523,6 +586,7 @@ export function ServicesPage() {
                       aria-label={`View ${service.service_id}`}
                       style={{ ...secondaryButtonStyle, textDecoration: "none" }}
                     >
+                      <StudioIcon name="open" />
                       View
                     </Link>
                     <button
@@ -531,6 +595,7 @@ export function ServicesPage() {
                       aria-label={`Edit ${service.service_id}`}
                       style={secondaryButtonStyle}
                     >
+                      <StudioIcon name="edit" />
                       Edit
                     </button>
                   </div>

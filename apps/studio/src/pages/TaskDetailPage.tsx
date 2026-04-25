@@ -11,6 +11,7 @@ import {
   MetricCard,
   NoticeBanner,
   SectionCard,
+  StudioIcon,
   TaskRefLink,
   buildMermaid,
   formatDuration,
@@ -43,6 +44,61 @@ const TASK_TERMINAL_STATUSES = new Set([
   "timed_out",
   "timed-out",
 ]);
+
+type TaskLogWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
+
+function isoToLocalDateTime(value: string) {
+  if (!value.trim()) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function localDateTimeToIso(value: string) {
+  if (!value.trim()) {
+    return "";
+  }
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return "";
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function resolveQuickTaskLogWindow(mode: TaskLogWindowMode) {
+  if (mode === "auto" || mode === "manual") {
+    return null;
+  }
+  const now = Date.now();
+  const durationMs = mode === "15m" ? 15 * 60 * 1000 : mode === "1h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return {
+    from: new Date(now - durationMs).toISOString(),
+    to: new Date(now).toISOString(),
+  };
+}
+
+function describeTaskLogWindow(mode: TaskLogWindowMode, from: string, to: string, warning?: string | null) {
+  if (mode === "auto") {
+    return (
+      warning ||
+      `Auto window: ${from ? new Date(from).toLocaleString() : "unbounded"} to ${
+        to ? new Date(to).toLocaleString() : "unbounded"
+      }.`
+    );
+  }
+  if (mode === "manual") {
+    return "Custom range is active. Use local date and time fields; empty bounds stay unbounded.";
+  }
+  const label = mode === "15m" ? "15 minutes" : mode === "1h" ? "1 hour" : "24 hours";
+  return `Quick window: last ${label} (${from ? new Date(from).toLocaleString() : "unbounded"} to ${
+    to ? new Date(to).toLocaleString() : "unbounded"
+  }).`;
+}
 
 function normalizeStatusValue(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -127,7 +183,8 @@ function deriveTaskLogWindow(taskDetail: StudioTaskDetail, taskTimeline: StudioE
   }
 
   const endedAt = taskDetail.execution_graph?.summary.ended_at || null;
-  const end = terminalTimeline || endedAt || fallbackNow;
+  const candidateEnd = terminalTimeline || endedAt || fallbackNow;
+  const end = new Date(candidateEnd).getTime() >= new Date(start).getTime() ? candidateEnd : fallbackNow;
   return {
     from: start,
     to: end,
@@ -151,10 +208,11 @@ export function TaskDetailPage() {
   const [taskLogLevel, setTaskLogLevel] = useState("");
   const [taskLogSource, setTaskLogSource] = useState("");
   const [taskLogLimit, setTaskLogLimit] = useState("50");
-  const [taskLogWindowMode, setTaskLogWindowMode] = useState<"auto" | "manual">("auto");
+  const [taskLogWindowMode, setTaskLogWindowMode] = useState<TaskLogWindowMode>("auto");
   const [taskLogManualFrom, setTaskLogManualFrom] = useState("");
   const [taskLogManualTo, setTaskLogManualTo] = useState("");
   const [taskLogAutoNow, setTaskLogAutoNow] = useState(() => new Date().toISOString());
+  const [mermaidCopyState, setMermaidCopyState] = useState<"idle" | "copied" | "selected" | "failed">("idle");
 
   useEffect(() => {
     if (!serviceId || !taskId) {
@@ -180,8 +238,11 @@ export function TaskDetailPage() {
   }, [taskDetail]);
 
   const derivedTaskLogWindow = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, taskLogAutoNow) : null;
-  const activeTaskLogFrom = taskLogWindowMode === "manual" ? taskLogManualFrom.trim() : derivedTaskLogWindow?.from || "";
-  const activeTaskLogTo = taskLogWindowMode === "manual" ? taskLogManualTo.trim() : derivedTaskLogWindow?.to || "";
+  const quickTaskLogWindow = resolveQuickTaskLogWindow(taskLogWindowMode);
+  const activeTaskLogFrom =
+    taskLogWindowMode === "manual" ? localDateTimeToIso(taskLogManualFrom) : quickTaskLogWindow?.from || derivedTaskLogWindow?.from || "";
+  const activeTaskLogTo =
+    taskLogWindowMode === "manual" ? localDateTimeToIso(taskLogManualTo) : quickTaskLogWindow?.to || derivedTaskLogWindow?.to || "";
 
   useEffect(() => {
     if (!taskDetail || taskTimelineLoading) {
@@ -202,7 +263,7 @@ export function TaskDetailPage() {
   ]);
 
   function getTaskLogWindow({ refreshAutoNow = false }: { refreshAutoNow?: boolean } = {}) {
-    if (taskLogWindowMode === "manual") {
+    if (taskLogWindowMode === "manual" || quickTaskLogWindow) {
       return {
         from: activeTaskLogFrom,
         to: activeTaskLogTo,
@@ -293,6 +354,55 @@ export function TaskDetailPage() {
     }
   }
 
+  async function copyMermaidToClipboard() {
+    if (!mermaid) {
+      return;
+    }
+    const selectVisibleMermaid = () => {
+      const visibleTarget = document.querySelector<HTMLTextAreaElement>(".studio-mermaid-export-card textarea");
+      if (!visibleTarget) {
+        return false;
+      }
+      visibleTarget.focus();
+      visibleTarget.select();
+      visibleTarget.setSelectionRange(0, visibleTarget.value.length);
+      return true;
+    };
+    const copyWithSelection = () => {
+      const clipboardTarget = document.createElement("textarea");
+      clipboardTarget.value = mermaid;
+      clipboardTarget.setAttribute("readonly", "");
+      clipboardTarget.style.position = "fixed";
+      clipboardTarget.style.left = "-9999px";
+      clipboardTarget.style.top = "0";
+      document.body.appendChild(clipboardTarget);
+      clipboardTarget.focus();
+      clipboardTarget.select();
+      clipboardTarget.setSelectionRange(0, clipboardTarget.value.length);
+      const copied = document.execCommand("copy");
+      document.body.removeChild(clipboardTarget);
+      if (!copied) {
+        throw new Error("Clipboard copy was blocked.");
+      }
+    };
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(mermaid);
+        } catch {
+          copyWithSelection();
+        }
+      } else {
+        copyWithSelection();
+      }
+      setMermaidCopyState("copied");
+    } catch {
+      setMermaidCopyState(selectVisibleMermaid() ? "selected" : "failed");
+    }
+    window.setTimeout(() => setMermaidCopyState("idle"), 1800);
+  }
+
   const graph = taskDetail?.execution_graph || null;
   const mermaid = graph ? buildMermaid(graph) : "";
   const latestStatusValue = String(taskDetail?.latest_status?.event?.status || graph?.summary.status || "unknown");
@@ -313,9 +423,11 @@ export function TaskDetailPage() {
         action={
           <div style={{ display: "flex", gap: 10 }}>
             <Link to={`/services/${encodeURIComponent(serviceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+              <StudioIcon name="back" />
               Back to Service
             </Link>
             <button type="button" onClick={() => void loadTaskDetail()} style={secondaryButtonStyle}>
+              <StudioIcon name="refresh" />
               Reload
             </button>
           </div>
@@ -349,6 +461,7 @@ export function TaskDetailPage() {
                       onClick={() => void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id)}
                       style={secondaryButtonStyle}
                     >
+                      <StudioIcon name="refresh" />
                       Reload Timeline
                     </button>
                   }
@@ -401,6 +514,7 @@ export function TaskDetailPage() {
                         <Link
                           to={`/services/${encodeURIComponent(taskDetail.service_id)}/dlq?mode=broker&task_id=${encodeURIComponent(taskDetail.task_id)}`}
                         >
+                          <StudioIcon name="dlq" />
                           Inspect live broker DLQ messages
                         </Link>
                         .
@@ -443,40 +557,54 @@ export function TaskDetailPage() {
                     }
                     style={secondaryButtonStyle}
                   >
+                    <StudioIcon name="refresh" />
                     Reload Logs
                   </button>
                 }>
                   <div className="studio-log-filter-grid">
-                    <input
-                      aria-label="Task log text filter"
-                      value={taskLogQuery}
-                      onChange={(event) => setTaskLogQuery(event.target.value)}
-                      placeholder="Search task logs"
-                      style={inputStyle}
-                    />
-                    <input
-                      aria-label="Task log level"
-                      value={taskLogLevel}
-                      onChange={(event) => setTaskLogLevel(event.target.value)}
-                      placeholder="level"
-                      style={inputStyle}
-                    />
-                    <input
-                      aria-label="Task log source"
-                      value={taskLogSource}
-                      onChange={(event) => setTaskLogSource(event.target.value)}
-                      list={`task-log-sources-${taskDetail.service_id}-${taskDetail.task_id}`}
-                      placeholder={taskDetail.service.log_config?.source_label || "source"}
-                      disabled={!taskDetail.service.log_config?.source_label}
-                      style={inputStyle}
-                    />
-                    <input
-                      aria-label="Task log limit"
-                      value={taskLogLimit}
-                      onChange={(event) => setTaskLogLimit(event.target.value)}
-                      placeholder="50"
-                      style={inputStyle}
-                    />
+                    <label className="studio-filter-field">
+                      <span>Text</span>
+                      <input
+                        aria-label="Task log text filter"
+                        value={taskLogQuery}
+                        onChange={(event) => setTaskLogQuery(event.target.value)}
+                        placeholder="Search task logs"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label className="studio-filter-field">
+                      <span>Level</span>
+                      <input
+                        aria-label="Task log level"
+                        value={taskLogLevel}
+                        onChange={(event) => setTaskLogLevel(event.target.value)}
+                        placeholder="info, error"
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label className="studio-filter-field">
+                      <span>Source</span>
+                      <input
+                        aria-label="Task log source"
+                        value={taskLogSource}
+                        onChange={(event) => setTaskLogSource(event.target.value)}
+                        list={`task-log-sources-${taskDetail.service_id}-${taskDetail.task_id}`}
+                        placeholder={taskDetail.service.log_config?.source_label || "source"}
+                        disabled={!taskDetail.service.log_config?.source_label}
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label className="studio-filter-field">
+                      <span>Limit</span>
+                      <input
+                        aria-label="Task log limit"
+                        value={taskLogLimit}
+                        onChange={(event) => setTaskLogLimit(event.target.value)}
+                        placeholder="50"
+                        inputMode="numeric"
+                        style={inputStyle}
+                      />
+                    </label>
                   </div>
                   {taskLogSourceOptions.length ? (
                     <datalist id={`task-log-sources-${taskDetail.service_id}-${taskDetail.task_id}`}>
@@ -485,49 +613,68 @@ export function TaskDetailPage() {
                       ))}
                     </datalist>
                   ) : null}
-                  <div className="studio-log-filter-grid" style={{ marginTop: 12 }}>
-                    <select
-                      aria-label="Task log window mode"
-                      value={taskLogWindowMode}
-                      onChange={(event) => {
-                        const nextMode = event.target.value as "auto" | "manual";
-                        if (nextMode === "manual") {
-                          setTaskLogManualFrom(activeTaskLogFrom);
-                          setTaskLogManualTo(activeTaskLogTo);
+                  <div className="studio-log-filter-grid studio-log-window-grid" style={{ marginTop: 12 }}>
+                    <label className="studio-filter-field">
+                      <span>Log Window</span>
+                      <select
+                        aria-label="Task log window mode"
+                        value={taskLogWindowMode}
+                        onChange={(event) => {
+                          const nextMode = event.target.value as TaskLogWindowMode;
+                          if (nextMode === "manual") {
+                            setTaskLogManualFrom(isoToLocalDateTime(activeTaskLogFrom));
+                            setTaskLogManualTo(isoToLocalDateTime(activeTaskLogTo));
+                          }
+                          setTaskLogWindowMode(nextMode);
+                        }}
+                        style={inputStyle}
+                      >
+                        <option value="auto">Auto task window</option>
+                        <option value="15m">Last 15 minutes</option>
+                        <option value="1h">Last hour</option>
+                        <option value="24h">Last 24 hours</option>
+                        <option value="manual">Custom range</option>
+                      </select>
+                    </label>
+                    <label className="studio-filter-field">
+                      <span>From</span>
+                      <input
+                        aria-label="Task log from"
+                        type="datetime-local"
+                        value={
+                          taskLogWindowMode === "manual"
+                            ? taskLogManualFrom
+                            : isoToLocalDateTime(activeTaskLogFrom)
                         }
-                        setTaskLogWindowMode(nextMode);
-                      }}
-                      style={inputStyle}
-                    >
-                      <option value="auto">Auto task window</option>
-                      <option value="manual">Manual override</option>
-                    </select>
-                    <input
-                      aria-label="Task log from"
-                      value={taskLogWindowMode === "manual" ? taskLogManualFrom : activeTaskLogFrom}
-                      onChange={(event) => setTaskLogManualFrom(event.target.value)}
-                      placeholder="from (ISO-8601)"
-                      readOnly={taskLogWindowMode !== "manual"}
-                      style={inputStyle}
-                    />
-                    <input
-                      aria-label="Task log to"
-                      value={taskLogWindowMode === "manual" ? taskLogManualTo : activeTaskLogTo}
-                      onChange={(event) => setTaskLogManualTo(event.target.value)}
-                      placeholder="to (ISO-8601)"
-                      readOnly={taskLogWindowMode !== "manual"}
-                      style={inputStyle}
-                    />
+                        onChange={(event) => setTaskLogManualFrom(event.target.value)}
+                        disabled={taskLogWindowMode !== "manual"}
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label className="studio-filter-field">
+                      <span>To</span>
+                      <input
+                        aria-label="Task log to"
+                        type="datetime-local"
+                        value={
+                          taskLogWindowMode === "manual"
+                            ? taskLogManualTo
+                            : isoToLocalDateTime(activeTaskLogTo)
+                        }
+                        onChange={(event) => setTaskLogManualTo(event.target.value)}
+                        disabled={taskLogWindowMode !== "manual"}
+                        style={inputStyle}
+                      />
+                    </label>
                   </div>
-                  {taskLogWindowMode === "auto" ? (
-                    <p style={mutedTextStyle}>
-                      {derivedTaskLogWindow?.warning
-                        ? derivedTaskLogWindow.warning
-                        : `Auto window: ${activeTaskLogFrom || "unbounded"} to ${activeTaskLogTo || "unbounded"}.`}
-                    </p>
-                  ) : (
-                    <p style={mutedTextStyle}>Manual window override is active. Leave either bound empty to keep that side unbounded.</p>
-                  )}
+                  <p style={mutedTextStyle}>
+                    {describeTaskLogWindow(
+                      taskLogWindowMode,
+                      activeTaskLogFrom,
+                      activeTaskLogTo,
+                      derivedTaskLogWindow?.warning,
+                    )}
+                  </p>
                   {!taskDetail.task_ref.correlation_id ? (
                     <p style={mutedTextStyle}>Correlation filter unavailable for this task; Studio is filtering by task id only.</p>
                   ) : null}
@@ -572,8 +719,23 @@ export function TaskDetailPage() {
                 </SectionCard>
 
                 {graph ? (
-                  <SectionCard title="Mermaid Export">
-                    <InlineCodeBox value={mermaid} minHeight={260} />
+                  <SectionCard
+                    title="Mermaid Export"
+                    className="studio-section-card--compact studio-mermaid-export-card"
+                    action={
+                      <button type="button" onClick={() => void copyMermaidToClipboard()} style={secondaryButtonStyle}>
+                        <StudioIcon name="copy" />
+                        {mermaidCopyState === "copied"
+                          ? "Copied"
+                          : mermaidCopyState === "selected"
+                            ? "Selected"
+                            : mermaidCopyState === "failed"
+                              ? "Copy Failed"
+                              : "Copy"}
+                      </button>
+                    }
+                  >
+                    <InlineCodeBox value={mermaid} minHeight={120} />
                   </SectionCard>
                 ) : null}
 

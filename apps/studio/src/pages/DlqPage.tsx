@@ -6,6 +6,7 @@ import { useStudioServices } from "../services-context";
 import {
   NoticeBanner,
   SectionCard,
+  StudioIcon,
   TaskRefLink,
   formatTimestamp,
   inputStyle,
@@ -116,6 +117,7 @@ export function DlqPage() {
         subtitle="Service-scoped DLQ explorer with explicit indexed and broker-backed inspection modes."
         action={
           <Link to={`/services/${encodeURIComponent(serviceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+            <StudioIcon name="back" />
             Back to Service
           </Link>
         }
@@ -131,6 +133,7 @@ export function DlqPage() {
             style={mode === "indexed" ? primaryButtonStyle : secondaryButtonStyle}
             onClick={() => void load({ ...query, cursor: null }, "indexed")}
           >
+            <StudioIcon name="filter" />
             Indexed Mode
           </button>
           <button
@@ -139,6 +142,7 @@ export function DlqPage() {
             onClick={() => void load({ ...query, cursor: null }, "broker")}
             disabled={!brokerSupported}
           >
+            <StudioIcon name="dlq" />
             Broker Mode
           </button>
         </div>
@@ -199,6 +203,7 @@ export function DlqPage() {
             style={inputStyle}
           />
           <button type="submit" style={primaryButtonStyle}>
+            <StudioIcon name="filter" />
             Apply Filters
           </button>
         </form>
@@ -244,6 +249,7 @@ export function DlqPage() {
                 style={secondaryButtonStyle}
                 onClick={() => void load({ ...query, cursor: indexedPayload.next_cursor || null }, "indexed")}
               >
+                <StudioIcon name="next" />
                 Load Next Page
               </button>
             ) : null}

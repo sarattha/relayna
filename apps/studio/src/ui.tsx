@@ -47,6 +47,10 @@ export const mutedTextStyle: CSSProperties = {
 };
 
 export const primaryButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
   border: "none",
   borderRadius: 14,
   background: "linear-gradient(135deg, var(--studio-primary) 0%, var(--studio-primary-strong) 100%)",
@@ -59,6 +63,10 @@ export const primaryButtonStyle: CSSProperties = {
 };
 
 export const secondaryButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 8,
   borderRadius: 14,
   border: "1px solid var(--studio-border)",
   background: "var(--studio-surface-muted)",
@@ -68,6 +76,236 @@ export const secondaryButtonStyle: CSSProperties = {
   fontWeight: 600,
   cursor: "pointer",
 };
+
+export function StudioIcon({
+  name,
+}: {
+  name:
+    | "add"
+    | "back"
+    | "clear"
+    | "copy"
+    | "delete"
+    | "disable"
+    | "dlq"
+    | "edit"
+    | "enable"
+    | "filter"
+    | "health"
+    | "next"
+    | "open"
+    | "refresh"
+    | "save"
+    | "search"
+    | "services"
+    | "tasks"
+    | "topology"
+    | "unavailable";
+}) {
+  const commonProps = {
+    className: "studio-button-icon",
+    viewBox: "0 0 24 24",
+    width: 16,
+    height: 16,
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 2,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  if (name === "search") {
+    return (
+      <svg {...commonProps}>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m16 16 4 4" />
+      </svg>
+    );
+  }
+
+  if (name === "clear") {
+    return (
+      <svg {...commonProps}>
+        <path d="M5 12h14" />
+        <path d="m8 8 8 8" />
+        <path d="m16 8-8 8" />
+      </svg>
+    );
+  }
+
+  if (name === "refresh") {
+    return (
+      <svg {...commonProps}>
+        <path d="M20 6v5h-5" />
+        <path d="M4 18v-5h5" />
+        <path d="M18.5 9A7 7 0 0 0 6.3 6.3L4 8.5" />
+        <path d="M5.5 15a7 7 0 0 0 12.2 2.7L20 15.5" />
+      </svg>
+    );
+  }
+
+  if (name === "copy") {
+    return (
+      <svg {...commonProps}>
+        <rect x="8" y="8" width="11" height="11" rx="2" />
+        <path d="M5 15V5h10" />
+        <path d="M7 5h8v2" />
+      </svg>
+    );
+  }
+
+  if (name === "back") {
+    return (
+      <svg {...commonProps}>
+        <path d="m12 19-7-7 7-7" />
+        <path d="M19 12H5" />
+      </svg>
+    );
+  }
+
+  if (name === "next") {
+    return (
+      <svg {...commonProps}>
+        <path d="M5 12h14" />
+        <path d="m12 5 7 7-7 7" />
+      </svg>
+    );
+  }
+
+  if (name === "add") {
+    return (
+      <svg {...commonProps}>
+        <path d="M12 5v14" />
+        <path d="M5 12h14" />
+      </svg>
+    );
+  }
+
+  if (name === "save") {
+    return (
+      <svg {...commonProps}>
+        <path d="M5 4h12l2 2v14H5z" />
+        <path d="M8 4v6h8V4" />
+        <path d="M8 20v-6h8v6" />
+      </svg>
+    );
+  }
+
+  if (name === "delete") {
+    return (
+      <svg {...commonProps}>
+        <path d="M4 7h16" />
+        <path d="M10 11v6" />
+        <path d="M14 11v6" />
+        <path d="M6 7l1 13h10l1-13" />
+        <path d="M9 7V4h6v3" />
+      </svg>
+    );
+  }
+
+  if (name === "edit") {
+    return (
+      <svg {...commonProps}>
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+      </svg>
+    );
+  }
+
+  if (name === "open") {
+    return (
+      <svg {...commonProps}>
+        <path d="M7 7h10v10H7z" />
+        <path d="M10 14 17 7" />
+        <path d="M12 7h5v5" />
+      </svg>
+    );
+  }
+
+  if (name === "filter") {
+    return (
+      <svg {...commonProps}>
+        <path d="M4 5h16" />
+        <path d="M7 12h10" />
+        <path d="M10 19h4" />
+      </svg>
+    );
+  }
+
+  if (name === "health") {
+    return (
+      <svg {...commonProps}>
+        <path d="M20 13a8 8 0 1 1-3-6.2" />
+        <path d="m9 12 2 2 6-7" />
+      </svg>
+    );
+  }
+
+  if (name === "enable") {
+    return (
+      <svg {...commonProps}>
+        <path d="m5 12 4 4L19 6" />
+      </svg>
+    );
+  }
+
+  if (name === "disable" || name === "unavailable") {
+    return (
+      <svg {...commonProps}>
+        <circle cx="12" cy="12" r="8" />
+        <path d="m8 8 8 8" />
+      </svg>
+    );
+  }
+
+  if (name === "topology") {
+    return (
+      <svg {...commonProps}>
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="6" r="2" />
+        <circle cx="12" cy="18" r="2" />
+        <path d="M8 7l3 8" />
+        <path d="m16 7-3 8" />
+        <path d="M8 6h8" />
+      </svg>
+    );
+  }
+
+  if (name === "dlq") {
+    return (
+      <svg {...commonProps}>
+        <path d="M5 7h14" />
+        <path d="M7 7v12h10V7" />
+        <path d="M9 4h6l1 3H8z" />
+        <path d="M9 12h6" />
+        <path d="M9 16h4" />
+      </svg>
+    );
+  }
+
+  if (name === "tasks") {
+    return (
+      <svg {...commonProps}>
+        <path d="M9 6h11" />
+        <path d="M9 12h11" />
+        <path d="M9 18h11" />
+        <path d="M4 6h1" />
+        <path d="M4 12h1" />
+        <path d="M4 18h1" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...commonProps}>
+      <rect x="4" y="5" width="6" height="6" rx="1.5" />
+      <rect x="14" y="5" width="6" height="6" rx="1.5" />
+      <rect x="4" y="15" width="6" height="4" rx="1.5" />
+      <rect x="14" y="15" width="6" height="4" rx="1.5" />
+    </svg>
+  );
+}
 
 export const destructiveButtonStyle: CSSProperties = {
   ...secondaryButtonStyle,
@@ -298,8 +536,8 @@ function buildFlowNodes(graph: ExecutionGraph): Node[] {
         position: { x: level * 310, y: row * 168 },
         data: {
           label: (
-            <div style={{ display: "grid", gap: 6 }}>
-              <strong style={{ fontSize: 13, lineHeight: 1.2 }}>{labelLines[0]}</strong>
+            <div className="studio-flow-node-label">
+              <strong>{labelLines[0]}</strong>
               <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1.1, opacity: 0.76 }}>
                 {labelLines[1]}
               </span>
@@ -573,11 +811,11 @@ export function MetadataRow({ label, value }: { label: string; value: ReactNode 
   );
 }
 
-export function MetricCard({ label, value }: { label: string; value: string }) {
+export function MetricCard({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <article className="studio-card" style={{ ...frameStyle, padding: 16 }}>
-      <p style={{ margin: 0, fontSize: 12, textTransform: "uppercase", letterSpacing: 1.2, color: "var(--studio-text-soft)" }}>{label}</p>
-      <strong style={{ display: "block", marginTop: 10, fontSize: 26 }}>{value}</strong>
+    <article className={`studio-card studio-metric-card${className ? ` ${className}` : ""}`} style={frameStyle}>
+      <p className="studio-metric-card__label">{label}</p>
+      <strong className="studio-metric-card__value">{value}</strong>
     </article>
   );
 }
@@ -681,13 +919,15 @@ export function AppHeader() {
       <section className="studio-card studio-section-card studio-nav-card" style={frameStyle}>
         <div>
           <h2 className="studio-section-title" style={{ fontSize: 20 }}>Routes</h2>
-          <p className="studio-section-subtitle">Studio now treats route paths as the primary UI contract.</p>
+          <p className="studio-section-subtitle">Open the service registry or search tasks across registered services.</p>
         </div>
         <div className="studio-nav-links">
           <Link to="/services" style={navStyle}>
+            <StudioIcon name="services" />
             Services
           </Link>
           <Link to="/tasks/search" style={navStyle}>
+            <StudioIcon name="tasks" />
             Task Search
           </Link>
         </div>
