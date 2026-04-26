@@ -282,7 +282,6 @@ export function TaskDetailPage() {
   }, [
     taskDetail,
     taskTimelineLoading,
-    taskLogWindowMode,
   ]);
 
   function getTaskLogWindow({ refreshAutoNow = false }: { refreshAutoNow?: boolean } = {}) {
