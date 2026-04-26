@@ -91,6 +91,12 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function isoToLocalDateTime(value: string) {
+  const date = new Date(value);
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
 function serviceListResponse(services: MockServiceRecord[]) {
   return jsonResponse({ count: services.length, services });
 }
@@ -812,8 +818,13 @@ describe("App", () => {
 
     expect(await screen.findByText("Service Detail")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service log window mode"), { target: { value: "manual" } });
-    fireEvent.change(screen.getByLabelText("Service log from"), { target: { value: "2026-04-08T09:50:00Z" } });
-    fireEvent.change(screen.getByLabelText("Service log to"), { target: { value: "2026-04-08T10:10:00Z" } });
+    await waitFor(() => expect(screen.getByLabelText("Service log from")).toBeEnabled());
+    const serviceLogFrom = isoToLocalDateTime("2026-04-08T09:50:00Z");
+    const serviceLogTo = isoToLocalDateTime("2026-04-08T10:10:00Z");
+    fireEvent.change(screen.getByLabelText("Service log from"), { target: { value: serviceLogFrom } });
+    fireEvent.change(screen.getByLabelText("Service log to"), { target: { value: serviceLogTo } });
+    await waitFor(() => expect(screen.getByLabelText("Service log from")).toHaveValue(serviceLogFrom));
+    await waitFor(() => expect(screen.getByLabelText("Service log to")).toHaveValue(serviceLogTo));
     fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
 
     await waitFor(() => {
@@ -821,8 +832,8 @@ describe("App", () => {
         const parsed = new URL(String(input), "http://studio.test");
         return (
           parsed.pathname === "/studio/services/payments-api/logs" &&
-          parsed.searchParams.get("from") === "2026-04-08T09:50:00Z" &&
-          parsed.searchParams.get("to") === "2026-04-08T10:10:00Z"
+          parsed.searchParams.get("from") === new Date("2026-04-08T09:50:00Z").toISOString() &&
+          parsed.searchParams.get("to") === new Date("2026-04-08T10:10:00Z").toISOString()
         );
       });
       expect(matchingCall).toBeTruthy();
@@ -836,8 +847,13 @@ describe("App", () => {
 
     expect(await screen.findByText("Service Detail")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service event window mode"), { target: { value: "manual" } });
-    fireEvent.change(screen.getByLabelText("Service event from"), { target: { value: "2026-04-08T09:45:00Z" } });
-    fireEvent.change(screen.getByLabelText("Service event to"), { target: { value: "2026-04-08T10:15:00Z" } });
+    await waitFor(() => expect(screen.getByLabelText("Service event from")).toBeEnabled());
+    const serviceEventFrom = isoToLocalDateTime("2026-04-08T09:45:00Z");
+    const serviceEventTo = isoToLocalDateTime("2026-04-08T10:15:00Z");
+    fireEvent.change(screen.getByLabelText("Service event from"), { target: { value: serviceEventFrom } });
+    fireEvent.change(screen.getByLabelText("Service event to"), { target: { value: serviceEventTo } });
+    await waitFor(() => expect(screen.getByLabelText("Service event from")).toHaveValue(serviceEventFrom));
+    await waitFor(() => expect(screen.getByLabelText("Service event to")).toHaveValue(serviceEventTo));
     fireEvent.click(screen.getByRole("button", { name: "Reload Activity" }));
 
     await waitFor(() => {
@@ -845,8 +861,8 @@ describe("App", () => {
         const parsed = new URL(String(input), "http://studio.test");
         return (
           parsed.pathname === "/studio/services/payments-api/events" &&
-          parsed.searchParams.get("from") === "2026-04-08T09:45:00Z" &&
-          parsed.searchParams.get("to") === "2026-04-08T10:15:00Z"
+          parsed.searchParams.get("from") === new Date("2026-04-08T09:45:00Z").toISOString() &&
+          parsed.searchParams.get("to") === new Date("2026-04-08T10:15:00Z").toISOString()
         );
       });
       expect(matchingCall).toBeTruthy();
@@ -1130,8 +1146,13 @@ describe("App", () => {
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Task log window mode"), { target: { value: "manual" } });
-    fireEvent.change(screen.getByLabelText("Task log from"), { target: { value: "2026-04-08T09:55:00Z" } });
-    fireEvent.change(screen.getByLabelText("Task log to"), { target: { value: "2026-04-08T10:06:00Z" } });
+    await waitFor(() => expect(screen.getByLabelText("Task log from")).toBeEnabled());
+    const taskLogFrom = isoToLocalDateTime("2026-04-08T09:55:00Z");
+    const taskLogTo = isoToLocalDateTime("2026-04-08T10:06:00Z");
+    fireEvent.change(screen.getByLabelText("Task log from"), { target: { value: taskLogFrom } });
+    fireEvent.change(screen.getByLabelText("Task log to"), { target: { value: taskLogTo } });
+    await waitFor(() => expect(screen.getByLabelText("Task log from")).toHaveValue(taskLogFrom));
+    await waitFor(() => expect(screen.getByLabelText("Task log to")).toHaveValue(taskLogTo));
     fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
 
     await waitFor(() => {
@@ -1139,8 +1160,8 @@ describe("App", () => {
         const parsed = new URL(String(input), "http://studio.test");
         return (
           parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
-          parsed.searchParams.get("from") === "2026-04-08T09:55:00Z" &&
-          parsed.searchParams.get("to") === "2026-04-08T10:06:00Z"
+          parsed.searchParams.get("from") === new Date("2026-04-08T09:55:00Z").toISOString() &&
+          parsed.searchParams.get("to") === new Date("2026-04-08T10:06:00Z").toISOString()
         );
       });
       expect(matchingCall).toBeTruthy();

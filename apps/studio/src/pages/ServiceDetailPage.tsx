@@ -22,9 +22,16 @@ import {
   parseLimit,
   secondaryButtonStyle,
 } from "../ui";
-import type { ServiceEventSourceKind, StudioControlPlaneEvent, StudioEventListResponse, StudioLogListResponse } from "../types";
+import type {
+  ServiceEventSourceKind,
+  ServiceRecord,
+  StudioControlPlaneEvent,
+  StudioEventListResponse,
+  StudioLogListResponse,
+} from "../types";
 
 type TimeWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
+type TimeWindow = { from: string; to: string };
 
 function latestTimestamp(...values: Array<string | null | undefined>) {
   const candidates = values.filter((value): value is string => Boolean(value));
@@ -76,6 +83,8 @@ function resolveWindow(mode: TimeWindowMode, manualFrom: string, manualTo: strin
   };
 }
 
+const emptyWindow: TimeWindow = { from: "", to: "" };
+
 function describeWindow(mode: TimeWindowMode, from: string, to: string) {
   if (mode === "auto") {
     return "Auto window: unbounded to unbounded.";
@@ -124,7 +133,7 @@ export function ServiceDetailPage() {
     setServiceEventWindowMode("auto");
     setServiceEventManualFrom("");
     setServiceEventManualTo("");
-    void loadServiceEvents(serviceId);
+    void loadServiceEvents(serviceId, emptyWindow);
   }, [serviceId]);
 
   const activeServiceEventWindow = resolveWindow(serviceEventWindowMode, serviceEventManualFrom, serviceEventManualTo);
@@ -139,7 +148,11 @@ export function ServiceDetailPage() {
       setServiceLogsError(service ? "No log provider configured for this service." : null);
       return;
     }
-    void loadServiceLogs();
+    void loadServiceLogs({
+      targetService: service,
+      source: "",
+      window: emptyWindow,
+    });
   }, [service?.service_id, service?.log_config]);
 
   const activeServiceLogWindow = resolveWindow(serviceLogWindowMode, serviceLogManualFrom, serviceLogManualTo);
@@ -165,14 +178,14 @@ export function ServiceDetailPage() {
     return () => source.close();
   }, [serviceId]);
 
-  async function loadServiceEvents(targetServiceId: string) {
+  async function loadServiceEvents(targetServiceId: string, window = activeServiceEventWindow) {
     setServiceEventsLoading(true);
     setServiceEventsError(null);
     try {
       const payload = await fetchServiceEvents(targetServiceId, {
         limit: 20,
-        from: activeServiceEventWindow.from,
-        to: activeServiceEventWindow.to,
+        from: window.from,
+        to: window.to,
       });
       setServiceEvents(payload);
     } catch (fetchError) {
@@ -182,20 +195,28 @@ export function ServiceDetailPage() {
     }
   }
 
-  async function loadServiceLogs() {
-    if (!service) {
+  async function loadServiceLogs({
+    targetService = service,
+    source = serviceLogSource,
+    window = activeServiceLogWindow,
+  }: {
+    targetService?: ServiceRecord | null;
+    source?: string;
+    window?: TimeWindow;
+  } = {}) {
+    if (!targetService) {
       return;
     }
     setServiceLogsLoading(true);
     setServiceLogsError(null);
     try {
-      const payload = await fetchServiceLogs(service.service_id, {
+      const payload = await fetchServiceLogs(targetService.service_id, {
         query: serviceLogQuery,
         level: serviceLogLevel,
-        source: serviceLogSource,
+        source,
         limit: parseLimit(serviceLogLimit, 20),
-        from: activeServiceLogWindow.from,
-        to: activeServiceLogWindow.to,
+        from: window.from,
+        to: window.to,
       });
       setServiceLogs(payload);
     } catch (fetchError) {

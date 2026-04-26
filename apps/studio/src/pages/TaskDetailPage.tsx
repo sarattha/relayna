@@ -258,7 +258,6 @@ export function TaskDetailPage() {
   }, [
     taskDetail,
     taskTimelineLoading,
-    taskTimeline?.count,
     taskLogWindowMode,
   ]);
 
