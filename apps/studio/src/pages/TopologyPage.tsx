@@ -7,6 +7,7 @@ import {
   InlineCodeBox,
   NoticeBanner,
   SectionCard,
+  StudioIcon,
   WorkflowTopologySurface,
   mutedTextStyle,
   secondaryButtonStyle,
@@ -52,9 +53,11 @@ export function TopologyPage() {
         action={
           <div style={{ display: "flex", gap: 10 }}>
             <Link to={`/services/${encodeURIComponent(serviceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+              <StudioIcon name="back" />
               Back to Service
             </Link>
             <button type="button" onClick={() => void load()} style={secondaryButtonStyle}>
+              <StudioIcon name="refresh" />
               Reload
             </button>
           </div>

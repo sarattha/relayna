@@ -11,6 +11,7 @@ import {
   MetadataRow,
   NoticeBanner,
   SectionCard,
+  StudioIcon,
   StatusBadge,
   formatEventSummary,
   formatLogLevel,
@@ -21,7 +22,16 @@ import {
   parseLimit,
   secondaryButtonStyle,
 } from "../ui";
-import type { ServiceEventSourceKind, StudioControlPlaneEvent, StudioEventListResponse, StudioLogListResponse } from "../types";
+import type {
+  ServiceEventSourceKind,
+  ServiceRecord,
+  StudioControlPlaneEvent,
+  StudioEventListResponse,
+  StudioLogListResponse,
+} from "../types";
+
+type TimeWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
+type TimeWindow = { from: string; to: string };
 
 function latestTimestamp(...values: Array<string | null | undefined>) {
   const candidates = values.filter((value): value is string => Boolean(value));
@@ -29,6 +39,90 @@ function latestTimestamp(...values: Array<string | null | undefined>) {
     return null;
   }
   return candidates.reduce((latest, value) => (new Date(value).getTime() > new Date(latest).getTime() ? value : latest));
+}
+
+function localDateTimeToIso(value: string) {
+  if (!value.trim()) {
+    return "";
+  }
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return "";
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function isoToLocalDateTime(value: string) {
+  if (!value.trim()) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function resolveWindow(mode: TimeWindowMode, manualFrom: string, manualTo: string) {
+  if (mode === "manual") {
+    return {
+      from: localDateTimeToIso(manualFrom),
+      to: localDateTimeToIso(manualTo),
+    };
+  }
+  if (mode === "auto") {
+    return { from: "", to: "" };
+  }
+
+  const now = Date.now();
+  const durationMs = mode === "15m" ? 15 * 60 * 1000 : mode === "1h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return {
+    from: new Date(now - durationMs).toISOString(),
+    to: new Date(now).toISOString(),
+  };
+}
+
+const emptyWindow: TimeWindow = { from: "", to: "" };
+
+function describeWindow(mode: TimeWindowMode, from: string, to: string) {
+  if (mode === "auto") {
+    return "Auto window: unbounded to unbounded.";
+  }
+  if (mode === "manual") {
+    return "Manual window is active. Use the local date and time fields; empty bounds stay unbounded.";
+  }
+  const label = mode === "15m" ? "15 minutes" : mode === "1h" ? "1 hour" : "24 hours";
+  return `Quick window: last ${label} (${from ? new Date(from).toLocaleString() : "unbounded"} to ${
+    to ? new Date(to).toLocaleString() : "unbounded"
+  }).`;
+}
+
+function eventTimestamp(item: { timestamp?: string | null; ingested_at?: string | null }) {
+  return item.timestamp || item.ingested_at || "";
+}
+
+function isInWindow(value: string, window: TimeWindow) {
+  if (!value.trim()) {
+    return true;
+  }
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return true;
+  }
+  if (window.from) {
+    const fromTimestamp = new Date(window.from).getTime();
+    if (!Number.isNaN(fromTimestamp) && timestamp < fromTimestamp) {
+      return false;
+    }
+  }
+  if (window.to) {
+    const toTimestamp = new Date(window.to).getTime();
+    if (!Number.isNaN(toTimestamp) && timestamp > toTimestamp) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function ServiceDetailPage() {
@@ -43,7 +137,7 @@ export function ServiceDetailPage() {
   const [serviceEventTaskFilter, setServiceEventTaskFilter] = useState("");
   const [serviceEventSourceFilter, setServiceEventSourceFilter] = useState<"" | ServiceEventSourceKind>("");
   const [serviceEventTypeFilter, setServiceEventTypeFilter] = useState("");
-  const [serviceEventWindowMode, setServiceEventWindowMode] = useState<"auto" | "manual">("auto");
+  const [serviceEventWindowMode, setServiceEventWindowMode] = useState<TimeWindowMode>("auto");
   const [serviceEventManualFrom, setServiceEventManualFrom] = useState("");
   const [serviceEventManualTo, setServiceEventManualTo] = useState("");
 
@@ -54,7 +148,7 @@ export function ServiceDetailPage() {
   const [serviceLogLevel, setServiceLogLevel] = useState("");
   const [serviceLogSource, setServiceLogSource] = useState("");
   const [serviceLogLimit, setServiceLogLimit] = useState("20");
-  const [serviceLogWindowMode, setServiceLogWindowMode] = useState<"auto" | "manual">("auto");
+  const [serviceLogWindowMode, setServiceLogWindowMode] = useState<TimeWindowMode>("auto");
   const [serviceLogManualFrom, setServiceLogManualFrom] = useState("");
   const [serviceLogManualTo, setServiceLogManualTo] = useState("");
   const [refreshingService, setRefreshingService] = useState(false);
@@ -66,11 +160,10 @@ export function ServiceDetailPage() {
     setServiceEventWindowMode("auto");
     setServiceEventManualFrom("");
     setServiceEventManualTo("");
-    void loadServiceEvents(serviceId);
+    void loadServiceEvents(serviceId, emptyWindow);
   }, [serviceId]);
 
-  const activeServiceEventFrom = serviceEventWindowMode === "manual" ? serviceEventManualFrom.trim() : "";
-  const activeServiceEventTo = serviceEventWindowMode === "manual" ? serviceEventManualTo.trim() : "";
+  const activeServiceEventWindow = resolveWindow(serviceEventWindowMode, serviceEventManualFrom, serviceEventManualTo);
 
   useEffect(() => {
     setServiceLogSource("");
@@ -82,11 +175,14 @@ export function ServiceDetailPage() {
       setServiceLogsError(service ? "No log provider configured for this service." : null);
       return;
     }
-    void loadServiceLogs();
+    void loadServiceLogs({
+      targetService: service,
+      source: "",
+      window: emptyWindow,
+    });
   }, [service?.service_id, service?.log_config]);
 
-  const activeServiceLogFrom = serviceLogWindowMode === "manual" ? serviceLogManualFrom.trim() : "";
-  const activeServiceLogTo = serviceLogWindowMode === "manual" ? serviceLogManualTo.trim() : "";
+  const activeServiceLogWindow = resolveWindow(serviceLogWindowMode, serviceLogManualFrom, serviceLogManualTo);
 
   useEffect(() => {
     if (typeof EventSource === "undefined" || !serviceId) {
@@ -109,14 +205,14 @@ export function ServiceDetailPage() {
     return () => source.close();
   }, [serviceId]);
 
-  async function loadServiceEvents(targetServiceId: string) {
+  async function loadServiceEvents(targetServiceId: string, window = activeServiceEventWindow) {
     setServiceEventsLoading(true);
     setServiceEventsError(null);
     try {
       const payload = await fetchServiceEvents(targetServiceId, {
         limit: 20,
-        from: activeServiceEventFrom,
-        to: activeServiceEventTo,
+        from: window.from,
+        to: window.to,
       });
       setServiceEvents(payload);
     } catch (fetchError) {
@@ -126,20 +222,28 @@ export function ServiceDetailPage() {
     }
   }
 
-  async function loadServiceLogs() {
-    if (!service) {
+  async function loadServiceLogs({
+    targetService = service,
+    source = serviceLogSource,
+    window = activeServiceLogWindow,
+  }: {
+    targetService?: ServiceRecord | null;
+    source?: string;
+    window?: TimeWindow;
+  } = {}) {
+    if (!targetService) {
       return;
     }
     setServiceLogsLoading(true);
     setServiceLogsError(null);
     try {
-      const payload = await fetchServiceLogs(service.service_id, {
+      const payload = await fetchServiceLogs(targetService.service_id, {
         query: serviceLogQuery,
         level: serviceLogLevel,
-        source: serviceLogSource,
+        source,
         limit: parseLimit(serviceLogLimit, 20),
-        from: activeServiceLogFrom,
-        to: activeServiceLogTo,
+        from: window.from,
+        to: window.to,
       });
       setServiceLogs(payload);
     } catch (fetchError) {
@@ -164,6 +268,9 @@ export function ServiceDetailPage() {
   }
 
   const filteredServiceEvents = (serviceEvents?.items || []).filter((item) => {
+    if (!isInWindow(eventTimestamp(item), activeServiceEventWindow)) {
+      return false;
+    }
     if (serviceEventTaskFilter.trim() && !item.task_id.includes(serviceEventTaskFilter.trim())) {
       return false;
     }
@@ -175,6 +282,7 @@ export function ServiceDetailPage() {
     }
     return true;
   });
+  const filteredServiceLogs = (serviceLogs?.items || []).filter((item) => isInWindow(item.timestamp, activeServiceLogWindow));
   const serviceLogSourceOptions = Array.from(new Set((serviceLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
 
   if (servicesState.error) {
@@ -213,30 +321,39 @@ export function ServiceDetailPage() {
       >
         <div className="studio-action-row">
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+            <StudioIcon name="back" />
             Back to Services
           </Link>
           <Link to={`/services/${encodeURIComponent(service.service_id)}/topology`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+            <StudioIcon name="topology" />
             Topology
           </Link>
           <Link to={`/services/${encodeURIComponent(service.service_id)}/dlq`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+            <StudioIcon name="dlq" />
             DLQ Explorer
           </Link>
           <Link to={`/tasks/search?service_id=${encodeURIComponent(service.service_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+            <StudioIcon name="tasks" />
             Task Search
           </Link>
           <button type="button" onClick={() => void handleRefreshService()} style={secondaryButtonStyle} disabled={refreshingService}>
+            <StudioIcon name="refresh" />
             {refreshingService ? "Refreshing..." : "Refresh"}
           </button>
           <button type="button" onClick={() => void servicesState.runHealthCheck(service.service_id)} style={secondaryButtonStyle}>
+            <StudioIcon name="health" />
             Run Health Check
           </button>
           <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "registered")} style={secondaryButtonStyle}>
+            <StudioIcon name="enable" />
             Enable
           </button>
           <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "unavailable")} style={secondaryButtonStyle}>
+            <StudioIcon name="unavailable" />
             Mark Unavailable
           </button>
           <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "disabled")} style={secondaryButtonStyle}>
+            <StudioIcon name="disable" />
             Disable
           </button>
           <button
@@ -247,6 +364,7 @@ export function ServiceDetailPage() {
             }}
             style={secondaryButtonStyle}
           >
+            <StudioIcon name="delete" />
             Delete
           </button>
         </div>
@@ -310,6 +428,7 @@ export function ServiceDetailPage() {
           subtitle="Service-scoped Studio-ingested events with live SSE updates."
           action={
             <button type="button" onClick={() => void loadServiceEvents(service.service_id)} style={secondaryButtonStyle}>
+              <StudioIcon name="refresh" />
               Reload Activity
             </button>
           }
@@ -337,38 +456,76 @@ export function ServiceDetailPage() {
               style={inputStyle}
             />
           </div>
-          <div className="studio-log-filter-grid" style={{ marginTop: 12 }}>
-            <select
-              aria-label="Service event window mode"
-              value={serviceEventWindowMode}
-              onChange={(event) => setServiceEventWindowMode(event.target.value as "auto" | "manual")}
-              style={inputStyle}
-            >
-              <option value="auto">Auto activity window</option>
-              <option value="manual">Manual override</option>
-            </select>
-            <input
-              aria-label="Service event from"
-              value={serviceEventWindowMode === "manual" ? serviceEventManualFrom : ""}
-              onChange={(event) => setServiceEventManualFrom(event.target.value)}
-              placeholder="from (ISO-8601)"
-              readOnly={serviceEventWindowMode !== "manual"}
-              style={inputStyle}
-            />
-            <input
-              aria-label="Service event to"
-              value={serviceEventWindowMode === "manual" ? serviceEventManualTo : ""}
-              onChange={(event) => setServiceEventManualTo(event.target.value)}
-              placeholder="to (ISO-8601)"
-              readOnly={serviceEventWindowMode !== "manual"}
-              style={inputStyle}
-            />
+          <div className="studio-log-filter-grid studio-log-window-grid" style={{ marginTop: 12 }}>
+            <label className="studio-filter-field">
+              <span>Activity Window</span>
+              <select
+                aria-label="Service event window mode"
+                value={serviceEventWindowMode}
+                onChange={(event) => {
+                  const nextMode = event.target.value as TimeWindowMode;
+                  let nextManualFrom = serviceEventManualFrom;
+                  let nextManualTo = serviceEventManualTo;
+                  if (nextMode === "manual") {
+                    nextManualFrom = isoToLocalDateTime(activeServiceEventWindow.from);
+                    nextManualTo = isoToLocalDateTime(activeServiceEventWindow.to);
+                    setServiceEventManualFrom(nextManualFrom);
+                    setServiceEventManualTo(nextManualTo);
+                  }
+                  setServiceEventWindowMode(nextMode);
+                  void loadServiceEvents(service.service_id, resolveWindow(nextMode, nextManualFrom, nextManualTo));
+                }}
+                style={inputStyle}
+              >
+                <option value="auto">Auto window</option>
+                <option value="15m">Last 15 minutes</option>
+                <option value="1h">Last hour</option>
+                <option value="24h">Last 24 hours</option>
+                <option value="manual">Custom range</option>
+              </select>
+            </label>
+            <label className="studio-filter-field">
+              <span>From</span>
+              <input
+                aria-label="Service event from"
+                type="datetime-local"
+                value={
+                  serviceEventWindowMode === "manual"
+                    ? serviceEventManualFrom
+                    : isoToLocalDateTime(activeServiceEventWindow.from)
+                }
+                onChange={(event) => {
+                  const nextFrom = event.target.value;
+                  setServiceEventManualFrom(nextFrom);
+                  void loadServiceEvents(service.service_id, resolveWindow("manual", nextFrom, serviceEventManualTo));
+                }}
+                disabled={serviceEventWindowMode !== "manual"}
+                style={inputStyle}
+              />
+            </label>
+            <label className="studio-filter-field">
+              <span>To</span>
+              <input
+                aria-label="Service event to"
+                type="datetime-local"
+                value={
+                  serviceEventWindowMode === "manual"
+                    ? serviceEventManualTo
+                    : isoToLocalDateTime(activeServiceEventWindow.to)
+                }
+                onChange={(event) => {
+                  const nextTo = event.target.value;
+                  setServiceEventManualTo(nextTo);
+                  void loadServiceEvents(service.service_id, resolveWindow("manual", serviceEventManualFrom, nextTo));
+                }}
+                disabled={serviceEventWindowMode !== "manual"}
+                style={inputStyle}
+              />
+            </label>
           </div>
-          {serviceEventWindowMode === "auto" ? (
-            <p style={mutedTextStyle}>Auto window: unbounded to unbounded.</p>
-          ) : (
-            <p style={mutedTextStyle}>Manual window override is active. Leave either bound empty to keep that side unbounded.</p>
-          )}
+          <p style={mutedTextStyle}>
+            {describeWindow(serviceEventWindowMode, activeServiceEventWindow.from, activeServiceEventWindow.to)}
+          </p>
           {serviceEventsLoading ? <p style={mutedTextStyle}>Loading service activity...</p> : null}
           {serviceEventsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceEventsError}</p> : null}
           {!serviceEventsLoading && !serviceEventsError && !filteredServiceEvents.length ? (
@@ -415,74 +572,126 @@ export function ServiceDetailPage() {
           subtitle="Service-scoped log queries remain separate from Relayna status and observations."
           action={
             <button type="button" onClick={() => void loadServiceLogs()} style={secondaryButtonStyle}>
+              <StudioIcon name="refresh" />
               Reload Logs
             </button>
           }
         >
           <div className="studio-log-filter-grid">
-            <input
-              aria-label="Service log text filter"
-              value={serviceLogQuery}
-              onChange={(event) => setServiceLogQuery(event.target.value)}
-              placeholder="Search log text"
-              style={inputStyle}
-            />
-            <input
-              aria-label="Service log level"
-              value={serviceLogLevel}
-              onChange={(event) => setServiceLogLevel(event.target.value)}
-              placeholder="level"
-              style={inputStyle}
-            />
-            <input
-              aria-label="Service log source"
-              value={serviceLogSource}
-              onChange={(event) => setServiceLogSource(event.target.value)}
-              list={`service-log-sources-${service.service_id}`}
-              placeholder={service.log_config?.source_label || "source"}
-              disabled={!service.log_config?.source_label}
-              style={inputStyle}
-            />
-            <input
-              aria-label="Service log limit"
-              value={serviceLogLimit}
-              onChange={(event) => setServiceLogLimit(event.target.value)}
-              placeholder="20"
-              style={inputStyle}
-            />
+            <label className="studio-filter-field">
+              <span>Text</span>
+              <input
+                aria-label="Service log text filter"
+                value={serviceLogQuery}
+                onChange={(event) => setServiceLogQuery(event.target.value)}
+                placeholder="Search log text"
+                style={inputStyle}
+              />
+            </label>
+            <label className="studio-filter-field">
+              <span>Level</span>
+              <input
+                aria-label="Service log level"
+                value={serviceLogLevel}
+                onChange={(event) => setServiceLogLevel(event.target.value)}
+                placeholder="info, error"
+                style={inputStyle}
+              />
+            </label>
+            <label className="studio-filter-field">
+              <span>Source</span>
+              <input
+                aria-label="Service log source"
+                value={serviceLogSource}
+                onChange={(event) => setServiceLogSource(event.target.value)}
+                list={`service-log-sources-${service.service_id}`}
+                placeholder={service.log_config?.source_label || "source"}
+                disabled={!service.log_config?.source_label}
+                style={inputStyle}
+              />
+            </label>
+            <label className="studio-filter-field">
+              <span>Limit</span>
+              <input
+                aria-label="Service log limit"
+                value={serviceLogLimit}
+                onChange={(event) => setServiceLogLimit(event.target.value)}
+                placeholder="20"
+                inputMode="numeric"
+                style={inputStyle}
+              />
+            </label>
           </div>
-          <div className="studio-log-filter-grid" style={{ marginTop: 12 }}>
-            <select
-              aria-label="Service log window mode"
-              value={serviceLogWindowMode}
-              onChange={(event) => setServiceLogWindowMode(event.target.value as "auto" | "manual")}
-              style={inputStyle}
-            >
-              <option value="auto">Auto service window</option>
-              <option value="manual">Manual override</option>
-            </select>
-            <input
-              aria-label="Service log from"
-              value={serviceLogWindowMode === "manual" ? serviceLogManualFrom : ""}
-              onChange={(event) => setServiceLogManualFrom(event.target.value)}
-              placeholder="from (ISO-8601)"
-              readOnly={serviceLogWindowMode !== "manual"}
-              style={inputStyle}
-            />
-            <input
-              aria-label="Service log to"
-              value={serviceLogWindowMode === "manual" ? serviceLogManualTo : ""}
-              onChange={(event) => setServiceLogManualTo(event.target.value)}
-              placeholder="to (ISO-8601)"
-              readOnly={serviceLogWindowMode !== "manual"}
-              style={inputStyle}
-            />
+          <div className="studio-log-filter-grid studio-log-window-grid" style={{ marginTop: 12 }}>
+            <label className="studio-filter-field">
+              <span>Log Window</span>
+              <select
+                aria-label="Service log window mode"
+                value={serviceLogWindowMode}
+                onChange={(event) => {
+                  const nextMode = event.target.value as TimeWindowMode;
+                  let nextManualFrom = serviceLogManualFrom;
+                  let nextManualTo = serviceLogManualTo;
+                  if (nextMode === "manual") {
+                    nextManualFrom = isoToLocalDateTime(activeServiceLogWindow.from);
+                    nextManualTo = isoToLocalDateTime(activeServiceLogWindow.to);
+                    setServiceLogManualFrom(nextManualFrom);
+                    setServiceLogManualTo(nextManualTo);
+                  }
+                  setServiceLogWindowMode(nextMode);
+                  void loadServiceLogs({ window: resolveWindow(nextMode, nextManualFrom, nextManualTo) });
+                }}
+                style={inputStyle}
+              >
+                <option value="auto">Auto window</option>
+                <option value="15m">Last 15 minutes</option>
+                <option value="1h">Last hour</option>
+                <option value="24h">Last 24 hours</option>
+                <option value="manual">Custom range</option>
+              </select>
+            </label>
+            <label className="studio-filter-field">
+              <span>From</span>
+              <input
+                aria-label="Service log from"
+                type="datetime-local"
+                value={
+                  serviceLogWindowMode === "manual"
+                    ? serviceLogManualFrom
+                    : isoToLocalDateTime(activeServiceLogWindow.from)
+                }
+                onChange={(event) => {
+                  const nextFrom = event.target.value;
+                  setServiceLogManualFrom(nextFrom);
+                  void loadServiceLogs({ window: resolveWindow("manual", nextFrom, serviceLogManualTo) });
+                }}
+                disabled={serviceLogWindowMode !== "manual"}
+                style={inputStyle}
+              />
+            </label>
+            <label className="studio-filter-field">
+              <span>To</span>
+              <input
+                aria-label="Service log to"
+                type="datetime-local"
+                value={
+                  serviceLogWindowMode === "manual"
+                    ? serviceLogManualTo
+                    : isoToLocalDateTime(activeServiceLogWindow.to)
+                }
+                onChange={(event) => {
+                  const nextTo = event.target.value;
+                  setServiceLogManualTo(nextTo);
+                  void loadServiceLogs({ window: resolveWindow("manual", serviceLogManualFrom, nextTo) });
+                }}
+                disabled={serviceLogWindowMode !== "manual"}
+                style={inputStyle}
+              />
+            </label>
           </div>
-          {serviceLogWindowMode === "auto" ? (
-            <p style={mutedTextStyle}>Auto window: unbounded to unbounded.</p>
-          ) : (
-            <p style={mutedTextStyle}>Manual window override is active. Leave either bound empty to keep that side unbounded.</p>
-          )}
+          <p style={mutedTextStyle}>
+            {describeWindow(serviceLogWindowMode, activeServiceLogWindow.from, activeServiceLogWindow.to)}
+          </p>
           {serviceLogSourceOptions.length ? (
             <datalist id={`service-log-sources-${service.service_id}`}>
               {serviceLogSourceOptions.map((source) => (
@@ -500,12 +709,12 @@ export function ServiceDetailPage() {
           )}
           {serviceLogsLoading ? <p style={mutedTextStyle}>Loading service logs...</p> : null}
           {serviceLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceLogsError}</p> : null}
-          {!serviceLogsLoading && !serviceLogsError && !(serviceLogs?.items.length || 0) ? (
+          {!serviceLogsLoading && !serviceLogsError && !filteredServiceLogs.length ? (
             <p style={mutedTextStyle}>No service logs matched the current filters.</p>
           ) : null}
-          {serviceLogs?.items.length ? (
+          {filteredServiceLogs.length ? (
             <div className="studio-stack-sm studio-surface-scroll">
-              {serviceLogs.items.map((item, index) => (
+              {filteredServiceLogs.map((item, index) => (
                 <article
                   key={`${item.timestamp}-${item.message}-${index}`}
                   className="studio-subcard"

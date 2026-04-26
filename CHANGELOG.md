@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- Bumped the Studio backend package and Studio frontend package versions to `0.1.5`.
+- Updated current Studio release documentation to reference `relayna-studio 0.1.5` and the matching frontend package version.
+
 ## Studio Backend 0.1.4 - 2026-04-23
 
 ### Added

@@ -6,6 +6,7 @@ import { searchTasks } from "../api";
 import {
   NoticeBanner,
   SectionCard,
+  StudioIcon,
   inputStyle,
   mutedTextStyle,
   primaryButtonStyle,
@@ -77,6 +78,7 @@ export function TaskSearchPage() {
         action={
           backServiceId ? (
             <Link to={`/services/${encodeURIComponent(backServiceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+              <StudioIcon name="back" />
               Back to Service
             </Link>
           ) : undefined
@@ -126,6 +128,7 @@ export function TaskSearchPage() {
             style={inputStyle}
           />
           <button type="submit" style={primaryButtonStyle}>
+            <StudioIcon name="search" />
             Search
           </button>
         </form>
@@ -157,6 +160,7 @@ export function TaskSearchPage() {
                   last seen: {item.last_seen_at ? new Date(item.last_seen_at).toLocaleString() : "unknown"}
                 </span>
                 <Link to={`/tasks/${encodeURIComponent(item.service_id)}/${encodeURIComponent(item.task_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none", width: "fit-content" }}>
+                  <StudioIcon name="open" />
                   Open Task Detail
                 </Link>
               </article>
@@ -167,6 +171,7 @@ export function TaskSearchPage() {
                 onClick={() => void loadSearch({ ...query, cursor: result.next_cursor || null })}
                 style={secondaryButtonStyle}
               >
+                <StudioIcon name="next" />
                 Load Next Page
               </button>
             ) : null}
