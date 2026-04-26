@@ -98,6 +98,33 @@ function describeWindow(mode: TimeWindowMode, from: string, to: string) {
   }).`;
 }
 
+function eventTimestamp(item: { timestamp?: string | null; ingested_at?: string | null }) {
+  return item.timestamp || item.ingested_at || "";
+}
+
+function isInWindow(value: string, window: TimeWindow) {
+  if (!value.trim()) {
+    return true;
+  }
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return true;
+  }
+  if (window.from) {
+    const fromTimestamp = new Date(window.from).getTime();
+    if (!Number.isNaN(fromTimestamp) && timestamp < fromTimestamp) {
+      return false;
+    }
+  }
+  if (window.to) {
+    const toTimestamp = new Date(window.to).getTime();
+    if (!Number.isNaN(toTimestamp) && timestamp > toTimestamp) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function ServiceDetailPage() {
   const navigate = useNavigate();
   const { serviceId = "" } = useParams();
@@ -241,6 +268,9 @@ export function ServiceDetailPage() {
   }
 
   const filteredServiceEvents = (serviceEvents?.items || []).filter((item) => {
+    if (!isInWindow(eventTimestamp(item), activeServiceEventWindow)) {
+      return false;
+    }
     if (serviceEventTaskFilter.trim() && !item.task_id.includes(serviceEventTaskFilter.trim())) {
       return false;
     }
@@ -252,6 +282,7 @@ export function ServiceDetailPage() {
     }
     return true;
   });
+  const filteredServiceLogs = (serviceLogs?.items || []).filter((item) => isInWindow(item.timestamp, activeServiceLogWindow));
   const serviceLogSourceOptions = Array.from(new Set((serviceLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
 
   if (servicesState.error) {
@@ -433,11 +464,16 @@ export function ServiceDetailPage() {
                 value={serviceEventWindowMode}
                 onChange={(event) => {
                   const nextMode = event.target.value as TimeWindowMode;
+                  let nextManualFrom = serviceEventManualFrom;
+                  let nextManualTo = serviceEventManualTo;
                   if (nextMode === "manual") {
-                    setServiceEventManualFrom(isoToLocalDateTime(activeServiceEventWindow.from));
-                    setServiceEventManualTo(isoToLocalDateTime(activeServiceEventWindow.to));
+                    nextManualFrom = isoToLocalDateTime(activeServiceEventWindow.from);
+                    nextManualTo = isoToLocalDateTime(activeServiceEventWindow.to);
+                    setServiceEventManualFrom(nextManualFrom);
+                    setServiceEventManualTo(nextManualTo);
                   }
                   setServiceEventWindowMode(nextMode);
+                  void loadServiceEvents(service.service_id, resolveWindow(nextMode, nextManualFrom, nextManualTo));
                 }}
                 style={inputStyle}
               >
@@ -458,7 +494,11 @@ export function ServiceDetailPage() {
                     ? serviceEventManualFrom
                     : isoToLocalDateTime(activeServiceEventWindow.from)
                 }
-                onChange={(event) => setServiceEventManualFrom(event.target.value)}
+                onChange={(event) => {
+                  const nextFrom = event.target.value;
+                  setServiceEventManualFrom(nextFrom);
+                  void loadServiceEvents(service.service_id, resolveWindow("manual", nextFrom, serviceEventManualTo));
+                }}
                 disabled={serviceEventWindowMode !== "manual"}
                 style={inputStyle}
               />
@@ -473,7 +513,11 @@ export function ServiceDetailPage() {
                     ? serviceEventManualTo
                     : isoToLocalDateTime(activeServiceEventWindow.to)
                 }
-                onChange={(event) => setServiceEventManualTo(event.target.value)}
+                onChange={(event) => {
+                  const nextTo = event.target.value;
+                  setServiceEventManualTo(nextTo);
+                  void loadServiceEvents(service.service_id, resolveWindow("manual", serviceEventManualFrom, nextTo));
+                }}
                 disabled={serviceEventWindowMode !== "manual"}
                 style={inputStyle}
               />
@@ -586,11 +630,16 @@ export function ServiceDetailPage() {
                 value={serviceLogWindowMode}
                 onChange={(event) => {
                   const nextMode = event.target.value as TimeWindowMode;
+                  let nextManualFrom = serviceLogManualFrom;
+                  let nextManualTo = serviceLogManualTo;
                   if (nextMode === "manual") {
-                    setServiceLogManualFrom(isoToLocalDateTime(activeServiceLogWindow.from));
-                    setServiceLogManualTo(isoToLocalDateTime(activeServiceLogWindow.to));
+                    nextManualFrom = isoToLocalDateTime(activeServiceLogWindow.from);
+                    nextManualTo = isoToLocalDateTime(activeServiceLogWindow.to);
+                    setServiceLogManualFrom(nextManualFrom);
+                    setServiceLogManualTo(nextManualTo);
                   }
                   setServiceLogWindowMode(nextMode);
+                  void loadServiceLogs({ window: resolveWindow(nextMode, nextManualFrom, nextManualTo) });
                 }}
                 style={inputStyle}
               >
@@ -611,7 +660,11 @@ export function ServiceDetailPage() {
                     ? serviceLogManualFrom
                     : isoToLocalDateTime(activeServiceLogWindow.from)
                 }
-                onChange={(event) => setServiceLogManualFrom(event.target.value)}
+                onChange={(event) => {
+                  const nextFrom = event.target.value;
+                  setServiceLogManualFrom(nextFrom);
+                  void loadServiceLogs({ window: resolveWindow("manual", nextFrom, serviceLogManualTo) });
+                }}
                 disabled={serviceLogWindowMode !== "manual"}
                 style={inputStyle}
               />
@@ -626,7 +679,11 @@ export function ServiceDetailPage() {
                     ? serviceLogManualTo
                     : isoToLocalDateTime(activeServiceLogWindow.to)
                 }
-                onChange={(event) => setServiceLogManualTo(event.target.value)}
+                onChange={(event) => {
+                  const nextTo = event.target.value;
+                  setServiceLogManualTo(nextTo);
+                  void loadServiceLogs({ window: resolveWindow("manual", serviceLogManualFrom, nextTo) });
+                }}
                 disabled={serviceLogWindowMode !== "manual"}
                 style={inputStyle}
               />
@@ -652,12 +709,12 @@ export function ServiceDetailPage() {
           )}
           {serviceLogsLoading ? <p style={mutedTextStyle}>Loading service logs...</p> : null}
           {serviceLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceLogsError}</p> : null}
-          {!serviceLogsLoading && !serviceLogsError && !(serviceLogs?.items.length || 0) ? (
+          {!serviceLogsLoading && !serviceLogsError && !filteredServiceLogs.length ? (
             <p style={mutedTextStyle}>No service logs matched the current filters.</p>
           ) : null}
-          {serviceLogs?.items.length ? (
+          {filteredServiceLogs.length ? (
             <div className="studio-stack-sm studio-surface-scroll">
-              {serviceLogs.items.map((item, index) => (
+              {filteredServiceLogs.map((item, index) => (
                 <article
                   key={`${item.timestamp}-${item.message}-${index}`}
                   className="studio-subcard"

@@ -445,7 +445,6 @@ button:hover {
 
 @media (max-width: 1180px) {
   .studio-page-grid--services,
-  .studio-detail-grid,
   .studio-two-column,
   .studio-content-split--graph,
   .studio-content-split--topology {
@@ -483,6 +482,7 @@ button:hover {
   .studio-form-grid--task-search,
   .studio-form-grid--service-search,
   .studio-form-grid--triple,
+  .studio-detail-grid,
   .studio-log-filter-grid {
     grid-template-columns: 1fr;
   }

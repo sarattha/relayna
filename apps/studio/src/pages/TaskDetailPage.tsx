@@ -46,6 +46,7 @@ const TASK_TERMINAL_STATUSES = new Set([
 ]);
 
 type TaskLogWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
+type TaskLogWindow = { from: string; to: string };
 
 function isoToLocalDateTime(value: string) {
   if (!value.trim()) {
@@ -98,6 +99,29 @@ function describeTaskLogWindow(mode: TaskLogWindowMode, from: string, to: string
   return `Quick window: last ${label} (${from ? new Date(from).toLocaleString() : "unbounded"} to ${
     to ? new Date(to).toLocaleString() : "unbounded"
   }).`;
+}
+
+function isInTimeWindow(value: string, window: TaskLogWindow) {
+  if (!value.trim()) {
+    return true;
+  }
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return true;
+  }
+  if (window.from) {
+    const fromTimestamp = new Date(window.from).getTime();
+    if (!Number.isNaN(fromTimestamp) && timestamp < fromTimestamp) {
+      return false;
+    }
+  }
+  if (window.to) {
+    const toTimestamp = new Date(window.to).getTime();
+    if (!Number.isNaN(toTimestamp) && timestamp > toTimestamp) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function normalizeStatusValue(value: unknown) {
@@ -258,14 +282,29 @@ export function TaskDetailPage() {
   }, [
     taskDetail,
     taskTimelineLoading,
-    taskLogWindowMode,
   ]);
 
   function getTaskLogWindow({ refreshAutoNow = false }: { refreshAutoNow?: boolean } = {}) {
-    if (taskLogWindowMode === "manual" || quickTaskLogWindow) {
+    return getTaskLogWindowForMode(taskLogWindowMode, taskLogManualFrom, taskLogManualTo, { refreshAutoNow });
+  }
+
+  function getTaskLogWindowForMode(
+    mode: TaskLogWindowMode,
+    manualFrom: string,
+    manualTo: string,
+    { refreshAutoNow = false }: { refreshAutoNow?: boolean } = {},
+  ) {
+    const quickWindow = resolveQuickTaskLogWindow(mode);
+    if (mode === "manual") {
       return {
-        from: activeTaskLogFrom,
-        to: activeTaskLogTo,
+        from: localDateTimeToIso(manualFrom),
+        to: localDateTimeToIso(manualTo),
+      };
+    }
+    if (quickWindow) {
+      return {
+        from: quickWindow.from,
+        to: quickWindow.to,
       };
     }
     const autoNow = refreshAutoNow ? new Date().toISOString() : taskLogAutoNow;
@@ -410,6 +449,9 @@ export function TaskDetailPage() {
   const taskTimelineItems = taskTimeline?.items || [];
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
   const brokerDlqSupported = supportsCapability(taskDetail?.service.capabilities || null, "broker.dlq.messages");
+  const filteredTaskLogs = (taskLogs?.items || []).filter((item) =>
+    isInTimeWindow(item.timestamp, { from: activeTaskLogFrom, to: activeTaskLogTo }),
+  );
   const taskLogSourceOptions = Array.from(new Set((taskLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
 
   return (
@@ -620,11 +662,23 @@ export function TaskDetailPage() {
                         value={taskLogWindowMode}
                         onChange={(event) => {
                           const nextMode = event.target.value as TaskLogWindowMode;
+                          let nextManualFrom = taskLogManualFrom;
+                          let nextManualTo = taskLogManualTo;
                           if (nextMode === "manual") {
-                            setTaskLogManualFrom(isoToLocalDateTime(activeTaskLogFrom));
-                            setTaskLogManualTo(isoToLocalDateTime(activeTaskLogTo));
+                            nextManualFrom = isoToLocalDateTime(activeTaskLogFrom);
+                            nextManualTo = isoToLocalDateTime(activeTaskLogTo);
+                            setTaskLogManualFrom(nextManualFrom);
+                            setTaskLogManualTo(nextManualTo);
                           }
                           setTaskLogWindowMode(nextMode);
+                          if (taskDetail.service.log_config) {
+                            void loadTaskLogs(
+                              taskDetail.service_id,
+                              taskDetail.task_id,
+                              taskDetail.task_ref.correlation_id || null,
+                              getTaskLogWindowForMode(nextMode, nextManualFrom, nextManualTo),
+                            );
+                          }
                         }}
                         style={inputStyle}
                       >
@@ -645,7 +699,18 @@ export function TaskDetailPage() {
                             ? taskLogManualFrom
                             : isoToLocalDateTime(activeTaskLogFrom)
                         }
-                        onChange={(event) => setTaskLogManualFrom(event.target.value)}
+                        onChange={(event) => {
+                          const nextFrom = event.target.value;
+                          setTaskLogManualFrom(nextFrom);
+                          if (taskDetail.service.log_config) {
+                            void loadTaskLogs(
+                              taskDetail.service_id,
+                              taskDetail.task_id,
+                              taskDetail.task_ref.correlation_id || null,
+                              getTaskLogWindowForMode("manual", nextFrom, taskLogManualTo),
+                            );
+                          }
+                        }}
                         disabled={taskLogWindowMode !== "manual"}
                         style={inputStyle}
                       />
@@ -660,7 +725,18 @@ export function TaskDetailPage() {
                             ? taskLogManualTo
                             : isoToLocalDateTime(activeTaskLogTo)
                         }
-                        onChange={(event) => setTaskLogManualTo(event.target.value)}
+                        onChange={(event) => {
+                          const nextTo = event.target.value;
+                          setTaskLogManualTo(nextTo);
+                          if (taskDetail.service.log_config) {
+                            void loadTaskLogs(
+                              taskDetail.service_id,
+                              taskDetail.task_id,
+                              taskDetail.task_ref.correlation_id || null,
+                              getTaskLogWindowForMode("manual", taskLogManualFrom, nextTo),
+                            );
+                          }
+                        }}
                         disabled={taskLogWindowMode !== "manual"}
                         style={inputStyle}
                       />
@@ -687,12 +763,12 @@ export function TaskDetailPage() {
                   )}
                   {taskLogsLoading ? <p style={mutedTextStyle}>Loading task logs...</p> : null}
                   {taskLogsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskLogsError}</p> : null}
-                  {!taskLogsLoading && !taskLogsError && !(taskLogs?.items.length || 0) ? (
+                  {!taskLogsLoading && !taskLogsError && !filteredTaskLogs.length ? (
                     <p style={mutedTextStyle}>No task logs matched the current filters.</p>
                   ) : null}
-                  {taskLogs?.items.length ? (
+                  {filteredTaskLogs.length ? (
                     <div className="studio-stack-sm studio-surface-scroll">
-                      {taskLogs.items.map((item, index) => (
+                      {filteredTaskLogs.map((item, index) => (
                         <article
                           key={`${item.timestamp}-${item.message}-${index}`}
                           className="studio-subcard"

@@ -840,6 +840,59 @@ describe("App", () => {
     });
   });
 
+  it("applies quick service log windows immediately", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url.startsWith("/studio/services/payments-api/logs?") && method === "GET") {
+        const parsed = new URL(url, "http://studio.test");
+        if (parsed.searchParams.get("from") || parsed.searchParams.get("to")) {
+          return jsonResponse({ count: 0, items: [] });
+        }
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              timestamp: "2026-04-25T15:46:04Z",
+              level: "info",
+              source: "runtime-worker",
+              message: "old service log line",
+              fields: {},
+            },
+          ],
+        });
+      }
+
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("old service log line")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Service log window mode"), { target: { value: "15m" } });
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        const from = parsed.searchParams.get("from");
+        const to = parsed.searchParams.get("to");
+        return (
+          parsed.pathname === "/studio/services/payments-api/logs" &&
+          Boolean(from) &&
+          Boolean(to) &&
+          new Date(to || "").getTime() - new Date(from || "").getTime() === 15 * 60 * 1000
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+    await waitFor(() => expect(screen.queryByText("old service log line")).not.toBeInTheDocument());
+  });
+
   it("uses the manual service activity window override when provided", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
 
@@ -867,6 +920,65 @@ describe("App", () => {
       });
       expect(matchingCall).toBeTruthy();
     });
+  });
+
+  it("applies quick service activity windows immediately", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url.startsWith("/studio/services/payments-api/events?") && method === "GET") {
+        const parsed = new URL(url, "http://studio.test");
+        if (parsed.searchParams.get("from") || parsed.searchParams.get("to")) {
+          return jsonResponse({ count: 0, items: [], next_cursor: null });
+        }
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              ingest_method: "pull",
+              ingested_at: "2026-04-25T15:46:04Z",
+              dedupe_key: "evt-old",
+              out_of_order: false,
+              task_id: "task-old",
+              event_type: "status.completed",
+              source_kind: "status",
+              component: "mock-service",
+              timestamp: "2026-04-25T15:46:04Z",
+              payload: { status: "completed" },
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("task-old")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Service event window mode"), { target: { value: "15m" } });
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        const from = parsed.searchParams.get("from");
+        const to = parsed.searchParams.get("to");
+        return (
+          parsed.pathname === "/studio/services/payments-api/events" &&
+          Boolean(from) &&
+          Boolean(to) &&
+          new Date(to || "").getTime() - new Date(from || "").getTime() === 15 * 60 * 1000
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+    await waitFor(() => expect(screen.queryByText("task-old")).not.toBeInTheDocument());
   });
 
   it("derives service log source options from returned log entries", async () => {
@@ -1166,6 +1278,66 @@ describe("App", () => {
       });
       expect(matchingCall).toBeTruthy();
     });
+  });
+
+  it("applies quick task log windows immediately", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url.startsWith("/studio/tasks/payments-api/task-123/logs?") && method === "GET") {
+        const parsed = new URL(url, "http://studio.test");
+        const from = parsed.searchParams.get("from");
+        const to = parsed.searchParams.get("to");
+        const isQuickWindow =
+          Boolean(from) && Boolean(to) && new Date(to || "").getTime() - new Date(from || "").getTime() === 15 * 60 * 1000;
+        if (isQuickWindow) {
+          return jsonResponse({ count: 0, items: [], next_cursor: null });
+        }
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              timestamp: "2026-04-25T15:46:04Z",
+              level: "info",
+              source: "api",
+              message: "old task log line",
+              fields: {},
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("old task log line")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Task log window mode"), { target: { value: "15m" } });
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        const from = parsed.searchParams.get("from");
+        const to = parsed.searchParams.get("to");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/logs" &&
+          Boolean(from) &&
+          Boolean(to) &&
+          new Date(to || "").getTime() - new Date(from || "").getTime() === 15 * 60 * 1000
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+    await waitFor(() => expect(screen.queryByText("old task log line")).not.toBeInTheDocument());
   });
 
   it("advances the auto task log window end when reload logs is clicked on a running task", async () => {
