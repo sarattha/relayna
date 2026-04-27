@@ -44,6 +44,8 @@ export const mutedTextStyle: CSSProperties = {
   fontSize: 13,
   lineHeight: 1.55,
   color: "var(--studio-text-muted)",
+  minWidth: 0,
+  overflowWrap: "anywhere",
 };
 
 export const primaryButtonStyle: CSSProperties = {
@@ -668,8 +670,10 @@ const logMessageSurfaceStyle: CSSProperties = {
   fontFamily: "'SFMono-Regular', Menlo, monospace",
   fontSize: 12,
   lineHeight: 1.6,
+  minWidth: 0,
   maxWidth: "100%",
-  overflowX: "auto",
+  overflowX: "hidden",
+  overflowWrap: "anywhere",
   whiteSpace: "pre-wrap",
   wordBreak: "break-word",
 };
@@ -785,6 +789,8 @@ function AnsiLogMessage({ message }: { message: string }) {
           style={{
             color: segment.color,
             fontWeight: segment.fontWeight,
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
           }}
         >
           {segment.text}
