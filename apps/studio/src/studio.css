@@ -187,7 +187,8 @@ button:hover {
 }
 
 .studio-content-split--graph {
-  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(420px, 0.9fr);
+  align-items: start;
 }
 
 .studio-content-split--topology {
@@ -230,11 +231,11 @@ button:hover {
 }
 
 .studio-log-filter-grid {
-  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 0.45fr) minmax(110px, 0.35fr);
+  grid-template-columns: minmax(160px, 1.4fr) minmax(110px, 0.45fr) minmax(100px, 0.35fr);
 }
 
 .studio-log-window-grid {
-  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(150px, 0.62fr));
+  grid-template-columns: minmax(160px, 1fr) repeat(2, minmax(130px, 0.62fr));
 }
 
 .studio-card,
@@ -306,7 +307,8 @@ button:hover {
 
 .studio-surface-scroll {
   max-height: 420px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 4px;
   min-width: 0;
 }
@@ -427,6 +429,12 @@ button:hover {
   min-width: 0;
 }
 
+.studio-list-card__top > *,
+.studio-list-card__meta > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .studio-inline-meta {
   font-size: 0.78rem;
   color: var(--studio-text-soft);
@@ -470,10 +478,15 @@ button:hover {
   margin: 0 0 10px;
 }
 
+@media (max-width: 1320px) {
+  .studio-content-split--graph {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1180px) {
   .studio-page-grid--services,
   .studio-two-column,
-  .studio-content-split--graph,
   .studio-content-split--topology {
     grid-template-columns: 1fr;
   }
