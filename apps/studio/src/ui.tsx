@@ -644,6 +644,8 @@ export function LogSourceBadge({ source }: { source?: string | null }) {
         fontSize: 11,
         fontWeight: 700,
         letterSpacing: 0.4,
+        maxWidth: "100%",
+        overflowWrap: "anywhere",
       }}
     >
       {formatLogSource(source)}
@@ -666,6 +668,8 @@ const logMessageSurfaceStyle: CSSProperties = {
   fontFamily: "'SFMono-Regular', Menlo, monospace",
   fontSize: 12,
   lineHeight: 1.6,
+  maxWidth: "100%",
+  overflowX: "auto",
   whiteSpace: "pre-wrap",
   wordBreak: "break-word",
 };
@@ -804,9 +808,9 @@ export function LogMessage({ message }: { message: string }) {
 
 export function MetadataRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div style={{ display: "grid", gap: 2 }}>
+    <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
       <dt style={{ fontWeight: 700 }}>{label}</dt>
-      <dd style={{ margin: 0, opacity: 0.85 }}>{value}</dd>
+      <dd style={{ margin: 0, opacity: 0.85, minWidth: 0, overflowWrap: "anywhere" }}>{value}</dd>
     </div>
   );
 }
@@ -828,6 +832,8 @@ export function NoticeBanner({ tone = "info", children }: { tone?: "info" | "err
         padding: 16,
         borderColor: tone === "error" ? "rgba(168, 60, 40, 0.3)" : "rgba(15, 124, 123, 0.24)",
         color: tone === "error" ? "var(--studio-danger)" : "var(--studio-secondary-strong)",
+        minWidth: 0,
+        overflowWrap: "anywhere",
       }}
     >
       {children}
@@ -880,6 +886,7 @@ export function InlineCodeBox({ value, minHeight = 180 }: { value: string; minHe
       style={{
         ...inputStyle,
         minHeight,
+        maxWidth: "100%",
         resize: "vertical",
         fontFamily: "'SFMono-Regular', Menlo, monospace",
         fontSize: 12,
