@@ -160,6 +160,17 @@ button:hover {
 .studio-content-split {
   display: grid;
   gap: 20px;
+  min-width: 0;
+}
+
+.studio-page-grid > *,
+.studio-two-column > *,
+.studio-detail-grid > *,
+.studio-content-split > *,
+.studio-stack-sm > *,
+.studio-stack-md > *,
+.studio-stack-lg > * {
+  min-width: 0;
 }
 
 .studio-page-grid--services {
@@ -219,11 +230,11 @@ button:hover {
 }
 
 .studio-log-filter-grid {
-  grid-template-columns: minmax(0, 1.4fr) 140px 110px;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 0.45fr) minmax(110px, 0.35fr);
 }
 
 .studio-log-window-grid {
-  grid-template-columns: minmax(260px, 1fr) minmax(210px, 0.38fr) minmax(210px, 0.38fr);
+  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(150px, 0.62fr));
 }
 
 .studio-card,
@@ -231,6 +242,7 @@ button:hover {
   border: 1px solid var(--studio-border);
   border-radius: 20px;
   box-shadow: var(--studio-shadow);
+  min-width: 0;
 }
 
 .studio-card {
@@ -247,6 +259,8 @@ button:hover {
   padding: 20px;
   display: grid;
   gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .studio-section-card--compact {
@@ -264,15 +278,23 @@ button:hover {
   justify-content: space-between;
   gap: 14px;
   align-items: start;
+  min-width: 0;
 }
 
 .studio-section-header__copy {
   min-width: 0;
 }
 
+.studio-section-header > :last-child {
+  max-width: 100%;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
 .studio-section-title {
   margin: 0;
   line-height: 1.05;
+  overflow-wrap: anywhere;
 }
 
 .studio-section-subtitle {
@@ -286,6 +308,7 @@ button:hover {
   max-height: 420px;
   overflow: auto;
   padding-right: 4px;
+  min-width: 0;
 }
 
 .studio-filter-field {
@@ -294,6 +317,7 @@ button:hover {
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--studio-text-muted);
+  min-width: 0;
 }
 
 .studio-filter-field--wide {
@@ -327,6 +351,7 @@ button:hover {
   display: block;
   margin-top: 10px;
   font-size: 1.625rem;
+  overflow-wrap: anywhere;
 }
 
 .studio-metric-card--compact {
@@ -399,12 +424,14 @@ button:hover {
   gap: 12px;
   align-items: start;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .studio-inline-meta {
   font-size: 0.78rem;
   color: var(--studio-text-soft);
   overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .studio-flow-surface {
