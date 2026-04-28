@@ -292,6 +292,15 @@ button:hover {
   flex: 0 1 auto;
 }
 
+.studio-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .studio-section-title {
   margin: 0;
   line-height: 1.05;

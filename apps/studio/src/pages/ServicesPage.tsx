@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { searchServices } from "../api";
@@ -27,6 +27,7 @@ export function ServicesPage() {
   const [showEditor, setShowEditor] = useState(false);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServiceDraft>(servicesState.emptyDraft);
+  const editorRef = useRef<HTMLDivElement | null>(null);
   const [saving, setSaving] = useState(false);
   const [searchDraft, setSearchDraft] = useState({
     query: "",
@@ -121,6 +122,12 @@ export function ServicesPage() {
     service.health ? ["stale", "degraded"].includes(service.health.overall_status) : false,
   ).length;
   const disabledCount = servicesState.services.filter((service) => service.status === "disabled").length;
+
+  useEffect(() => {
+    if (showEditor) {
+      editorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    }
+  }, [editingServiceId, showEditor]);
 
   return (
     <div className="studio-stack-lg">
@@ -252,28 +259,29 @@ export function ServicesPage() {
       </SectionCard>
 
       {showEditor ? (
-        <SectionCard
-          title={editingServiceId ? "Edit Service" : "Register Service"}
-          subtitle={
-            editingServiceId
-              ? "Update operator-managed metadata or move the service to a different environment."
-              : "Create a durable service entry in the Studio registry."
-          }
-          action={
-            <div className="studio-action-row">
-              {editingServiceId ? (
-                <button type="button" onClick={startCreate} style={secondaryButtonStyle}>
-                  <StudioIcon name="add" />
-                  New Draft
+        <div ref={editorRef}>
+          <SectionCard
+            title={editingServiceId ? "Edit Service" : "Register Service"}
+            subtitle={
+              editingServiceId
+                ? "Update operator-managed metadata or move the service to a different environment."
+                : "Create a durable service entry in the Studio registry."
+            }
+            action={
+              <div className="studio-action-row">
+                {editingServiceId ? (
+                  <button type="button" onClick={startCreate} style={secondaryButtonStyle}>
+                    <StudioIcon name="add" />
+                    New Draft
+                  </button>
+                ) : null}
+                <button type="button" onClick={closeEditor} style={secondaryButtonStyle}>
+                  <StudioIcon name="clear" />
+                  Close
                 </button>
-              ) : null}
-              <button type="button" onClick={closeEditor} style={secondaryButtonStyle}>
-                <StudioIcon name="clear" />
-                Close
-              </button>
-            </div>
-          }
-        >
+              </div>
+            }
+          >
           <form onSubmit={handleSubmit} className="studio-stack-sm">
             <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
               Service id
@@ -493,7 +501,8 @@ export function ServicesPage() {
               </div>
             </SectionCard>
           ) : null}
-        </SectionCard>
+          </SectionCard>
+        </div>
       ) : null}
 
       <SectionCard

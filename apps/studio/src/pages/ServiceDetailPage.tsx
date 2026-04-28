@@ -313,7 +313,7 @@ export function ServiceDetailPage() {
         title="Service Detail"
         subtitle="Inspect stored registry metadata, navigate to routed control-plane screens, and run existing registry actions."
         action={
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="studio-badge-row">
             <StatusBadge status={service.status} />
             <HealthBadge status={health?.overall_status || "unknown"} />
           </div>
