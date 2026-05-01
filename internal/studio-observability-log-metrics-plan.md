@@ -1,0 +1,451 @@
+# Relayna Studio Observability Plan
+
+This internal-only file is the source of truth for the Relayna Studio logs and
+metrics feature plan. It is intentionally kept outside `docs/` and must not be
+linked from `mkdocs.yml` or treated as public product documentation.
+
+## Summary
+
+The first production observability stack for Relayna Studio is:
+
+```text
+Relayna API pods / long-running worker pods
+  -> stdout JSON logs + /metrics
+  -> Grafana Alloy
+  -> Loki for logs
+  -> Prometheus or Mimir for metrics
+  -> Relayna Studio as the task-aware query and visualization layer
+```
+
+Relayna Studio must not ingest every log line. Studio should query Loki,
+Prometheus/Mimir, and Relayna APIs, then merge those results into service and
+task views. Relayna Redis remains the source of truth for task lifecycle, status
+history, DLQ records, observations, and execution graphs.
+
+Grafana may remain available for generic observability, but Relayna Studio is
+the product-specific task and runtime UI.
+
+## Key Decisions
+
+- Use Alloy + Loki + Prometheus + Relayna Studio as the first production stack.
+- Use Option A, the safer default for Loki: keep `task_id` inside the JSON log
+  body, not as a Loki label.
+- Treat Case 2, many tasks per long-running worker pod, as the real usage model.
+- For long-running worker pods, Kubernetes CPU/memory is pod/container-level
+  only. Studio may show pod metrics over the task time window, but exact
+  per-task CPU/memory requires Relayna runtime instrumentation.
+- Keep task lifecycle, status history, DLQ, observations, and execution graph
+  data in Relayna/Redis. Do not replace those stores with Loki.
+
+## Interfaces And Data Model
+
+Relayna worker and API pods should emit structured JSON logs to stdout. Minimum
+fields:
+
+```text
+service
+app
+task_id
+correlation_id
+stage
+attempt
+event
+level
+```
+
+Extended fields:
+
+```text
+env
+cluster
+namespace
+pod
+container
+workflow_id
+worker_id
+runtime
+request_id
+message
+timestamp
+```
+
+Loki labels should stay low-cardinality:
+
+```text
+cluster
+namespace
+service
+app
+container
+level
+stage
+```
+
+These fields must not become default Loki labels:
+
+```text
+task_id
+correlation_id
+request_id
+pod
+worker_id
+```
+
+Studio service observability config should cover both logs and metrics:
+
+- Logs:
+  - `backend`: `loki`
+  - Loki base URL
+  - optional tenant ID
+  - service selector labels
+  - source/app label
+  - `task_match_mode`: `contains`
+  - `task_match_template`: `{task_id}`
+- Metrics:
+  - `backend`: `prometheus` or `mimir`
+  - metrics backend URL
+  - namespace selector
+  - service label
+  - pod label
+
+Studio endpoints should include or evolve toward:
+
+```text
+GET /studio/services/{service_id}/logs
+GET /studio/tasks/{service_id}/{task_id}/logs
+GET /studio/services/{service_id}/metrics
+GET /studio/tasks/{service_id}/{task_id}/metrics
+```
+
+Relayna API pods, Relayna worker pods, and the Studio backend should expose
+`/metrics`.
+
+## Phase 1: Centralized Logs
+
+Goal: provide the fastest useful log visibility in Studio without changing
+Relayna into a log ingestion system.
+
+Implementation:
+
+- Deploy Alloy + Loki in the observability namespace.
+- Configure Alloy to collect `/var/log/containers/*.log`, parse CRI logs,
+  attach Kubernetes metadata, parse JSON log bodies, drop noisy labels, and send
+  to Loki.
+- Collect Relayna worker pod logs, Relayna API pod logs, Studio backend logs,
+  Kubernetes events, and optionally Redis/RabbitMQ logs.
+- Configure Studio `log_config` so service logs query by Loki service selector.
+- Configure task logs to use body matching, for example:
+
+```logql
+{service="document-worker"} |= "task-123"
+```
+
+- Studio displays service logs, task logs, time-window filtering, level
+  filtering, and source/app filtering.
+
+Tasks:
+
+- Define the required Relayna JSON log fields for API, worker, aggregation, and
+  Studio backend emitters.
+- Add or update runtime logging helpers so task lifecycle logs consistently
+  include `task_id`, `correlation_id`, `stage`, `attempt`, `event`, `service`,
+  `app`, and `level`.
+- Document the expected Alloy log pipeline: Kubernetes log source, CRI parsing,
+  Kubernetes metadata enrichment, JSON parsing, label selection, and Loki write.
+- Define the Loki label allowlist and explicitly keep high-cardinality fields in
+  the log body.
+- Confirm Studio service registration can express the required Loki
+  `log_config` for service selector labels, source/app filtering, and
+  `contains` task matching.
+- Verify the existing Studio Loki provider returns normalized log entries for
+  service and task views with source, level, timestamp, message, and structured
+  fields.
+- Add or update frontend states for log loading, empty results, backend errors,
+  source filtering, level filtering, and manual task time-window overrides.
+- Add example local or AKS registration payloads for a Relayna service using
+  Option A task matching.
+
+Acceptance criteria:
+
+- Studio service pages show logs for API and worker sources belonging to the
+  registered service.
+- Studio task pages show task-related logs through `task_id` body matching.
+- Missing logs do not break task status, timeline, DLQ, or execution graph
+  views.
+
+Checklist:
+
+- [ ] Define Relayna JSON log field contract.
+- [ ] Standardize API pod log fields.
+- [ ] Standardize worker pod log fields.
+- [ ] Standardize Studio backend log fields.
+- [ ] Define Alloy log collection pipeline.
+- [ ] Define Loki low-cardinality label allowlist.
+- [ ] Confirm `task_id` remains in the log body by default.
+- [ ] Configure Studio `log_config` examples for Loki.
+- [ ] Verify service-scoped log queries.
+- [ ] Verify task-scoped `contains` log queries.
+- [ ] Add source/app and level filtering coverage.
+- [ ] Add empty/error/loading UI coverage for logs.
+- [ ] Add backend tests for Loki provider errors and unsafe URLs.
+- [ ] Add frontend tests for service and task log views.
+
+## Phase 2: Kubernetes Metrics
+
+Goal: add pod/container infrastructure metrics around Relayna service and task
+windows.
+
+Implementation:
+
+- Add Prometheus or Mimir plus Alloy metrics collection.
+- Collect kubelet, cAdvisor, and Kubernetes API metrics.
+- Include pod CPU, memory, limits/requests, restart count, OOMKilled events,
+  pod phase, container readiness, and network I/O.
+- Studio service views show API and worker pod CPU/memory, restarts, OOM
+  signals, and pod state.
+- Studio task views derive task lifecycle windows from Relayna Redis and show
+  pod/container metrics around that window.
+- The UI must clearly treat task-window pod metrics as approximate for
+  long-running workers that process many tasks.
+
+Tasks:
+
+- Define the Studio metrics provider interface separately from the existing log
+  provider interface.
+- Define the service-level metrics query contract for CPU, memory, restart
+  count, OOMKilled events, pod phase, readiness, and network I/O.
+- Define the task-window metrics query contract using task lifecycle start/end
+  timestamps from Relayna status or observations.
+- Add a Prometheus-compatible provider that builds bounded PromQL queries from
+  service metrics config and rejects unsupported high-cardinality task labels.
+- Extend Studio service records or registry metadata with metrics backend
+  configuration without breaking existing `log_config` behavior.
+- Reuse the Studio backend egress allowlist model for Prometheus/Mimir base
+  URLs.
+- Add backend normalization for metric series, units, query windows, warnings,
+  partial results, and provider errors.
+- Add service metrics UI panels for pod CPU, memory, restarts, OOMKilled
+  events, phase, readiness, and network I/O.
+- Add task metrics UI panels that clearly label pod-level task-window metrics as
+  approximate for long-running workers.
+- Add fixtures for overlapping tasks in the same worker pod to verify the UI
+  does not imply exact per-task CPU/memory.
+
+Acceptance criteria:
+
+- Studio can show API pod and worker pod CPU/memory for a registered service.
+- Studio can show restart, OOMKilled, pod phase, and readiness signals near a
+  task lifecycle window.
+- Operators can distinguish exact Relayna task state from approximate
+  task-window pod metrics.
+
+Checklist:
+
+- [ ] Define Studio metrics provider interface.
+- [ ] Define service metrics response schema.
+- [ ] Define task-window metrics response schema.
+- [ ] Add metrics config to service registry model.
+- [ ] Add Prometheus/Mimir backend URL allowlist validation.
+- [ ] Implement Prometheus-compatible query provider.
+- [ ] Reject `task_id` as a metrics label in default config.
+- [ ] Normalize metric series and units.
+- [ ] Add service metrics backend routes.
+- [ ] Add task metrics backend routes.
+- [ ] Add service metrics UI panels.
+- [ ] Add task-window metrics UI panels.
+- [ ] Add approximation messaging for long-running workers.
+- [ ] Add backend tests for query generation and provider errors.
+- [ ] Add frontend tests for service and task metrics states.
+
+## Phase 3: Relayna Task Metrics
+
+Goal: expose aggregate Relayna runtime metrics and exact task-level resource
+samples where pod-level metrics are not enough.
+
+Instrument Relayna SDK/runtime with first-class Prometheus metrics:
+
+```text
+relayna_tasks_started_total
+relayna_tasks_completed_total
+relayna_tasks_failed_total
+relayna_tasks_retried_total
+relayna_tasks_dlq_total
+relayna_task_duration_seconds
+relayna_task_attempts
+relayna_worker_active_tasks
+relayna_worker_heartbeat_timestamp
+relayna_queue_publish_total
+relayna_status_events_published_total
+relayna_observation_events_total
+```
+
+Use low-cardinality metric labels:
+
+```text
+service
+stage
+queue
+status
+worker_type
+```
+
+Never use `task_id` as a metric label.
+
+For exact per-task resource data in long-running worker pods, add Relayna
+runtime observations such as:
+
+```text
+task_start_cpu_process_seconds
+task_end_cpu_process_seconds
+task_start_memory_rss
+task_end_memory_rss
+```
+
+Studio should add views for throughput, failure rate, retry rate, p95 task
+duration, active tasks, worker saturation, queue lag, and DLQ trends.
+
+Tasks:
+
+- Choose the Relayna metrics implementation strategy and dependency boundary so
+  SDK users can expose Prometheus metrics without forcing Studio dependencies.
+- Add metric instruments for task starts, completions, failures, retries, DLQ
+  movement, task duration, attempts, active tasks, worker heartbeat, queue
+  publishes, status events, and observation events.
+- Define low-cardinality label values for service, stage, queue, status, and
+  worker type.
+- Add guardrails and tests that prevent `task_id`, `correlation_id`, pod name,
+  request ID, and worker ID from being metric labels.
+- Expose `/metrics` from Relayna API integrations, worker runtimes, and Studio
+  backend where applicable.
+- Add runtime hooks to record active tasks and heartbeat state for long-running
+  worker pods.
+- Add optional process-level task resource observations for CPU and RSS sampled
+  around task execution.
+- Ensure exact task-level resource samples are stored as Relayna observations,
+  not Prometheus labels.
+- Add Studio aggregate runtime charts for throughput, failures, retries, DLQ,
+  p95 duration, active tasks, saturation, and queue lag.
+- Add Studio task detail rendering for exact per-task runtime samples when
+  observations are present, with fallback to phase 2 pod-window metrics.
+
+Acceptance criteria:
+
+- Prometheus/Mimir can scrape Relayna API pods, worker pods, and Studio backend
+  `/metrics` endpoints.
+- Studio can render aggregate task/runtime charts without high-cardinality
+  labels.
+- Exact per-task resource samples come from Relayna observations, not from
+  Prometheus labels.
+
+Checklist:
+
+- [ ] Select Relayna metrics dependency and export strategy.
+- [ ] Add task lifecycle counters.
+- [ ] Add task duration histogram.
+- [ ] Add task attempt metric.
+- [ ] Add active task gauge.
+- [ ] Add worker heartbeat metric.
+- [ ] Add queue publish metric.
+- [ ] Add status event metric.
+- [ ] Add observation event metric.
+- [ ] Add low-cardinality label definitions.
+- [ ] Add high-cardinality label guardrails.
+- [ ] Expose `/metrics` from API runtime integration.
+- [ ] Expose `/metrics` from worker runtime integration.
+- [ ] Expose `/metrics` from Studio backend.
+- [ ] Add task CPU process observation samples.
+- [ ] Add task RSS memory observation samples.
+- [ ] Add Studio aggregate runtime charts.
+- [ ] Add Studio exact task resource sample display.
+- [ ] Add SDK/runtime tests for metrics emission.
+- [ ] Add Studio tests for aggregate charts and sample fallback behavior.
+
+## Phase 4: Trace Correlation
+
+Goal: connect distributed Relayna task execution across API publish, queueing,
+worker consumption, handler work, external calls, and result publication.
+
+Implementation:
+
+- Add OpenTelemetry tracing after logs and metrics are stable.
+- Include these identifiers in logs and observations:
+
+```text
+trace_id
+span_id
+task_id
+workflow_id
+correlation_id
+```
+
+- Studio links API publish, queue wait, worker consume, handler execution,
+  external API calls, result publish, logs, metrics, and execution graph.
+
+Tasks:
+
+- Define OpenTelemetry trace propagation points across API publish, RabbitMQ
+  message headers/properties, worker consume, handler execution, status publish,
+  and result publish.
+- Define how `trace_id`, `span_id`, `task_id`, `workflow_id`, and
+  `correlation_id` are attached to logs, observations, and task references.
+- Add optional tracing hooks that are disabled or no-op unless tracing is
+  configured by the downstream service.
+- Define the trace backend contract for Studio, including Tempo or another
+  OpenTelemetry-compatible trace query provider.
+- Add Studio backend trace lookup by task context while keeping traces optional.
+- Add Studio UI links between task timeline entries, logs, metrics,
+  execution-graph nodes, and trace spans.
+- Add fallback behavior for services without tracing enabled.
+- Document the rollout order so tracing cannot block centralized logs,
+  Kubernetes metrics, or Relayna task metrics.
+
+Acceptance criteria:
+
+- Tracing remains optional for the first production release and does not block
+  phases 1-3.
+- When traces are available, Studio can navigate from a task to related logs,
+  metrics, lifecycle events, and trace spans.
+
+Checklist:
+
+- [ ] Define trace propagation model.
+- [ ] Add trace context to API publish path.
+- [ ] Add trace context to broker message metadata.
+- [ ] Add trace context to worker consume path.
+- [ ] Add trace context to handler execution spans.
+- [ ] Add trace context to status/result publish spans.
+- [ ] Add trace identifiers to structured logs.
+- [ ] Add trace identifiers to Relayna observations.
+- [ ] Add no-op behavior when tracing is not configured.
+- [ ] Define Studio trace provider contract.
+- [ ] Add optional trace backend config.
+- [ ] Add task-to-trace backend lookup.
+- [ ] Add frontend links from task views to trace spans.
+- [ ] Add tests for trace-disabled behavior.
+- [ ] Add tests for trace-context propagation.
+- [ ] Add tests for Studio trace lookup and fallback UI.
+
+## Test Plan
+
+- Verify Alloy/Loki ingestion with sample Relayna API and worker JSON logs.
+- Unit-test Studio Loki query generation for Option A body matching.
+- Unit-test Prometheus query generation for service-level and task-window pod
+  metrics.
+- Add validation tests that reject `task_id` as a default metric label.
+- Add backend tests for missing log/metrics config, backend failures, unsafe
+  backend URLs, and empty result handling.
+- Add frontend tests for service logs, task logs, service metrics, task-window
+  metrics, and long-running-worker approximation messaging.
+- Add integration fixtures for one service, one long-running worker pod,
+  multiple task windows, and concurrent task overlap.
+
+## Assumptions
+
+- Target deployment is AKS.
+- Worker pods are long-running and may process many tasks, including overlapping
+  tasks.
+- Existing Studio Loki log support remains the base for phase 1.
+- Existing Relayna Redis/status/observation/DLQ/execution graph behavior remains
+  authoritative for task lifecycle.
+- This file is internal-only and must not be linked from public docs or
+  `mkdocs.yml`.
