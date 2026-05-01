@@ -1,8 +1,23 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
-from relayna.observability import RedisObservationStore, SSEKeepaliveSent, emit_observation, make_redis_observation_sink
+from relayna.observability import (
+    RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS,
+    RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST,
+    RedisObservationStore,
+    SSEKeepaliveSent,
+    TaskHandlerFailed,
+    TaskMessageReceived,
+    bind_studio_log_context,
+    emit_observation,
+    make_redis_observation_sink,
+    make_structlog_observation_sink,
+    observation_to_studio_log_fields,
+    validate_studio_log_fields,
+)
 
 
 class FakePipeline:
@@ -61,6 +76,24 @@ class FakeRedis:
         return items[int(start) : int(stop) + 1]
 
 
+class FakeStructlogLogger:
+    def __init__(self, context: dict[str, object] | None = None, calls: list[dict[str, object]] | None = None) -> None:
+        self.context = context or {}
+        self.calls = calls if calls is not None else []
+
+    def bind(self, **kwargs: object) -> FakeStructlogLogger:
+        return FakeStructlogLogger({**self.context, **kwargs}, self.calls)
+
+    def info(self, event: str, **kwargs: object) -> None:
+        self.calls.append({"method": "info", "event": event, **self.context, **kwargs})
+
+    def warning(self, event: str, **kwargs: object) -> None:
+        self.calls.append({"method": "warning", "event": event, **self.context, **kwargs})
+
+    def error(self, event: str, **kwargs: object) -> None:
+        self.calls.append({"method": "error", "event": event, **self.context, **kwargs})
+
+
 @pytest.mark.asyncio
 async def test_emit_observation_is_noop_when_sink_is_none() -> None:
     await emit_observation(None, SSEKeepaliveSent(task_id="task-123"))
@@ -107,3 +140,130 @@ async def test_make_redis_observation_sink_persists_and_dedupes_events() -> None
     assert len(history) == 1
     assert history[0]["event_type"] == "SSEKeepaliveSent"
     assert redis.expirations[store.history_key("task-123")] == 60
+
+
+def test_studio_log_contract_converts_task_observation_to_structlog_fields() -> None:
+    fields = observation_to_studio_log_fields(
+        TaskMessageReceived(
+            consumer_name="payments-worker",
+            queue_name="payments.tasks",
+            task_id="task-123",
+            correlation_id="corr-123",
+            retry_attempt=2,
+            task_type="charge",
+        ),
+        service="payments",
+        app="payments-worker",
+        env="prod",
+        runtime="worker",
+        stage="charge",
+    )
+
+    assert validate_studio_log_fields(fields, require_task_context=True) == set()
+    assert fields["service"] == "payments"
+    assert fields["app"] == "payments-worker"
+    assert fields["event"] == "task_message_received"
+    assert fields["level"] == "info"
+    assert fields["task_id"] == "task-123"
+    assert fields["correlation_id"] == "corr-123"
+    assert fields["stage"] == "charge"
+    assert fields["attempt"] == 2
+    assert "retry_attempt" not in fields
+    assert str(fields["timestamp"]).endswith("Z")
+
+
+def test_studio_log_contract_marks_failure_observations_as_error() -> None:
+    fields = observation_to_studio_log_fields(
+        TaskHandlerFailed(
+            consumer_name="payments-worker",
+            queue_name="payments.tasks",
+            task_id="task-123",
+            correlation_id="corr-123",
+            retry_attempt=1,
+            exception_type="ValueError",
+        ),
+        service="payments",
+        app="payments-worker",
+        stage="charge",
+    )
+
+    assert fields["event"] == "task_handler_failed"
+    assert fields["level"] == "error"
+    assert fields["attempt"] == 1
+
+
+def test_studio_log_contract_keeps_canonical_fields_when_mapping_contains_reserved_keys() -> None:
+    fields = observation_to_studio_log_fields(
+        {
+            "event": "TaskHandlerFailed",
+            "event_type": "TaskMessageReceived",
+            "level": "debug",
+            "timestamp": datetime(2026, 5, 1, 12, 30, tzinfo=UTC),
+            "task_id": "task-123",
+            "correlation_id": "corr-123",
+            "retry_attempt": 3,
+        },
+        service="payments",
+        app="payments-worker",
+        stage="charge",
+        level="debug",
+        timestamp="caller_override",
+    )
+
+    assert fields["event"] == "task_handler_failed"
+    assert fields["level"] == "error"
+    assert fields["timestamp"] == "2026-05-01T12:30:00Z"
+    assert fields["attempt"] == 3
+    assert fields["task_id"] == "task-123"
+    assert fields["correlation_id"] == "corr-123"
+
+
+def test_studio_loki_label_contract_keeps_task_identifiers_in_body() -> None:
+    assert {"service", "app", "level", "stage"}.issubset(RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST)
+    assert {"task_id", "correlation_id", "request_id", "pod", "worker_id"}.issubset(
+        RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS
+    )
+    assert RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST.isdisjoint(RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS)
+
+
+@pytest.mark.asyncio
+async def test_make_structlog_observation_sink_emits_structlog_style_event() -> None:
+    logger = bind_studio_log_context(
+        FakeStructlogLogger(),
+        service="payments",
+        app="payments-worker",
+        env="prod",
+        runtime="worker",
+    )
+    sink = make_structlog_observation_sink(logger, service="payments", app="payments-worker")
+
+    await sink(
+        TaskHandlerFailed(
+            consumer_name="payments-worker",
+            queue_name="payments.tasks",
+            task_id="task-123",
+            correlation_id="corr-123",
+            retry_attempt=1,
+            exception_type="ValueError",
+        )
+    )
+
+    assert len(logger.calls) == 1
+    call = logger.calls[0]
+    assert call["method"] == "error"
+    assert call["event"] == "task_handler_failed"
+    assert call["service"] == "payments"
+    assert call["app"] == "payments-worker"
+    assert call["env"] == "prod"
+    assert call["runtime"] == "worker"
+    assert call["level"] == "error"
+    assert call["consumer_name"] == "payments-worker"
+    assert call["queue_name"] == "payments.tasks"
+    assert call["task_id"] == "task-123"
+    assert call["correlation_id"] == "corr-123"
+    assert call["attempt"] == 1
+    assert call["exception_type"] == "ValueError"
+    assert call["requeue"] is False
+    assert call["component"] == "consumer"
+    assert str(call["timestamp"]).endswith("Z")
+    assert "task_type" not in call

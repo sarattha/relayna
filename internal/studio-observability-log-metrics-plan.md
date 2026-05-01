@@ -13,12 +13,12 @@ Relayna API pods / long-running worker pods
   -> stdout JSON logs + /metrics
   -> Grafana Alloy
   -> Loki for logs
-  -> Prometheus or Mimir for metrics
+  -> Prometheus for metrics
   -> Relayna Studio as the task-aware query and visualization layer
 ```
 
 Relayna Studio must not ingest every log line. Studio should query Loki,
-Prometheus/Mimir, and Relayna APIs, then merge those results into service and
+Prometheus, and Relayna APIs, then merge those results into service and
 task views. Relayna Redis remains the source of truth for task lifecycle, status
 history, DLQ records, observations, and execution graphs.
 
@@ -39,8 +39,9 @@ the product-specific task and runtime UI.
 
 ## Interfaces And Data Model
 
-Relayna worker and API pods should emit structured JSON logs to stdout. Minimum
-fields:
+Relayna worker and API pods should emit `structlog` JSON logs to stdout.
+Studio depends on the emitted field contract, not on a separate Relayna log
+ingestion path. Minimum fields:
 
 ```text
 service
@@ -102,7 +103,7 @@ Studio service observability config should cover both logs and metrics:
   - `task_match_mode`: `contains`
   - `task_match_template`: `{task_id}`
 - Metrics:
-  - `backend`: `prometheus` or `mimir`
+  - `backend`: `prometheus`
   - metrics backend URL
   - namespace selector
   - service label
@@ -143,10 +144,158 @@ Implementation:
 - Studio displays service logs, task logs, time-window filtering, level
   filtering, and source/app filtering.
 
+Producer contract:
+
+- Registered services should keep using `structlog` and render JSON to stdout.
+- Use snake_case field names consistently across API, worker, aggregation, and
+  Studio backend logs.
+- Required fields on every log event:
+
+```text
+service
+app
+event
+level
+timestamp
+```
+
+- Required fields when task context exists:
+
+```text
+task_id
+correlation_id
+stage
+attempt
+```
+
+- Optional fields:
+
+```text
+env
+cluster
+namespace
+workflow_id
+worker_id
+runtime
+request_id
+message
+pod
+container
+```
+
+Relayna provides lightweight `structlog`-compatible helpers in
+`relayna.observability`:
+
+- `bind_studio_log_context(...)` binds stable `service`, `app`, `env`, and
+  `runtime` fields to a structlog-style logger.
+- `observation_to_studio_log_fields(...)` converts Relayna observation objects
+  into the Studio log field contract.
+- `make_structlog_observation_sink(...)` emits Relayna observations through a
+  structlog-style logger without replacing the service logging stack.
+- `validate_studio_log_fields(...)` returns missing required contract fields for
+  tests and fixtures.
+
+Example API pod setup:
+
+```python
+import structlog
+from relayna.observability import bind_studio_log_context
+
+logger = bind_studio_log_context(
+    structlog.get_logger(),
+    service="document-service",
+    app="document-api",
+    env="prod",
+    runtime="api",
+)
+
+logger.info(
+    "request_received",
+    request_id="req-123",
+    correlation_id="corr-123",
+)
+```
+
+Example worker observation sink:
+
+```python
+import structlog
+from relayna.observability import bind_studio_log_context, make_structlog_observation_sink
+
+worker_logger = bind_studio_log_context(
+    structlog.get_logger(),
+    service="document-service",
+    app="document-worker",
+    env="prod",
+    runtime="worker",
+)
+observation_sink = make_structlog_observation_sink(
+    worker_logger,
+    service="document-service",
+    app="document-worker",
+    stage="parse",
+)
+```
+
+Example aggregation worker setup:
+
+```python
+aggregation_logger = bind_studio_log_context(
+    structlog.get_logger(),
+    service="document-service",
+    app="document-aggregation-worker",
+    env="prod",
+    runtime="aggregation",
+)
+```
+
+Example Studio backend setup:
+
+```python
+studio_logger = bind_studio_log_context(
+    structlog.get_logger(),
+    service="relayna-studio",
+    app="studio-backend",
+    env="prod",
+    runtime="studio-backend",
+)
+```
+
+Alloy pipeline expectation:
+
+1. Collect Kubernetes pod stdout from `/var/log/containers/*.log`.
+2. Parse CRI/container log framing.
+3. Attach Kubernetes metadata.
+4. Parse the JSON body emitted by `structlog`.
+5. Promote only low-cardinality labels.
+6. Write to Loki.
+
+Default Loki label allowlist:
+
+```text
+cluster
+namespace
+service
+app
+container
+level
+stage
+```
+
+High-cardinality fields that must remain in the JSON log body by default:
+
+```text
+task_id
+correlation_id
+request_id
+pod
+worker_id
+```
+
 Tasks:
 
-- Define the required Relayna JSON log fields for API, worker, aggregation, and
-  Studio backend emitters.
+- Define the required Relayna `structlog` JSON fields for API, worker,
+  aggregation, and Studio backend emitters.
 - Add or update runtime logging helpers so task lifecycle logs consistently
   include `task_id`, `correlation_id`, `stage`, `attempt`, `event`, `service`,
   `app`, and `level`.
@@ -164,6 +313,8 @@ Tasks:
   source filtering, level filtering, and manual task time-window overrides.
 - Add example local or AKS registration payloads for a Relayna service using
   Option A task matching.
+- Add fixtures or tests proving representative `structlog` output contains the
+  required field names.
 
 Acceptance criteria:
 
@@ -175,20 +326,21 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Define Relayna JSON log field contract.
-- [ ] Standardize API pod log fields.
-- [ ] Standardize worker pod log fields.
-- [ ] Standardize Studio backend log fields.
-- [ ] Define Alloy log collection pipeline.
-- [ ] Define Loki low-cardinality label allowlist.
-- [ ] Confirm `task_id` remains in the log body by default.
-- [ ] Configure Studio `log_config` examples for Loki.
-- [ ] Verify service-scoped log queries.
-- [ ] Verify task-scoped `contains` log queries.
-- [ ] Add source/app and level filtering coverage.
-- [ ] Add empty/error/loading UI coverage for logs.
-- [ ] Add backend tests for Loki provider errors and unsafe URLs.
-- [ ] Add frontend tests for service and task log views.
+- [x] Define Relayna `structlog` JSON log field contract.
+- [x] Standardize API pod log fields.
+- [x] Standardize worker pod log fields.
+- [x] Standardize Studio backend log fields.
+- [x] Define Alloy log collection pipeline.
+- [x] Define Loki low-cardinality label allowlist.
+- [x] Confirm `task_id` remains in the log body by default.
+- [x] Configure Studio `log_config` examples for Loki.
+- [x] Verify service-scoped log queries.
+- [x] Verify task-scoped `contains` log queries.
+- [x] Add source/app and level filtering coverage.
+- [x] Add empty/error/loading UI coverage for logs.
+- [x] Add backend tests for Loki provider errors and unsafe URLs.
+- [x] Add frontend tests for service and task log views.
+- [x] Add representative `structlog` contract tests.
 
 ## Phase 2: Kubernetes Metrics
 
@@ -197,7 +349,7 @@ windows.
 
 Implementation:
 
-- Add Prometheus or Mimir plus Alloy metrics collection.
+- Add Prometheus plus Alloy metrics collection.
 - Collect kubelet, cAdvisor, and Kubernetes API metrics.
 - Include pod CPU, memory, limits/requests, restart count, OOMKilled events,
   pod phase, container readiness, and network I/O.
@@ -220,7 +372,7 @@ Tasks:
   service metrics config and rejects unsupported high-cardinality task labels.
 - Extend Studio service records or registry metadata with metrics backend
   configuration without breaking existing `log_config` behavior.
-- Reuse the Studio backend egress allowlist model for Prometheus/Mimir base
+- Reuse the Studio backend egress allowlist model for Prometheus base
   URLs.
 - Add backend normalization for metric series, units, query windows, warnings,
   partial results, and provider errors.
@@ -245,7 +397,7 @@ Checklist:
 - [ ] Define service metrics response schema.
 - [ ] Define task-window metrics response schema.
 - [ ] Add metrics config to service registry model.
-- [ ] Add Prometheus/Mimir backend URL allowlist validation.
+- [ ] Add Prometheus backend URL allowlist validation.
 - [ ] Implement Prometheus-compatible query provider.
 - [ ] Reject `task_id` as a metrics label in default config.
 - [ ] Normalize metric series and units.
@@ -330,7 +482,7 @@ Tasks:
 
 Acceptance criteria:
 
-- Prometheus/Mimir can scrape Relayna API pods, worker pods, and Studio backend
+- Prometheus can scrape Relayna API pods, worker pods, and Studio backend
   `/metrics` endpoints.
 - Studio can render aggregate task/runtime charts without high-cardinality
   labels.

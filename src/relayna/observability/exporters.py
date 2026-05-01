@@ -4,6 +4,8 @@ import logging
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from .log_contract import make_structlog_observation_sink
+
 
 def event_to_dict(event: object) -> dict[str, Any]:
     if not isinstance(event, type) and is_dataclass(event):
@@ -18,4 +20,4 @@ def make_logging_sink(logger: logging.Logger) -> Any:
     return _sink
 
 
-__all__ = ["event_to_dict", "make_logging_sink"]
+__all__ = ["event_to_dict", "make_logging_sink", "make_structlog_observation_sink"]

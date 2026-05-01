@@ -893,6 +893,46 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryByText("old service log line")).not.toBeInTheDocument());
   });
 
+  it("renders service log loading, empty, and error states", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let serviceLogCalls = 0;
+    let resolveServiceLogs: ((response: Response) => void) | null = null;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url.startsWith("/studio/services/payments-api/logs?") && method === "GET") {
+        serviceLogCalls += 1;
+        if (serviceLogCalls === 1) {
+          return await new Promise<Response>((resolve) => {
+            resolveServiceLogs = resolve;
+          });
+        }
+        return jsonResponse({ detail: "Loki query failed." }, 502);
+      }
+
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByText("Loading service logs...")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveServiceLogs?.(jsonResponse({ count: 0, items: [], next_cursor: null }));
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText("No service logs matched the current filters.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    expect(await screen.findByText("Loki query failed.")).toBeInTheDocument();
+  });
+
   it("uses the manual service activity window override when provided", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
 
@@ -1437,6 +1477,46 @@ describe("App", () => {
       expect(matchingCall).toBeTruthy();
     });
     await waitFor(() => expect(screen.queryByText("old task log line")).not.toBeInTheDocument());
+  });
+
+  it("renders task log loading, empty, and error states", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let taskLogCalls = 0;
+    let resolveTaskLogs: ((response: Response) => void) | null = null;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+
+      if (url.startsWith("/studio/tasks/payments-api/task-123/logs?") && method === "GET") {
+        taskLogCalls += 1;
+        if (taskLogCalls === 1) {
+          return await new Promise<Response>((resolve) => {
+            resolveTaskLogs = resolve;
+          });
+        }
+        return jsonResponse({ detail: "Task Loki query failed." }, 502);
+      }
+
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    expect(await screen.findByText("Loading task logs...")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveTaskLogs?.(jsonResponse({ count: 0, items: [], next_cursor: null }));
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText("No task logs matched the current filters.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+
+    expect(await screen.findByText("Task Loki query failed.")).toBeInTheDocument();
   });
 
   it("advances the auto task log window end when reload logs is clicked on a running task", async () => {
