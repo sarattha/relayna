@@ -337,7 +337,7 @@ Checklist:
 - [x] Verify service-scoped log queries.
 - [x] Verify task-scoped `contains` log queries.
 - [x] Add source/app and level filtering coverage.
-- [ ] Add empty/error/loading UI coverage for logs.
+- [x] Add empty/error/loading UI coverage for logs.
 - [x] Add backend tests for Loki provider errors and unsafe URLs.
 - [x] Add frontend tests for service and task log views.
 - [x] Add representative `structlog` contract tests.

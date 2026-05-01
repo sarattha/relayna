@@ -5,7 +5,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 RELAYNA_STUDIO_REQUIRED_LOG_FIELDS = frozenset({"service", "app", "event", "level", "timestamp"})
 RELAYNA_STUDIO_TASK_LOG_FIELDS = frozenset({"task_id", "correlation_id", "stage", "attempt"})
@@ -26,9 +26,7 @@ RELAYNA_STUDIO_OPTIONAL_LOG_FIELDS = frozenset(
 RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST = frozenset(
     {"cluster", "namespace", "service", "app", "container", "level", "stage"}
 )
-RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS = frozenset(
-    {"task_id", "correlation_id", "request_id", "pod", "worker_id"}
-)
+RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS = frozenset({"task_id", "correlation_id", "request_id", "pod", "worker_id"})
 
 _WARNING_EVENTS = (
     "rejected",
@@ -150,13 +148,14 @@ def _event_to_dict(event: object) -> dict[str, Any]:
     if not isinstance(event, type) and is_dataclass(event):
         return asdict(event)
     if isinstance(event, Mapping):
-        return dict(event)
+        return dict(cast(Mapping[str, Any], event))
     return dict(vars(event))
 
 
 def _event_name(event: object) -> str:
     if isinstance(event, Mapping):
-        raw = event.get("event") or event.get("event_type") or "relayna_event"
+        event_mapping = cast(Mapping[str, Any], event)
+        raw = event_mapping.get("event") or event_mapping.get("event_type") or "relayna_event"
         return _snake_case(str(raw))
     return _snake_case(type(event).__name__)
 
