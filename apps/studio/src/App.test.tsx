@@ -1042,6 +1042,44 @@ describe("App", () => {
     expect(patches).toEqual([{ status }]);
   });
 
+  it("traps focus inside service action confirmation dialogs", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    const baseImpl = fetchMock.getMockImplementation();
+    const patches: Array<Record<string, unknown>> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "PATCH") {
+        patches.push(JSON.parse(String(init?.body || "{}")) as Record<string, unknown>);
+        return jsonResponse(services[0]);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    const disableTrigger = screen.getByRole("button", { name: "Disable" });
+    disableTrigger.focus();
+    fireEvent.click(disableTrigger);
+
+    const dialog = screen.getByRole("dialog", { name: "Disable service" });
+    const cancelButton = within(dialog).getByRole("button", { name: "Cancel" });
+    const confirmButton = within(dialog).getByRole("button", { name: "Disable Service" });
+    expect(cancelButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(confirmButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(cancelButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Disable service" })).not.toBeInTheDocument();
+    expect(disableTrigger).toHaveFocus();
+    expect(patches).toEqual([]);
+  });
+
   it("supersedes a stale background services poll when a mutation triggers reload", async () => {
     vi.useFakeTimers();
     window.history.replaceState({}, "", "/services/payments-api");
