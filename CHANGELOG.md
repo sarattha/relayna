@@ -2,16 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 1.4.7 - 2026-05-01
 
 ### Added
 
 - Studio operator confirmation dialogs now guard service deletion, disable, and mark-unavailable actions; service deletion requires typing the exact service id before the destructive action is enabled.
+- Shared Studio backend egress policy for registered service URLs and Loki URLs, using `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` and `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`.
+- `RELAYNA_STUDIO_PUSH_INGEST_ENABLED`, defaulting to disabled, for deployments that intentionally opt into direct push ingestion at `POST /studio/ingest/events`.
 
 ### Changed
 
-- Bumped the Studio frontend package version to `0.1.7`.
-- Updated current Studio release documentation to reference `relayna-studio 0.1.5` with the matching frontend package version `0.1.7`.
+- Bumped the SDK package version to `1.4.7`, the Studio backend package version to `0.1.6`, and the Studio frontend package version to `0.1.8`.
+- Updated release-install documentation to reference `relayna 1.4.7`, `relayna-studio 0.1.6`, and the matching frontend package version `0.1.8`.
+- Documented AKS service DNS suffix allowlisting, explicit CIDR allowlisting for literal private IP targets, and pull-sync as the default internal Studio ingestion path.
+
+### Fixed
+
+- Studio now validates registered service `base_url` and Loki `log_config.base_url` at create/update time and immediately before backend-origin requests, preventing stored or caller-controlled URLs from bypassing the current egress policy.
+- Federation reads, health refreshes, event pull-sync, capability refreshes, and Loki log queries now refuse disallowed loopback, link-local, private, multicast, unspecified, or otherwise untrusted literal IP targets unless explicitly CIDR-allowlisted.
+- Direct Studio push event ingestion now returns `403` unless explicitly enabled, while registered-service pull-sync remains available by default.
 
 ## Studio Backend 0.1.4 - 2026-04-23
 
