@@ -209,6 +209,7 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
 
     app = create_studio_app(
         redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
         federation_client_factory=lambda timeout: TrackingAsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=timeout,
@@ -294,6 +295,7 @@ def test_service_broker_dlq_messages_proxy_and_normalize_task_refs(monkeypatch) 
 
     app = create_studio_app(
         redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
         federation_client_factory=lambda timeout: TrackingAsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=timeout,
@@ -359,6 +361,7 @@ def test_service_broker_dlq_messages_returns_unsupported_route_when_capability_m
 
     app = create_studio_app(
         redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
         federation_client_factory=lambda timeout: TrackingAsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=timeout,
@@ -395,6 +398,7 @@ def test_task_search_returns_retained_indexed_matches(monkeypatch) -> None:
 
     app = create_studio_app(
         redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
         federation_client_factory=lambda timeout: TrackingAsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=timeout,
@@ -489,6 +493,7 @@ def test_task_search_uses_retained_index_even_when_task_detail_falls_back_to_his
 
     app = create_studio_app(
         redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
         federation_client_factory=lambda timeout: TrackingAsyncClient(
             transport=httpx.MockTransport(handler),
             timeout=timeout,
@@ -1081,6 +1086,36 @@ def test_federation_routes_normalize_disabled_timeout_invalid_json_and_not_found
         assert invalid_json_response.json()["code"] == "invalid_json"
         assert missing_response.status_code == 404
         assert missing_response.json()["code"] == "upstream_not_found"
+
+
+def test_federation_refuses_stored_disallowed_base_url_before_request(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"Unexpected upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="unsafe-api",
+                base_url="http://169.254.169.254",
+                capabilities=make_capability_document(supported_routes=["status.latest"]),
+            ),
+        )
+
+        response = client.get("/studio/services/unsafe-api/status/task-123")
+
+    assert response.status_code == 502
+    assert response.json()["code"] == "upstream_policy_violation"
 
 
 def test_create_studio_app_closes_shared_federation_client(monkeypatch) -> None:

@@ -22,7 +22,14 @@ from relayna.observability import (
     StudioEventIngestMethod,
 )
 
-from .registry import ServiceNotFoundError, ServiceRecord, ServiceRegistryService, ServiceStatus
+from .registry import (
+    OutboundUrlPolicyError,
+    ServiceNotFoundError,
+    ServiceRecord,
+    ServiceRegistryService,
+    ServiceStatus,
+    StudioOutboundUrlPolicy,
+)
 
 if TYPE_CHECKING:
     from .search import StudioSearchIndexer
@@ -388,6 +395,7 @@ class StudioEventIngestService:
     event_store: StudioEventStore
     http_client: httpx.AsyncClient
     search_indexer: StudioSearchIndexer | None = None
+    outbound_policy: StudioOutboundUrlPolicy | None = None
     pull_page_limit: int = 200
     pull_max_pages: int = 25
 
@@ -475,6 +483,7 @@ class StudioEventIngestService:
                 continue
 
     async def sync_service(self, service: ServiceRecord) -> None:
+        self._validate_service_base_url(service)
         stored_cursor = await self.event_store.get_pull_cursor(service.service_id)
         newest_cursor: str | None = None
         next_after: str | None = None
@@ -511,6 +520,13 @@ class StudioEventIngestService:
             next_after = payload.next_cursor
         if newest_cursor is not None:
             await self.event_store.set_pull_cursor(service.service_id, newest_cursor)
+
+    def _validate_service_base_url(self, service: ServiceRecord) -> None:
+        policy = self.outbound_policy or StudioOutboundUrlPolicy()
+        try:
+            policy.validate_url(service.base_url, label=f"Service '{service.service_id}' base_url")
+        except OutboundUrlPolicyError as exc:
+            raise RuntimeError(str(exc)) from exc
 
 
 @dataclass(slots=True)
@@ -598,11 +614,14 @@ def create_studio_events_router(
     ingest_service: StudioEventIngestService,
     event_stream: StudioEventStream,
     prefix: str = "/studio",
+    push_ingest_enabled: bool = False,
 ) -> APIRouter:
     router = APIRouter()
 
     @router.post(f"{prefix}/ingest/events", response_model=StudioEventIngestResponse)
     async def ingest_events(request: StudioEventIngestRequest) -> StudioEventIngestResponse:
+        if not push_ingest_enabled:
+            raise HTTPException(status_code=403, detail="Push event ingest is disabled.")
         return await ingest_service.ingest_request(request)
 
     @router.get(f"{prefix}/services/{{service_id}}/events", response_model=StudioEventListResponse)

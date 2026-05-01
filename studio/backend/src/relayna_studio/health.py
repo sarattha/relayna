@@ -14,7 +14,15 @@ from pydantic import BaseModel, Field, ValidationError
 from relayna.api import HEALTH_WORKERS_ROUTE_ID, CapabilityDocument, WorkerHeartbeatListResponse, WorkerHeartbeatSummary
 
 from .events import StudioServiceActivitySnapshot
-from .registry import CapabilityRefreshError, ServiceNotFoundError, ServiceRecord, ServiceRegistryService, ServiceStatus
+from .registry import (
+    CapabilityRefreshError,
+    OutboundUrlPolicyError,
+    ServiceNotFoundError,
+    ServiceRecord,
+    ServiceRegistryService,
+    ServiceStatus,
+    StudioOutboundUrlPolicy,
+)
 
 if TYPE_CHECKING:
     from .search import StudioSearchIndexer
@@ -164,6 +172,7 @@ class StudioHealthRefreshService:
     activity_reader: StudioServiceActivityReader
     http_client: httpx.AsyncClient
     search_indexer: StudioSearchIndexer | None = None
+    outbound_policy: StudioOutboundUrlPolicy | None = None
     capability_stale_after_seconds: int = 180
     observation_stale_after_seconds: int = 300
     worker_heartbeat_stale_after_seconds: int = 90
@@ -269,9 +278,17 @@ class StudioHealthRefreshService:
                 continue
 
     async def _fetch_worker_health(self, service: ServiceRecord) -> WorkerHeartbeatListResponse:
+        self._validate_service_base_url(service)
         response = await self.http_client.get(f"{service.base_url.rstrip('/')}/relayna/health/workers")
         response.raise_for_status()
         return WorkerHeartbeatListResponse.model_validate(response.json())
+
+    def _validate_service_base_url(self, service: ServiceRecord) -> None:
+        policy = self.outbound_policy or StudioOutboundUrlPolicy()
+        try:
+            policy.validate_url(service.base_url, label=f"Service '{service.service_id}' base_url")
+        except OutboundUrlPolicyError as exc:
+            raise RuntimeError(str(exc)) from exc
 
     def _empty_document(self, service_id: str, registry_status: ServiceStatus) -> StudioServiceHealthDocument:
         return StudioServiceHealthDocument(service_id=service_id, registry_status=registry_status)

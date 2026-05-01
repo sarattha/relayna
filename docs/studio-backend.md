@@ -75,8 +75,8 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RELAYNA_STUDIO_REGISTRY_PREFIX` | `studio:services` | Redis prefix for persisted service registry entries. |
-| `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` | unset | Comma-separated host suffix allowlist for capability refresh targets. |
-| `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` | unset | Comma-separated CIDR allowlist for capability refresh targets. |
+| `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` | unset | Comma-separated host suffix allowlist for Studio backend egress to registered services and Loki. |
+| `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` | unset | Comma-separated CIDR allowlist for Studio backend egress to literal IP targets. |
 | `RELAYNA_STUDIO_CAPABILITY_STALE_AFTER_SECONDS` | `180` | Threshold after which a cached capability snapshot is considered stale. |
 
 ### Optional event ingestion settings
@@ -86,6 +86,7 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | `RELAYNA_STUDIO_EVENT_STORE_PREFIX` | `studio:events` | Redis prefix for retained Studio events. |
 | `RELAYNA_STUDIO_EVENT_STORE_TTL_SECONDS` | `86400` | TTL for retained events. Use `none`, `null`, or `off` to disable TTL. |
 | `RELAYNA_STUDIO_EVENT_HISTORY_MAXLEN` | `5000` | Max retained event history length. |
+| `RELAYNA_STUDIO_PUSH_INGEST_ENABLED` | `false` | Enables direct `POST /studio/ingest/events` push ingestion. Pull sync remains available when this is disabled. |
 | `RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS` | `5.0` | Interval for the background pull-sync worker. Use `none`, `null`, or `off` to disable the worker. |
 
 ### Optional health settings
@@ -213,14 +214,19 @@ Operational expectations:
 - `environment` should be meaningful to operators, not incidental
 - `auth_mode` should reflect how the backend is expected to reach the service
 
-Capability refresh guardrails:
+Studio backend egress guardrails:
 
 - `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` filters allowed host suffixes
-- `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` filters allowed IP
-  networks
+  for registered service URLs and Loki URLs
+- `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` filters allowed literal
+  IP networks
+- AKS service DNS should normally be allowed with host suffixes such as
+  `.svc.cluster.local`
+- literal private IP targets are rejected unless their CIDR is explicitly
+  listed in `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`
 
-If these are set too tightly, refresh attempts can fail even when the service is
-otherwise healthy.
+If these are set too tightly, registration, refresh, federation, health, event
+pull-sync, or log queries can fail even when the service is otherwise healthy.
 
 ### Loki `log_config` for AKS service/app/task views
 
@@ -418,6 +424,7 @@ The backend can run three periodic workers:
 - pull sync worker
   - ingests events from registered services into the central event store
   - controlled by `RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS`
+  - this is the default ingestion path for internal AKS deployments
 - health refresh worker
   - refreshes service health snapshots and staleness state
   - controlled by `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS`
@@ -427,6 +434,10 @@ The backend can run three periodic workers:
   - controlled by `RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS`
 
 Disable a worker by setting its interval to `none`, `null`, or `off`.
+
+Direct push ingestion to `POST /studio/ingest/events` is disabled by default.
+Enable it only when a deployment explicitly needs service-side push forwarding
+by setting `RELAYNA_STUDIO_PUSH_INGEST_ENABLED=true`.
 
 Examples:
 
@@ -539,8 +550,8 @@ Symptoms:
 Checks:
 
 - confirm the service `base_url` is reachable from the backend host
-- confirm the host suffix matches `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS`
-- confirm the resolved IP is within `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`
+- confirm the service or Loki host suffix matches `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS`
+- for literal IP URLs, confirm the IP is within `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`
 
 ### Service unavailable vs stale capability vs stale observation
 

@@ -8,7 +8,14 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from .registry import LokiLogConfig, ServiceNotFoundError, ServiceRecord, ServiceRegistryService
+from .registry import (
+    LokiLogConfig,
+    OutboundUrlPolicyError,
+    ServiceNotFoundError,
+    ServiceRecord,
+    ServiceRegistryService,
+    StudioOutboundUrlPolicy,
+)
 
 _LOKI_CURSOR_PREFIX = "loki:"
 
@@ -153,12 +160,19 @@ class StudioLogProvider(Protocol):
 class LokiLogProvider:
     provider_name = "loki"
 
-    def __init__(self, *, http_client: httpx.AsyncClient, query_path: str = "/loki/api/v1/query_range") -> None:
+    def __init__(
+        self,
+        *,
+        http_client: httpx.AsyncClient,
+        query_path: str = "/loki/api/v1/query_range",
+        outbound_policy: StudioOutboundUrlPolicy | None = None,
+    ) -> None:
         normalized_path = query_path.strip() or "/loki/api/v1/query_range"
         if not normalized_path.startswith("/"):
             normalized_path = f"/{normalized_path}"
         self._http_client = http_client
         self._query_path = normalized_path
+        self._outbound_policy = outbound_policy or StudioOutboundUrlPolicy()
 
     async def query_logs(
         self,
@@ -188,7 +202,10 @@ class LokiLogProvider:
             headers["X-Scope-OrgID"] = config.tenant_id
         url = f"{config.base_url.rstrip('/')}{self._query_path}"
         try:
+            self._outbound_policy.validate_url(config.base_url, label="Loki log_config.base_url")
             response = await self._http_client.get(url, params=params, headers=headers)
+        except OutboundUrlPolicyError as exc:
+            raise StudioLogProviderError(str(exc)) from exc
         except httpx.HTTPError as exc:
             raise StudioLogProviderError(f"Loki query failed for service '{service.service_id}'.") from exc
 

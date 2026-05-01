@@ -254,6 +254,10 @@ class CapabilityRefreshError(Exception):
     pass
 
 
+class OutboundUrlPolicyError(ValueError):
+    pass
+
+
 class CapabilityFetcher(Protocol):
     async def fetch(self, base_url: str) -> CapabilityDocument: ...
 
@@ -275,6 +279,57 @@ DEFAULT_CAPABILITY_REFRESH_ALLOWED_HOSTS = (
 )
 
 
+class StudioOutboundUrlPolicy:
+    def __init__(
+        self,
+        *,
+        allowed_hosts: Collection[str] | None = None,
+        allowed_networks: Collection[str] | None = None,
+    ) -> None:
+        trusted_hosts = DEFAULT_CAPABILITY_REFRESH_ALLOWED_HOSTS if allowed_hosts is None else allowed_hosts
+        self._allowed_host_patterns = tuple(self._normalize_host_pattern(item) for item in trusted_hosts)
+        self._allowed_networks = tuple(ip_network(item.strip(), strict=False) for item in (allowed_networks or ()))
+
+    def validate_url(self, url: str, *, label: str = "outbound request target") -> None:
+        hostname = urlsplit(url).hostname
+        if hostname is None:
+            raise OutboundUrlPolicyError(f"{label} '{url}' is missing a hostname.")
+
+        normalized_host = hostname.lower()
+        try:
+            parsed_ip = ip_address(normalized_host)
+        except ValueError:
+            parsed_ip = None
+
+        if parsed_ip is not None:
+            if any(parsed_ip in network for network in self._allowed_networks):
+                return
+            raise OutboundUrlPolicyError(f"{label} '{url}' is not in the trusted host/network allowlist.")
+
+        if self._is_allowed_hostname(normalized_host):
+            return
+
+        raise OutboundUrlPolicyError(f"{label} '{url}' is not in the trusted host/network allowlist.")
+
+    def _is_allowed_hostname(self, hostname: str) -> bool:
+        return any(self._matches_host_pattern(hostname, pattern) for pattern in self._allowed_host_patterns)
+
+    @staticmethod
+    def _normalize_host_pattern(pattern: str) -> str:
+        normalized = pattern.strip().lower()
+        if not normalized:
+            raise ValueError("allowed_hosts entries must not be empty")
+        if normalized.startswith("*."):
+            return normalized[1:]
+        return normalized
+
+    @staticmethod
+    def _matches_host_pattern(hostname: str, pattern: str) -> bool:
+        if pattern.startswith("."):
+            return hostname.endswith(pattern)
+        return hostname == pattern
+
+
 class HttpCapabilityFetcher:
     def __init__(
         self,
@@ -291,9 +346,10 @@ class HttpCapabilityFetcher:
         self._capability_path = normalized_path
         self._timeout_seconds = timeout_seconds
         self._client_factory = client_factory
-        trusted_hosts = DEFAULT_CAPABILITY_REFRESH_ALLOWED_HOSTS if allowed_hosts is None else allowed_hosts
-        self._allowed_host_patterns = tuple(self._normalize_host_pattern(item) for item in trusted_hosts)
-        self._allowed_networks = tuple(ip_network(item.strip(), strict=False) for item in (allowed_networks or ()))
+        self._outbound_policy = StudioOutboundUrlPolicy(
+            allowed_hosts=allowed_hosts,
+            allowed_networks=allowed_networks,
+        )
 
     async def fetch(self, base_url: str) -> CapabilityDocument:
         self._validate_base_url(base_url)
@@ -326,43 +382,10 @@ class HttpCapabilityFetcher:
             ) from exc
 
     def _validate_base_url(self, base_url: str) -> None:
-        hostname = urlsplit(base_url).hostname
-        if hostname is None:
-            raise CapabilityRefreshError(f"Capability refresh target '{base_url}' is missing a hostname.")
-
-        normalized_host = hostname.lower()
-        if self._is_allowed_hostname(normalized_host):
-            return
-
         try:
-            parsed_ip = ip_address(normalized_host)
-        except ValueError:
-            parsed_ip = None
-
-        if parsed_ip is not None and any(parsed_ip in network for network in self._allowed_networks):
-            return
-
-        raise CapabilityRefreshError(
-            f"Capability refresh target '{base_url}' is not in the trusted host/network allowlist."
-        )
-
-    def _is_allowed_hostname(self, hostname: str) -> bool:
-        return any(self._matches_host_pattern(hostname, pattern) for pattern in self._allowed_host_patterns)
-
-    @staticmethod
-    def _normalize_host_pattern(pattern: str) -> str:
-        normalized = pattern.strip().lower()
-        if not normalized:
-            raise ValueError("allowed_hosts entries must not be empty")
-        if normalized.startswith("*."):
-            return normalized[1:]
-        return normalized
-
-    @staticmethod
-    def _matches_host_pattern(hostname: str, pattern: str) -> bool:
-        if pattern.startswith("."):
-            return hostname.endswith(pattern)
-        return hostname == pattern
+            self._outbound_policy.validate_url(base_url, label="Capability refresh target")
+        except OutboundUrlPolicyError as exc:
+            raise CapabilityRefreshError(str(exc)) from exc
 
 
 class ServiceRegistryStore(Protocol):
@@ -487,16 +510,20 @@ class ServiceRegistryService:
         store: ServiceRegistryStore,
         capability_fetcher: CapabilityFetcher | None = None,
         search_indexer: StudioSearchIndexer | None = None,
+        outbound_policy: StudioOutboundUrlPolicy | None = None,
     ) -> None:
         self._store = store
         self._capability_fetcher = capability_fetcher or HttpCapabilityFetcher()
         self._search_indexer = search_indexer
+        self._outbound_policy = outbound_policy or StudioOutboundUrlPolicy()
 
     def set_search_indexer(self, search_indexer: StudioSearchIndexer | None) -> None:
         self._search_indexer = search_indexer
 
     async def create_service(self, request: CreateServiceRequest) -> ServiceRecord:
-        created = await self._store.create(request.to_record())
+        record = request.to_record()
+        self._validate_record_outbound_urls(record)
+        created = await self._store.create(record)
         if self._search_indexer is not None:
             await self._search_indexer.upsert_service_document(created)
         return created
@@ -524,10 +551,16 @@ class ServiceRegistryService:
         if next_status is not None:
             data["status"] = next_status
         updated = ServiceRecord.model_validate(data)
+        self._validate_record_outbound_urls(updated)
         saved = await self._store.update(normalized_service_id, updated)
         if self._search_indexer is not None:
             await self._search_indexer.upsert_service_document(saved)
         return saved
+
+    def _validate_record_outbound_urls(self, record: ServiceRecord) -> None:
+        self._outbound_policy.validate_url(record.base_url, label="Service base_url")
+        if record.log_config is not None:
+            self._outbound_policy.validate_url(record.log_config.base_url, label="Loki log_config.base_url")
 
     async def delete_service(self, service_id: str) -> None:
         normalized_service_id = service_id.strip()
@@ -593,6 +626,8 @@ def create_service_registry_router(
             return await attach_health(created)
         except DuplicateServiceError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @router.get(prefix, response_model=ServiceListResponse)
     async def list_services() -> ServiceListResponse:
@@ -657,6 +692,7 @@ __all__ = [
     "DuplicateServiceError",
     "HttpCapabilityFetcher",
     "LokiLogConfig",
+    "OutboundUrlPolicyError",
     "RedisServiceRegistryStore",
     "ServiceListResponse",
     "ServiceNotFoundError",
@@ -664,6 +700,7 @@ __all__ = [
     "ServiceRegistryService",
     "ServiceRegistryStore",
     "ServiceStatus",
+    "StudioOutboundUrlPolicy",
     "UpdateServiceRequest",
     "create_service_registry_router",
     "normalize_base_url",

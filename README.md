@@ -542,6 +542,10 @@ curl -s "http://localhost:8000/studio/tasks/checker-service/task-123/logs?limit=
 
 Operator guidance:
 
+- Studio backend egress to both registered service URLs and Loki URLs is
+  controlled by `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` and
+  `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`; for AKS DNS, allow
+  suffixes such as `.svc.cluster.local`
 - on the service page, Studio first queries at service scope, then discovers
   app/source values from the returned log streams
 - on the task page, Studio derives an automatic time window from the task
@@ -554,6 +558,8 @@ Operator guidance:
 - for Loki-backed services, prefer JSON log output such as `structlog` with a
   JSON renderer so Studio can pretty-print structured log objects and arrays
   while still falling back to plain text for legacy log lines
+- Studio pull-sync is the default event ingestion path; direct push ingestion
+  requires `RELAYNA_STUDIO_PUSH_INGEST_ENABLED=true`
 
 The Studio registration UI exposes AKS-friendly fields for:
 

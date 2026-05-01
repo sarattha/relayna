@@ -626,6 +626,32 @@ def test_service_log_route_returns_502_for_provider_errors(monkeypatch) -> None:
     assert response.status_code == 502
 
 
+def test_service_log_route_refuses_disallowed_loki_base_url_before_request(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(200, json=loki_success_response())
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(app, make_record(log_config=make_log_config(base_url="http://127.0.0.1:3100")))
+        response = client.get("/studio/services/payments-api/logs")
+
+    assert response.status_code == 502
+    assert "allowlist" in response.json()["detail"]
+    assert requests == []
+
+
 def test_custom_router_returns_422_for_unsupported_provider() -> None:
     async def scenario() -> None:
         store = RedisServiceRegistryStore(FakeRedis())

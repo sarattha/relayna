@@ -183,11 +183,17 @@ def make_capability_document(*, supported_routes: list[str]) -> dict[str, object
     ).model_dump(mode="json")
 
 
-def make_record(*, service_id: str, status: ServiceStatus = ServiceStatus.HEALTHY, capabilities=None) -> ServiceRecord:
+def make_record(
+    *,
+    service_id: str,
+    base_url: str | None = None,
+    status: ServiceStatus = ServiceStatus.HEALTHY,
+    capabilities=None,
+) -> ServiceRecord:
     return ServiceRecord(
         service_id=service_id,
         name=service_id.replace("-", " ").title(),
-        base_url=f"https://{service_id}.example.test",
+        base_url=base_url or f"https://{service_id}.example.test",
         environment="prod",
         tags=["core"],
         auth_mode="internal_network",
@@ -204,7 +210,11 @@ def install_service(app, record: ServiceRecord) -> None:
 
 def test_studio_ingest_route_dedupes_and_marks_out_of_order(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
-    app = create_studio_app(redis_url="redis://studio-test/0", pull_sync_interval_seconds=None)
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        push_ingest_enabled=True,
+    )
 
     with TestClient(app) as client:
         install_service(app, make_record(service_id="payments-api"))
@@ -281,6 +291,17 @@ def test_studio_ingest_route_dedupes_and_marks_out_of_order(monkeypatch) -> None
         assert ranged_service_events.status_code == 200
         assert ranged_service_events.json()["count"] == 1
         assert ranged_service_events.json()["items"][0]["event_type"] == "status.completed"
+
+
+def test_studio_ingest_route_is_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    app = create_studio_app(redis_url="redis://studio-test/0", pull_sync_interval_seconds=None)
+
+    with TestClient(app) as client:
+        response = client.post("/studio/ingest/events", json={"events": []})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Push event ingest is disabled."
 
 
 def test_event_store_compares_mixed_offset_timestamps_chronologically() -> None:
@@ -428,6 +449,41 @@ def test_studio_pull_sync_ingests_service_feed(monkeypatch) -> None:
         assert response.json()["count"] == 1
         assert response.json()["items"][0]["ingest_method"] == "pull"
         assert asyncio.run(runtime.event_store.get_pull_cursor("payments-api")) == "evt-1"
+
+
+def test_studio_pull_sync_refuses_stored_disallowed_base_url_before_request(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(str(request.url))
+        return httpx.Response(200, json={"items": [], "next_cursor": None})
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app):
+        runtime = get_studio_runtime(app)
+        service = make_record(
+            service_id="unsafe-api",
+            base_url="http://10.0.0.10:8000",
+            status=ServiceStatus.HEALTHY,
+            capabilities=make_capability_document(supported_routes=["events.feed"]),
+        )
+        try:
+            asyncio.run(runtime.event_ingest_service.sync_service(service))
+        except RuntimeError as exc:
+            assert "allowlist" in str(exc)
+        else:
+            raise AssertionError("Expected outbound policy failure")
+
+    assert requests == []
 
 
 def test_studio_pull_sync_advances_existing_cursor(monkeypatch) -> None:
