@@ -4,10 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Studio operator confirmation dialogs now guard service deletion, disable, and mark-unavailable actions; service deletion requires typing the exact service id before the destructive action is enabled.
+
 ### Changed
 
-- Bumped the Studio backend package and Studio frontend package versions to `0.1.5`.
-- Updated current Studio release documentation to reference `relayna-studio 0.1.5` and the matching frontend package version.
+- Bumped the Studio frontend package version to `0.1.7`.
+- Updated current Studio release documentation to reference `relayna-studio 0.1.5` with the matching frontend package version `0.1.7`.
 
 ## Studio Backend 0.1.4 - 2026-04-23
 

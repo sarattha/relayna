@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -1009,6 +1009,77 @@ describe("App", () => {
     expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
   });
 
+  it.each([
+    ["Disable", "Disable Service", "disabled"],
+    ["Mark Unavailable", "Mark Unavailable", "unavailable"],
+  ])("confirms the %s service action before patching registry status", async (buttonLabel, confirmLabel, status) => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    const baseImpl = fetchMock.getMockImplementation();
+    const patches: Array<Record<string, unknown>> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "PATCH") {
+        const payload = JSON.parse(String(init?.body || "{}")) as Record<string, unknown>;
+        patches.push(payload);
+        services[0] = { ...services[0], status: payload.status as MockServiceRecord["status"] };
+        return jsonResponse(services[0]);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: buttonLabel }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(patches).toEqual([]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: confirmLabel }));
+
+    expect(await screen.findByText(`Marked 'payments-api' as ${status}.`)).toBeInTheDocument();
+    expect(patches).toEqual([{ status }]);
+  });
+
+  it("traps focus inside service action confirmation dialogs", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    const baseImpl = fetchMock.getMockImplementation();
+    const patches: Array<Record<string, unknown>> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "PATCH") {
+        patches.push(JSON.parse(String(init?.body || "{}")) as Record<string, unknown>);
+        return jsonResponse(services[0]);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    const disableTrigger = screen.getByRole("button", { name: "Disable" });
+    disableTrigger.focus();
+    fireEvent.click(disableTrigger);
+
+    const dialog = screen.getByRole("dialog", { name: "Disable service" });
+    const cancelButton = within(dialog).getByRole("button", { name: "Cancel" });
+    const confirmButton = within(dialog).getByRole("button", { name: "Disable Service" });
+    expect(cancelButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(confirmButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(cancelButton).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Disable service" })).not.toBeInTheDocument();
+    expect(disableTrigger).toHaveFocus();
+    expect(patches).toEqual([]);
+  });
+
   it("supersedes a stale background services poll when a mutation triggers reload", async () => {
     vi.useFakeTimers();
     window.history.replaceState({}, "", "/services/payments-api");
@@ -1086,10 +1157,12 @@ describe("App", () => {
 
   it("keeps the edit context visible when service deletion fails", async () => {
     const baseImpl = fetchMock.getMockImplementation();
+    let deleteCalls = 0;
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || "GET";
       if (url === "/studio/services/payments-api" && method === "DELETE") {
+        deleteCalls += 1;
         return jsonResponse({ detail: "Delete failed." }, 500);
       }
       return await baseImpl!(input, init);
@@ -1101,7 +1174,33 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Editing Target" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete Service" }));
 
+    const dialog = screen.getByRole("dialog", { name: "Delete service" });
+    const confirmButton = within(dialog).getByRole("button", { name: "Delete Service" });
+    expect(confirmButton).toBeDisabled();
+    expect(deleteCalls).toBe(0);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(deleteCalls).toBe(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Service" }));
+    const reopenedDialog = screen.getByRole("dialog", { name: "Delete service" });
+    const reopenedConfirmButton = within(reopenedDialog).getByRole("button", { name: "Delete Service" });
+
+    fireEvent.change(within(reopenedDialog).getByLabelText("Type payments-api to confirm deletion"), {
+      target: { value: "wrong-service" },
+    });
+    expect(reopenedConfirmButton).toBeDisabled();
+    expect(deleteCalls).toBe(0);
+
+    fireEvent.change(within(reopenedDialog).getByLabelText("Type payments-api to confirm deletion"), {
+      target: { value: "payments-api" },
+    });
+    expect(reopenedConfirmButton).not.toBeDisabled();
+    fireEvent.click(reopenedConfirmButton);
+
     expect(await screen.findByText("Delete failed.")).toBeInTheDocument();
+    expect(deleteCalls).toBe(1);
     expect(screen.getByRole("heading", { name: "Editing Target" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Detail Page" })).toBeInTheDocument();
   });

@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -322,6 +322,149 @@ export const insetSurfaceStyle: CSSProperties = {
   background: "linear-gradient(180deg, rgba(239, 250, 248, 0.92), rgba(255, 247, 236, 0.9))",
   padding: 14,
 };
+
+export function ConfirmationDialog({
+  title,
+  body,
+  confirmLabel,
+  cancelLabel = "Cancel",
+  challengeLabel,
+  challengeText,
+  pending = false,
+  tone = "default",
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: ReactNode;
+  confirmLabel: string;
+  cancelLabel?: string;
+  challengeLabel?: string;
+  challengeText?: string;
+  pending?: boolean;
+  tone?: "default" | "danger";
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [challengeValue, setChallengeValue] = useState("");
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const challengeInputRef = useRef<HTMLInputElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setChallengeValue("");
+  }, [title, challengeText]);
+
+  useEffect(() => {
+    previouslyFocusedElementRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusTarget = challengeInputRef.current || cancelButtonRef.current || dialogRef.current;
+    focusTarget?.focus();
+
+    return () => {
+      previouslyFocusedElementRef.current?.focus();
+    };
+  }, []);
+
+  const requiresChallenge = Boolean(challengeText);
+  const challengeMatches = !requiresChallenge || challengeValue === challengeText;
+  const confirmStyle = tone === "danger" ? destructiveButtonStyle : primaryButtonStyle;
+
+  function getFocusableElements() {
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return [];
+    }
+    return Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => element.getAttribute("aria-hidden") !== "true");
+  }
+
+  function handleDialogKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape" && !pending) {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusableElements = getFocusableElements();
+    if (!focusableElements.length) {
+      event.preventDefault();
+      dialogRef.current?.focus();
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+    const activeElement = document.activeElement;
+    const activeElementIsInsideDialog =
+      activeElement instanceof Node && Boolean(dialogRef.current?.contains(activeElement));
+
+    if (event.shiftKey && (!activeElementIsInsideDialog || activeElement === firstElement)) {
+      event.preventDefault();
+      lastElement.focus();
+      return;
+    }
+    if (!event.shiftKey && (!activeElementIsInsideDialog || activeElement === lastElement)) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  }
+
+  return (
+    <div className="studio-dialog-backdrop" role="presentation">
+      <section
+        ref={dialogRef}
+        className="studio-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="studio-confirmation-title"
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+      >
+        <div className="studio-stack-sm">
+          <div>
+            <h2 id="studio-confirmation-title" className="studio-dialog__title">
+              {title}
+            </h2>
+            <div className="studio-dialog__body">{body}</div>
+          </div>
+          {requiresChallenge ? (
+            <label className="studio-dialog__challenge">
+              <span>{challengeLabel || `Type ${challengeText} to confirm`}</span>
+              <input
+                ref={challengeInputRef}
+                value={challengeValue}
+                onChange={(event) => setChallengeValue(event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+          ) : null}
+          <div className="studio-dialog__actions">
+            <button
+              ref={cancelButtonRef}
+              type="button"
+              onClick={onCancel}
+              disabled={pending}
+              style={secondaryButtonStyle}
+            >
+              {cancelLabel}
+            </button>
+            <button type="button" onClick={onConfirm} disabled={pending || !challengeMatches} style={confirmStyle}>
+              {pending ? "Working..." : confirmLabel}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 const kindPalette: Record<string, { background: string; border: string; color: string }> = {
   task: { background: "#fff3dd", border: "#cb7b2d", color: "#5d3110" },

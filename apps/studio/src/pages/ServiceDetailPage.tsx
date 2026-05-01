@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fetchServiceEvents, fetchServiceLogs } from "../api";
 import { useStudioServices } from "../services-context";
 import {
+  ConfirmationDialog,
   HealthBadge,
   InlineCodeBox,
   LogSourceBadge,
@@ -13,6 +14,7 @@ import {
   SectionCard,
   StudioIcon,
   StatusBadge,
+  destructiveButtonStyle,
   formatEventSummary,
   formatLogLevel,
   formatTimestamp,
@@ -32,6 +34,14 @@ import type {
 
 type TimeWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
 type TimeWindow = { from: string; to: string };
+type ConfirmationRequest = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  challengeText?: string;
+  challengeLabel?: string;
+  onConfirm: () => Promise<void>;
+};
 
 function latestTimestamp(...values: Array<string | null | undefined>) {
   const candidates = values.filter((value): value is string => Boolean(value));
@@ -152,6 +162,8 @@ export function ServiceDetailPage() {
   const [serviceLogManualFrom, setServiceLogManualFrom] = useState("");
   const [serviceLogManualTo, setServiceLogManualTo] = useState("");
   const [refreshingService, setRefreshingService] = useState(false);
+  const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
+  const [confirmationPending, setConfirmationPending] = useState(false);
 
   useEffect(() => {
     if (!serviceId) {
@@ -267,6 +279,58 @@ export function ServiceDetailPage() {
     }
   }
 
+  function requestStatusChange(nextStatus: "unavailable" | "disabled") {
+    if (!service) {
+      return;
+    }
+    const serviceId = service.service_id;
+    setConfirmation({
+      title: nextStatus === "disabled" ? "Disable service" : "Mark service unavailable",
+      body:
+        nextStatus === "disabled"
+          ? `Disable '${serviceId}' in the Studio registry. Federated reads for this service will be blocked while it is disabled.`
+          : `Mark '${serviceId}' as unavailable in the Studio registry. Operators will see it as unavailable until it is enabled or refreshed.`,
+      confirmLabel: nextStatus === "disabled" ? "Disable Service" : "Mark Unavailable",
+      onConfirm: async () => {
+        await runConfirmedAction(async () => {
+          await servicesState.updateStatus(serviceId, nextStatus);
+        });
+      },
+    });
+  }
+
+  function requestDeleteService() {
+    if (!service) {
+      return;
+    }
+    const serviceId = service.service_id;
+    setConfirmation({
+      title: "Delete service",
+      body: `Delete '${serviceId}' from the Studio registry. This also removes retained task search documents for the service.`,
+      confirmLabel: "Delete Service",
+      challengeText: serviceId,
+      challengeLabel: `Type ${serviceId} to confirm deletion`,
+      onConfirm: async () => {
+        await runConfirmedAction(async () => {
+          await servicesState.remove(serviceId);
+          navigate("/services");
+        });
+      },
+    });
+  }
+
+  async function runConfirmedAction(action: () => Promise<void>) {
+    setConfirmationPending(true);
+    try {
+      await action();
+    } catch {
+      // Shared services context populates the error banner for failed mutations.
+    } finally {
+      setConfirmationPending(false);
+      setConfirmation(null);
+    }
+  }
+
   const filteredServiceEvents = (serviceEvents?.items || []).filter((item) => {
     if (!isInWindow(eventTimestamp(item), activeServiceEventWindow)) {
       return false;
@@ -348,21 +412,18 @@ export function ServiceDetailPage() {
             <StudioIcon name="enable" />
             Enable
           </button>
-          <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "unavailable")} style={secondaryButtonStyle}>
+          <button type="button" onClick={() => requestStatusChange("unavailable")} style={secondaryButtonStyle}>
             <StudioIcon name="unavailable" />
             Mark Unavailable
           </button>
-          <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "disabled")} style={secondaryButtonStyle}>
+          <button type="button" onClick={() => requestStatusChange("disabled")} style={secondaryButtonStyle}>
             <StudioIcon name="disable" />
             Disable
           </button>
           <button
             type="button"
-            onClick={async () => {
-              await servicesState.remove(service.service_id);
-              navigate("/services");
-            }}
-            style={secondaryButtonStyle}
+            onClick={requestDeleteService}
+            style={destructiveButtonStyle}
           >
             <StudioIcon name="delete" />
             Delete
@@ -738,6 +799,19 @@ export function ServiceDetailPage() {
           ) : null}
         </SectionCard>
       </div>
+      {confirmation ? (
+        <ConfirmationDialog
+          title={confirmation.title}
+          body={<p>{confirmation.body}</p>}
+          confirmLabel={confirmation.confirmLabel}
+          challengeText={confirmation.challengeText}
+          challengeLabel={confirmation.challengeLabel}
+          pending={confirmationPending}
+          tone={confirmation.challengeText ? "danger" : "default"}
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => void confirmation.onConfirm()}
+        />
+      ) : null}
     </div>
   );
 }

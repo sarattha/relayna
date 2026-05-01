@@ -346,6 +346,59 @@ button:hover {
   flex: 0 0 auto;
 }
 
+.studio-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(31, 47, 48, 0.36);
+}
+
+.studio-dialog {
+  width: min(520px, 100%);
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--studio-border-strong);
+  border-radius: 20px;
+  background: var(--studio-surface-strong);
+  box-shadow: 0 28px 72px rgba(31, 47, 48, 0.24);
+  padding: 22px;
+}
+
+.studio-dialog__title {
+  margin: 0 0 8px;
+  font-size: 1.35rem;
+  letter-spacing: 0;
+}
+
+.studio-dialog__body {
+  display: grid;
+  gap: 8px;
+  color: var(--studio-text-muted);
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.studio-dialog__body p {
+  margin: 0;
+}
+
+.studio-dialog__challenge {
+  display: grid;
+  gap: 8px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.studio-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .studio-metric-card {
   padding: 16px;
 }
