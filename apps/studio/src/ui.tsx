@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import {
   Background,
   Controls,
@@ -322,6 +322,79 @@ export const insetSurfaceStyle: CSSProperties = {
   background: "linear-gradient(180deg, rgba(239, 250, 248, 0.92), rgba(255, 247, 236, 0.9))",
   padding: 14,
 };
+
+export function ConfirmationDialog({
+  title,
+  body,
+  confirmLabel,
+  cancelLabel = "Cancel",
+  challengeLabel,
+  challengeText,
+  pending = false,
+  tone = "default",
+  onCancel,
+  onConfirm,
+}: {
+  title: string;
+  body: ReactNode;
+  confirmLabel: string;
+  cancelLabel?: string;
+  challengeLabel?: string;
+  challengeText?: string;
+  pending?: boolean;
+  tone?: "default" | "danger";
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [challengeValue, setChallengeValue] = useState("");
+
+  useEffect(() => {
+    setChallengeValue("");
+  }, [title, challengeText]);
+
+  const requiresChallenge = Boolean(challengeText);
+  const challengeMatches = !requiresChallenge || challengeValue === challengeText;
+  const confirmStyle = tone === "danger" ? destructiveButtonStyle : primaryButtonStyle;
+
+  return (
+    <div className="studio-dialog-backdrop" role="presentation">
+      <section
+        className="studio-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="studio-confirmation-title"
+      >
+        <div className="studio-stack-sm">
+          <div>
+            <h2 id="studio-confirmation-title" className="studio-dialog__title">
+              {title}
+            </h2>
+            <div className="studio-dialog__body">{body}</div>
+          </div>
+          {requiresChallenge ? (
+            <label className="studio-dialog__challenge">
+              <span>{challengeLabel || `Type ${challengeText} to confirm`}</span>
+              <input
+                value={challengeValue}
+                onChange={(event) => setChallengeValue(event.target.value)}
+                style={inputStyle}
+                autoFocus
+              />
+            </label>
+          ) : null}
+          <div className="studio-dialog__actions">
+            <button type="button" onClick={onCancel} disabled={pending} style={secondaryButtonStyle}>
+              {cancelLabel}
+            </button>
+            <button type="button" onClick={onConfirm} disabled={pending || !challengeMatches} style={confirmStyle}>
+              {pending ? "Working..." : confirmLabel}
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 const kindPalette: Record<string, { background: string; border: string; color: string }> = {
   task: { background: "#fff3dd", border: "#cb7b2d", color: "#5d3110" },

@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { searchServices } from "../api";
 import { useStudioServices } from "../services-context";
 import {
+  ConfirmationDialog,
   EmptyState,
   HealthBadge,
   MetricCard,
@@ -20,6 +21,15 @@ import {
   secondaryButtonStyle,
 } from "../ui";
 import type { ServiceDraft, ServiceRecord, StudioServiceSearchItem } from "../types";
+
+type ConfirmationRequest = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  challengeText?: string;
+  challengeLabel?: string;
+  onConfirm: () => Promise<void>;
+};
 
 export function ServicesPage() {
   const navigate = useNavigate();
@@ -39,6 +49,7 @@ export function ServicesPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<StudioServiceSearchItem[] | null>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
 
   function startCreate() {
     setShowEditor(true);
@@ -75,18 +86,33 @@ export function ServicesPage() {
     }
   }
 
-  async function handleDeleteEditingService() {
+  function requestDeleteEditingService() {
     if (!editingServiceId) {
       return;
     }
+    const serviceId = editingServiceId;
+    setConfirmation({
+      title: "Delete service",
+      body: `Delete '${serviceId}' from the Studio registry. This also removes retained task search documents for the service.`,
+      confirmLabel: "Delete Service",
+      challengeText: serviceId,
+      challengeLabel: `Type ${serviceId} to confirm deletion`,
+      onConfirm: async () => {
+        await handleDeleteEditingService(serviceId);
+      },
+    });
+  }
+
+  async function handleDeleteEditingService(serviceId: string) {
     setSaving(true);
     try {
-      await servicesState.remove(editingServiceId);
+      await servicesState.remove(serviceId);
       startCreate();
     } catch {
       // Shared services context populates the error banner for failed mutations.
     } finally {
       setSaving(false);
+      setConfirmation(null);
     }
   }
 
@@ -491,7 +517,7 @@ export function ServicesPage() {
                 </Link>
                 <button
                   type="button"
-                  onClick={() => void handleDeleteEditingService()}
+                  onClick={requestDeleteEditingService}
                   disabled={saving}
                   style={destructiveButtonStyle}
                 >
@@ -614,6 +640,19 @@ export function ServicesPage() {
           </>
         ) : null}
       </SectionCard>
+      {confirmation ? (
+        <ConfirmationDialog
+          title={confirmation.title}
+          body={<p>{confirmation.body}</p>}
+          confirmLabel={confirmation.confirmLabel}
+          challengeText={confirmation.challengeText}
+          challengeLabel={confirmation.challengeLabel}
+          pending={saving}
+          tone="danger"
+          onCancel={() => setConfirmation(null)}
+          onConfirm={() => void confirmation.onConfirm()}
+        />
+      ) : null}
     </div>
   );
 }
