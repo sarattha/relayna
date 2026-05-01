@@ -502,6 +502,139 @@ export function ServicesPage() {
               </div>
             </details>
 
+            <details style={insetSurfaceStyle}>
+              <summary style={{ cursor: "pointer", fontSize: 16, fontWeight: 700, listStyle: "none" }}>Metrics Configuration</summary>
+              <div className="studio-stack-sm" style={{ marginTop: 12 }}>
+                <p style={mutedTextStyle}>Optional per-service Prometheus query settings for Kubernetes metrics panels.</p>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Metrics provider
+                  <select
+                    value={draft.metrics_provider}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, metrics_provider: event.target.value as "" | "prometheus" }))
+                    }
+                    style={inputStyle}
+                  >
+                    <option value="">Disabled</option>
+                    <option value="prometheus">Prometheus</option>
+                  </select>
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Prometheus base URL
+                  <input
+                    value={draft.metrics_base_url}
+                    onChange={(event) => setDraft((current) => ({ ...current, metrics_base_url: event.target.value }))}
+                    placeholder="https://prometheus.example.test"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Namespace
+                  <input
+                    value={draft.metrics_namespace}
+                    onChange={(event) => setDraft((current) => ({ ...current, metrics_namespace: event.target.value }))}
+                    placeholder="prod"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Prometheus selector key
+                  <input
+                    value={draft.metrics_service_label_key}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, metrics_service_label_key: event.target.value }))
+                    }
+                    placeholder="service"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Prometheus selector value
+                  <input
+                    value={draft.metrics_service_label_value}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, metrics_service_label_value: event.target.value }))
+                    }
+                    placeholder="payments-api"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Additional selector labels
+                  <input
+                    value={draft.metrics_service_selector_labels}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, metrics_service_selector_labels: event.target.value }))
+                    }
+                    placeholder="app=payments-worker"
+                    style={inputStyle}
+                  />
+                </label>
+                <div className="studio-form-grid studio-form-grid--triple">
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Namespace label
+                    <input
+                      value={draft.metrics_namespace_label}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, metrics_namespace_label: event.target.value }))
+                      }
+                      placeholder="namespace"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Pod label
+                    <input
+                      value={draft.metrics_pod_label}
+                      onChange={(event) => setDraft((current) => ({ ...current, metrics_pod_label: event.target.value }))}
+                      placeholder="pod"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Container label
+                    <input
+                      value={draft.metrics_container_label}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, metrics_container_label: event.target.value }))
+                      }
+                      placeholder="container"
+                      style={inputStyle}
+                    />
+                  </label>
+                </div>
+                <div className="studio-form-grid studio-form-grid--triple">
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Step seconds
+                    <input
+                      value={draft.metrics_step_seconds}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, metrics_step_seconds: event.target.value }))
+                      }
+                      inputMode="numeric"
+                      placeholder="30"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Task padding seconds
+                    <input
+                      value={draft.metrics_task_window_padding_seconds}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          metrics_task_window_padding_seconds: event.target.value,
+                        }))
+                      }
+                      inputMode="numeric"
+                      placeholder="120"
+                      style={inputStyle}
+                    />
+                  </label>
+                </div>
+              </div>
+            </details>
+
             <button type="submit" disabled={saving} style={primaryButtonStyle}>
               <StudioIcon name="save" />
               {saving ? "Saving..." : editingServiceId ? "Save Service" : "Register Service"}

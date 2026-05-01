@@ -63,6 +63,18 @@ export type ServiceLogConfig = {
   task_match_template?: string | null;
 };
 
+export type ServiceMetricsConfig = {
+  provider: "prometheus";
+  base_url: string;
+  namespace: string;
+  service_selector_labels: Record<string, string>;
+  namespace_label: string;
+  pod_label: string;
+  container_label: string;
+  step_seconds: number;
+  task_window_padding_seconds: number;
+};
+
 export type ServiceRecord = {
   service_id: string;
   name: string;
@@ -74,6 +86,7 @@ export type ServiceRecord = {
   capabilities?: Record<string, unknown> | null;
   last_seen_at?: string | null;
   log_config?: ServiceLogConfig | null;
+  metrics_config?: ServiceMetricsConfig | null;
   health?: ServiceHealthSummary | null;
 };
 
@@ -102,6 +115,17 @@ export type ServiceDraft = {
   log_level_label: string;
   log_task_match_mode: "label" | "contains" | "regex";
   log_task_match_template: string;
+  metrics_provider: "" | "prometheus";
+  metrics_base_url: string;
+  metrics_namespace: string;
+  metrics_service_label_key: string;
+  metrics_service_label_value: string;
+  metrics_service_selector_labels: string;
+  metrics_namespace_label: string;
+  metrics_pod_label: string;
+  metrics_container_label: string;
+  metrics_step_seconds: string;
+  metrics_task_window_padding_seconds: string;
 };
 
 export type StudioTaskPointer = {
@@ -416,6 +440,43 @@ export type StudioLogQuery = {
   level?: string;
   limit?: number;
   correlation_id?: string | null;
+};
+
+export type StudioMetricGroup =
+  | "cpu_usage"
+  | "memory_usage"
+  | "cpu_requests"
+  | "cpu_limits"
+  | "memory_requests"
+  | "memory_limits"
+  | "restarts"
+  | "oom_killed"
+  | "pod_phase"
+  | "readiness"
+  | "network_receive"
+  | "network_transmit";
+
+export type StudioMetricPoint = {
+  timestamp: string;
+  value: number | null;
+};
+
+export type StudioMetricSeries = {
+  metric: StudioMetricGroup;
+  unit: string;
+  labels: Record<string, string>;
+  points: StudioMetricPoint[];
+};
+
+export type StudioMetricsResponse = {
+  service_id: string;
+  task_id?: string | null;
+  from: string;
+  to: string;
+  step_seconds: number;
+  approximate: boolean;
+  warnings: string[];
+  series: StudioMetricSeries[];
 };
 
 export type DlqMode = "indexed" | "broker";

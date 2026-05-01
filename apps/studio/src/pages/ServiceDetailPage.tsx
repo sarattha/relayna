@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { fetchServiceEvents, fetchServiceLogs } from "../api";
+import { fetchServiceEvents, fetchServiceLogs, fetchServiceMetrics } from "../api";
 import { useStudioServices } from "../services-context";
 import {
   ConfirmationDialog,
@@ -30,6 +30,7 @@ import type {
   StudioControlPlaneEvent,
   StudioEventListResponse,
   StudioLogListResponse,
+  StudioMetricsResponse,
 } from "../types";
 
 type TimeWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
@@ -135,6 +136,41 @@ function isInWindow(value: string, window: TimeWindow) {
   return true;
 }
 
+function metricLabel(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatMetricValue(value: number | null | undefined, unit: string) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "n/a";
+  }
+  if (unit === "bytes") {
+    if (Math.abs(value) >= 1024 * 1024 * 1024) {
+      return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+    }
+    if (Math.abs(value) >= 1024 * 1024) {
+      return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+    }
+    return `${value.toFixed(0)} B`;
+  }
+  if (unit === "bytes_per_second") {
+    return `${(value / 1024).toFixed(2)} KiB/s`;
+  }
+  if (unit === "cores") {
+    return `${value.toFixed(3)} cores`;
+  }
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string) {
+  const series = metrics?.series.find((item) => item.metric === metric && item.points.length);
+  const point = series?.points[series.points.length - 1];
+  return formatMetricValue(point?.value, series?.unit || "");
+}
+
 export function ServiceDetailPage() {
   const navigate = useNavigate();
   const { serviceId = "" } = useParams();
@@ -161,6 +197,12 @@ export function ServiceDetailPage() {
   const [serviceLogWindowMode, setServiceLogWindowMode] = useState<TimeWindowMode>("auto");
   const [serviceLogManualFrom, setServiceLogManualFrom] = useState("");
   const [serviceLogManualTo, setServiceLogManualTo] = useState("");
+  const [serviceMetrics, setServiceMetrics] = useState<StudioMetricsResponse | null>(null);
+  const [serviceMetricsLoading, setServiceMetricsLoading] = useState(false);
+  const [serviceMetricsError, setServiceMetricsError] = useState<string | null>(null);
+  const [serviceMetricWindowMode, setServiceMetricWindowMode] = useState<TimeWindowMode>("1h");
+  const [serviceMetricManualFrom, setServiceMetricManualFrom] = useState("");
+  const [serviceMetricManualTo, setServiceMetricManualTo] = useState("");
   const [refreshingService, setRefreshingService] = useState(false);
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
@@ -195,6 +237,23 @@ export function ServiceDetailPage() {
   }, [service?.service_id, service?.log_config]);
 
   const activeServiceLogWindow = resolveWindow(serviceLogWindowMode, serviceLogManualFrom, serviceLogManualTo);
+  const activeServiceMetricWindow = resolveWindow(
+    serviceMetricWindowMode,
+    serviceMetricManualFrom,
+    serviceMetricManualTo,
+  );
+
+  useEffect(() => {
+    setServiceMetricWindowMode("1h");
+    setServiceMetricManualFrom("");
+    setServiceMetricManualTo("");
+    if (!service?.metrics_config) {
+      setServiceMetrics(null);
+      setServiceMetricsError(service ? "No metrics provider configured for this service." : null);
+      return;
+    }
+    void loadServiceMetrics({ targetService: service, window: resolveWindow("1h", "", "") });
+  }, [service?.service_id, service?.metrics_config]);
 
   useEffect(() => {
     if (typeof EventSource === "undefined" || !serviceId) {
@@ -262,6 +321,34 @@ export function ServiceDetailPage() {
       setServiceLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load service logs.");
     } finally {
       setServiceLogsLoading(false);
+    }
+  }
+
+  async function loadServiceMetrics({
+    targetService = service,
+    window = activeServiceMetricWindow,
+  }: {
+    targetService?: ServiceRecord | null;
+    window?: TimeWindow;
+  } = {}) {
+    if (!targetService?.metrics_config) {
+      setServiceMetrics(null);
+      setServiceMetricsError("No metrics provider configured for this service.");
+      return;
+    }
+    setServiceMetricsLoading(true);
+    setServiceMetricsError(null);
+    try {
+      const payload = await fetchServiceMetrics(targetService.service_id, {
+        from: window.from,
+        to: window.to,
+      });
+      setServiceMetrics(payload);
+    } catch (fetchError) {
+      setServiceMetrics(null);
+      setServiceMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load service metrics.");
+    } finally {
+      setServiceMetricsLoading(false);
     }
   }
 
@@ -440,6 +527,7 @@ export function ServiceDetailPage() {
             <MetadataRow label="Tags" value={service.tags.length ? service.tags.join(", ") : "none"} />
             <MetadataRow label="Last refresh" value={formatTimestamp(service.last_seen_at)} />
             <MetadataRow label="Log provider" value={service.log_config?.provider || "none"} />
+            <MetadataRow label="Metrics provider" value={service.metrics_config?.provider || "none"} />
           </dl>
 
           <div className="studio-stack-sm">
@@ -479,8 +567,121 @@ export function ServiceDetailPage() {
                 <p style={mutedTextStyle}>No log provider configured for this service.</p>
               )}
             </div>
+            <div>
+              <h3 style={{ margin: 0, marginBottom: 8 }}>Stored Metrics Config</h3>
+              {service.metrics_config ? (
+                <InlineCodeBox value={JSON.stringify(service.metrics_config, null, 2)} minHeight={160} />
+              ) : (
+                <p style={mutedTextStyle}>No metrics provider configured for this service.</p>
+              )}
+            </div>
           </div>
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Kubernetes Metrics"
+        subtitle="Prometheus-backed pod and container metrics for this registered service."
+        action={
+          <button type="button" onClick={() => void loadServiceMetrics()} style={secondaryButtonStyle}>
+            <StudioIcon name="refresh" />
+            Reload Metrics
+          </button>
+        }
+      >
+        <div className="studio-log-filter-grid studio-log-window-grid">
+          <label className="studio-filter-field">
+            <span>Metrics Window</span>
+            <select
+              aria-label="Service metrics window mode"
+              value={serviceMetricWindowMode}
+              onChange={(event) => {
+                const nextMode = event.target.value as TimeWindowMode;
+                let nextManualFrom = serviceMetricManualFrom;
+                let nextManualTo = serviceMetricManualTo;
+                if (nextMode === "manual") {
+                  nextManualFrom = isoToLocalDateTime(activeServiceMetricWindow.from);
+                  nextManualTo = isoToLocalDateTime(activeServiceMetricWindow.to);
+                  setServiceMetricManualFrom(nextManualFrom);
+                  setServiceMetricManualTo(nextManualTo);
+                }
+                setServiceMetricWindowMode(nextMode);
+                void loadServiceMetrics({ window: resolveWindow(nextMode, nextManualFrom, nextManualTo) });
+              }}
+              style={inputStyle}
+            >
+              <option value="15m">Last 15 minutes</option>
+              <option value="1h">Last hour</option>
+              <option value="24h">Last 24 hours</option>
+              <option value="manual">Custom range</option>
+            </select>
+          </label>
+          <label className="studio-filter-field">
+            <span>From</span>
+            <input
+              aria-label="Service metrics from"
+              type="datetime-local"
+              value={
+                serviceMetricWindowMode === "manual"
+                  ? serviceMetricManualFrom
+                  : isoToLocalDateTime(activeServiceMetricWindow.from)
+              }
+              onChange={(event) => {
+                const nextFrom = event.target.value;
+                setServiceMetricManualFrom(nextFrom);
+                void loadServiceMetrics({ window: resolveWindow("manual", nextFrom, serviceMetricManualTo) });
+              }}
+              disabled={serviceMetricWindowMode !== "manual"}
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>To</span>
+            <input
+              aria-label="Service metrics to"
+              type="datetime-local"
+              value={
+                serviceMetricWindowMode === "manual"
+                  ? serviceMetricManualTo
+                  : isoToLocalDateTime(activeServiceMetricWindow.to)
+              }
+              onChange={(event) => {
+                const nextTo = event.target.value;
+                setServiceMetricManualTo(nextTo);
+                void loadServiceMetrics({ window: resolveWindow("manual", serviceMetricManualFrom, nextTo) });
+              }}
+              disabled={serviceMetricWindowMode !== "manual"}
+              style={inputStyle}
+            />
+          </label>
+        </div>
+        <p style={mutedTextStyle}>
+          {describeWindow(serviceMetricWindowMode, activeServiceMetricWindow.from, activeServiceMetricWindow.to)}
+        </p>
+        {serviceMetricsLoading ? <p style={mutedTextStyle}>Loading service metrics...</p> : null}
+        {serviceMetricsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{serviceMetricsError}</p> : null}
+        {!serviceMetricsLoading && !serviceMetricsError && serviceMetrics && !serviceMetrics.series.length ? (
+          <p style={mutedTextStyle}>No service metrics matched the current window.</p>
+        ) : null}
+        {serviceMetrics ? (
+          <div className="studio-metrics-grid studio-metrics-grid--4">
+            {[
+              "cpu_usage",
+              "memory_usage",
+              "restarts",
+              "oom_killed",
+              "pod_phase",
+              "readiness",
+              "network_receive",
+              "network_transmit",
+            ].map((metric) => (
+              <div key={metric} className="studio-subcard" style={{ borderRadius: 14, padding: 14 }}>
+                <span className="studio-inline-meta">{metricLabel(metric)}</span>
+                <strong style={{ display: "block", marginTop: 6 }}>{metricLatestValue(serviceMetrics, metric)}</strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </SectionCard>
 
       <div className="studio-two-column">

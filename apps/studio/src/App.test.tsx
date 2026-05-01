@@ -52,6 +52,7 @@ type MockServiceRecord = {
   capabilities?: Record<string, unknown> | null;
   last_seen_at?: string | null;
   log_config?: Record<string, unknown> | null;
+  metrics_config?: Record<string, unknown> | null;
   health?: Record<string, unknown> | null;
 };
 
@@ -257,6 +258,34 @@ function taskDetailResponse(options?: { taskId?: string; dlqItems?: Array<Record
       },
     ],
     errors: [{ code: "unsupported_route", detail: "history route missing", retryable: false }],
+  };
+}
+
+function metricsResponse(taskId?: string | null) {
+  return {
+    service_id: "payments-api",
+    task_id: taskId || null,
+    from: "2026-04-08T10:00:00Z",
+    to: "2026-04-08T10:05:00Z",
+    step_seconds: 30,
+    approximate: Boolean(taskId),
+    warnings: taskId
+      ? ["Task-window Kubernetes pod/container metrics are approximate for long-running workers that process many tasks."]
+      : [],
+    series: [
+      {
+        metric: "cpu_usage",
+        unit: "cores",
+        labels: { pod: "payments-abc", container: "worker" },
+        points: [{ timestamp: "2026-04-08T10:05:00Z", value: 0.25 }],
+      },
+      {
+        metric: "memory_usage",
+        unit: "bytes",
+        labels: { pod: "payments-abc", container: "worker" },
+        points: [{ timestamp: "2026-04-08T10:05:00Z", value: 268435456 }],
+      },
+    ],
   };
 }
 
@@ -933,6 +962,56 @@ describe("App", () => {
     expect(await screen.findByText("Loki query failed.")).toBeInTheDocument();
   });
 
+  it("renders service metrics and manual metrics window requests", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "pod",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url.startsWith("/studio/services/payments-api/metrics") && method === "GET") {
+        return jsonResponse(metricsResponse(null));
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Kubernetes Metrics")).toBeInTheDocument();
+    expect(await screen.findByText("0.250 cores")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Service metrics window mode"), { target: { value: "manual" } });
+    const from = isoToLocalDateTime("2026-04-08T09:45:00Z");
+    const to = isoToLocalDateTime("2026-04-08T10:15:00Z");
+    fireEvent.change(screen.getByLabelText("Service metrics from"), { target: { value: from } });
+    fireEvent.change(screen.getByLabelText("Service metrics to"), { target: { value: to } });
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("from") === new Date("2026-04-08T09:45:00Z").toISOString() &&
+          parsed.searchParams.get("to") === new Date("2026-04-08T10:15:00Z").toISOString()
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+  });
+
   it("uses the manual service activity window override when provided", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
 
@@ -1517,6 +1596,57 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
 
     expect(await screen.findByText("Task Loki query failed.")).toBeInTheDocument();
+  });
+
+  it("renders approximate task metrics and manual metrics window requests", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "pod",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url.startsWith("/studio/tasks/payments-api/task-123/metrics") && method === "GET") {
+        return jsonResponse(metricsResponse("task-123"));
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Kubernetes Metrics")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText(/approximate for long-running workers/i).length).toBeGreaterThan(0));
+    expect(await screen.findByText("256.00 MiB")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Task metrics window mode"), { target: { value: "manual" } });
+    const from = isoToLocalDateTime("2026-04-08T09:45:00Z");
+    const to = isoToLocalDateTime("2026-04-08T10:15:00Z");
+    fireEvent.change(screen.getByLabelText("Task metrics from"), { target: { value: from } });
+    fireEvent.change(screen.getByLabelText("Task metrics to"), { target: { value: to } });
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/tasks/payments-api/task-123/metrics" &&
+          parsed.searchParams.get("from") === new Date("2026-04-08T09:45:00Z").toISOString() &&
+          parsed.searchParams.get("to") === new Date("2026-04-08T10:15:00Z").toISOString()
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
   });
 
   it("advances the auto task log window end when reload logs is clicked on a running task", async () => {

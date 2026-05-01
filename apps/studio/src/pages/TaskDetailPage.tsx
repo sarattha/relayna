@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs } from "../api";
+import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics } from "../api";
 import {
   GraphSurface,
   InlineCodeBox,
@@ -27,7 +27,13 @@ import {
   secondaryButtonStyle,
   supportsCapability,
 } from "../ui";
-import type { StudioControlPlaneEvent, StudioEventListResponse, StudioLogListResponse, StudioTaskDetail } from "../types";
+import type {
+  StudioControlPlaneEvent,
+  StudioEventListResponse,
+  StudioLogListResponse,
+  StudioMetricsResponse,
+  StudioTaskDetail,
+} from "../types";
 
 const TASK_QUEUED_STATUSES = new Set(["queued"]);
 const TASK_TERMINAL_STATUSES = new Set([
@@ -101,6 +107,11 @@ function describeTaskLogWindow(mode: TaskLogWindowMode, from: string, to: string
   }).`;
 }
 
+function describeTaskMetricWindow(mode: TaskLogWindowMode, from: string, to: string, warning?: string | null) {
+  const description = describeTaskLogWindow(mode, from, to, warning);
+  return description.startsWith("Auto window:") ? description.replace("Auto window:", "Metrics auto window:") : description;
+}
+
 function isInTimeWindow(value: string, window: TaskLogWindow) {
   if (!value.trim()) {
     return true;
@@ -122,6 +133,41 @@ function isInTimeWindow(value: string, window: TaskLogWindow) {
     }
   }
   return true;
+}
+
+function metricLabel(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatMetricValue(value: number | null | undefined, unit: string) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "n/a";
+  }
+  if (unit === "bytes") {
+    if (Math.abs(value) >= 1024 * 1024 * 1024) {
+      return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+    }
+    if (Math.abs(value) >= 1024 * 1024) {
+      return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+    }
+    return `${value.toFixed(0)} B`;
+  }
+  if (unit === "bytes_per_second") {
+    return `${(value / 1024).toFixed(2)} KiB/s`;
+  }
+  if (unit === "cores") {
+    return `${value.toFixed(3)} cores`;
+  }
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string) {
+  const series = metrics?.series.find((item) => item.metric === metric && item.points.length);
+  const point = series?.points[series.points.length - 1];
+  return formatMetricValue(point?.value, series?.unit || "");
 }
 
 function normalizeStatusValue(value: unknown) {
@@ -228,6 +274,9 @@ export function TaskDetailPage() {
   const [taskLogs, setTaskLogs] = useState<StudioLogListResponse | null>(null);
   const [taskLogsLoading, setTaskLogsLoading] = useState(false);
   const [taskLogsError, setTaskLogsError] = useState<string | null>(null);
+  const [taskMetrics, setTaskMetrics] = useState<StudioMetricsResponse | null>(null);
+  const [taskMetricsLoading, setTaskMetricsLoading] = useState(false);
+  const [taskMetricsError, setTaskMetricsError] = useState<string | null>(null);
   const [taskLogQuery, setTaskLogQuery] = useState("");
   const [taskLogLevel, setTaskLogLevel] = useState("");
   const [taskLogSource, setTaskLogSource] = useState("");
@@ -236,6 +285,9 @@ export function TaskDetailPage() {
   const [taskLogManualFrom, setTaskLogManualFrom] = useState("");
   const [taskLogManualTo, setTaskLogManualTo] = useState("");
   const [taskLogAutoNow, setTaskLogAutoNow] = useState(() => new Date().toISOString());
+  const [taskMetricWindowMode, setTaskMetricWindowMode] = useState<TaskLogWindowMode>("auto");
+  const [taskMetricManualFrom, setTaskMetricManualFrom] = useState("");
+  const [taskMetricManualTo, setTaskMetricManualTo] = useState("");
   const [mermaidCopyState, setMermaidCopyState] = useState<"idle" | "copied" | "selected" | "failed">("idle");
 
   useEffect(() => {
@@ -251,10 +303,15 @@ export function TaskDetailPage() {
     setTaskLogManualFrom("");
     setTaskLogManualTo("");
     setTaskLogAutoNow(new Date().toISOString());
+    setTaskMetricWindowMode("auto");
+    setTaskMetricManualFrom("");
+    setTaskMetricManualTo("");
     if (!taskDetail) {
       setTaskTimeline(null);
       setTaskLogs(null);
       setTaskLogsError(null);
+      setTaskMetrics(null);
+      setTaskMetricsError(null);
       return;
     }
     setTaskTimeline(null);
@@ -267,6 +324,15 @@ export function TaskDetailPage() {
     taskLogWindowMode === "manual" ? localDateTimeToIso(taskLogManualFrom) : quickTaskLogWindow?.from || derivedTaskLogWindow?.from || "";
   const activeTaskLogTo =
     taskLogWindowMode === "manual" ? localDateTimeToIso(taskLogManualTo) : quickTaskLogWindow?.to || derivedTaskLogWindow?.to || "";
+  const quickTaskMetricWindow = resolveQuickTaskLogWindow(taskMetricWindowMode);
+  const activeTaskMetricFrom =
+    taskMetricWindowMode === "manual"
+      ? localDateTimeToIso(taskMetricManualFrom)
+      : quickTaskMetricWindow?.from || derivedTaskLogWindow?.from || "";
+  const activeTaskMetricTo =
+    taskMetricWindowMode === "manual"
+      ? localDateTimeToIso(taskMetricManualTo)
+      : quickTaskMetricWindow?.to || derivedTaskLogWindow?.to || "";
 
   useEffect(() => {
     if (!taskDetail || taskTimelineLoading) {
@@ -278,6 +344,12 @@ export function TaskDetailPage() {
     } else {
       setTaskLogs(null);
       setTaskLogsError("No log provider configured for this service.");
+    }
+    if (taskDetail.service.metrics_config) {
+      void loadTaskMetrics(taskDetail.service_id, taskDetail.task_id, getTaskMetricWindowForMode("auto", "", ""));
+    } else {
+      setTaskMetrics(null);
+      setTaskMetricsError("No metrics provider configured for this service.");
     }
   }, [
     taskDetail,
@@ -312,6 +384,24 @@ export function TaskDetailPage() {
       setTaskLogAutoNow(autoNow);
     }
     const window = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, autoNow) : null;
+    return {
+      from: window?.from || "",
+      to: window?.to || "",
+    };
+  }
+
+  function getTaskMetricWindowForMode(mode: TaskLogWindowMode, manualFrom: string, manualTo: string) {
+    const quickWindow = resolveQuickTaskLogWindow(mode);
+    if (mode === "manual") {
+      return {
+        from: localDateTimeToIso(manualFrom),
+        to: localDateTimeToIso(manualTo),
+      };
+    }
+    if (quickWindow) {
+      return quickWindow;
+    }
+    const window = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, new Date().toISOString()) : null;
     return {
       from: window?.from || "",
       to: window?.to || "",
@@ -389,6 +479,24 @@ export function TaskDetailPage() {
       setTaskLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load task logs.");
     } finally {
       setTaskLogsLoading(false);
+    }
+  }
+
+  async function loadTaskMetrics(
+    targetServiceId: string,
+    targetTaskId: string,
+    window: { from?: string; to?: string } = {},
+  ) {
+    setTaskMetricsLoading(true);
+    setTaskMetricsError(null);
+    try {
+      const payload = await fetchTaskMetrics(targetServiceId, targetTaskId, window);
+      setTaskMetrics(payload);
+    } catch (fetchError) {
+      setTaskMetrics(null);
+      setTaskMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load task metrics.");
+    } finally {
+      setTaskMetricsLoading(false);
     }
   }
 
@@ -788,6 +896,142 @@ export function TaskDetailPage() {
                           </div>
                           <LogMessage message={item.message} />
                         </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </SectionCard>
+
+                <SectionCard title="Task Kubernetes Metrics" action={
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void loadTaskMetrics(
+                        taskDetail.service_id,
+                        taskDetail.task_id,
+                        getTaskMetricWindowForMode(taskMetricWindowMode, taskMetricManualFrom, taskMetricManualTo),
+                      )
+                    }
+                    style={secondaryButtonStyle}
+                  >
+                    <StudioIcon name="refresh" />
+                    Reload Metrics
+                  </button>
+                }>
+                  <NoticeBanner>
+                    Task metrics are pod/container metrics over the task lifecycle window. They are approximate for long-running workers that process multiple tasks.
+                  </NoticeBanner>
+                  <div className="studio-log-filter-grid studio-log-window-grid" style={{ marginTop: 12 }}>
+                    <label className="studio-filter-field">
+                      <span>Metrics Window</span>
+                      <select
+                        aria-label="Task metrics window mode"
+                        value={taskMetricWindowMode}
+                        onChange={(event) => {
+                          const nextMode = event.target.value as TaskLogWindowMode;
+                          let nextManualFrom = taskMetricManualFrom;
+                          let nextManualTo = taskMetricManualTo;
+                          if (nextMode === "manual") {
+                            nextManualFrom = isoToLocalDateTime(activeTaskMetricFrom);
+                            nextManualTo = isoToLocalDateTime(activeTaskMetricTo);
+                            setTaskMetricManualFrom(nextManualFrom);
+                            setTaskMetricManualTo(nextManualTo);
+                          }
+                          setTaskMetricWindowMode(nextMode);
+                          if (taskDetail.service.metrics_config) {
+                            void loadTaskMetrics(
+                              taskDetail.service_id,
+                              taskDetail.task_id,
+                              getTaskMetricWindowForMode(nextMode, nextManualFrom, nextManualTo),
+                            );
+                          }
+                        }}
+                        style={inputStyle}
+                      >
+                        <option value="auto">Auto task window</option>
+                        <option value="15m">Last 15 minutes</option>
+                        <option value="1h">Last hour</option>
+                        <option value="24h">Last 24 hours</option>
+                        <option value="manual">Custom range</option>
+                      </select>
+                    </label>
+                    <label className="studio-filter-field">
+                      <span>From</span>
+                      <input
+                        aria-label="Task metrics from"
+                        type="datetime-local"
+                        value={
+                          taskMetricWindowMode === "manual"
+                            ? taskMetricManualFrom
+                            : isoToLocalDateTime(activeTaskMetricFrom)
+                        }
+                        onChange={(event) => {
+                          const nextFrom = event.target.value;
+                          setTaskMetricManualFrom(nextFrom);
+                          if (taskDetail.service.metrics_config) {
+                            void loadTaskMetrics(
+                              taskDetail.service_id,
+                              taskDetail.task_id,
+                              getTaskMetricWindowForMode("manual", nextFrom, taskMetricManualTo),
+                            );
+                          }
+                        }}
+                        disabled={taskMetricWindowMode !== "manual"}
+                        style={inputStyle}
+                      />
+                    </label>
+                    <label className="studio-filter-field">
+                      <span>To</span>
+                      <input
+                        aria-label="Task metrics to"
+                        type="datetime-local"
+                        value={
+                          taskMetricWindowMode === "manual"
+                            ? taskMetricManualTo
+                            : isoToLocalDateTime(activeTaskMetricTo)
+                        }
+                        onChange={(event) => {
+                          const nextTo = event.target.value;
+                          setTaskMetricManualTo(nextTo);
+                          if (taskDetail.service.metrics_config) {
+                            void loadTaskMetrics(
+                              taskDetail.service_id,
+                              taskDetail.task_id,
+                              getTaskMetricWindowForMode("manual", taskMetricManualFrom, nextTo),
+                            );
+                          }
+                        }}
+                        disabled={taskMetricWindowMode !== "manual"}
+                        style={inputStyle}
+                      />
+                    </label>
+                  </div>
+                  <p style={mutedTextStyle}>
+                    {describeTaskMetricWindow(taskMetricWindowMode, activeTaskMetricFrom, activeTaskMetricTo, derivedTaskLogWindow?.warning)}
+                  </p>
+                  {taskMetrics?.warnings.length ? (
+                    <p style={mutedTextStyle}>{taskMetrics.warnings.join(" ")}</p>
+                  ) : null}
+                  {taskMetricsLoading ? <p style={mutedTextStyle}>Loading task metrics...</p> : null}
+                  {taskMetricsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskMetricsError}</p> : null}
+                  {!taskMetricsLoading && !taskMetricsError && taskMetrics && !taskMetrics.series.length ? (
+                    <p style={mutedTextStyle}>No task metrics matched the current window.</p>
+                  ) : null}
+                  {taskMetrics ? (
+                    <div className="studio-metrics-grid studio-metrics-grid--4">
+                      {[
+                        "cpu_usage",
+                        "memory_usage",
+                        "restarts",
+                        "oom_killed",
+                        "pod_phase",
+                        "readiness",
+                        "network_receive",
+                        "network_transmit",
+                      ].map((metric) => (
+                        <div key={metric} className="studio-subcard" style={{ borderRadius: 14, padding: 14 }}>
+                          <span className="studio-inline-meta">{metricLabel(metric)}</span>
+                          <strong style={{ display: "block", marginTop: 6 }}>{metricLatestValue(taskMetrics, metric)}</strong>
+                        </div>
                       ))}
                     </div>
                   ) : null}

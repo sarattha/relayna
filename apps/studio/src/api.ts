@@ -11,6 +11,8 @@ import type {
   ServiceHealthSummary,
   StudioEventListResponse,
   StudioLogListResponse,
+  StudioMetricGroup,
+  StudioMetricsResponse,
   StudioTaskDetail,
   StudioTaskSearchQuery,
   StudioTaskSearchResponse,
@@ -76,6 +78,7 @@ function splitServiceSelectorLabels(value: Record<string, string>) {
 
 export function serviceToDraft(service: ServiceRecord): ServiceDraft {
   const selectorLabels = splitServiceSelectorLabels(service.log_config?.service_selector_labels || {});
+  const metricsSelectorLabels = splitServiceSelectorLabels(service.metrics_config?.service_selector_labels || {});
   return {
     service_id: service.service_id,
     name: service.name,
@@ -96,6 +99,17 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     log_level_label: service.log_config?.level_label || "",
     log_task_match_mode: service.log_config?.task_match_mode || "label",
     log_task_match_template: service.log_config?.task_match_template || "",
+    metrics_provider: service.metrics_config?.provider || "",
+    metrics_base_url: service.metrics_config?.base_url || "",
+    metrics_namespace: service.metrics_config?.namespace || "",
+    metrics_service_label_key: metricsSelectorLabels.serviceLabelKey,
+    metrics_service_label_value: metricsSelectorLabels.serviceLabelValue,
+    metrics_service_selector_labels: metricsSelectorLabels.additionalSelectorLabels,
+    metrics_namespace_label: service.metrics_config?.namespace_label || "namespace",
+    metrics_pod_label: service.metrics_config?.pod_label || "pod",
+    metrics_container_label: service.metrics_config?.container_label || "container",
+    metrics_step_seconds: String(service.metrics_config?.step_seconds || 30),
+    metrics_task_window_padding_seconds: String(service.metrics_config?.task_window_padding_seconds || 120),
   };
 }
 
@@ -117,6 +131,18 @@ export function buildServicePayload(draft: ServiceDraft) {
       draft.log_task_match_template.trim() ||
       draft.log_task_match_mode !== "label" ||
       draft.log_tenant_id.trim(),
+  );
+  const mergedMetricsSelectorLabels = parseLabelPairs(draft.metrics_service_selector_labels);
+  if (draft.metrics_service_label_key.trim() && draft.metrics_service_label_value.trim()) {
+    mergedMetricsSelectorLabels[draft.metrics_service_label_key.trim()] = draft.metrics_service_label_value.trim();
+  }
+  const hasMetricsConfig = Boolean(
+    draft.metrics_provider ||
+      draft.metrics_base_url.trim() ||
+      draft.metrics_namespace.trim() ||
+      draft.metrics_service_label_key.trim() ||
+      draft.metrics_service_label_value.trim() ||
+      draft.metrics_service_selector_labels.trim(),
   );
 
   return {
@@ -141,6 +167,19 @@ export function buildServicePayload(draft: ServiceDraft) {
           level_label: draft.log_level_label.trim() || null,
           task_match_mode: draft.log_task_match_mode || "label",
           task_match_template: draft.log_task_match_template.trim() || null,
+        }
+      : null,
+    metrics_config: hasMetricsConfig
+      ? {
+          provider: (draft.metrics_provider || "prometheus") as "prometheus",
+          base_url: draft.metrics_base_url.trim(),
+          namespace: draft.metrics_namespace.trim(),
+          service_selector_labels: mergedMetricsSelectorLabels,
+          namespace_label: draft.metrics_namespace_label.trim() || "namespace",
+          pod_label: draft.metrics_pod_label.trim() || "pod",
+          container_label: draft.metrics_container_label.trim() || "container",
+          step_seconds: Number(draft.metrics_step_seconds) || 30,
+          task_window_padding_seconds: Number(draft.metrics_task_window_padding_seconds) || 120,
         }
       : null,
   };
@@ -170,6 +209,7 @@ export async function updateService(serviceId: string, draft: ServiceDraft) {
       tags: payload.tags,
       auth_mode: payload.auth_mode,
       log_config: payload.log_config,
+      metrics_config: payload.metrics_config,
     }),
   });
 }
@@ -283,6 +323,44 @@ export async function fetchTaskLogs(
   }
   return requestJson<StudioLogListResponse>(
     `/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/logs?${params.toString()}`,
+  );
+}
+
+function appendMetricsQuery(params: URLSearchParams, query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[] }) {
+  if (query.from?.trim()) {
+    params.set("from", query.from.trim());
+  }
+  if (query.to?.trim()) {
+    params.set("to", query.to.trim());
+  }
+  if (query.step) {
+    params.set("step", String(query.step));
+  }
+  for (const group of query.groups || []) {
+    params.append("group", group);
+  }
+}
+
+export async function fetchServiceMetrics(
+  serviceId: string,
+  query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[] } = {},
+) {
+  const params = new URLSearchParams();
+  appendMetricsQuery(params, query);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<StudioMetricsResponse>(`/studio/services/${encodeURIComponent(serviceId)}/metrics${suffix}`);
+}
+
+export async function fetchTaskMetrics(
+  serviceId: string,
+  taskId: string,
+  query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[] } = {},
+) {
+  const params = new URLSearchParams();
+  appendMetricsQuery(params, query);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return requestJson<StudioMetricsResponse>(
+    `/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/metrics${suffix}`,
   );
 }
 

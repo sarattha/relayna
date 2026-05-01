@@ -84,6 +84,58 @@ class LokiLogConfig(BaseModel):
         return normalized
 
 
+_UNSUPPORTED_METRIC_SELECTOR_LABELS = {"task_id", "correlation_id", "request_id", "worker_id"}
+
+
+class PrometheusMetricsConfig(BaseModel):
+    provider: Literal["prometheus"] = "prometheus"
+    base_url: str
+    namespace: str
+    service_selector_labels: dict[str, str] = Field(default_factory=dict)
+    namespace_label: str = "namespace"
+    pod_label: str = "pod"
+    container_label: str = "container"
+    step_seconds: int = Field(default=30, ge=5, le=3600)
+    task_window_padding_seconds: int = Field(default=120, ge=0, le=3600)
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _normalize_base_url(cls, value: Any) -> str:
+        return normalize_base_url(value)
+
+    @field_validator("namespace", "namespace_label", "pod_label", "container_label", mode="before")
+    @classmethod
+    def _normalize_required_string(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError("value must be a string")
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value must not be empty")
+        if normalized in _UNSUPPORTED_METRIC_SELECTOR_LABELS:
+            raise ValueError(f"metrics_config must not use high-cardinality selector label '{normalized}'")
+        return normalized
+
+    @field_validator("service_selector_labels", mode="before")
+    @classmethod
+    def _normalize_service_selector_labels(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            raise ValueError("service_selector_labels must not be empty")
+        if not isinstance(value, dict):
+            raise ValueError("service_selector_labels must be an object")
+        normalized: dict[str, str] = {}
+        for raw_key, raw_value in value.items():
+            key = _normalize_optional_string(raw_key)
+            field_value = _normalize_optional_string(raw_value)
+            if key is None or field_value is None:
+                raise ValueError("service_selector_labels must contain non-empty string keys and values")
+            if key in _UNSUPPORTED_METRIC_SELECTOR_LABELS:
+                raise ValueError(f"metrics_config must not use high-cardinality selector label '{key}'")
+            normalized[key] = field_value
+        if not normalized:
+            raise ValueError("service_selector_labels must not be empty")
+        return normalized
+
+
 class ServiceRecord(BaseModel):
     service_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -95,6 +147,7 @@ class ServiceRecord(BaseModel):
     capabilities: dict[str, Any] | None = None
     last_seen_at: datetime | None = None
     log_config: LokiLogConfig | None = None
+    metrics_config: PrometheusMetricsConfig | None = None
     health: dict[str, Any] | None = None
 
     @field_validator("service_id", "name", "environment", "auth_mode", mode="before")
@@ -142,6 +195,7 @@ class CreateServiceRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     auth_mode: str = Field(min_length=1)
     log_config: LokiLogConfig | None = None
+    metrics_config: PrometheusMetricsConfig | None = None
 
     @field_validator("service_id", "name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -175,6 +229,7 @@ class UpdateServiceRequest(BaseModel):
     auth_mode: str | None = None
     status: ServiceStatus | None = None
     log_config: LokiLogConfig | None = None
+    metrics_config: PrometheusMetricsConfig | None = None
 
     @field_validator("name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -561,6 +616,11 @@ class ServiceRegistryService:
         self._outbound_policy.validate_url(record.base_url, label="Service base_url")
         if record.log_config is not None:
             self._outbound_policy.validate_url(record.log_config.base_url, label="Loki log_config.base_url")
+        if record.metrics_config is not None:
+            self._outbound_policy.validate_url(
+                record.metrics_config.base_url,
+                label="Prometheus metrics_config.base_url",
+            )
 
     async def delete_service(self, service_id: str) -> None:
         normalized_service_id = service_id.strip()
@@ -693,6 +753,7 @@ __all__ = [
     "HttpCapabilityFetcher",
     "LokiLogConfig",
     "OutboundUrlPolicyError",
+    "PrometheusMetricsConfig",
     "RedisServiceRegistryStore",
     "ServiceListResponse",
     "ServiceNotFoundError",
