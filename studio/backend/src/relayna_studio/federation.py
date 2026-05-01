@@ -31,7 +31,14 @@ from .identity import (
     build_task_pointer,
     build_task_ref,
 )
-from .registry import ServiceNotFoundError, ServiceRecord, ServiceRegistryService, ServiceStatus
+from .registry import (
+    OutboundUrlPolicyError,
+    ServiceNotFoundError,
+    ServiceRecord,
+    ServiceRegistryService,
+    ServiceStatus,
+    StudioOutboundUrlPolicy,
+)
 
 SERVICE_STATUS_PATH = "/status/{task_id}"
 SERVICE_HISTORY_PATH = "/history"
@@ -148,6 +155,7 @@ class StudioFederationError(RuntimeError):
 class StudioFederationService:
     registry_service: ServiceRegistryService
     http_client: httpx.AsyncClient
+    outbound_policy: StudioOutboundUrlPolicy | None = None
     search_max_concurrency: int = 8
 
     async def get_service_status(self, service_id: str, task_id: str) -> dict[str, Any]:
@@ -895,6 +903,7 @@ class StudioFederationService:
             raise self._unsupported_route_error(service, capability_id)
 
         try:
+            self._validate_service_base_url(service)
             response = await self.http_client.get(
                 f"{service.base_url.rstrip('/')}{path}",
                 params=self._map_query_params(service, params),
@@ -984,6 +993,18 @@ class StudioFederationService:
             )
 
         return dict(payload) | {"service_id": service.service_id}
+
+    def _validate_service_base_url(self, service: ServiceRecord) -> None:
+        policy = self.outbound_policy or StudioOutboundUrlPolicy()
+        try:
+            policy.validate_url(service.base_url, label=f"Service '{service.service_id}' base_url")
+        except OutboundUrlPolicyError as exc:
+            raise StudioFederationError(
+                status_code=502,
+                detail=str(exc),
+                code="upstream_policy_violation",
+                service_id=service.service_id,
+            ) from exc
 
     async def _capture(self, awaitable) -> tuple[dict[str, Any] | None, StudioFederationError | None]:
         try:

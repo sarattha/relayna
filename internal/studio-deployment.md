@@ -35,6 +35,7 @@ Optional:
 - `RELAYNA_STUDIO_EVENT_STORE_PREFIX`
 - `RELAYNA_STUDIO_EVENT_STORE_TTL_SECONDS`
 - `RELAYNA_STUDIO_EVENT_HISTORY_MAXLEN`
+- `RELAYNA_STUDIO_PUSH_INGEST_ENABLED`
 - `RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS`
 - `RELAYNA_STUDIO_HEALTH_STORE_PREFIX`
 - `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS`
@@ -49,6 +50,13 @@ Optional:
 
 The container entrypoint serves `uvicorn relayna_studio.asgi:app` and keeps all
 Studio backend routes under `/studio/*`.
+
+The capability refresh allowlist variables are the shared Studio backend egress
+policy for registered service URLs and Loki URLs. For AKS DNS names, allow
+suffixes such as `.svc.cluster.local`; for literal private IP URLs, allow the
+required CIDR explicitly. Push ingestion is disabled by default, so the default
+internal deployment should rely on pull sync unless `RELAYNA_STUDIO_PUSH_INGEST_ENABLED=true`
+is set intentionally.
 
 ## Frontend Single-Origin Routing
 

@@ -15,6 +15,7 @@ from relayna_studio import (
     ServiceRecord,
     ServiceRegistryService,
     ServiceStatus,
+    StudioOutboundUrlPolicy,
     UpdateServiceRequest,
     create_service_registry_router,
     create_studio_app,
@@ -159,6 +160,76 @@ def test_normalize_base_url_rejects_invalid_inputs() -> None:
         except ValueError:
             continue
         raise AssertionError(f"Expected ValueError for {value!r}")
+
+
+def test_service_registry_rejects_disallowed_literal_ip_base_urls() -> None:
+    async def scenario() -> None:
+        store = RedisServiceRegistryStore(FakeRedis())
+        registry_service = ServiceRegistryService(store=store)
+
+        for base_url in (
+            "http://169.254.169.254/latest/meta-data",
+            "http://127.0.0.1:8000",
+            "http://10.0.0.10:8000",
+        ):
+            with pytest.raises(ValueError, match="allowlist"):
+                await registry_service.create_service(
+                    CreateServiceRequest(
+                        service_id=f"svc-{base_url.split('//', 1)[1].split(':', 1)[0].replace('.', '-')}",
+                        name="Unsafe Service",
+                        base_url=base_url,
+                        environment="prod",
+                        auth_mode="internal_network",
+                    )
+                )
+
+    asyncio.run(scenario())
+
+
+def test_service_registry_allows_private_ip_when_network_is_allowlisted() -> None:
+    async def scenario() -> None:
+        store = RedisServiceRegistryStore(FakeRedis())
+        registry_service = ServiceRegistryService(
+            store=store,
+            outbound_policy=StudioOutboundUrlPolicy(allowed_networks=("10.0.0.0/8",)),
+        )
+
+        created = await registry_service.create_service(
+            CreateServiceRequest(
+                service_id="payments-api",
+                name="Payments API",
+                base_url="http://10.0.0.10:8000",
+                environment="prod",
+                auth_mode="internal_network",
+            )
+        )
+
+        assert created.base_url == "http://10.0.0.10:8000"
+
+    asyncio.run(scenario())
+
+
+def test_service_registry_allows_cluster_dns_suffix_when_host_is_allowlisted() -> None:
+    async def scenario() -> None:
+        store = RedisServiceRegistryStore(FakeRedis())
+        registry_service = ServiceRegistryService(
+            store=store,
+            outbound_policy=StudioOutboundUrlPolicy(allowed_hosts=(".svc.cluster.local",)),
+        )
+
+        created = await registry_service.create_service(
+            CreateServiceRequest(
+                service_id="payments-api",
+                name="Payments API",
+                base_url="http://payments.default.svc.cluster.local:8000",
+                environment="prod",
+                auth_mode="internal_network",
+            )
+        )
+
+        assert created.base_url == "http://payments.default.svc.cluster.local:8000"
+
+    asyncio.run(scenario())
 
 
 def test_registry_store_enforces_duplicate_env_url_and_cleans_indexes_after_delete() -> None:

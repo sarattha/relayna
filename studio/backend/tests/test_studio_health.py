@@ -541,6 +541,45 @@ def test_studio_health_routes_merge_health_into_registry_and_compat_refresh(monk
         assert compat_refresh.json()["health"]["overall_status"] == "healthy"
 
 
+def test_worker_health_fetch_refuses_stored_disallowed_base_url_before_request() -> None:
+    async def scenario() -> None:
+        requests: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(str(request.url))
+            return httpx.Response(200, json={"reported_at": datetime.now(UTC).isoformat(), "workers": []})
+
+        registry = ServiceRegistryService(store=RedisServiceRegistryStore(FakeRedis()))
+        event_store = RedisStudioEventStore(FakeRedis())
+        service = StudioHealthRefreshService(
+            registry_service=registry,
+            health_store=RedisStudioHealthStore(FakeRedis()),
+            activity_reader=event_store,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+        try:
+            await service._fetch_worker_health(
+                ServiceRecord(
+                    service_id="unsafe-api",
+                    name="Unsafe API",
+                    base_url="http://127.0.0.1:8000",
+                    environment="prod",
+                    tags=[],
+                    auth_mode="internal_network",
+                    status=ServiceStatus.HEALTHY,
+                )
+            )
+        except RuntimeError as exc:
+            assert "allowlist" in str(exc)
+        else:
+            raise AssertionError("Expected outbound policy failure")
+        assert requests == []
+        await service.http_client.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_create_worker_health_router_serves_worker_heartbeat_payload() -> None:
     app = FastAPI()
     app.include_router(

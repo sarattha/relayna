@@ -33,6 +33,7 @@ from .registry import (
     HttpCapabilityFetcher,
     RedisServiceRegistryStore,
     ServiceRegistryService,
+    StudioOutboundUrlPolicy,
     create_service_registry_router,
 )
 from .search import (
@@ -56,6 +57,7 @@ class StudioRuntime:
     health_store: RedisStudioHealthStore
     health_service: StudioHealthRefreshService
     log_query_service: StudioLogQueryService
+    outbound_policy: StudioOutboundUrlPolicy
     search_store: RedisStudioSearchStore
     search_service: StudioSearchService
     pull_sync_worker: StudioPullSyncWorker | None = None
@@ -74,11 +76,14 @@ class _StudioLifespan:
         app_state_key: str,
         registry_prefix: str,
         capability_fetcher: CapabilityFetcher | None,
+        capability_refresh_allowed_hosts: tuple[str, ...] | None,
+        capability_refresh_allowed_networks: tuple[str, ...] | None,
         federation_client_factory,
         federation_timeout_seconds: float,
         event_store_prefix: str,
         event_store_ttl_seconds: int | None,
         event_history_maxlen: int,
+        push_ingest_enabled: bool,
         pull_sync_interval_seconds: float | None,
         health_store_prefix: str,
         health_refresh_interval_seconds: float | None,
@@ -93,11 +98,14 @@ class _StudioLifespan:
         self._app_state_key = app_state_key
         self._registry_prefix = registry_prefix
         self._capability_fetcher = capability_fetcher
+        self._capability_refresh_allowed_hosts = capability_refresh_allowed_hosts
+        self._capability_refresh_allowed_networks = capability_refresh_allowed_networks
         self._federation_client_factory = federation_client_factory
         self._federation_timeout_seconds = federation_timeout_seconds
         self._event_store_prefix = event_store_prefix
         self._event_store_ttl_seconds = event_store_ttl_seconds
         self._event_history_maxlen = event_history_maxlen
+        self._push_ingest_enabled = push_ingest_enabled
         self._pull_sync_interval_seconds = pull_sync_interval_seconds
         self._health_store_prefix = health_store_prefix
         self._health_refresh_interval_seconds = health_refresh_interval_seconds
@@ -118,9 +126,14 @@ class _StudioLifespan:
             redis = Redis.from_url(self._redis_url)
             registry_store = RedisServiceRegistryStore(redis, prefix=self._registry_prefix)
             search_store = RedisStudioSearchStore(redis, prefix=self._task_search_index_prefix)
+            outbound_policy = StudioOutboundUrlPolicy(
+                allowed_hosts=self._capability_refresh_allowed_hosts,
+                allowed_networks=self._capability_refresh_allowed_networks,
+            )
             registry_service = ServiceRegistryService(
                 store=registry_store,
                 capability_fetcher=self._capability_fetcher,
+                outbound_policy=outbound_policy,
             )
             http_client = self._federation_client_factory(self._federation_timeout_seconds)
             event_store = RedisStudioEventStore(
@@ -141,6 +154,7 @@ class _StudioLifespan:
             federation_service = StudioFederationService(
                 registry_service=registry_service,
                 http_client=http_client,
+                outbound_policy=outbound_policy,
             )
             health_service = StudioHealthRefreshService(
                 registry_service=registry_service,
@@ -148,19 +162,21 @@ class _StudioLifespan:
                 activity_reader=event_store,
                 http_client=http_client,
                 search_indexer=search_service,
+                outbound_policy=outbound_policy,
                 capability_stale_after_seconds=self._capability_stale_after_seconds,
                 observation_stale_after_seconds=self._observation_stale_after_seconds,
                 worker_heartbeat_stale_after_seconds=self._worker_heartbeat_stale_after_seconds,
             )
             log_query_service = StudioLogQueryService(
                 registry_service=registry_service,
-                providers={"loki": LokiLogProvider(http_client=http_client)},
+                providers={"loki": LokiLogProvider(http_client=http_client, outbound_policy=outbound_policy)},
             )
             event_ingest_service = StudioEventIngestService(
                 registry_service=registry_service,
                 event_store=event_store,
                 http_client=http_client,
                 search_indexer=search_service,
+                outbound_policy=outbound_policy,
             )
             event_stream = StudioEventStream(event_store=event_store)
             pull_sync_worker = (
@@ -199,6 +215,7 @@ class _StudioLifespan:
                 health_store=health_store,
                 health_service=health_service,
                 log_query_service=log_query_service,
+                outbound_policy=outbound_policy,
                 search_store=search_store,
                 search_service=search_service,
                 pull_sync_worker=pull_sync_worker,
@@ -286,6 +303,7 @@ def create_studio_app(
     event_store_prefix: str = "studio:events",
     event_store_ttl_seconds: int | None = 86400,
     event_history_maxlen: int = 5000,
+    push_ingest_enabled: bool = False,
     pull_sync_interval_seconds: float | None = 5.0,
     health_store_prefix: str = "studio:health",
     health_refresh_interval_seconds: float | None = 60.0,
@@ -305,11 +323,14 @@ def create_studio_app(
         app_state_key=app_state_key,
         registry_prefix=registry_prefix,
         capability_fetcher=resolved_capability_fetcher,
+        capability_refresh_allowed_hosts=capability_refresh_allowed_hosts,
+        capability_refresh_allowed_networks=capability_refresh_allowed_networks,
         federation_client_factory=federation_client_factory or _default_async_client_factory,
         federation_timeout_seconds=federation_timeout_seconds,
         event_store_prefix=event_store_prefix,
         event_store_ttl_seconds=event_store_ttl_seconds,
         event_history_maxlen=event_history_maxlen,
+        push_ingest_enabled=push_ingest_enabled,
         pull_sync_interval_seconds=pull_sync_interval_seconds,
         health_store_prefix=health_store_prefix,
         health_refresh_interval_seconds=health_refresh_interval_seconds,
@@ -332,6 +353,7 @@ def create_studio_app(
         create_studio_events_router(
             ingest_service=runtime.event_ingest_service,
             event_stream=runtime.event_stream,
+            push_ingest_enabled=push_ingest_enabled,
         )
     )
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))

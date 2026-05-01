@@ -16,6 +16,7 @@ class StudioAppKwargs(TypedDict):
     event_store_prefix: str
     event_store_ttl_seconds: int | None
     event_history_maxlen: int
+    push_ingest_enabled: bool
     pull_sync_interval_seconds: float | None
     health_store_prefix: str
     health_refresh_interval_seconds: float | None
@@ -76,6 +77,16 @@ def _env_optional_float(name: str, default: float | None) -> float | None:
     return float(stripped)
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    stripped = value.strip().lower()
+    if not stripped:
+        return default
+    return stripped in {"1", "true", "yes", "on"}
+
+
 def _env_csv(name: str) -> tuple[str, ...] | None:
     value = os.getenv(name)
     if value is None:
@@ -98,6 +109,7 @@ class StudioBackendSettings:
     event_store_prefix: str = "studio:events"
     event_store_ttl_seconds: int | None = 86400
     event_history_maxlen: int = 5000
+    push_ingest_enabled: bool = False
     pull_sync_interval_seconds: float | None = 5.0
     health_store_prefix: str = "studio:health"
     health_refresh_interval_seconds: float | None = 60.0
@@ -123,6 +135,7 @@ class StudioBackendSettings:
             event_store_prefix=_env_str("RELAYNA_STUDIO_EVENT_STORE_PREFIX", "studio:events"),
             event_store_ttl_seconds=_env_optional_int("RELAYNA_STUDIO_EVENT_STORE_TTL_SECONDS", 86400),
             event_history_maxlen=_env_int("RELAYNA_STUDIO_EVENT_HISTORY_MAXLEN", 5000),
+            push_ingest_enabled=_env_bool("RELAYNA_STUDIO_PUSH_INGEST_ENABLED", False),
             pull_sync_interval_seconds=_env_optional_float("RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS", 5.0),
             health_store_prefix=_env_str("RELAYNA_STUDIO_HEALTH_STORE_PREFIX", "studio:health"),
             health_refresh_interval_seconds=_env_optional_float(
@@ -155,6 +168,7 @@ class StudioBackendSettings:
             "event_store_prefix": self.event_store_prefix,
             "event_store_ttl_seconds": self.event_store_ttl_seconds,
             "event_history_maxlen": self.event_history_maxlen,
+            "push_ingest_enabled": self.push_ingest_enabled,
             "pull_sync_interval_seconds": self.pull_sync_interval_seconds,
             "health_store_prefix": self.health_store_prefix,
             "health_refresh_interval_seconds": self.health_refresh_interval_seconds,
