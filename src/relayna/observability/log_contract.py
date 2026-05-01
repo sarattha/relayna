@@ -39,6 +39,7 @@ _ERROR_EVENTS = (
     "failed",
     "error",
 )
+_NORMALIZED_LOG_KEYS = frozenset({"event", "level", "timestamp"})
 
 
 class StructlogLikeLogger(Protocol):
@@ -90,6 +91,8 @@ def observation_to_studio_log_fields(
     retry_attempt = event_fields.pop("retry_attempt", None)
     if retry_attempt is not None and "attempt" not in event_fields:
         event_fields["attempt"] = retry_attempt
+    event_fields = _drop_normalized_log_keys(event_fields)
+    context_fields = _drop_normalized_log_keys(fields)
 
     payload = {
         "service": service,
@@ -100,7 +103,7 @@ def observation_to_studio_log_fields(
         "level": _level_for_event(event_name),
         "timestamp": timestamp_value,
         **event_fields,
-        **fields,
+        **context_fields,
     }
     return _drop_none(payload)
 
@@ -176,6 +179,10 @@ def _snake_case(value: str) -> str:
 
 def _drop_none(fields: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value is not None}
+
+
+def _drop_normalized_log_keys(fields: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in fields.items() if key not in _NORMALIZED_LOG_KEYS}
 
 
 __all__ = [

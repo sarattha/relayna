@@ -13,12 +13,12 @@ Relayna API pods / long-running worker pods
   -> stdout JSON logs + /metrics
   -> Grafana Alloy
   -> Loki for logs
-  -> Prometheus or Mimir for metrics
+  -> Prometheus for metrics
   -> Relayna Studio as the task-aware query and visualization layer
 ```
 
 Relayna Studio must not ingest every log line. Studio should query Loki,
-Prometheus/Mimir, and Relayna APIs, then merge those results into service and
+Prometheus, and Relayna APIs, then merge those results into service and
 task views. Relayna Redis remains the source of truth for task lifecycle, status
 history, DLQ records, observations, and execution graphs.
 
@@ -103,7 +103,7 @@ Studio service observability config should cover both logs and metrics:
   - `task_match_mode`: `contains`
   - `task_match_template`: `{task_id}`
 - Metrics:
-  - `backend`: `prometheus` or `mimir`
+  - `backend`: `prometheus`
   - metrics backend URL
   - namespace selector
   - service label
@@ -349,7 +349,7 @@ windows.
 
 Implementation:
 
-- Add Prometheus or Mimir plus Alloy metrics collection.
+- Add Prometheus plus Alloy metrics collection.
 - Collect kubelet, cAdvisor, and Kubernetes API metrics.
 - Include pod CPU, memory, limits/requests, restart count, OOMKilled events,
   pod phase, container readiness, and network I/O.
@@ -372,7 +372,7 @@ Tasks:
   service metrics config and rejects unsupported high-cardinality task labels.
 - Extend Studio service records or registry metadata with metrics backend
   configuration without breaking existing `log_config` behavior.
-- Reuse the Studio backend egress allowlist model for Prometheus/Mimir base
+- Reuse the Studio backend egress allowlist model for Prometheus base
   URLs.
 - Add backend normalization for metric series, units, query windows, warnings,
   partial results, and provider errors.
@@ -397,7 +397,7 @@ Checklist:
 - [ ] Define service metrics response schema.
 - [ ] Define task-window metrics response schema.
 - [ ] Add metrics config to service registry model.
-- [ ] Add Prometheus/Mimir backend URL allowlist validation.
+- [ ] Add Prometheus backend URL allowlist validation.
 - [ ] Implement Prometheus-compatible query provider.
 - [ ] Reject `task_id` as a metrics label in default config.
 - [ ] Normalize metric series and units.
@@ -482,7 +482,7 @@ Tasks:
 
 Acceptance criteria:
 
-- Prometheus/Mimir can scrape Relayna API pods, worker pods, and Studio backend
+- Prometheus can scrape Relayna API pods, worker pods, and Studio backend
   `/metrics` endpoints.
 - Studio can render aggregate task/runtime charts without high-cardinality
   labels.

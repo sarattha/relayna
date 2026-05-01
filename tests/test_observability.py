@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from relayna.observability import (
@@ -188,6 +190,32 @@ def test_studio_log_contract_marks_failure_observations_as_error() -> None:
     assert fields["event"] == "task_handler_failed"
     assert fields["level"] == "error"
     assert fields["attempt"] == 1
+
+
+def test_studio_log_contract_keeps_canonical_fields_when_mapping_contains_reserved_keys() -> None:
+    fields = observation_to_studio_log_fields(
+        {
+            "event": "TaskHandlerFailed",
+            "event_type": "TaskMessageReceived",
+            "level": "debug",
+            "timestamp": datetime(2026, 5, 1, 12, 30, tzinfo=UTC),
+            "task_id": "task-123",
+            "correlation_id": "corr-123",
+            "retry_attempt": 3,
+        },
+        service="payments",
+        app="payments-worker",
+        stage="charge",
+        level="debug",
+        timestamp="caller_override",
+    )
+
+    assert fields["event"] == "task_handler_failed"
+    assert fields["level"] == "error"
+    assert fields["timestamp"] == "2026-05-01T12:30:00Z"
+    assert fields["attempt"] == 3
+    assert fields["task_id"] == "task-123"
+    assert fields["correlation_id"] == "corr-123"
 
 
 def test_studio_loki_label_contract_keeps_task_identifiers_in_body() -> None:
