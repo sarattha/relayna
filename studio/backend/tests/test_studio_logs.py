@@ -303,6 +303,37 @@ def test_loki_provider_uses_contains_task_matching() -> None:
     assert observed_query["query"] == '{app="payments-api",namespace="prod"} |= "checker_task-123"'
 
 
+def test_loki_provider_uses_option_a_task_body_matching() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    config = LokiLogConfig(
+        provider="loki",
+        base_url="https://loki.example.test",
+        service_selector_labels={"service": "document-worker"},
+        source_label="app",
+        task_id_label=None,
+        correlation_id_label=None,
+        level_label="level",
+        task_match_mode="contains",
+        task_match_template="{task_id}",
+    )
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=config),
+            config=config,
+            query=StudioLogQuery(task_id="task-123", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == '{service="document-worker"} |= "task-123"'
+
+
 def test_loki_provider_uses_regex_task_matching() -> None:
     observed_query: dict[str, str] = {}
 
