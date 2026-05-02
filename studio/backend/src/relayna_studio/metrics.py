@@ -481,9 +481,7 @@ def create_studio_metrics_router(
         group: list[StudioMetricGroup],
     ) -> StudioMetricsQuery:
         try:
-            return StudioMetricsQuery.model_validate(
-                {"from": from_time, "to": to_time, "step": step, "groups": group}
-            )
+            return StudioMetricsQuery.model_validate({"from": from_time, "to": to_time, "step": step, "groups": group})
         except ValidationError as exc:
             sanitized_errors: list[dict[str, Any]] = []
             for item in exc.errors(include_url=False):
