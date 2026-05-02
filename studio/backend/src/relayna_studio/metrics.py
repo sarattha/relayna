@@ -183,15 +183,17 @@ class PrometheusMetricsProvider:
                     step_seconds=step_seconds,
                 )
             )
-        return StudioMetricsResponse(
-            service_id=service.service_id,
-            task_id=task_id,
-            from_time=_iso(start),
-            to_time=_iso(end),
-            step_seconds=step_seconds,
-            approximate=approximate,
-            warnings=warnings or [],
-            series=series,
+        return StudioMetricsResponse.model_validate(
+            {
+                "service_id": service.service_id,
+                "task_id": task_id,
+                "from": _iso(start),
+                "to": _iso(end),
+                "step_seconds": step_seconds,
+                "approximate": approximate,
+                "warnings": warnings or [],
+                "series": series,
+            }
         )
 
     async def _query_group(
@@ -276,8 +278,7 @@ class PrometheusMetricsProvider:
         if extra:
             labels.update(extra)
         return ",".join(
-            f'{key}{operator}"{_escape_promql_string(value)}"'
-            for key, (operator, value) in sorted(labels.items())
+            f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())
         )
 
     def _normalize_response(self, *, group: StudioMetricGroup, payload: Mapping[str, Any]) -> list[StudioMetricSeries]:
@@ -480,7 +481,9 @@ def create_studio_metrics_router(
         group: list[StudioMetricGroup],
     ) -> StudioMetricsQuery:
         try:
-            return StudioMetricsQuery(from_time=from_time, to_time=to_time, step=step, groups=group)
+            return StudioMetricsQuery.model_validate(
+                {"from": from_time, "to": to_time, "step": step, "groups": group}
+            )
         except ValidationError as exc:
             sanitized_errors: list[dict[str, Any]] = []
             for item in exc.errors(include_url=False):
