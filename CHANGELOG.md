@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.8 - 2026-05-02
+
+### Added
+
+- Studio now supports Phase 2 Kubernetes infrastructure metrics through Prometheus-backed `metrics_config` on registered services.
+- Added Studio backend metrics endpoints for service windows and approximate task windows, covering CPU, memory, requests, limits, restarts, OOMKilled signals, pod phase, readiness, and network I/O.
+- Added Studio frontend metrics panels on service and task detail pages, including loading, empty, missing-config, provider-error, and manual task-window states.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.8`, the Studio backend package version to `0.1.7`, and the Studio frontend package version to `0.1.9`.
+- Updated release-install documentation to reference `relayna 1.4.8`, `relayna-studio 0.1.7`, and the matching frontend package version `0.1.9`.
+- Documented example service registration payloads that combine Loki `log_config` with Prometheus `metrics_config`.
+
+### Fixed
+
+- Studio rejects unsupported high-cardinality task identity labels in Prometheus metrics selectors and normalizes Prometheus configuration/provider failures into Studio API errors.
+
 ## 1.4.7 - 2026-05-01
 
 ### Added

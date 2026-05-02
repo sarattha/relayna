@@ -51,6 +51,17 @@ const emptyDraft: ServiceDraft = {
   log_level_label: "",
   log_task_match_mode: "label",
   log_task_match_template: "",
+  metrics_provider: "",
+  metrics_base_url: "",
+  metrics_namespace: "",
+  metrics_service_label_key: "",
+  metrics_service_label_value: "",
+  metrics_service_selector_labels: "",
+  metrics_namespace_label: "namespace",
+  metrics_pod_label: "pod",
+  metrics_container_label: "container",
+  metrics_step_seconds: "30",
+  metrics_task_window_padding_seconds: "120",
 };
 
 const ServicesContext = createContext<ServicesContextValue | null>(null);

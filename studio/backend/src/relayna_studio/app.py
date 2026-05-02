@@ -28,6 +28,7 @@ from .health import (
     create_studio_health_router,
 )
 from .logs import LokiLogProvider, StudioLogQueryService, create_studio_logs_router
+from .metrics import PrometheusMetricsProvider, StudioMetricsQueryService, create_studio_metrics_router
 from .registry import (
     CapabilityFetcher,
     HttpCapabilityFetcher,
@@ -57,6 +58,7 @@ class StudioRuntime:
     health_store: RedisStudioHealthStore
     health_service: StudioHealthRefreshService
     log_query_service: StudioLogQueryService
+    metrics_query_service: StudioMetricsQueryService
     outbound_policy: StudioOutboundUrlPolicy
     search_store: RedisStudioSearchStore
     search_service: StudioSearchService
@@ -171,6 +173,13 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 providers={"loki": LokiLogProvider(http_client=http_client, outbound_policy=outbound_policy)},
             )
+            metrics_query_service = StudioMetricsQueryService(
+                registry_service=registry_service,
+                providers={
+                    "prometheus": PrometheusMetricsProvider(http_client=http_client, outbound_policy=outbound_policy)
+                },
+                federation_service=federation_service,
+            )
             event_ingest_service = StudioEventIngestService(
                 registry_service=registry_service,
                 event_store=event_store,
@@ -215,6 +224,7 @@ class _StudioLifespan:
                 health_store=health_store,
                 health_service=health_service,
                 log_query_service=log_query_service,
+                metrics_query_service=metrics_query_service,
                 outbound_policy=outbound_policy,
                 search_store=search_store,
                 search_service=search_service,
@@ -357,6 +367,7 @@ def create_studio_app(
         )
     )
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
+    app.include_router(create_studio_metrics_router(metrics_query_service=runtime.metrics_query_service))
     return app
 
 

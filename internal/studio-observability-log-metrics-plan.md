@@ -360,6 +360,44 @@ Implementation:
 - The UI must clearly treat task-window pod metrics as approximate for
   long-running workers that process many tasks.
 
+Example Studio service registration observability config:
+
+```json
+{
+  "service_id": "document-service",
+  "name": "Document Service",
+  "base_url": "https://document-service.prod.svc.cluster.local",
+  "environment": "prod",
+  "tags": ["documents"],
+  "auth_mode": "internal_network",
+  "log_config": {
+    "provider": "loki",
+    "base_url": "https://loki.observability.svc.cluster.local",
+    "service_selector_labels": {
+      "service": "document-service",
+      "namespace": "prod"
+    },
+    "source_label": "app",
+    "level_label": "level",
+    "task_match_mode": "contains",
+    "task_match_template": "{task_id}"
+  },
+  "metrics_config": {
+    "provider": "prometheus",
+    "base_url": "https://prometheus.observability.svc.cluster.local",
+    "namespace": "prod",
+    "service_selector_labels": {
+      "service": "document-service"
+    },
+    "namespace_label": "namespace",
+    "pod_label": "pod",
+    "container_label": "container",
+    "step_seconds": 30,
+    "task_window_padding_seconds": 120
+  }
+}
+```
+
 Tasks:
 
 - Define the Studio metrics provider interface separately from the existing log
@@ -393,21 +431,21 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Define Studio metrics provider interface.
-- [ ] Define service metrics response schema.
-- [ ] Define task-window metrics response schema.
-- [ ] Add metrics config to service registry model.
-- [ ] Add Prometheus backend URL allowlist validation.
-- [ ] Implement Prometheus-compatible query provider.
-- [ ] Reject `task_id` as a metrics label in default config.
-- [ ] Normalize metric series and units.
-- [ ] Add service metrics backend routes.
-- [ ] Add task metrics backend routes.
-- [ ] Add service metrics UI panels.
-- [ ] Add task-window metrics UI panels.
-- [ ] Add approximation messaging for long-running workers.
-- [ ] Add backend tests for query generation and provider errors.
-- [ ] Add frontend tests for service and task metrics states.
+- [x] Define Studio metrics provider interface.
+- [x] Define service metrics response schema.
+- [x] Define task-window metrics response schema.
+- [x] Add metrics config to service registry model.
+- [x] Add Prometheus backend URL allowlist validation.
+- [x] Implement Prometheus-compatible query provider.
+- [x] Reject `task_id` as a metrics label in default config.
+- [x] Normalize metric series and units.
+- [x] Add service metrics backend routes.
+- [x] Add task metrics backend routes.
+- [x] Add service metrics UI panels.
+- [x] Add task-window metrics UI panels.
+- [x] Add approximation messaging for long-running workers.
+- [x] Add backend tests for query generation and provider errors.
+- [x] Add frontend tests for service and task metrics states.
 
 ## Phase 3: Relayna Task Metrics
 
