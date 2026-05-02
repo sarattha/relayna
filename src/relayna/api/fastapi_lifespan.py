@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 
 from ..contracts import ContractAliasConfig, TerminalStatusSet, public_output_aliases
 from ..dlq import BrokerDLQMessageInspector, DLQService, RedisDLQStore
+from ..metrics import RelaynaMetrics
 from ..observability import ExecutionGraphService, RedisObservationStore, RedisServiceEventFeedStore
 from ..rabbitmq import RelaynaRabbitClient
 from ..status.history import StreamHistoryReader
@@ -38,6 +39,7 @@ class RelaynaRuntime:
     history_reader: StreamHistoryReader
     execution_graph_service: ExecutionGraphService
     broker_message_inspector: BrokerDLQMessageInspector | None = None
+    metrics: RelaynaMetrics | None = None
     hub_task: asyncio.Task[None] | None = None
 
 
@@ -69,6 +71,8 @@ class _RelaynaLifespan:
         app_state_key: str,
         alias_config: ContractAliasConfig | None,
         broker_message_inspector: BrokerDLQMessageInspector | None,
+        metrics: RelaynaMetrics | None,
+        metrics_service_name: str,
     ) -> None:
         self._topology = topology
         self._redis_url = redis_url
@@ -94,6 +98,8 @@ class _RelaynaLifespan:
         self._app_state_key = app_state_key
         self._alias_config = alias_config
         self._broker_message_inspector = broker_message_inspector
+        self._metrics = metrics
+        self._metrics_service_name = metrics_service_name
         self._runtime: RelaynaRuntime | None = None
 
     @property
@@ -102,10 +108,17 @@ class _RelaynaLifespan:
 
     def ensure_runtime(self) -> RelaynaRuntime:
         if self._runtime is None:
-            rabbit_kwargs: dict[str, Any] = {"connection_name": self._rabbit_connection_name}
+            metrics = self._metrics or RelaynaMetrics(service=self._metrics_service_name)
+            rabbit_kwargs: dict[str, Any] = {"connection_name": self._rabbit_connection_name, "metrics": metrics}
             if self._alias_config is not None:
                 rabbit_kwargs["alias_config"] = self._alias_config
-            rabbitmq = RelaynaRabbitClient(self._topology, **rabbit_kwargs)
+            try:
+                rabbitmq = RelaynaRabbitClient(self._topology, **rabbit_kwargs)
+            except TypeError as exc:
+                if "metrics" not in str(exc):
+                    raise
+                rabbit_kwargs.pop("metrics", None)
+                rabbitmq = RelaynaRabbitClient(self._topology, **rabbit_kwargs)
             redis = Redis.from_url(self._redis_url)
             service_event_store = None
             if self._service_event_store_prefix is not None:
@@ -150,6 +163,7 @@ class _RelaynaLifespan:
                         else self._store_ttl_seconds
                     ),
                     "history_maxlen": self._observation_history_maxlen,
+                    "metrics": metrics,
                 }
                 if service_event_store is not None:
                     observation_store_kwargs["service_event_store"] = service_event_store
@@ -204,6 +218,7 @@ class _RelaynaLifespan:
                 history_reader=history_reader,
                 execution_graph_service=execution_graph_service,
                 broker_message_inspector=self._broker_message_inspector,
+                metrics=metrics,
             )
         return self._runtime
 
@@ -272,6 +287,8 @@ def create_relayna_lifespan(
     app_state_key: str = "relayna",
     alias_config: ContractAliasConfig | None = None,
     broker_message_inspector: BrokerDLQMessageInspector | None = None,
+    metrics: RelaynaMetrics | None = None,
+    metrics_service_name: str = "relayna",
 ) -> _RelaynaLifespan:
     return _RelaynaLifespan(
         topology=topology,
@@ -298,6 +315,8 @@ def create_relayna_lifespan(
         app_state_key=app_state_key,
         alias_config=alias_config,
         broker_message_inspector=broker_message_inspector,
+        metrics=metrics,
+        metrics_service_name=metrics_service_name,
     )
 
 

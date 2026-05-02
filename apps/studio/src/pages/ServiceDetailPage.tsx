@@ -162,6 +162,15 @@ function formatMetricValue(value: number | null | undefined, unit: string) {
   if (unit === "cores") {
     return `${value.toFixed(3)} cores`;
   }
+  if (unit === "per_second") {
+    return `${value.toFixed(3)}/s`;
+  }
+  if (unit === "seconds") {
+    return `${value.toFixed(3)}s`;
+  }
+  if (unit === "unix_seconds") {
+    return value > 0 ? formatTimestamp(new Date(value * 1000).toISOString()) : "n/a";
+  }
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
@@ -685,6 +694,16 @@ export function ServiceDetailPage() {
               "readiness",
               "network_receive",
               "network_transmit",
+              "tasks_started_rate",
+              "tasks_failed_rate",
+              "tasks_retried_rate",
+              "tasks_dlq_rate",
+              "task_duration_p95",
+              "active_tasks",
+              "worker_heartbeat",
+              "queue_publish_rate",
+              "status_events_rate",
+              "observation_events_rate",
             ].map((metric) => (
               <div key={metric} className="studio-subcard" style={{ borderRadius: 14, padding: 14 }}>
                 <span className="studio-inline-meta">{metricLabel(metric)}</span>

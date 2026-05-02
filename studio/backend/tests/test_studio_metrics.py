@@ -142,6 +142,35 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
     ]
 
 
+def test_prometheus_provider_builds_relayna_runtime_queries() -> None:
+    observed_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=make_metrics_config()),
+            config=make_metrics_config(),
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=["tasks_started_rate", "task_duration_p95"],
+            ),
+        )
+
+    asyncio.run(scenario())
+    assert observed_queries == [
+        'sum(rate(relayna_tasks_started_total{service="payments-api"}[5m]))',
+        'histogram_quantile(0.95, sum by (le) '
+        '(rate(relayna_task_duration_seconds_bucket{service="payments-api"}[5m])))',
+    ]
+
+
 def test_service_metrics_route_returns_series(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 

@@ -529,26 +529,26 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Select Relayna metrics dependency and export strategy.
-- [ ] Add task lifecycle counters.
-- [ ] Add task duration histogram.
-- [ ] Add task attempt metric.
-- [ ] Add active task gauge.
-- [ ] Add worker heartbeat metric.
-- [ ] Add queue publish metric.
-- [ ] Add status event metric.
-- [ ] Add observation event metric.
-- [ ] Add low-cardinality label definitions.
-- [ ] Add high-cardinality label guardrails.
-- [ ] Expose `/metrics` from API runtime integration.
-- [ ] Expose `/metrics` from worker runtime integration.
-- [ ] Expose `/metrics` from Studio backend.
-- [ ] Add task CPU process observation samples.
-- [ ] Add task RSS memory observation samples.
-- [ ] Add Studio aggregate runtime charts.
-- [ ] Add Studio exact task resource sample display.
-- [ ] Add SDK/runtime tests for metrics emission.
-- [ ] Add Studio tests for aggregate charts and sample fallback behavior.
+- [x] Select Relayna metrics dependency and export strategy.
+- [x] Add task lifecycle counters.
+- [x] Add task duration histogram.
+- [x] Add task attempt metric.
+- [x] Add active task gauge.
+- [x] Add worker heartbeat metric.
+- [x] Add queue publish metric.
+- [x] Add status event metric.
+- [x] Add observation event metric.
+- [x] Add low-cardinality label definitions.
+- [x] Add high-cardinality label guardrails.
+- [x] Expose `/metrics` from API runtime integration.
+- [x] Expose `/metrics` from worker runtime integration.
+- [x] Expose `/metrics` from Studio backend.
+- [x] Add task CPU process observation samples.
+- [x] Add task RSS memory observation samples.
+- [x] Add Studio aggregate runtime charts.
+- [x] Add Studio exact task resource sample display.
+- [x] Add SDK/runtime tests for metrics emission.
+- [x] Add Studio tests for aggregate charts and sample fallback behavior.
 
 ## Phase 4: Trace Correlation
 

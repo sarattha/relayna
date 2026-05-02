@@ -26,6 +26,7 @@ from ..contracts import (
     ensure_status_event_id,
     normalize_contract_aliases,
 )
+from ..metrics import RelaynaMetrics
 from ..topology import (
     RelaynaTopology,
     RoutedTasksSharedStatusShardedAggregationTopology,
@@ -48,10 +49,12 @@ class RelaynaRabbitClient:
         *,
         connection_name: str = "relayna-robust",
         alias_config: ContractAliasConfig | None = None,
+        metrics: RelaynaMetrics | None = None,
     ) -> None:
         self._topology = topology
         self._connection_name = connection_name
         self._alias_config = alias_config
+        self._metrics = metrics
         self._connection: AbstractRobustConnection | None = None
         self._channel: AbstractRobustChannel | None = None
         self._tasks_exchange: AbstractRobustExchange | None = None
@@ -67,6 +70,10 @@ class RelaynaRabbitClient:
     @property
     def alias_config(self) -> ContractAliasConfig | None:
         return self._alias_config
+
+    @property
+    def metrics(self) -> RelaynaMetrics | None:
+        return self._metrics
 
     async def initialize(self) -> None:
         async with self._lock:
@@ -174,7 +181,10 @@ class RelaynaRabbitClient:
             headers=cast(Any, message_headers),
         )
         _clear_default_priority(message, priority=cast(int | None, task_dict.get("priority")))
-        await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(task_dict))
+        routing_key = self._topology.task_routing_key(task_dict)
+        await self._tasks_exchange.publish(message, routing_key=routing_key)
+        if self._metrics is not None:
+            self._metrics.record_queue_publish(queue=routing_key, status="task", worker_type="api")
 
     async def publish_tasks(
         self,
@@ -282,6 +292,13 @@ class RelaynaRabbitClient:
         )
         _clear_default_priority(message, priority=cast(int | None, workflow_payload.get("priority")))
         await self._workflow_exchange.publish(message, routing_key=routing_key)
+        if self._metrics is not None:
+            self._metrics.record_queue_publish(
+                stage=str(workflow_payload.get("stage") or ""),
+                queue=routing_key,
+                status="workflow",
+                worker_type="api",
+            )
 
     async def publish_raw_to_queue(
         self,
@@ -304,6 +321,8 @@ class RelaynaRabbitClient:
             headers=dict(headers or {}),
         )
         await self._channel.default_exchange.publish(message, routing_key=queue_name)
+        if self._metrics is not None:
+            self._metrics.record_queue_publish(queue=queue_name, status="raw", worker_type="worker")
 
     async def acquire_channel(self, prefetch: int = 200) -> AbstractChannel:
         await self._ensure_ready()
@@ -416,6 +435,8 @@ class RelaynaRabbitClient:
             headers={"task_id": task_id, "status": str(payload.get("status", ""))},
         )
         await self._status_exchange.publish(message, routing_key=routing_key)
+        if self._metrics is not None:
+            self._metrics.record_status_event(status=str(payload.get("status") or ""), worker_type="api")
 
     async def _publish_batch_envelope(self, payload: dict[str, Any], *, priority: int | None) -> None:
         await self._ensure_ready()
@@ -433,7 +454,10 @@ class RelaynaRabbitClient:
             headers={"batch_id": batch_id, "batch_size": len(tasks) if isinstance(tasks, list) else 0},
         )
         _clear_default_priority(message, priority=priority)
-        await self._tasks_exchange.publish(message, routing_key=self._topology.task_routing_key(first_task))
+        routing_key = self._topology.task_routing_key(first_task)
+        await self._tasks_exchange.publish(message, routing_key=routing_key)
+        if self._metrics is not None:
+            self._metrics.record_queue_publish(queue=routing_key, status="batch", worker_type="api")
 
     def _resolve_batch_priority(self, tasks: Sequence[Mapping[str, Any]]) -> int | None:
         priorities = {cast(int | None, task.get("priority")) for task in tasks}

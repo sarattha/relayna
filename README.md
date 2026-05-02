@@ -50,7 +50,7 @@ uv sync --extra dev
 ```python
 from fastapi import FastAPI
 
-from relayna.api import create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.api import create_metrics_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.topology import SharedTasksSharedStatusTopology
 
 topology = SharedTasksSharedStatusTopology(
@@ -77,6 +77,7 @@ app.include_router(
         latest_status_store=runtime.store,
     )
 )
+app.include_router(create_metrics_router(runtime.metrics))
 ```
 
 This setup gives you:
@@ -84,6 +85,13 @@ This setup gives you:
 - `GET /events/{task_id}` for SSE status updates
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
+- `GET /metrics` for low-cardinality Prometheus runtime metrics
+
+Worker-only processes can expose the same registry with
+`start_metrics_http_server(runtime_metrics, port=8001)`. Relayna Prometheus
+labels are limited to `service`, `stage`, `queue`, `status`, and `worker_type`;
+task identity such as `task_id` and `correlation_id` is emitted only through
+Relayna observations, not metric labels.
 
 ## SDK vs Studio
 

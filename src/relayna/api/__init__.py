@@ -1,3 +1,4 @@
+from ..metrics import RelaynaMetrics, create_metrics_router, start_metrics_http_server
 from .capabilities_routes import (
     ALL_CAPABILITY_ROUTE_IDS,
     BROKER_DLQ_CAPABILITY_ROUTE_IDS,
@@ -61,6 +62,7 @@ __all__ = [
     "CapabilityServiceMetadata",
     "HistoryOutputAdapter",
     "RelaynaRuntime",
+    "RelaynaMetrics",
     "STATUS_CAPABILITY_ROUTE_IDS",
     "STATUS_EVENTS_ROUTE_ID",
     "STATUS_HISTORY_ROUTE_ID",
@@ -79,6 +81,7 @@ __all__ = [
     "create_dlq_router",
     "create_events_router",
     "create_execution_router",
+    "create_metrics_router",
     "create_worker_health_router",
     "create_relayna_lifespan",
     "create_replay_router",
@@ -87,4 +90,5 @@ __all__ = [
     "get_relayna_runtime",
     "merge_capability_route_ids",
     "sse_response",
+    "start_metrics_http_server",
 ]

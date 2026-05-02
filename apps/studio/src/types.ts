@@ -454,7 +454,17 @@ export type StudioMetricGroup =
   | "pod_phase"
   | "readiness"
   | "network_receive"
-  | "network_transmit";
+  | "network_transmit"
+  | "tasks_started_rate"
+  | "tasks_failed_rate"
+  | "tasks_retried_rate"
+  | "tasks_dlq_rate"
+  | "task_duration_p95"
+  | "active_tasks"
+  | "worker_heartbeat"
+  | "queue_publish_rate"
+  | "status_events_rate"
+  | "observation_events_rate";
 
 export type StudioMetricPoint = {
   timestamp: string;

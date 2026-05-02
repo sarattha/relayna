@@ -206,6 +206,28 @@ def build_execution_graph(
                 )
                 continue
 
+            if event_type == "TaskResourceSampled":
+                sample_kind = str(item.get("sample_kind") or "").strip() or "sample"
+                add_node(
+                    ExecutionGraphNode(
+                        id=f"resource-sample:{current_task_id}:{sample_kind}:{event_timestamp or len(node_map)}",
+                        kind="resource_sample",
+                        task_id=current_task_id,
+                        label=f"{sample_kind} resource sample",
+                        timestamp=event_timestamp,
+                        annotations={
+                            "sample_kind": sample_kind,
+                            "cpu_process_seconds": item.get("cpu_process_seconds"),
+                            "memory_rss_bytes": item.get("memory_rss_bytes"),
+                            "queue_name": item.get("queue_name"),
+                            "correlation_id": item.get("correlation_id"),
+                            "task_type": item.get("task_type"),
+                            "consumer_name": item.get("consumer_name"),
+                        },
+                    )
+                )
+                continue
+
             if event_type == "WorkflowMessagePublished":
                 message_id = str(item.get("message_id") or "").strip()
                 if not message_id:

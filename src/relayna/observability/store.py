@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from redis.asyncio import Redis
 
+from ..metrics import RelaynaMetrics
 from .exporters import event_to_dict
 from .feed import RedisServiceEventFeedStore
 
@@ -29,12 +30,14 @@ class RedisObservationStore:
         ttl_seconds: int | None = 86400,
         history_maxlen: int = 500,
         service_event_store: RedisServiceEventFeedStore | None = None,
+        metrics: RelaynaMetrics | None = None,
     ) -> None:
         self.redis = redis
         self.prefix = prefix
         self.ttl_seconds = ttl_seconds
         self.history_maxlen = history_maxlen
         self.service_event_store = service_event_store
+        self.metrics = metrics
 
     def history_key(self, task_id: str) -> str:
         return f"{self.prefix}:history:{task_id}"
@@ -68,6 +71,8 @@ class RedisObservationStore:
         await pipe.execute()
         if self.service_event_store is not None:
             await self.service_event_store.add_observation_event(event)
+        if self.metrics is not None:
+            self.metrics.record_observation_event(status=str(payload.get("event_type") or "observation"))
         return True
 
     async def get_history(self, task_id: str, limit: int | None = None) -> list[dict[str, Any]]:

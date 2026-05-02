@@ -33,6 +33,16 @@ class StudioMetricGroup(StrEnum):
     READINESS = "readiness"
     NETWORK_RECEIVE = "network_receive"
     NETWORK_TRANSMIT = "network_transmit"
+    TASKS_STARTED_RATE = "tasks_started_rate"
+    TASKS_FAILED_RATE = "tasks_failed_rate"
+    TASKS_RETRIED_RATE = "tasks_retried_rate"
+    TASKS_DLQ_RATE = "tasks_dlq_rate"
+    TASK_DURATION_P95 = "task_duration_p95"
+    ACTIVE_TASKS = "active_tasks"
+    WORKER_HEARTBEAT = "worker_heartbeat"
+    QUEUE_PUBLISH_RATE = "queue_publish_rate"
+    STATUS_EVENTS_RATE = "status_events_rate"
+    OBSERVATION_EVENTS_RATE = "observation_events_rate"
 
 
 _DEFAULT_GROUPS = tuple(StudioMetricGroup)
@@ -206,7 +216,7 @@ class PrometheusMetricsProvider:
         end: datetime,
         step_seconds: int,
     ) -> list[StudioMetricSeries]:
-        promql = self._build_query(config=config, group=group)
+        promql = self._build_query(service=service, config=config, group=group)
         params = {
             "query": promql,
             "start": str(start.timestamp()),
@@ -235,12 +245,13 @@ class PrometheusMetricsProvider:
             ) from exc
         return self._normalize_response(group=group, payload=payload)
 
-    def _build_query(self, *, config: PrometheusMetricsConfig, group: StudioMetricGroup) -> str:
+    def _build_query(self, *, service: ServiceRecord, config: PrometheusMetricsConfig, group: StudioMetricGroup) -> str:
         selector = self._selector(config)
         container_selector = self._selector(
             config,
             extra={config.container_label: ("!=", ""), config.pod_label: ("=~", ".+")},
         )
+        runtime_selector = f'service="{_escape_promql_string(service.service_id)}"'
         if group == StudioMetricGroup.CPU_USAGE:
             return f"rate(container_cpu_usage_seconds_total{{{container_selector}}}[5m])"
         if group == StudioMetricGroup.MEMORY_USAGE:
@@ -265,6 +276,29 @@ class PrometheusMetricsProvider:
             return f"rate(container_network_receive_bytes_total{{{selector}}}[5m])"
         if group == StudioMetricGroup.NETWORK_TRANSMIT:
             return f"rate(container_network_transmit_bytes_total{{{selector}}}[5m])"
+        if group == StudioMetricGroup.TASKS_STARTED_RATE:
+            return f"sum(rate(relayna_tasks_started_total{{{runtime_selector}}}[5m]))"
+        if group == StudioMetricGroup.TASKS_FAILED_RATE:
+            return f"sum(rate(relayna_tasks_failed_total{{{runtime_selector}}}[5m]))"
+        if group == StudioMetricGroup.TASKS_RETRIED_RATE:
+            return f"sum(rate(relayna_tasks_retried_total{{{runtime_selector}}}[5m]))"
+        if group == StudioMetricGroup.TASKS_DLQ_RATE:
+            return f"sum(rate(relayna_tasks_dlq_total{{{runtime_selector}}}[5m]))"
+        if group == StudioMetricGroup.TASK_DURATION_P95:
+            return (
+                "histogram_quantile(0.95, "
+                f"sum by (le) (rate(relayna_task_duration_seconds_bucket{{{runtime_selector}}}[5m])))"
+            )
+        if group == StudioMetricGroup.ACTIVE_TASKS:
+            return f"sum(relayna_worker_active_tasks{{{runtime_selector}}})"
+        if group == StudioMetricGroup.WORKER_HEARTBEAT:
+            return f"max(relayna_worker_heartbeat_timestamp{{{runtime_selector}}})"
+        if group == StudioMetricGroup.QUEUE_PUBLISH_RATE:
+            return f"sum(rate(relayna_queue_publish_total{{{runtime_selector}}}[5m]))"
+        if group == StudioMetricGroup.STATUS_EVENTS_RATE:
+            return f"sum(rate(relayna_status_events_published_total{{{runtime_selector}}}[5m]))"
+        if group == StudioMetricGroup.OBSERVATION_EVENTS_RATE:
+            return f"sum(rate(relayna_observation_events_total{{{runtime_selector}}}[5m]))"
         raise StudioMetricsConfigError(f"Unsupported metric group '{group}'.")
 
     def _selector(
@@ -465,8 +499,26 @@ def _metric_unit(group: StudioMetricGroup) -> str:
         return "bytes"
     if group in {StudioMetricGroup.NETWORK_RECEIVE, StudioMetricGroup.NETWORK_TRANSMIT}:
         return "bytes_per_second"
-    if group in {StudioMetricGroup.RESTARTS, StudioMetricGroup.OOM_KILLED}:
+    if group in {
+        StudioMetricGroup.RESTARTS,
+        StudioMetricGroup.OOM_KILLED,
+        StudioMetricGroup.ACTIVE_TASKS,
+    }:
         return "count"
+    if group in {
+        StudioMetricGroup.TASKS_STARTED_RATE,
+        StudioMetricGroup.TASKS_FAILED_RATE,
+        StudioMetricGroup.TASKS_RETRIED_RATE,
+        StudioMetricGroup.TASKS_DLQ_RATE,
+        StudioMetricGroup.QUEUE_PUBLISH_RATE,
+        StudioMetricGroup.STATUS_EVENTS_RATE,
+        StudioMetricGroup.OBSERVATION_EVENTS_RATE,
+    }:
+        return "per_second"
+    if group == StudioMetricGroup.TASK_DURATION_P95:
+        return "seconds"
+    if group == StudioMetricGroup.WORKER_HEARTBEAT:
+        return "unix_seconds"
     return "state"
 
 
