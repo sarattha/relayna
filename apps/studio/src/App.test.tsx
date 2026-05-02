@@ -280,10 +280,22 @@ function metricsResponse(taskId?: string | null) {
         points: [{ timestamp: "2026-04-08T10:05:00Z", value: 0.25 }],
       },
       {
+        metric: "cpu_usage",
+        unit: "cores",
+        labels: { pod: "payments-def", container: "worker" },
+        points: [{ timestamp: "2026-04-08T10:05:00Z", value: 0.5 }],
+      },
+      {
         metric: "memory_usage",
         unit: "bytes",
         labels: { pod: "payments-abc", container: "worker" },
         points: [{ timestamp: "2026-04-08T10:05:00Z", value: 268435456 }],
+      },
+      {
+        metric: "memory_usage",
+        unit: "bytes",
+        labels: { pod: "payments-def", container: "worker" },
+        points: [{ timestamp: "2026-04-08T10:05:00Z", value: 134217728 }],
       },
     ],
   };
@@ -992,7 +1004,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("Kubernetes Metrics")).toBeInTheDocument();
-    expect(await screen.findByText("0.250 cores")).toBeInTheDocument();
+    expect(await screen.findByText("0.750 cores")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service metrics window mode"), { target: { value: "manual" } });
     const from = isoToLocalDateTime("2026-04-08T09:45:00Z");
     const to = isoToLocalDateTime("2026-04-08T10:15:00Z");
@@ -1629,7 +1641,7 @@ describe("App", () => {
 
     expect(await screen.findByText("Task Kubernetes Metrics")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText(/approximate for long-running workers/i).length).toBeGreaterThan(0));
-    expect(await screen.findByText("256.00 MiB")).toBeInTheDocument();
+    expect(await screen.findByText("384.00 MiB")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Task metrics window mode"), { target: { value: "manual" } });
     const from = isoToLocalDateTime("2026-04-08T09:45:00Z");
     const to = isoToLocalDateTime("2026-04-08T10:15:00Z");

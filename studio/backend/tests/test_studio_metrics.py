@@ -234,6 +234,64 @@ def test_task_metrics_route_derives_window_and_marks_approximate(monkeypatch) ->
     assert float(observed_params["end"]) == 1712783220.0
 
 
+def test_task_metrics_route_ignores_invalid_summary_timestamps(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/query_range":
+            observed_params["start"] = request.url.params["start"]
+            observed_params["end"] = request.url.params["end"]
+            return httpx.Response(200, json=prometheus_success_response())
+        if request.url.path == "/status/task-123":
+            return httpx.Response(
+                200,
+                json={"task_id": "task-123", "event": {"task_id": "task-123", "status": "completed"}},
+            )
+        if request.url.path == "/history":
+            return httpx.Response(
+                200,
+                json={
+                    "count": 2,
+                    "events": [
+                        {"task_id": "task-123", "status": "queued", "timestamp": "2024-04-10T21:00:00Z"},
+                        {"task_id": "task-123", "status": "completed", "timestamp": "2024-04-10T21:05:00Z"},
+                    ],
+                },
+            )
+        if request.url.path == "/executions/task-123/graph":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "task-123",
+                    "topology_kind": "pipeline",
+                    "summary": {"started_at": "not-a-date", "ended_at": "still-not-a-date"},
+                    "nodes": [],
+                    "edges": [],
+                    "annotations": {},
+                    "related_task_ids": [],
+                },
+            )
+        return httpx.Response(200, json={"count": 0, "items": []})
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(app, make_record(metrics_config=make_metrics_config()))
+        response = client.get("/studio/tasks/payments-api/task-123/metrics", params={"group": "cpu_usage"})
+
+    assert response.status_code == 200
+    assert float(observed_params["start"]) == 1712782680.0
+    assert float(observed_params["end"]) == 1712783220.0
+
+
 def test_metrics_routes_return_expected_error_codes(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
     app = create_studio_app(redis_url="redis://studio-test/0", pull_sync_interval_seconds=None)

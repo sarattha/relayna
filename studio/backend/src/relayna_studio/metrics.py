@@ -419,10 +419,8 @@ def _derive_task_window(detail: StudioTaskDetailResponse) -> tuple[datetime | No
     if isinstance(summary, Mapping):
         raw_start = summary.get("started_at")
         raw_end = summary.get("ended_at")
-        if isinstance(raw_start, str):
-            start = _parse_iso_timestamp(raw_start)
-        if isinstance(raw_end, str):
-            end = _parse_iso_timestamp(raw_end)
+        start = _timestamp_from_value(raw_start)
+        end = _timestamp_from_value(raw_end)
     history = detail.history or {}
     events = history.get("events") if isinstance(history, Mapping) else None
     if isinstance(events, list):
@@ -441,13 +439,19 @@ def _derive_task_window(detail: StudioTaskDetailResponse) -> tuple[datetime | No
 
 def _timestamp_from_record(record: Mapping[str, Any]) -> datetime | None:
     for key in ("timestamp", "event_timestamp", "created_at", "updated_at", "ingested_at"):
-        value = record.get(key)
-        if isinstance(value, str):
-            try:
-                return _parse_iso_timestamp(value)
-            except ValueError:
-                continue
+        parsed = _timestamp_from_value(record.get(key))
+        if parsed is not None:
+            return parsed
     return None
+
+
+def _timestamp_from_value(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return _parse_iso_timestamp(value)
+    except ValueError:
+        return None
 
 
 def _metric_unit(group: StudioMetricGroup) -> str:

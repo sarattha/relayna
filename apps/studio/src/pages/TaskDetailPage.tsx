@@ -165,9 +165,20 @@ function formatMetricValue(value: number | null | undefined, unit: string) {
 }
 
 function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string) {
-  const series = metrics?.series.find((item) => item.metric === metric && item.points.length);
-  const point = series?.points[series.points.length - 1];
-  return formatMetricValue(point?.value, series?.unit || "");
+  const matchingSeries = metrics?.series.filter((item) => item.metric === metric && item.points.length) || [];
+  let unit = "";
+  let total = 0;
+  let hasValue = false;
+  for (const series of matchingSeries) {
+    const point = series.points[series.points.length - 1];
+    if (point.value === null || point.value === undefined || Number.isNaN(point.value)) {
+      continue;
+    }
+    unit ||= series.unit;
+    total += point.value;
+    hasValue = true;
+  }
+  return formatMetricValue(hasValue ? total : null, unit);
 }
 
 function normalizeStatusValue(value: unknown) {
