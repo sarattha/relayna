@@ -92,6 +92,7 @@ class PrometheusMetricsConfig(BaseModel):
     base_url: str
     namespace: str
     service_selector_labels: dict[str, str] = Field(default_factory=dict)
+    runtime_service_label_value: str | None = None
     namespace_label: str = "namespace"
     pod_label: str = "pod"
     container_label: str = "container"
@@ -114,6 +115,11 @@ class PrometheusMetricsConfig(BaseModel):
         if normalized in _UNSUPPORTED_METRIC_SELECTOR_LABELS:
             raise ValueError(f"metrics_config must not use high-cardinality selector label '{normalized}'")
         return normalized
+
+    @field_validator("runtime_service_label_value", mode="before")
+    @classmethod
+    def _normalize_runtime_service_label_value(cls, value: Any) -> str | None:
+        return _normalize_optional_string(value)
 
     @field_validator("service_selector_labels", mode="before")
     @classmethod

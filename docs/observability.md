@@ -1,9 +1,10 @@
 # Observability
 
 `relayna` exposes backend-agnostic runtime observations through async sink
-callbacks. The library emits typed dataclass events from long-running loops such
-as SSE streaming, worker consumption, and status fanout, but it does not ship a
-logging backend, metrics registry, or tracing exporter.
+callbacks and low-cardinality Prometheus runtime metrics. The library emits
+typed dataclass events from long-running loops such as SSE streaming, worker
+consumption, and status fanout. It also ships a Prometheus metrics helper for
+API and worker runtimes, but it does not ship a tracing exporter.
 
 `relayna.observability` owns the event model plus collector and exporter
 helpers. It does not own status storage, FastAPI routes, or worker runtime
@@ -12,6 +13,64 @@ execution; those live in `relayna.status`, `relayna.api`, and
 
 It now also owns the persisted observation store and execution-graph
 reconstruction helpers that sit on top of those event streams.
+
+For AKS deployments that use Relayna Studio, see
+[AKS observability stack](aks-observability.md) for the full Redis, RabbitMQ,
+Loki, Alloy, Prometheus, kube-state-metrics, registered-service, worker, and
+Studio architecture.
+
+## Prometheus runtime metrics
+
+Relayna runtime metrics are aggregate service/runtime signals. They are safe for
+Prometheus because their labels are low-cardinality:
+
+- `service`
+- `stage`
+- `queue`
+- `status`
+- `worker_type`
+
+The SDK exports:
+
+- `relayna_tasks_started_total`
+- `relayna_tasks_completed_total`
+- `relayna_tasks_failed_total`
+- `relayna_tasks_retried_total`
+- `relayna_tasks_dlq_total`
+- `relayna_task_duration_seconds`
+- `relayna_task_attempts`
+- `relayna_worker_active_tasks`
+- `relayna_worker_heartbeat_timestamp`
+- `relayna_queue_publish_total`
+- `relayna_status_events_published_total`
+- `relayna_observation_events_total`
+
+Never add task identity as Prometheus labels. `task_id`, `correlation_id`,
+`request_id`, `worker_id`, `pod`, `pod_name`, `container`, and `message_id` are
+rejected by the Relayna metrics helper because they can create unbounded series.
+
+FastAPI services can expose metrics on `/metrics`:
+
+```python
+from relayna.api import create_metrics_router, create_relayna_lifespan, get_relayna_runtime
+
+app = FastAPI(lifespan=create_relayna_lifespan(topology=topology, redis_url=redis_url))
+runtime = get_relayna_runtime(app)
+app.include_router(create_metrics_router(runtime.metrics))
+```
+
+Worker-only processes can expose the same registry through a small helper HTTP
+server:
+
+```python
+from relayna.api import start_metrics_http_server
+
+start_metrics_http_server(runtime.metrics, port=8001)
+```
+
+Exact per-task CPU and RSS samples are stored as Relayna observations around
+handler execution. Studio reads them from task detail/execution graph data; it
+does not query Prometheus by `task_id`.
 
 ## How it works
 

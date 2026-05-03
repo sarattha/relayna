@@ -21,6 +21,7 @@ from relayna.consumer import (
 )
 from relayna.contracts import ActionSchema, PayloadSchema, StatusEventEnvelope, WorkflowEnvelope
 from relayna.dlq import DLQRecord
+from relayna.metrics import RelaynaMetrics
 from relayna.observability import (
     ConsumerDeadLetterPublished,
     ConsumerDLQRecordPersistFailed,
@@ -32,6 +33,7 @@ from relayna.observability import (
     TaskMessageAcked,
     TaskMessageReceived,
     TaskMessageRejected,
+    TaskResourceSampled,
     WorkflowMessagePublished,
     WorkflowMessageReceived,
     WorkflowStageAcked,
@@ -982,6 +984,35 @@ async def test_task_consumer_acknowledges_successful_messages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_emits_resource_samples_and_runtime_metrics() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "task_type": "payment", "payload": {}}).encode("utf-8"))
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
+    observations: list[object] = []
+    metrics = RelaynaMetrics(service="payments-api")
+
+    async def sink(event: object) -> None:
+        observations.append(event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, observation_sink=sink, metrics=metrics)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    samples = [item for item in observations if isinstance(item, TaskResourceSampled)]
+    assert [sample.sample_kind for sample in samples] == ["start", "end"]
+    assert all(sample.task_id == "task-123" for sample in samples)
+    rendered = metrics.render().decode("utf-8")
+    assert 'service="payments-api"' in rendered
+    assert "relayna_tasks_started_total" in rendered
+    assert "relayna_tasks_completed_total" in rendered
+    assert 'task_id="' not in rendered
+
+
+@pytest.mark.asyncio
 async def test_task_consumer_declares_queue_with_topology_argument_fields() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-123", "payload": {"kind": "demo"}}).encode("utf-8"))
     queue = FakeQueue([message])
@@ -1270,11 +1301,11 @@ async def test_task_consumer_emits_observations_for_successful_processing() -> N
 
     assert isinstance(observed[0], TaskConsumerStarted)
     assert isinstance(observed[1], TaskMessageReceived)
-    assert isinstance(observed[2], TaskLifecycleStatusPublished)
-    assert observed[2].status == "processing"
-    assert isinstance(observed[3], TaskLifecycleStatusPublished)
-    assert observed[3].status == "completed"
-    assert isinstance(observed[4], TaskMessageAcked)
+    lifecycle_events = [event for event in observed if isinstance(event, TaskLifecycleStatusPublished)]
+    assert [event.status for event in lifecycle_events] == ["processing", "completed"]
+    resource_samples = [event for event in observed if isinstance(event, TaskResourceSampled)]
+    assert [event.sample_kind for event in resource_samples] == ["start", "end"]
+    assert isinstance(observed[-1], TaskMessageAcked)
 
 
 @pytest.mark.asyncio

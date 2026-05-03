@@ -161,6 +161,15 @@ function formatMetricValue(value: number | null | undefined, unit: string) {
   if (unit === "cores") {
     return `${value.toFixed(3)} cores`;
   }
+  if (unit === "per_second") {
+    return `${value.toFixed(3)}/s`;
+  }
+  if (unit === "seconds") {
+    return `${value.toFixed(3)}s`;
+  }
+  if (unit === "unix_seconds") {
+    return value > 0 ? formatTimestamp(new Date(value * 1000).toISOString()) : "n/a";
+  }
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
@@ -179,6 +188,30 @@ function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string
     hasValue = true;
   }
   return formatMetricValue(hasValue ? total : null, unit);
+}
+
+function extractTaskResourceDelta(taskDetail: StudioTaskDetail | null) {
+  const taskId = taskDetail?.task_id;
+  const samples = (taskDetail?.execution_graph?.nodes || [])
+    .filter((node) => node.kind === "resource_sample" && (!taskId || node.task_id === taskId))
+    .map((node) => ({
+      sampleKind: String(node.annotations?.sample_kind || ""),
+      cpu: Number(node.annotations?.cpu_process_seconds),
+      rss: Number(node.annotations?.memory_rss_bytes),
+      timestamp: node.timestamp || "",
+    }))
+    .filter((sample) => sample.sampleKind && !Number.isNaN(sample.cpu))
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  const start = samples.find((sample) => sample.sampleKind === "start");
+  const end = [...samples].reverse().find((sample) => sample.sampleKind === "end");
+  if (!start || !end) {
+    return null;
+  }
+  return {
+    cpuSeconds: Math.max(0, end.cpu - start.cpu),
+    rssDeltaBytes: Number.isNaN(end.rss) || Number.isNaN(start.rss) ? null : end.rss - start.rss,
+    endRssBytes: Number.isNaN(end.rss) ? null : end.rss,
+  };
 }
 
 function normalizeStatusValue(value: unknown) {
@@ -568,6 +601,7 @@ export function TaskDetailPage() {
   const taskTimelineItems = taskTimeline?.items || [];
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
   const brokerDlqSupported = supportsCapability(taskDetail?.service.capabilities || null, "broker.dlq.messages");
+  const resourceDelta = extractTaskResourceDelta(taskDetail);
   const filteredTaskLogs = (taskLogs?.items || []).filter((item) =>
     isInTimeWindow(item.timestamp, { from: activeTaskLogFrom, to: activeTaskLogTo }),
   );
@@ -1046,6 +1080,38 @@ export function TaskDetailPage() {
                       ))}
                     </div>
                   ) : null}
+                </SectionCard>
+
+                <SectionCard
+                  title="Exact Task Resources"
+                  subtitle="Relayna task resource samples are observations, not Prometheus task labels."
+                >
+                  {resourceDelta ? (
+                    <div className="studio-metrics-grid studio-metrics-grid--3">
+                      <MetricCard label="CPU Process Delta" value={`${resourceDelta.cpuSeconds.toFixed(3)}s`} />
+                      <MetricCard
+                        label="RSS Delta"
+                        value={
+                          resourceDelta.rssDeltaBytes === null
+                            ? "n/a"
+                            : formatMetricValue(resourceDelta.rssDeltaBytes, "bytes")
+                        }
+                      />
+                      <MetricCard
+                        label="End RSS"
+                        value={
+                          resourceDelta.endRssBytes === null
+                            ? "n/a"
+                            : formatMetricValue(resourceDelta.endRssBytes, "bytes")
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <p style={mutedTextStyle}>
+                      No exact Relayna task resource samples were found. Use the Kubernetes task-window metrics above as
+                      an approximate fallback.
+                    </p>
+                  )}
                 </SectionCard>
 
                 {graph ? (

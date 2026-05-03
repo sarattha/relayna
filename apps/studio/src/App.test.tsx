@@ -232,6 +232,22 @@ function taskDetailResponse(options?: { taskId?: string; dlqItems?: Array<Record
       nodes: [
         { id: "task", kind: "task", label: taskId, task_id: taskId },
         { id: "attempt", kind: "task_attempt", label: "attempt-1", task_id: taskId },
+        {
+          id: "resource-start",
+          kind: "resource_sample",
+          label: "start resource sample",
+          task_id: taskId,
+          timestamp: "2026-04-08T10:00:00Z",
+          annotations: { sample_kind: "start", cpu_process_seconds: 10, memory_rss_bytes: 268435456 },
+        },
+        {
+          id: "resource-end",
+          kind: "resource_sample",
+          label: "end resource sample",
+          task_id: taskId,
+          timestamp: "2026-04-08T10:00:03Z",
+          annotations: { sample_kind: "end", cpu_process_seconds: 10.75, memory_rss_bytes: 402653184 },
+        },
       ],
       edges: [{ source: "task", target: "attempt", kind: "stage_transitioned_to" }],
       annotations: {},
@@ -1631,6 +1647,28 @@ describe("App", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || "GET";
+      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
+        const detail = taskDetailResponse();
+        detail.execution_graph.nodes.push(
+          {
+            id: "child-resource-start",
+            kind: "resource_sample",
+            label: "child start resource sample",
+            task_id: "child-1",
+            timestamp: "2026-04-08T09:59:00Z",
+            annotations: { sample_kind: "start", cpu_process_seconds: 0, memory_rss_bytes: 0 },
+          },
+          {
+            id: "child-resource-end",
+            kind: "resource_sample",
+            label: "child end resource sample",
+            task_id: "child-1",
+            timestamp: "2026-04-08T10:06:00Z",
+            annotations: { sample_kind: "end", cpu_process_seconds: 99, memory_rss_bytes: 99 },
+          },
+        );
+        return jsonResponse(detail);
+      }
       if (url.startsWith("/studio/tasks/payments-api/task-123/metrics") && method === "GET") {
         return jsonResponse(metricsResponse("task-123"));
       }
@@ -1640,8 +1678,10 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("Task Kubernetes Metrics")).toBeInTheDocument();
+    expect(await screen.findByText("Exact Task Resources")).toBeInTheDocument();
+    expect(await screen.findByText("0.750s")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText(/approximate for long-running workers/i).length).toBeGreaterThan(0));
-    expect(await screen.findByText("384.00 MiB")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByText("384.00 MiB").length).toBeGreaterThan(0));
     fireEvent.change(screen.getByLabelText("Task metrics window mode"), { target: { value: "manual" } });
     const from = isoToLocalDateTime("2026-04-08T09:45:00Z");
     const to = isoToLocalDateTime("2026-04-08T10:15:00Z");

@@ -57,6 +57,7 @@ const emptyDraft: ServiceDraft = {
   metrics_service_label_key: "",
   metrics_service_label_value: "",
   metrics_service_selector_labels: "",
+  metrics_runtime_service_label_value: "",
   metrics_namespace_label: "namespace",
   metrics_pod_label: "pod",
   metrics_container_label: "container",

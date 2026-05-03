@@ -97,6 +97,7 @@ Studio deployment is packaged separately as `relayna-studio`.
 - [Migration v1 to v2](migration-v1-to-v2.md)
 - [Getting started](getting-started.md)
 - [Observability](observability.md)
+- [AKS observability stack](aks-observability.md)
 - [Execution graphs](execution-graphs.md)
 - [Components](components.md)
 - [Release installation](releases.md)

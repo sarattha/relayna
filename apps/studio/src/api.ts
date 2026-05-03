@@ -105,6 +105,7 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     metrics_service_label_key: metricsSelectorLabels.serviceLabelKey,
     metrics_service_label_value: metricsSelectorLabels.serviceLabelValue,
     metrics_service_selector_labels: metricsSelectorLabels.additionalSelectorLabels,
+    metrics_runtime_service_label_value: service.metrics_config?.runtime_service_label_value || "",
     metrics_namespace_label: service.metrics_config?.namespace_label || "namespace",
     metrics_pod_label: service.metrics_config?.pod_label || "pod",
     metrics_container_label: service.metrics_config?.container_label || "container",
@@ -142,7 +143,8 @@ export function buildServicePayload(draft: ServiceDraft) {
       draft.metrics_namespace.trim() ||
       draft.metrics_service_label_key.trim() ||
       draft.metrics_service_label_value.trim() ||
-      draft.metrics_service_selector_labels.trim(),
+      draft.metrics_service_selector_labels.trim() ||
+      draft.metrics_runtime_service_label_value.trim(),
   );
 
   return {
@@ -175,6 +177,7 @@ export function buildServicePayload(draft: ServiceDraft) {
           base_url: draft.metrics_base_url.trim(),
           namespace: draft.metrics_namespace.trim(),
           service_selector_labels: mergedMetricsSelectorLabels,
+          runtime_service_label_value: draft.metrics_runtime_service_label_value.trim() || null,
           namespace_label: draft.metrics_namespace_label.trim() || "namespace",
           pod_label: draft.metrics_pod_label.trim() || "pod",
           container_label: draft.metrics_container_label.trim() || "container",

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from ..dlq import DLQRecorder
+from ..metrics import RelaynaMetrics
 from ..observability import ObservationSink
 from ..rabbitmq import RelaynaRabbitClient
 from ..topology import RelaynaTopology
@@ -31,6 +32,7 @@ class AggregationWorkerRuntime:
         consume_timeout_seconds: float | None = 1.0,
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
+        metrics: RelaynaMetrics | None = None,
     ) -> None:
         if rabbitmq is None and topology is None:
             raise ValueError("Pass rabbitmq=... or topology=... to AggregationWorkerRuntime.")
@@ -40,7 +42,7 @@ class AggregationWorkerRuntime:
         else:
             if topology is None:
                 raise ValueError("Pass rabbitmq=... or topology=... to AggregationWorkerRuntime.")
-            self._rabbitmq = RelaynaRabbitClient(topology=topology, connection_name=connection_name)
+            self._rabbitmq = RelaynaRabbitClient(topology=topology, connection_name=connection_name, metrics=metrics)
         self._consumers = [
             AggregationConsumer(
                 rabbitmq=self._rabbitmq,
@@ -54,6 +56,7 @@ class AggregationWorkerRuntime:
                 consume_timeout_seconds=consume_timeout_seconds,
                 observation_sink=observation_sink,
                 dlq_store=dlq_store,
+                metrics=metrics,
             )
             for index, shards in enumerate(shard_groups)
         ]

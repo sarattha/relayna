@@ -9,6 +9,8 @@ import httpx
 from fastapi import FastAPI
 from redis.asyncio import Redis
 
+from relayna.metrics import RelaynaMetrics, create_metrics_router
+
 from .events import (
     RedisStudioEventStore,
     StudioEventIngestService,
@@ -59,6 +61,7 @@ class StudioRuntime:
     health_service: StudioHealthRefreshService
     log_query_service: StudioLogQueryService
     metrics_query_service: StudioMetricsQueryService
+    metrics: RelaynaMetrics
     outbound_policy: StudioOutboundUrlPolicy
     search_store: RedisStudioSearchStore
     search_service: StudioSearchService
@@ -126,6 +129,7 @@ class _StudioLifespan:
     def ensure_runtime(self) -> StudioRuntime:
         if self._runtime is None:
             redis = Redis.from_url(self._redis_url)
+            metrics = RelaynaMetrics(service="relayna-studio")
             registry_store = RedisServiceRegistryStore(redis, prefix=self._registry_prefix)
             search_store = RedisStudioSearchStore(redis, prefix=self._task_search_index_prefix)
             outbound_policy = StudioOutboundUrlPolicy(
@@ -225,6 +229,7 @@ class _StudioLifespan:
                 health_service=health_service,
                 log_query_service=log_query_service,
                 metrics_query_service=metrics_query_service,
+                metrics=metrics,
                 outbound_policy=outbound_policy,
                 search_store=search_store,
                 search_service=search_service,
@@ -368,6 +373,7 @@ def create_studio_app(
     )
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     app.include_router(create_studio_metrics_router(metrics_query_service=runtime.metrics_query_service))
+    app.include_router(create_metrics_router(runtime.metrics))
     return app
 
 

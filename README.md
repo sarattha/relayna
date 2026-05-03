@@ -30,13 +30,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.8/relayna-1.4.8-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.9/relayna-1.4.9-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.8/relayna-1.4.8.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.9/relayna-1.4.9.tar.gz
 ```
 
 For local development in this repository:
@@ -50,7 +50,7 @@ uv sync --extra dev
 ```python
 from fastapi import FastAPI
 
-from relayna.api import create_relayna_lifespan, create_status_router, get_relayna_runtime
+from relayna.api import create_metrics_router, create_relayna_lifespan, create_status_router, get_relayna_runtime
 from relayna.topology import SharedTasksSharedStatusTopology
 
 topology = SharedTasksSharedStatusTopology(
@@ -77,6 +77,7 @@ app.include_router(
         latest_status_store=runtime.store,
     )
 )
+app.include_router(create_metrics_router(runtime.metrics))
 ```
 
 This setup gives you:
@@ -84,6 +85,13 @@ This setup gives you:
 - `GET /events/{task_id}` for SSE status updates
 - `GET /history` for bounded stream replay
 - `GET /status/{task_id}` for the latest Redis-backed status
+- `GET /metrics` for low-cardinality Prometheus runtime metrics
+
+Worker-only processes can expose the same registry with
+`start_metrics_http_server(runtime_metrics, port=8001)`. Relayna Prometheus
+labels are limited to `service`, `stage`, `queue`, `status`, and `worker_type`;
+task identity such as `task_id` and `correlation_id` is emitted only through
+Relayna observations, not metric labels.
 
 ## SDK vs Studio
 
@@ -216,8 +224,8 @@ helpers, and retention behavior. It is not part of the documented public API.
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
-package version is `0.1.7`, the Studio frontend package version is `0.1.9`, and
-the backend requires `relayna>=1.4.8`.
+package version is `0.1.8`, the Studio frontend package version is `0.1.10`, and
+the backend requires `relayna>=1.4.9`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -801,6 +809,7 @@ Studio deployment and presenter helpers now live in the separate
 - Studio backend: [docs/studio-backend.md](docs/studio-backend.md)
 - Studio frontend: [docs/studio-frontend.md](docs/studio-frontend.md)
 - Observability guide: [docs/observability.md](docs/observability.md)
+- AKS observability stack: [docs/aks-observability.md](docs/aks-observability.md)
 - Execution graph guide: [docs/execution-graphs.md](docs/execution-graphs.md)
 - GitHub Releases: [github.com/sarattha/relayna/releases](https://github.com/sarattha/relayna/releases)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)

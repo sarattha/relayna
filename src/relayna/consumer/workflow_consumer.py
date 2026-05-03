@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any
 
 from pydantic import ValidationError
 
 from ..contracts import ContractAliasConfig, WorkflowEnvelope
 from ..dlq import DLQRecorder
+from ..metrics import RelaynaMetrics
 from ..observability import (
     ConsumerDeadLetterPublished,
     ConsumerRetryScheduled,
@@ -56,6 +58,7 @@ class WorkflowConsumer:
         dlq_store: DLQRecorder | None = None,
         alias_config: ContractAliasConfig | None = None,
         contract_store: WorkflowContractStore | None = None,
+        metrics: RelaynaMetrics | None = None,
     ) -> None:
         if stage is None and queue_name is None:
             raise ValueError("WorkflowConsumer requires stage=... or queue_name=...")
@@ -74,6 +77,7 @@ class WorkflowConsumer:
         self._dlq_store = dlq_store
         self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
         self._contract_store = contract_store
+        self._metrics = metrics or getattr(rabbitmq, "metrics", None)
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -314,15 +318,26 @@ class WorkflowConsumer:
                 )
                 raise
 
+        started_at = time.perf_counter()
+        outcome: str | None = None
+        if self._metrics is not None:
+            self._metrics.record_task_started(
+                stage=stage,
+                queue=source_queue_name,
+                worker_type="workflow",
+                retry_attempt=context.retry_attempt,
+            )
         try:
             timeout_seconds = stage_config.timeout_seconds
             if timeout_seconds is None:
                 await self._handler(workflow_message, context)
             else:
                 await asyncio.wait_for(self._handler(workflow_message, context), timeout=timeout_seconds)
+            outcome = "completed"
         except asyncio.CancelledError:
             raise
         except TimeoutError as exc:
+            outcome = "failed"
             await emit_observation(
                 self._observation_sink,
                 WorkflowStageFailed(
@@ -344,6 +359,8 @@ class WorkflowConsumer:
             max_retries = retry_policy.max_retries
             if context.retry_attempt < max_retries:
                 next_attempt = context.retry_attempt + 1
+                if self._metrics is not None:
+                    self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
                     message,
                     retry_infrastructure=retry_infrastructure,
@@ -356,6 +373,8 @@ class WorkflowConsumer:
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
+            if self._metrics is not None:
+                self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
                 message,
                 retry_infrastructure=retry_infrastructure,
@@ -369,6 +388,7 @@ class WorkflowConsumer:
             await self._publish_dead_letter_status(context, exc)
             return True
         except Exception as exc:
+            outcome = "failed"
             await emit_observation(
                 self._observation_sink,
                 WorkflowStageFailed(
@@ -391,6 +411,8 @@ class WorkflowConsumer:
             max_retries = retry_policy.max_retries
             if context.retry_attempt < max_retries:
                 next_attempt = context.retry_attempt + 1
+                if self._metrics is not None:
+                    self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
                     message,
                     retry_infrastructure=retry_infrastructure,
@@ -404,6 +426,8 @@ class WorkflowConsumer:
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
 
+            if self._metrics is not None:
+                self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
                 message,
                 retry_infrastructure=retry_infrastructure,
@@ -424,6 +448,14 @@ class WorkflowConsumer:
                     action=workflow_message.action,
                     payload=workflow_message.payload,
                     dedup_key_fields=stage_config.dedup_key_fields,
+                )
+            if self._metrics is not None and outcome is not None:
+                self._metrics.record_task_finished(
+                    outcome="completed" if outcome == "completed" else "failed",
+                    stage=stage,
+                    queue=source_queue_name,
+                    worker_type="workflow",
+                    duration_seconds=time.perf_counter() - started_at,
                 )
 
         await emit_observation(

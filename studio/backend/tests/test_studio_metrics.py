@@ -23,12 +23,17 @@ from relayna_studio import (
 from test_studio_logs import FakeRedis, TrackingAsyncClient
 
 
-def make_metrics_config(*, base_url: str = "https://prometheus.example.test") -> PrometheusMetricsConfig:
+def make_metrics_config(
+    *,
+    base_url: str = "https://prometheus.example.test",
+    runtime_service_label_value: str | None = None,
+) -> PrometheusMetricsConfig:
     return PrometheusMetricsConfig(
         provider="prometheus",
         base_url=base_url,
         namespace="prod",
         service_selector_labels={"app": "payments-api"},
+        runtime_service_label_value=runtime_service_label_value,
     )
 
 
@@ -139,6 +144,34 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
     asyncio.run(scenario())
     assert observed_queries == [
         'rate(container_cpu_usage_seconds_total{app="payments-api",container!="",namespace="prod",pod=~".+"}[5m])'
+    ]
+
+
+def test_prometheus_provider_builds_relayna_runtime_queries() -> None:
+    observed_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=make_metrics_config(runtime_service_label_value="relayna")),
+            config=make_metrics_config(runtime_service_label_value="relayna"),
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=["tasks_started_rate", "task_duration_p95"],
+            ),
+        )
+
+    asyncio.run(scenario())
+    assert observed_queries == [
+        'sum(rate(relayna_tasks_started_total{service="relayna"}[5m]))',
+        'histogram_quantile(0.95, sum by (le) (rate(relayna_task_duration_seconds_bucket{service="relayna"}[5m])))',
     ]
 
 

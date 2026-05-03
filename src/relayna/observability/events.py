@@ -161,6 +161,20 @@ class TaskLifecycleStatusPublished:
 
 
 @dataclass(slots=True)
+class TaskResourceSampled:
+    task_id: str
+    correlation_id: str | None
+    task_type: str | None
+    consumer_name: str
+    queue_name: str | None
+    sample_kind: Literal["start", "end"]
+    cpu_process_seconds: float
+    memory_rss_bytes: int | None
+    timestamp: datetime = field(default_factory=_utcnow)
+    component: Literal["consumer"] = field(init=False, default="consumer")
+
+
+@dataclass(slots=True)
 class TaskConsumerLoopError:
     consumer_name: str
     exception_type: str
@@ -421,6 +435,7 @@ __all__ = [
     "TaskMessageAcked",
     "TaskMessageReceived",
     "TaskMessageRejected",
+    "TaskResourceSampled",
     "WorkflowMessagePublished",
     "WorkflowMessageReceived",
     "WorkflowStageAcked",

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
 from ..contracts import BatchTaskEnvelope, ContractAliasConfig, StatusEventEnvelope, TaskEnvelope, is_batch_task_payload
 from ..dlq import DLQRecorder
+from ..metrics import RelaynaMetrics, sample_task_resources
 from ..observability import (
     AggregationDeadLetterPublished,
     AggregationHandlerFailed,
@@ -25,6 +27,7 @@ from ..observability import (
     TaskMessageAcked,
     TaskMessageReceived,
     TaskMessageRejected,
+    TaskResourceSampled,
     emit_observation,
 )
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
@@ -72,6 +75,7 @@ class TaskConsumer:
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
         alias_config: ContractAliasConfig | None = None,
+        metrics: RelaynaMetrics | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -87,6 +91,7 @@ class TaskConsumer:
         self._observation_sink = observation_sink
         self._dlq_store = dlq_store
         self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
+        self._metrics = metrics or getattr(rabbitmq, "metrics", None)
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -399,24 +404,41 @@ class TaskConsumer:
         retry_correlation_id: str | None = None,
         retry_headers: Mapping[str, Any] | None = None,
     ) -> bool:
+        started_at = time.perf_counter()
+        resource_sampling_started = False
+        outcome: str | None = None
+        if self._metrics is not None:
+            self._metrics.record_task_started(
+                stage=_coerce_task_type(context.raw_payload),
+                queue=source_queue_name,
+                worker_type="task",
+                retry_attempt=context.retry_attempt,
+            )
         try:
             await self._publish_lifecycle_status(
                 context, status=self._lifecycle_statuses.processing_status, message="Task processing started."
             )
+            await self._emit_task_resource_sample(
+                task=task, context=context, queue_name=source_queue_name, sample_kind="start"
+            )
+            resource_sampling_started = True
             try:
                 await self._handler(task, context)
             except _ManualRetryRequested:
                 pass
             if context._manual_retry_request is not None:
                 await self._publish_manual_retry_request(context, context._manual_retry_request)
+                outcome = "completed"
                 return True
             await self._publish_lifecycle_status(
                 context, status=self._lifecycle_statuses.completed_status, message="Task processing completed."
             )
+            outcome = "completed"
             return True
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            outcome = "failed"
             await emit_observation(
                 self._observation_sink,
                 TaskHandlerFailed(
@@ -458,6 +480,12 @@ class TaskConsumer:
             max_retries = self._retry_policy.max_retries
             if context.retry_attempt < max_retries:
                 next_attempt = context.retry_attempt + 1
+                if self._metrics is not None:
+                    self._metrics.record_task_retry(
+                        stage=task.task_type,
+                        queue=source_queue_name,
+                        worker_type="task",
+                    )
                 await self._publish_retry(
                     message,
                     retry_infrastructure=retry_infrastructure,
@@ -476,6 +504,8 @@ class TaskConsumer:
                     await message.ack()
                 return False
 
+            if self._metrics is not None:
+                self._metrics.record_task_dlq(stage=task.task_type, queue=source_queue_name, worker_type="task")
             await self._publish_dead_letter(
                 message,
                 retry_infrastructure=retry_infrastructure,
@@ -492,6 +522,51 @@ class TaskConsumer:
             if ack_message:
                 await message.ack()
             return False
+        finally:
+            if resource_sampling_started:
+                await self._emit_task_resource_sample(
+                    task=task, context=context, queue_name=source_queue_name, sample_kind="end"
+                )
+            if self._metrics is not None and outcome is not None:
+                self._metrics.record_task_finished(
+                    outcome="completed" if outcome == "completed" else "failed",
+                    stage=task.task_type,
+                    queue=source_queue_name,
+                    worker_type="task",
+                    duration_seconds=time.perf_counter() - started_at,
+                )
+
+    async def _emit_task_resource_sample(
+        self,
+        *,
+        task: TaskEnvelope,
+        context: TaskContext,
+        queue_name: str | None,
+        sample_kind: Literal["start", "end"],
+    ) -> None:
+        sample = sample_task_resources()
+        if sample is None:
+            return
+        await emit_observation(
+            self._observation_sink,
+            TaskResourceSampled(
+                task_id=task.task_id,
+                correlation_id=context.correlation_id,
+                task_type=task.task_type,
+                consumer_name=self._consumer_name,
+                queue_name=queue_name,
+                sample_kind=sample_kind,
+                cpu_process_seconds=sample.cpu_process_seconds,
+                memory_rss_bytes=sample.memory_rss_bytes,
+            ),
+        )
+        if self._metrics is not None:
+            self._metrics.record_observation_event(
+                stage=task.task_type,
+                queue=queue_name,
+                status=f"resource_{sample_kind}",
+                worker_type="task",
+            )
 
     async def _publish_manual_retry_request(self, context: TaskContext, request) -> None:
         try:
@@ -692,6 +767,7 @@ class AggregationConsumer:
         observation_sink: ObservationSink | None = None,
         dlq_store: DLQRecorder | None = None,
         alias_config: ContractAliasConfig | None = None,
+        metrics: RelaynaMetrics | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -707,6 +783,7 @@ class AggregationConsumer:
         self._observation_sink = observation_sink
         self._dlq_store = dlq_store
         self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
+        self._metrics = metrics or getattr(rabbitmq, "metrics", None)
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -776,6 +853,15 @@ class AggregationConsumer:
                             continue
 
                         current_retry_attempt = _retry_attempt(message)
+                        aggregation_started_at = time.perf_counter()
+                        aggregation_outcome: str | None = None
+                        if self._metrics is not None:
+                            self._metrics.record_task_started(
+                                stage="aggregation",
+                                queue=queue_name,
+                                worker_type="aggregation",
+                                retry_attempt=current_retry_attempt,
+                            )
                         headers = _message_headers(message)
                         manual_retry_meta = _manual_retry_meta_from_status(event.meta)
                         await emit_observation(
@@ -818,9 +904,11 @@ class AggregationConsumer:
                         )
                         try:
                             await self._handler(event, context)
+                            aggregation_outcome = "completed"
                         except asyncio.CancelledError:
                             raise
                         except Exception as exc:
+                            aggregation_outcome = "failed"
                             await emit_observation(
                                 self._observation_sink,
                                 AggregationHandlerFailed(
@@ -839,6 +927,10 @@ class AggregationConsumer:
                             max_retries = self._retry_policy.max_retries
                             if current_retry_attempt < max_retries:
                                 next_attempt = current_retry_attempt + 1
+                                if self._metrics is not None:
+                                    self._metrics.record_task_retry(
+                                        stage="aggregation", queue=queue_name, worker_type="aggregation"
+                                    )
                                 await self._publish_retry(
                                     message,
                                     retry_infrastructure=retry_infrastructure,
@@ -855,6 +947,10 @@ class AggregationConsumer:
                                 )
                                 await message.ack()
                                 continue
+                            if self._metrics is not None:
+                                self._metrics.record_task_dlq(
+                                    stage="aggregation", queue=queue_name, worker_type="aggregation"
+                                )
                             await self._publish_dead_letter(
                                 message,
                                 retry_infrastructure=retry_infrastructure,
@@ -868,6 +964,15 @@ class AggregationConsumer:
                             await self._publish_dead_letter_status(context, exc, meta=event.meta)
                             await message.ack()
                             continue
+                        finally:
+                            if self._metrics is not None and aggregation_outcome is not None:
+                                self._metrics.record_task_finished(
+                                    outcome="completed" if aggregation_outcome == "completed" else "failed",
+                                    stage="aggregation",
+                                    queue=queue_name,
+                                    worker_type="aggregation",
+                                    duration_seconds=time.perf_counter() - aggregation_started_at,
+                                )
                         await message.ack()
                         await emit_observation(
                             self._observation_sink,

@@ -570,6 +570,17 @@ export function ServicesPage() {
                     style={inputStyle}
                   />
                 </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Relayna runtime service label
+                  <input
+                    value={draft.metrics_runtime_service_label_value}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, metrics_runtime_service_label_value: event.target.value }))
+                    }
+                    placeholder="relayna"
+                    style={inputStyle}
+                  />
+                </label>
                 <div className="studio-form-grid studio-form-grid--triple">
                   <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                     Namespace label
