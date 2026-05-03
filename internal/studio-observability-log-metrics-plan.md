@@ -389,6 +389,7 @@ Example Studio service registration observability config:
     "service_selector_labels": {
       "service": "document-service"
     },
+    "runtime_service_label_value": "relayna",
     "namespace_label": "namespace",
     "pod_label": "pod",
     "container_label": "container",

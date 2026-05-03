@@ -251,7 +251,10 @@ class PrometheusMetricsProvider:
             config,
             extra={config.container_label: ("!=", ""), config.pod_label: ("=~", ".+")},
         )
-        runtime_selector = f'service="{_escape_promql_string(service.service_id)}"'
+        runtime_service_label_value = (
+            config.runtime_service_label_value or config.service_selector_labels.get("service") or service.service_id
+        )
+        runtime_selector = f'service="{_escape_promql_string(runtime_service_label_value)}"'
         if group == StudioMetricGroup.CPU_USAGE:
             return f"rate(container_cpu_usage_seconds_total{{{container_selector}}}[5m])"
         if group == StudioMetricGroup.MEMORY_USAGE:

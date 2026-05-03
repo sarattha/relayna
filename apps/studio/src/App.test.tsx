@@ -1647,6 +1647,28 @@ describe("App", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || "GET";
+      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
+        const detail = taskDetailResponse();
+        detail.execution_graph.nodes.push(
+          {
+            id: "child-resource-start",
+            kind: "resource_sample",
+            label: "child start resource sample",
+            task_id: "child-1",
+            timestamp: "2026-04-08T09:59:00Z",
+            annotations: { sample_kind: "start", cpu_process_seconds: 0, memory_rss_bytes: 0 },
+          },
+          {
+            id: "child-resource-end",
+            kind: "resource_sample",
+            label: "child end resource sample",
+            task_id: "child-1",
+            timestamp: "2026-04-08T10:06:00Z",
+            annotations: { sample_kind: "end", cpu_process_seconds: 99, memory_rss_bytes: 99 },
+          },
+        );
+        return jsonResponse(detail);
+      }
       if (url.startsWith("/studio/tasks/payments-api/task-123/metrics") && method === "GET") {
         return jsonResponse(metricsResponse("task-123"));
       }

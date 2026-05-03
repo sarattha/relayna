@@ -68,6 +68,7 @@ export type ServiceMetricsConfig = {
   base_url: string;
   namespace: string;
   service_selector_labels: Record<string, string>;
+  runtime_service_label_value?: string | null;
   namespace_label: string;
   pod_label: string;
   container_label: string;
@@ -121,6 +122,7 @@ export type ServiceDraft = {
   metrics_service_label_key: string;
   metrics_service_label_value: string;
   metrics_service_selector_labels: string;
+  metrics_runtime_service_label_value: string;
   metrics_namespace_label: string;
   metrics_pod_label: string;
   metrics_container_label: string;

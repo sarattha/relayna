@@ -191,8 +191,9 @@ function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string
 }
 
 function extractTaskResourceDelta(taskDetail: StudioTaskDetail | null) {
+  const taskId = taskDetail?.task_id;
   const samples = (taskDetail?.execution_graph?.nodes || [])
-    .filter((node) => node.kind === "resource_sample")
+    .filter((node) => node.kind === "resource_sample" && (!taskId || node.task_id === taskId))
     .map((node) => ({
       sampleKind: String(node.annotations?.sample_kind || ""),
       cpu: Number(node.annotations?.cpu_process_seconds),
