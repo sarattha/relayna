@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.9 - 2026-05-03
+
+### Added
+
+- Added first-class Relayna runtime Prometheus metrics for task lifecycle, duration, retry/DLQ activity, queue publishes, status events, observation events, active tasks, and worker heartbeat.
+- Added exact task CPU/RSS resource samples as Relayna observations and rendered them in Studio task detail without using high-cardinality Prometheus labels.
+- Added AKS observability documentation covering registered APIs, workers, Redis, RabbitMQ, Loki, Alloy, Prometheus, kube-state-metrics, and Studio.
+- Added `scripts/deploy-relayna-observability-aks.sh` to deploy a starter Loki, Alloy, Prometheus, and kube-state-metrics stack for Relayna on AKS.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.9`, the Studio backend package version to `0.1.8`, and the Studio frontend package version to `0.1.10`.
+- Updated release-install documentation to reference `relayna 1.4.9`, `relayna-studio 0.1.8`, and the matching frontend package version `0.1.10`.
+- Studio Prometheus runtime metric queries can now use `metrics_config.runtime_service_label_value` when Relayna metrics use a different `service` label value than the Studio registry id.
+
+### Fixed
+
+- Studio task resource deltas now ignore related-task resource samples when execution graphs include child or aggregation task nodes.
+
 ## 1.4.8 - 2026-05-02
 
 ### Added

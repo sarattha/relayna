@@ -29,6 +29,7 @@ nav:
   - Migration v1 to v2: migration-v1-to-v2.md
   - Components: components.md
   - Observability: observability.md
+  - AKS Observability: aks-observability.md
   - Execution Graphs: execution-graphs.md
   - Workflow Topology: workflow-topology-plan.md
   - Releases: releases.md
