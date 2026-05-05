@@ -15,6 +15,7 @@ from aio_pika.abc import (
     AbstractRobustConnection,
     AbstractRobustExchange,
 )
+from opentelemetry.trace import SpanKind
 from pydantic import BaseModel
 
 from ..contracts import (
@@ -27,6 +28,7 @@ from ..contracts import (
     normalize_contract_aliases,
 )
 from ..metrics import RelaynaMetrics
+from ..observability.tracing import active_trace_fields, inject_trace_headers, relayna_span
 from ..topology import (
     RelaynaTopology,
     RoutedTasksSharedStatusShardedAggregationTopology,
@@ -170,19 +172,30 @@ class RelaynaRabbitClient:
             raise RuntimeError("Tasks exchange is not initialized")
         task_dict = self._prepare_task_payload(task)
         self._validate_task_priority(task_dict)
-        message_headers = {"task_id": str(task_dict.get("task_id", ""))}
-        message_headers.update(dict(headers or {}))
-        message = Message(
-            _to_json_bytes(task_dict),
-            content_type="application/json",
-            delivery_mode=DeliveryMode.PERSISTENT,
-            correlation_id=str(task_dict.get("correlation_id") or task_dict.get("task_id", "")) or None,
-            priority=cast(int | None, task_dict.get("priority")),
-            headers=cast(Any, message_headers),
-        )
-        _clear_default_priority(message, priority=cast(int | None, task_dict.get("priority")))
         routing_key = self._topology.task_routing_key(task_dict)
-        await self._tasks_exchange.publish(message, routing_key=routing_key)
+        with relayna_span(
+            "relayna.rabbitmq.publish_task",
+            attributes={
+                "messaging.system": "rabbitmq",
+                "messaging.destination.name": routing_key,
+                "relayna.task_id": str(task_dict.get("task_id", "")),
+                "relayna.correlation_id": str(task_dict.get("correlation_id") or task_dict.get("task_id", "")),
+            },
+            kind=SpanKind.PRODUCER,
+        ):
+            message_headers = inject_trace_headers(
+                {"task_id": str(task_dict.get("task_id", "")), **dict(headers or {})}
+            )
+            message = Message(
+                _to_json_bytes(task_dict),
+                content_type="application/json",
+                delivery_mode=DeliveryMode.PERSISTENT,
+                correlation_id=str(task_dict.get("correlation_id") or task_dict.get("task_id", "")) or None,
+                priority=cast(int | None, task_dict.get("priority")),
+                headers=cast(Any, message_headers),
+            )
+            _clear_default_priority(message, priority=cast(int | None, task_dict.get("priority")))
+            await self._tasks_exchange.publish(message, routing_key=routing_key)
         if self._metrics is not None:
             self._metrics.record_queue_publish(queue=routing_key, status="task", worker_type="api")
 
@@ -273,25 +286,37 @@ class RelaynaRabbitClient:
         workflow_payload = self._prepare_workflow_payload(payload)
         self._validate_workflow_contract(workflow_payload)
         self._validate_workflow_priority(workflow_payload)
-        message_headers = {
-            "task_id": str(workflow_payload.get("task_id", "")),
-            "message_id": str(workflow_payload.get("message_id", "")),
-            "stage": str(workflow_payload.get("stage", "")),
-        }
-        origin_stage = workflow_payload.get("origin_stage")
-        if origin_stage:
-            message_headers["origin_stage"] = str(origin_stage)
-        message_headers.update(dict(headers or {}))
-        message = Message(
-            _to_json_bytes(workflow_payload),
-            content_type="application/json",
-            delivery_mode=DeliveryMode.PERSISTENT,
-            correlation_id=str(workflow_payload.get("correlation_id") or workflow_payload.get("task_id", "")) or None,
-            priority=cast(int | None, workflow_payload.get("priority")),
-            headers=cast(Any, message_headers),
-        )
-        _clear_default_priority(message, priority=cast(int | None, workflow_payload.get("priority")))
-        await self._workflow_exchange.publish(message, routing_key=routing_key)
+        with relayna_span(
+            "relayna.rabbitmq.publish_workflow",
+            attributes={
+                "messaging.system": "rabbitmq",
+                "messaging.destination.name": routing_key,
+                "relayna.task_id": str(workflow_payload.get("task_id", "")),
+                "relayna.stage": str(workflow_payload.get("stage", "")),
+            },
+            kind=SpanKind.PRODUCER,
+        ):
+            message_headers = {
+                "task_id": str(workflow_payload.get("task_id", "")),
+                "message_id": str(workflow_payload.get("message_id", "")),
+                "stage": str(workflow_payload.get("stage", "")),
+            }
+            origin_stage = workflow_payload.get("origin_stage")
+            if origin_stage:
+                message_headers["origin_stage"] = str(origin_stage)
+            message_headers.update(dict(headers or {}))
+            message_headers = inject_trace_headers(message_headers)
+            message = Message(
+                _to_json_bytes(workflow_payload),
+                content_type="application/json",
+                delivery_mode=DeliveryMode.PERSISTENT,
+                correlation_id=str(workflow_payload.get("correlation_id") or workflow_payload.get("task_id", ""))
+                or None,
+                priority=cast(int | None, workflow_payload.get("priority")),
+                headers=cast(Any, message_headers),
+            )
+            _clear_default_priority(message, priority=cast(int | None, workflow_payload.get("priority")))
+            await self._workflow_exchange.publish(message, routing_key=routing_key)
         if self._metrics is not None:
             self._metrics.record_queue_publish(
                 stage=str(workflow_payload.get("stage") or ""),
@@ -313,14 +338,19 @@ class RelaynaRabbitClient:
         await self._ensure_ready()
         if self._channel is None:
             raise RuntimeError("RabbitMQ connection is not initialized")
-        message = Message(
-            body,
-            content_type=content_type,
-            delivery_mode=delivery_mode,
-            correlation_id=correlation_id,
-            headers=dict(headers or {}),
-        )
-        await self._channel.default_exchange.publish(message, routing_key=queue_name)
+        with relayna_span(
+            "relayna.rabbitmq.publish_raw",
+            attributes={"messaging.system": "rabbitmq", "messaging.destination.name": queue_name},
+            kind=SpanKind.PRODUCER,
+        ):
+            message = Message(
+                body,
+                content_type=content_type,
+                delivery_mode=delivery_mode,
+                correlation_id=correlation_id,
+                headers=inject_trace_headers(headers),
+            )
+            await self._channel.default_exchange.publish(message, routing_key=queue_name)
         if self._metrics is not None:
             self._metrics.record_queue_publish(queue=queue_name, status="raw", worker_type="worker")
 
@@ -396,6 +426,7 @@ class RelaynaRabbitClient:
         correlation_id = event_dict.get("correlation_id") or task_id
         if correlation_id:
             event_dict["correlation_id"] = str(correlation_id)
+        event_dict.update(active_trace_fields())
 
         return ensure_status_event_id(event_dict)
 
@@ -427,14 +458,25 @@ class RelaynaRabbitClient:
             raise RuntimeError("Status exchange is not initialized")
         task_id = str(payload.get("task_id", ""))
         correlation_id = payload.get("correlation_id")
-        message = Message(
-            _to_json_bytes(payload),
-            content_type="application/json",
-            delivery_mode=DeliveryMode.PERSISTENT,
-            correlation_id=str(correlation_id) or None,
-            headers={"task_id": task_id, "status": str(payload.get("status", ""))},
-        )
-        await self._status_exchange.publish(message, routing_key=routing_key)
+        with relayna_span(
+            "relayna.rabbitmq.publish_status",
+            attributes={
+                "messaging.system": "rabbitmq",
+                "messaging.destination.name": routing_key,
+                "relayna.task_id": task_id,
+                "relayna.status": str(payload.get("status", "")),
+            },
+            kind=SpanKind.PRODUCER,
+        ):
+            payload.update(active_trace_fields())
+            message = Message(
+                _to_json_bytes(payload),
+                content_type="application/json",
+                delivery_mode=DeliveryMode.PERSISTENT,
+                correlation_id=str(correlation_id) or None,
+                headers=inject_trace_headers({"task_id": task_id, "status": str(payload.get("status", ""))}),
+            )
+            await self._status_exchange.publish(message, routing_key=routing_key)
         if self._metrics is not None:
             self._metrics.record_status_event(status=str(payload.get("status") or ""), worker_type="api")
 
@@ -445,17 +487,24 @@ class RelaynaRabbitClient:
         tasks = payload.get("tasks")
         first_task = tasks[0] if isinstance(tasks, list) and tasks else payload
         batch_id = str(payload.get("batch_id", ""))
-        message = Message(
-            _to_json_bytes(payload),
-            content_type="application/json",
-            delivery_mode=DeliveryMode.PERSISTENT,
-            correlation_id=batch_id or None,
-            priority=priority,
-            headers={"batch_id": batch_id, "batch_size": len(tasks) if isinstance(tasks, list) else 0},
-        )
-        _clear_default_priority(message, priority=priority)
         routing_key = self._topology.task_routing_key(first_task)
-        await self._tasks_exchange.publish(message, routing_key=routing_key)
+        with relayna_span(
+            "relayna.rabbitmq.publish_batch",
+            attributes={"messaging.system": "rabbitmq", "messaging.destination.name": routing_key},
+            kind=SpanKind.PRODUCER,
+        ):
+            message = Message(
+                _to_json_bytes(payload),
+                content_type="application/json",
+                delivery_mode=DeliveryMode.PERSISTENT,
+                correlation_id=batch_id or None,
+                priority=priority,
+                headers=inject_trace_headers(
+                    {"batch_id": batch_id, "batch_size": len(tasks) if isinstance(tasks, list) else 0}
+                ),
+            )
+            _clear_default_priority(message, priority=priority)
+            await self._tasks_exchange.publish(message, routing_key=routing_key)
         if self._metrics is not None:
             self._metrics.record_queue_publish(queue=routing_key, status="batch", worker_type="api")
 

@@ -63,6 +63,11 @@ const emptyDraft: ServiceDraft = {
   metrics_container_label: "container",
   metrics_step_seconds: "30",
   metrics_task_window_padding_seconds: "120",
+  trace_provider: "",
+  trace_base_url: "",
+  trace_public_base_url: "",
+  trace_tenant_id: "",
+  trace_query_path: "/api/traces/{trace_id}",
 };
 
 const ServicesContext = createContext<ServicesContextValue | null>(null);

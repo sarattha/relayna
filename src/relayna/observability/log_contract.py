@@ -7,6 +7,8 @@ from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
+from .tracing import active_trace_fields
+
 RELAYNA_STUDIO_REQUIRED_LOG_FIELDS = frozenset({"service", "app", "event", "level", "timestamp"})
 RELAYNA_STUDIO_TASK_LOG_FIELDS = frozenset({"task_id", "correlation_id", "stage", "attempt"})
 RELAYNA_STUDIO_OPTIONAL_LOG_FIELDS = frozenset(
@@ -21,6 +23,8 @@ RELAYNA_STUDIO_OPTIONAL_LOG_FIELDS = frozenset(
         "message",
         "pod",
         "container",
+        "trace_id",
+        "span_id",
     }
 )
 RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST = frozenset(
@@ -103,6 +107,7 @@ def observation_to_studio_log_fields(
         "level": _level_for_event(event_name),
         "timestamp": timestamp_value,
         **event_fields,
+        **active_trace_fields(),
         **context_fields,
     }
     return _drop_none(payload)

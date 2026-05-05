@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.9/relayna-1.4.9-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.10/relayna-1.4.10-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.9/relayna-1.4.9.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.10/relayna-1.4.10.tar.gz
 ```
 
 For local development in this repository:

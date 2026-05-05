@@ -1,6 +1,6 @@
 [project]
 name = "relayna-studio"
-version = "0.1.8"
+version = "0.1.9"
 description = "Deployable Relayna Studio backend package."
 requires-python = ">=3.13"
 license = { text = "MIT" }
@@ -10,11 +10,12 @@ authors = [
 dependencies = [
     "fastapi>=0.115.11",
     "httpx>=0.28.1",
+    "opentelemetry-api>=1.28.0",
     "prometheus-client>=0.21.0",
     "pydantic>=2.11.0",
     "redis>=7.1.1",
     "uvicorn>=0.34.0",
-    "relayna>=1.4.9",
+    "relayna>=1.4.10",
 ]
 
 [project.optional-dependencies]

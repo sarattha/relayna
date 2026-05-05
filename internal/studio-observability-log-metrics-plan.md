@@ -599,22 +599,22 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Define trace propagation model.
-- [ ] Add trace context to API publish path.
-- [ ] Add trace context to broker message metadata.
-- [ ] Add trace context to worker consume path.
-- [ ] Add trace context to handler execution spans.
-- [ ] Add trace context to status/result publish spans.
-- [ ] Add trace identifiers to structured logs.
-- [ ] Add trace identifiers to Relayna observations.
-- [ ] Add no-op behavior when tracing is not configured.
-- [ ] Define Studio trace provider contract.
-- [ ] Add optional trace backend config.
-- [ ] Add task-to-trace backend lookup.
-- [ ] Add frontend links from task views to trace spans.
-- [ ] Add tests for trace-disabled behavior.
-- [ ] Add tests for trace-context propagation.
-- [ ] Add tests for Studio trace lookup and fallback UI.
+- [x] Define trace propagation model.
+- [x] Add trace context to API publish path.
+- [x] Add trace context to broker message metadata.
+- [x] Add trace context to worker consume path.
+- [x] Add trace context to handler execution spans.
+- [x] Add trace context to status/result publish spans.
+- [x] Add trace identifiers to structured logs.
+- [x] Add trace identifiers to Relayna observations.
+- [x] Add no-op behavior when tracing is not configured.
+- [x] Define Studio trace provider contract.
+- [x] Add optional trace backend config.
+- [x] Add task-to-trace backend lookup.
+- [x] Add frontend links from task views to trace spans.
+- [x] Add tests for trace-disabled behavior.
+- [x] Add tests for trace-context propagation.
+- [x] Add tests for Studio trace lookup and fallback UI.
 
 ## Test Plan
 

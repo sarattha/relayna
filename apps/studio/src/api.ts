@@ -13,6 +13,7 @@ import type {
   StudioLogListResponse,
   StudioMetricGroup,
   StudioMetricsResponse,
+  StudioTraceResponse,
   StudioTaskDetail,
   StudioTaskSearchQuery,
   StudioTaskSearchResponse,
@@ -111,6 +112,11 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     metrics_container_label: service.metrics_config?.container_label || "container",
     metrics_step_seconds: String(service.metrics_config?.step_seconds || 30),
     metrics_task_window_padding_seconds: String(service.metrics_config?.task_window_padding_seconds || 120),
+    trace_provider: service.trace_config?.provider || "",
+    trace_base_url: service.trace_config?.base_url || "",
+    trace_public_base_url: service.trace_config?.public_base_url || "",
+    trace_tenant_id: service.trace_config?.tenant_id || "",
+    trace_query_path: service.trace_config?.query_path || "/api/traces/{trace_id}",
   };
 }
 
@@ -145,6 +151,13 @@ export function buildServicePayload(draft: ServiceDraft) {
       draft.metrics_service_label_value.trim() ||
       draft.metrics_service_selector_labels.trim() ||
       draft.metrics_runtime_service_label_value.trim(),
+  );
+  const hasTraceConfig = Boolean(
+      draft.trace_provider ||
+      draft.trace_base_url.trim() ||
+      draft.trace_public_base_url.trim() ||
+      draft.trace_tenant_id.trim() ||
+      draft.trace_query_path.trim() !== "/api/traces/{trace_id}",
   );
 
   return {
@@ -185,6 +198,15 @@ export function buildServicePayload(draft: ServiceDraft) {
           task_window_padding_seconds: Number(draft.metrics_task_window_padding_seconds) || 120,
         }
       : null,
+    trace_config: hasTraceConfig
+      ? {
+          provider: (draft.trace_provider || "tempo") as "tempo",
+          base_url: draft.trace_base_url.trim(),
+          public_base_url: draft.trace_public_base_url.trim() || null,
+          tenant_id: draft.trace_tenant_id.trim() || null,
+          query_path: draft.trace_query_path.trim() || "/api/traces/{trace_id}",
+        }
+      : null,
   };
 }
 
@@ -213,6 +235,7 @@ export async function updateService(serviceId: string, draft: ServiceDraft) {
       auth_mode: payload.auth_mode,
       log_config: payload.log_config,
       metrics_config: payload.metrics_config,
+      trace_config: payload.trace_config,
     }),
   });
 }
@@ -364,6 +387,12 @@ export async function fetchTaskMetrics(
   const suffix = params.toString() ? `?${params.toString()}` : "";
   return requestJson<StudioMetricsResponse>(
     `/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/metrics${suffix}`,
+  );
+}
+
+export async function fetchTaskTraces(serviceId: string, taskId: string) {
+  return requestJson<StudioTraceResponse>(
+    `/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/traces`,
   );
 }
 

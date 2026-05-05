@@ -78,6 +78,7 @@ from .registry import (
     ServiceRegistryService,
     ServiceStatus,
     StudioOutboundUrlPolicy,
+    TempoTraceConfig,
     UpdateServiceRequest,
     create_service_registry_router,
     normalize_base_url,
@@ -96,6 +97,15 @@ from .search import (
 )
 from .stage_view import build_stage_view
 from .topology_view import build_topology_view
+from .traces import (
+    StudioTraceConfigError,
+    StudioTraceProviderError,
+    StudioTraceQueryService,
+    StudioTraceResponse,
+    StudioTraceSpan,
+    TempoTraceProvider,
+    create_studio_traces_router,
+)
 
 __all__ = [
     "CapabilityRefreshError",
@@ -148,6 +158,11 @@ __all__ = [
     "StudioMetricsQuery",
     "StudioMetricsQueryService",
     "StudioMetricsResponse",
+    "StudioTraceConfigError",
+    "StudioTraceProviderError",
+    "StudioTraceQueryService",
+    "StudioTraceResponse",
+    "StudioTraceSpan",
     "StudioPullSyncWorker",
     "StudioRetentionWorker",
     "StudioSearchService",
@@ -164,6 +179,8 @@ __all__ = [
     "StudioTaskDetailResponse",
     "StudioTaskSearchDocument",
     "StudioTaskSearchResponse",
+    "TempoTraceConfig",
+    "TempoTraceProvider",
     "UpdateServiceRequest",
     "WorkerHealthState",
     "build_dlq_view",
@@ -179,6 +196,7 @@ __all__ = [
     "create_studio_logs_router",
     "create_studio_metrics_router",
     "create_studio_search_router",
+    "create_studio_traces_router",
     "create_studio_app",
     "get_studio_runtime",
     "normalize_base_url",

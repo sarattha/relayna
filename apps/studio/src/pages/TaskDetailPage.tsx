@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics } from "../api";
+import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics, fetchTaskTraces } from "../api";
 import {
   GraphSurface,
   InlineCodeBox,
@@ -33,6 +33,8 @@ import type {
   StudioLogListResponse,
   StudioMetricsResponse,
   StudioTaskDetail,
+  StudioTraceResponse,
+  StudioTraceSpan,
 } from "../types";
 
 const TASK_QUEUED_STATUSES = new Set(["queued"]);
@@ -321,6 +323,10 @@ export function TaskDetailPage() {
   const [taskMetrics, setTaskMetrics] = useState<StudioMetricsResponse | null>(null);
   const [taskMetricsLoading, setTaskMetricsLoading] = useState(false);
   const [taskMetricsError, setTaskMetricsError] = useState<string | null>(null);
+  const [taskTraces, setTaskTraces] = useState<StudioTraceResponse | null>(null);
+  const [taskTracesLoading, setTaskTracesLoading] = useState(false);
+  const [taskTracesError, setTaskTracesError] = useState<string | null>(null);
+  const [selectedTraceSpan, setSelectedTraceSpan] = useState<StudioTraceSpan | null>(null);
   const [taskLogQuery, setTaskLogQuery] = useState("");
   const [taskLogLevel, setTaskLogLevel] = useState("");
   const [taskLogSource, setTaskLogSource] = useState("");
@@ -356,6 +362,8 @@ export function TaskDetailPage() {
       setTaskLogsError(null);
       setTaskMetrics(null);
       setTaskMetricsError(null);
+      setTaskTraces(null);
+      setTaskTracesError(null);
       return;
     }
     setTaskTimeline(null);
@@ -395,6 +403,7 @@ export function TaskDetailPage() {
       setTaskMetrics(null);
       setTaskMetricsError("No metrics provider configured for this service.");
     }
+    void loadTaskTraces(taskDetail.service_id, taskDetail.task_id);
   }, [
     taskDetail,
     taskTimelineLoading,
@@ -505,12 +514,13 @@ export function TaskDetailPage() {
     targetTaskId: string,
     correlationId?: string | null,
     window?: { from?: string; to?: string },
+    queryOverride?: string,
   ) {
     setTaskLogsLoading(true);
     setTaskLogsError(null);
     try {
       const payload = await fetchTaskLogs(targetServiceId, targetTaskId, {
-        query: taskLogQuery,
+        query: queryOverride ?? taskLogQuery,
         level: taskLogLevel,
         source: taskLogSource,
         limit: parseLimit(taskLogLimit, 50),
@@ -524,6 +534,17 @@ export function TaskDetailPage() {
     } finally {
       setTaskLogsLoading(false);
     }
+  }
+
+  function applyTraceLogFilter(traceId: string) {
+    setTaskLogQuery(traceId);
+    void loadTaskLogs(
+      taskDetail?.service_id || "",
+      taskDetail?.task_id || "",
+      taskDetail?.task_ref.correlation_id || null,
+      getTaskLogWindow(),
+      traceId,
+    );
   }
 
   async function loadTaskMetrics(
@@ -541,6 +562,20 @@ export function TaskDetailPage() {
       setTaskMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load task metrics.");
     } finally {
       setTaskMetricsLoading(false);
+    }
+  }
+
+  async function loadTaskTraces(targetServiceId: string, targetTaskId: string) {
+    setTaskTracesLoading(true);
+    setTaskTracesError(null);
+    try {
+      const payload = await fetchTaskTraces(targetServiceId, targetTaskId);
+      setTaskTraces(payload);
+    } catch (fetchError) {
+      setTaskTraces(null);
+      setTaskTracesError(fetchError instanceof Error ? fetchError.message : "Unable to load task traces.");
+    } finally {
+      setTaskTracesLoading(false);
     }
   }
 
@@ -608,7 +643,8 @@ export function TaskDetailPage() {
   const taskLogSourceOptions = Array.from(new Set((taskLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
 
   return (
-    <div className="studio-stack-lg">
+    <>
+      <div className="studio-stack-lg">
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
 
       <SectionCard
@@ -681,6 +717,77 @@ export function TaskDetailPage() {
                             {item.source_kind} · {item.event_type} · {item.component || "unknown"}
                             {item.out_of_order ? " · out-of-order" : ""}
                           </p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+                </SectionCard>
+
+                <SectionCard
+                  title="Trace Correlation"
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => void loadTaskTraces(taskDetail.service_id, taskDetail.task_id)}
+                      style={secondaryButtonStyle}
+                    >
+                      <StudioIcon name="refresh" />
+                      Reload Traces
+                    </button>
+                  }
+                >
+                  {taskTracesLoading ? <p style={mutedTextStyle}>Loading task traces...</p> : null}
+                  {taskTracesError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTracesError}</p> : null}
+                  {taskTraces?.warnings.length ? <p style={mutedTextStyle}>{taskTraces.warnings.join(" ")}</p> : null}
+                  {!taskTracesLoading && !taskTracesError && taskTraces && !taskTraces.trace_ids.length ? (
+                    <p style={mutedTextStyle}>No trace identifiers were found for this task.</p>
+                  ) : null}
+                  {taskTraces?.trace_ids.length ? (
+                    <div className="studio-action-row">
+                      {taskTraces.trace_ids.map((traceId) => (
+                        <span key={traceId} className="studio-inline-meta">
+                          trace_id={traceId}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {taskTraces?.spans.length ? (
+                    <div className="studio-stack-sm studio-surface-scroll" style={{ marginTop: 12 }}>
+                      {taskTraces.spans.map((span) => (
+                        <article
+                          key={`${span.trace_id}-${span.span_id}`}
+                          className="studio-subcard"
+                          style={{ borderRadius: 14, padding: 14 }}
+                        >
+                          <div
+                            className="studio-list-card__top"
+                            style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}
+                          >
+                            <div>
+                              <strong style={{ fontSize: 13 }}>{span.name}</strong>
+                              <p style={{ ...mutedTextStyle, marginTop: 8, marginBottom: 0 }}>
+                                {span.service || span.source || "unknown"} · span={span.span_id}
+                                {span.parent_span_id ? ` · parent=${span.parent_span_id}` : ""}
+                                {span.start_time ? ` · ${formatTimestamp(span.start_time)}` : ""}
+                              </p>
+                            </div>
+                            <div
+                              className="studio-action-row"
+                              style={{ justifyContent: "flex-end", marginLeft: "auto", gap: 8 }}
+                            >
+                              <span className="studio-inline-meta">{formatDuration(span.duration_ms ?? null)}</span>
+                              <button type="button" onClick={() => setSelectedTraceSpan(span)} style={secondaryButtonStyle}>
+                                View Span
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => applyTraceLogFilter(span.trace_id)}
+                                style={secondaryButtonStyle}
+                              >
+                                Filter Logs
+                              </button>
+                            </div>
+                          </div>
                         </article>
                       ))}
                     </div>
@@ -1186,6 +1293,57 @@ export function TaskDetailPage() {
           </div>
         ) : null}
       </SectionCard>
-    </div>
+      </div>
+
+      {selectedTraceSpan ? (
+        <div
+          className="studio-dialog-backdrop"
+          role="presentation"
+          onClick={() => setSelectedTraceSpan(null)}
+        >
+          <section
+            className="studio-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="studio-span-detail-title"
+            style={{ width: "min(760px, 100%)" }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="studio-span-detail-title" className="studio-dialog__title">
+              Span Details
+            </h2>
+            <div className="studio-dialog__body">
+              <p>
+                <strong>{selectedTraceSpan.name}</strong>
+              </p>
+              <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
+                <MetadataRow label="Trace id" value={selectedTraceSpan.trace_id} />
+                <MetadataRow label="Span id" value={selectedTraceSpan.span_id} />
+                <MetadataRow label="Parent span" value={selectedTraceSpan.parent_span_id || "none"} />
+                <MetadataRow label="Kind" value={selectedTraceSpan.kind || "unknown"} />
+                <MetadataRow label="Service" value={selectedTraceSpan.service || "unknown"} />
+                <MetadataRow label="Source" value={selectedTraceSpan.source || "unknown"} />
+                <MetadataRow label="Started" value={formatTimestamp(selectedTraceSpan.start_time || null)} />
+                <MetadataRow label="Ended" value={formatTimestamp(selectedTraceSpan.end_time || null)} />
+                <MetadataRow label="Duration" value={formatDuration(selectedTraceSpan.duration_ms ?? null)} />
+              </dl>
+              {selectedTraceSpan.backend_url ? (
+                <>
+                  <strong style={{ color: "var(--studio-text)" }}>Backend query URL</strong>
+                  <InlineCodeBox value={selectedTraceSpan.backend_url} minHeight={64} />
+                </>
+              ) : null}
+              <strong style={{ color: "var(--studio-text)" }}>Attributes</strong>
+              <InlineCodeBox value={JSON.stringify(selectedTraceSpan.attributes || {}, null, 2)} minHeight={180} />
+              <div className="studio-dialog__actions">
+                <button type="button" onClick={() => setSelectedTraceSpan(null)} style={secondaryButtonStyle}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
   );
 }
