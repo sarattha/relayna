@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from opentelemetry import propagate, trace
+from opentelemetry.propagators.textmap import Getter, Setter
 from opentelemetry.trace import Span, SpanKind
 
 TRACEPARENT_HEADER = "traceparent"
@@ -12,18 +13,18 @@ TRACESTATE_HEADER = "tracestate"
 TRACE_HEADERS = frozenset({TRACEPARENT_HEADER, TRACESTATE_HEADER})
 
 
-class _Getter:
-    def get(self, carrier: Mapping[str, Any], key: str) -> list[str] | None:
+class _Getter(Getter[dict[str, Any]]):
+    def get(self, carrier: dict[str, Any], key: str) -> list[str] | None:
         value = carrier.get(key)
         if value is None:
             return None
         return [str(value)]
 
-    def keys(self, carrier: Mapping[str, Any]) -> list[str]:
+    def keys(self, carrier: dict[str, Any]) -> list[str]:
         return [str(key) for key in carrier]
 
 
-class _Setter:
+class _Setter(Setter[MutableMapping[str, Any]]):
     def set(self, carrier: MutableMapping[str, Any], key: str, value: str) -> None:
         carrier[key] = value
 
