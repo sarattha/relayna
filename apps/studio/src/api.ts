@@ -153,11 +153,11 @@ export function buildServicePayload(draft: ServiceDraft) {
       draft.metrics_runtime_service_label_value.trim(),
   );
   const hasTraceConfig = Boolean(
-      draft.trace_provider ||
-      draft.trace_base_url.trim() ||
-      draft.trace_public_base_url.trim() ||
-      draft.trace_tenant_id.trim() ||
-      draft.trace_query_path.trim() !== "/api/traces/{trace_id}",
+    draft.trace_provider === "tempo" &&
+      (draft.trace_base_url.trim() ||
+        draft.trace_public_base_url.trim() ||
+        draft.trace_tenant_id.trim() ||
+        draft.trace_query_path.trim() !== "/api/traces/{trace_id}"),
   );
 
   return {

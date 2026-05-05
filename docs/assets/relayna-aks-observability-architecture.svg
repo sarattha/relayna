@@ -80,6 +80,7 @@
   <path d="M348 304 V286 H820" class="arrow arrow-orange" />
   <path d="M848 286 H960 V304" class="arrow arrow-orange" />
   <path d="M1022 370 H1060" class="arrow arrow-orange" />
+  <path d="M960 436 V500 H1060" class="arrow arrow-orange" />
 
   <path d="M178 436 V602 H1284 V436" class="arrow arrow-blue dash" />
   <path d="M348 436 V602 H1284" class="arrow arrow-blue dash" />
@@ -91,6 +92,7 @@
   <path d="M657 738 V616 H584 V436" class="arrow arrow-green" />
   <path d="M744 792 H832 V482 H1122 V436" class="arrow arrow-green" />
   <path d="M744 824 H850 V504 H1284 V436" class="arrow arrow-green" />
+  <path d="M744 842 H872 V526 H1060" class="arrow arrow-green" />
 
   <rect x="108" y="304" width="140" height="132" class="node api" />
   <text x="134" y="334" class="node-title">Service APIs</text>
@@ -138,6 +140,11 @@
   <text x="1082" y="400" class="node-body">Service logs</text>
   <text x="1082" y="420" class="node-body">Task logs</text>
 
+  <rect x="1060" y="454" width="124" height="92" class="node obs" />
+  <text x="1100" y="484" class="node-title">Tempo</text>
+  <text x="1082" y="510" class="node-body">Trace store</text>
+  <text x="1082" y="530" class="node-body">Span query</text>
+
   <rect x="1222" y="304" width="124" height="132" class="node obs" />
   <text x="1245" y="334" class="node-title">Prometheus</text>
   <text x="1244" y="360" class="node-body">PromQL</text>
@@ -176,7 +183,7 @@
   <circle cx="966" cy="730" r="6" fill="#7c3aed" />
   <text x="984" y="734" class="legend-text">Runtime data: RabbitMQ and Redis status/history/observations</text>
   <circle cx="966" cy="760" r="6" fill="#ea580c" />
-  <text x="984" y="764" class="legend-text">Logs: pod stdout JSON to Alloy, then Loki</text>
+  <text x="984" y="764" class="legend-text">Logs/traces: stdout and OTLP to Alloy, then Loki and Tempo</text>
   <circle cx="966" cy="790" r="6" fill="#2563eb" />
   <text x="984" y="794" class="legend-text">Metrics: Relayna /metrics, cAdvisor, and kube-state-metrics</text>
   <circle cx="966" cy="820" r="6" fill="#16a34a" />

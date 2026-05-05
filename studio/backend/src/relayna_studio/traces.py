@@ -118,6 +118,9 @@ class TempoTraceProvider:
     def _normalize_response(self, *, payload: Any, backend_url: str) -> list[StudioTraceSpan]:
         if not isinstance(payload, Mapping):
             raise StudioTraceProviderError("Tempo query returned an invalid payload.")
+        trace_payload = payload.get("trace")
+        if isinstance(trace_payload, Mapping):
+            payload = trace_payload
         batches = payload.get("batches") or payload.get("resourceSpans") or payload.get("resource_spans") or []
         if not isinstance(batches, list):
             raise StudioTraceProviderError("Tempo query returned an invalid span batch list.")

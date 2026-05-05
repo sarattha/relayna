@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildServicePayload, serviceToDraft } from "./api";
 import { App } from "./App";
+import type { ServiceRecord } from "./types";
 
 vi.mock("@xyflow/react", async () => {
   const React = await import("react");
@@ -1330,6 +1332,19 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New Service" }));
 
     expect(screen.getByLabelText("Base URL")).toHaveValue("https://service.example.test");
+  });
+
+  it("clears trace config when the trace provider is disabled", () => {
+    const draft = serviceToDraft(buildMockService() as unknown as ServiceRecord);
+    const payloadWithTrace = buildServicePayload(draft);
+    expect(payloadWithTrace.trace_config).toMatchObject({
+      provider: "tempo",
+      base_url: "https://tempo.example.test",
+    });
+
+    draft.trace_provider = "";
+    const payloadWithoutTrace = buildServicePayload(draft);
+    expect(payloadWithoutTrace.trace_config).toBeNull();
   });
 
   it("keeps the edit context visible when service deletion fails", async () => {

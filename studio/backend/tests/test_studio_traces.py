@@ -133,6 +133,35 @@ def test_tempo_provider_uses_public_base_url_for_browser_links() -> None:
     asyncio.run(scenario())
 
 
+def test_tempo_provider_normalizes_v2_trace_envelope() -> None:
+    observed: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["path"] = request.url.path
+        return httpx.Response(200, json={"trace": tempo_success_response()})
+
+    async def scenario() -> None:
+        provider = TempoTraceProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0),
+            outbound_policy=StudioOutboundUrlPolicy(allowed_hosts=("tempo.example.test",)),
+        )
+        spans = await provider.query_trace(
+            service=make_record(trace_config=tempo_trace_config()),
+            config=TempoTraceConfig(
+                provider="tempo",
+                base_url="https://tempo.example.test",
+                query_path="/api/v2/traces/{trace_id}",
+            ),
+            trace_id="11111111111111111111111111111111",
+        )
+        assert spans[0].trace_id == "11111111111111111111111111111111"
+        assert spans[0].span_id == "2222222222222222"
+        assert spans[0].name == "handler"
+
+    asyncio.run(scenario())
+    assert observed == {"path": "/api/v2/traces/11111111111111111111111111111111"}
+
+
 def test_trace_query_returns_non_error_empty_state_without_trace_config() -> None:
     async def scenario() -> None:
         store = RedisServiceRegistryStore(FakeRedis())

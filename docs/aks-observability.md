@@ -644,8 +644,21 @@ The repository includes a starter AKS deployment script:
 scripts/deploy-relayna-observability-aks.sh
 ```
 
-It installs a namespace, Loki, Alloy, Prometheus, and kube-state-metrics with
-Relayna-compatible scrape and log-label defaults for phases 1-3. Add Tempo and
-the Alloy OTLP pipeline from the trace section when enabling phase 4 trace
-correlation. Review storage classes, resource requests, retention, auth, and
-network policy before using it in production.
+It installs a namespace, Loki, Alloy, Prometheus, Tempo, and
+kube-state-metrics with Relayna-compatible scrape, log-label, and OTLP trace
+forwarding defaults for all four phases. Review storage classes, resource
+requests, retention, auth, and network policy before using it in production.
+
+Useful overrides:
+
+```bash
+NAMESPACE=observability
+STORAGE_CLASS=managed-csi
+LOKI_STORAGE_SIZE=10Gi
+PROMETHEUS_STORAGE_SIZE=20Gi
+TEMPO_STORAGE_SIZE=10Gi
+LOKI_RETENTION=168h
+PROMETHEUS_RETENTION=15d
+TEMPO_RETENTION=168h
+TEMPO_IMAGE=grafana/tempo:latest
+```
