@@ -595,6 +595,14 @@ export function ServiceDetailPage() {
                 <p style={mutedTextStyle}>No metrics provider configured for this service.</p>
               )}
             </div>
+            <div>
+              <h3 style={{ margin: 0, marginBottom: 8 }}>Stored Trace Config</h3>
+              {service.trace_config ? (
+                <InlineCodeBox value={JSON.stringify(service.trace_config, null, 2)} minHeight={120} />
+              ) : (
+                <p style={mutedTextStyle}>No trace provider configured for this service.</p>
+              )}
+            </div>
           </div>
         </div>
       </SectionCard>

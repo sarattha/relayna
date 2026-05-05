@@ -4,7 +4,8 @@
 callbacks and low-cardinality Prometheus runtime metrics. The library emits
 typed dataclass events from long-running loops such as SSE streaming, worker
 consumption, and status fanout. It also ships a Prometheus metrics helper for
-API and worker runtimes, but it does not ship a tracing exporter.
+API and worker runtimes, plus lightweight OpenTelemetry trace propagation hooks.
+It does not ship a tracing exporter.
 
 `relayna.observability` owns the event model plus collector and exporter
 helpers. It does not own status storage, FastAPI routes, or worker runtime
@@ -16,8 +17,26 @@ reconstruction helpers that sit on top of those event streams.
 
 For AKS deployments that use Relayna Studio, see
 [AKS observability stack](aks-observability.md) for the full Redis, RabbitMQ,
-Loki, Alloy, Prometheus, kube-state-metrics, registered-service, worker, and
-Studio architecture.
+Loki, Alloy, Prometheus, Tempo, kube-state-metrics, registered-service, worker,
+and Studio architecture.
+
+## Studio observability phases
+
+Relayna Studio observability is split into four layers. Each layer is optional,
+but together they give the task detail page enough context to connect what was
+queued, what ran, what was logged, what resource envelope was visible, and which
+distributed trace spans belonged to the task.
+
+| Phase | Feature | Backend | What Studio shows |
+| --- | --- | --- | --- |
+| 1 | Centralized logs | Alloy + Loki | Service logs, task-window logs, source/app filtering, JSON log rendering, level/text filters. |
+| 2 | Kubernetes infrastructure metrics | Prometheus + kube-state-metrics + cAdvisor | Service and task-window CPU, memory, requests/limits, restarts, OOMKilled, readiness, pod phase, and network I/O. |
+| 3 | Relayna runtime metrics and exact task resource samples | Relayna `/metrics` + Redis observations | Aggregate task throughput/failures/retries/DLQ/queue/status charts and exact per-task CPU/RSS samples from execution graph observations. |
+| 4 | Trace correlation | OpenTelemetry propagation + Tempo | Task trace lookup, Studio-native span detail, trace/log linking, and W3C `traceparent`/`tracestate` propagation across RabbitMQ. |
+
+High-cardinality task identity is intentionally kept out of Loki labels and
+Prometheus labels. Use task IDs in JSON log bodies, Relayna Redis status and
+observation data, and OpenTelemetry trace/span IDs instead.
 
 ## Prometheus runtime metrics
 
@@ -71,6 +90,71 @@ start_metrics_http_server(runtime.metrics, port=8001)
 Exact per-task CPU and RSS samples are stored as Relayna observations around
 handler execution. Studio reads them from task detail/execution graph data; it
 does not query Prometheus by `task_id`.
+
+## OpenTelemetry trace correlation
+
+Relayna propagates W3C trace context through RabbitMQ message headers when an
+OpenTelemetry span is active. The headers are:
+
+- `traceparent`
+- `tracestate`
+
+Trace context stays in broker headers. Relayna does not mutate task payload
+schemas for trace propagation.
+
+The SDK includes `opentelemetry-api` only. Without an OpenTelemetry SDK,
+provider, and exporter configured by your application, Relayna trace helpers are
+no-op and should not change runtime behavior. This keeps tracing off by default
+and avoids vendor-specific dependencies in Relayna core.
+
+Useful helpers exported from `relayna.observability`:
+
+- `inject_trace_headers(headers=None)`
+  Adds W3C trace headers to a carrier when a span is active.
+- `extract_trace_context(headers)`
+  Extracts OpenTelemetry context from RabbitMQ-style headers.
+- `relayna_span(name, headers=None, attributes=None, kind=SpanKind.INTERNAL)`
+  Safely starts a span using incoming headers as the parent context.
+- `active_trace_fields()`
+  Returns `trace_id` and `span_id` for structured logs or observations when a
+  valid span is active.
+
+Relayna runtime code uses those helpers around task publish, batch publish,
+workflow publish, raw queue publish, status/result publish, task consumer
+handling, workflow stage handling, retry, and DLQ publication. Structured log
+and observation helpers attach `trace_id` and `span_id` only when available.
+
+Example application-owned OpenTelemetry setup that exports to an OTLP endpoint
+such as Alloy or Tempo:
+
+```python
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+
+def configure_tracing() -> None:
+    provider = TracerProvider(
+        resource=Resource.create(
+            {
+                "service.name": "orders-api",
+                "deployment.environment": "prod-aks",
+            }
+        )
+    )
+    provider.add_span_processor(
+        BatchSpanProcessor(
+            OTLPSpanExporter(endpoint="http://alloy.observability.svc.cluster.local:4317", insecure=True)
+        )
+    )
+    trace.set_tracer_provider(provider)
+```
+
+The `opentelemetry-sdk` and OTLP exporter packages are application
+dependencies. Add them to the service image that wants to export traces; Relayna
+does not install them for you.
 
 ## How it works
 

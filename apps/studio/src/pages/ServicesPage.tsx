@@ -646,6 +646,62 @@ export function ServicesPage() {
               </div>
             </details>
 
+            <details style={insetSurfaceStyle}>
+              <summary style={{ cursor: "pointer", fontSize: 16, fontWeight: 700, listStyle: "none" }}>Trace Configuration</summary>
+              <div className="studio-stack-sm" style={{ marginTop: 12 }}>
+                <p style={mutedTextStyle}>Optional per-service Tempo trace lookup settings.</p>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Trace provider
+                  <select
+                    value={draft.trace_provider}
+                    onChange={(event) => setDraft((current) => ({ ...current, trace_provider: event.target.value as "" | "tempo" }))}
+                    style={inputStyle}
+                  >
+                    <option value="">Disabled</option>
+                    <option value="tempo">Tempo</option>
+                  </select>
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Tempo base URL
+                  <input
+                    value={draft.trace_base_url}
+                    onChange={(event) => setDraft((current) => ({ ...current, trace_base_url: event.target.value }))}
+                    placeholder="https://tempo.example.test"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Public Tempo URL
+                  <input
+                    value={draft.trace_public_base_url}
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, trace_public_base_url: event.target.value }))
+                    }
+                    placeholder="http://localhost:3200"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Tenant ID
+                  <input
+                    value={draft.trace_tenant_id}
+                    onChange={(event) => setDraft((current) => ({ ...current, trace_tenant_id: event.target.value }))}
+                    placeholder="tenant-a"
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                  Query path
+                  <input
+                    value={draft.trace_query_path}
+                    onChange={(event) => setDraft((current) => ({ ...current, trace_query_path: event.target.value }))}
+                    placeholder="/api/traces/{trace_id}"
+                    style={inputStyle}
+                  />
+                </label>
+              </div>
+            </details>
+
             <button type="submit" disabled={saving} style={primaryButtonStyle}>
               <StudioIcon name="save" />
               {saving ? "Saving..." : editingServiceId ? "Save Service" : "Register Service"}

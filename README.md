@@ -30,13 +30,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.9/relayna-1.4.9-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.10/relayna-1.4.10-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.9/relayna-1.4.9.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.10/relayna-1.4.10.tar.gz
 ```
 
 For local development in this repository:
@@ -224,8 +224,8 @@ helpers, and retention behavior. It is not part of the documented public API.
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
-package version is `0.1.8`, the Studio frontend package version is `0.1.10`, and
-the backend requires `relayna>=1.4.9`.
+package version is `0.1.9`, the Studio frontend package version is `0.1.11`, and
+the backend requires `relayna>=1.4.10`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -550,7 +550,8 @@ curl -s "http://localhost:8000/studio/tasks/checker-service/task-123/logs?limit=
 
 Operator guidance:
 
-- Studio backend egress to both registered service URLs and Loki URLs is
+- Studio backend egress to registered service URLs, Loki URLs, Prometheus URLs,
+  and Tempo URLs is
   controlled by `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` and
   `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`; for AKS DNS, allow
   suffixes such as `.svc.cluster.local`
@@ -577,6 +578,59 @@ The Studio registration UI exposes AKS-friendly fields for:
 
 Under the hood those map back into the generic `log_config` fields shown above,
 so non-AKS deployments can still use the same backend contract.
+
+## Studio metrics and trace configuration
+
+Studio can also query Prometheus and Tempo when a registered service includes
+`metrics_config` and `trace_config`.
+
+Prometheus integration covers two metric classes:
+
+- Kubernetes pod/container metrics from cAdvisor and kube-state-metrics, shown
+  at service scope and over a task lifecycle window
+- Relayna runtime metrics from API and worker `/metrics` endpoints, shown as
+  aggregate throughput, failure, retry, DLQ, queue, status, and observation
+  charts
+
+Tempo integration covers optional trace correlation. Relayna propagates W3C
+`traceparent` and `tracestate` through RabbitMQ headers, but tracing is no-op
+until the application configures an OpenTelemetry SDK and exporter. Studio
+discovers trace IDs from task detail/log data and queries Tempo through:
+
+```text
+GET /studio/tasks/{service_id}/{task_id}/traces
+```
+
+Example provider config:
+
+```json
+{
+  "metrics_config": {
+    "provider": "prometheus",
+    "base_url": "http://prometheus.observability.svc.cluster.local:9090",
+    "namespace": "default",
+    "service_selector_labels": {
+      "service": "checker-service"
+    },
+    "runtime_service_label_value": "checker-service",
+    "namespace_label": "namespace",
+    "pod_label": "pod",
+    "container_label": "container",
+    "step_seconds": 30,
+    "task_window_padding_seconds": 120
+  },
+  "trace_config": {
+    "provider": "tempo",
+    "base_url": "http://tempo.observability.svc.cluster.local:3200",
+    "public_base_url": null,
+    "tenant_id": null,
+    "query_path": "/api/traces/{trace_id}"
+  }
+}
+```
+
+For the full Loki, Alloy, Prometheus, and Tempo service example, see
+[docs/aks-observability.md](docs/aks-observability.md).
 
 ## Topologies
 

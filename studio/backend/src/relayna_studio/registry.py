@@ -142,6 +142,44 @@ class PrometheusMetricsConfig(BaseModel):
         return normalized
 
 
+class TempoTraceConfig(BaseModel):
+    provider: Literal["tempo"] = "tempo"
+    base_url: str
+    public_base_url: str | None = None
+    tenant_id: str | None = None
+    query_path: str = "/api/traces/{trace_id}"
+
+    @field_validator("base_url", mode="before")
+    @classmethod
+    def _normalize_base_url(cls, value: Any) -> str:
+        return normalize_base_url(value)
+
+    @field_validator("public_base_url", mode="before")
+    @classmethod
+    def _normalize_public_base_url(cls, value: Any) -> str | None:
+        normalized = _normalize_optional_string(value)
+        if normalized is None:
+            return None
+        return normalize_base_url(normalized)
+
+    @field_validator("tenant_id", mode="before")
+    @classmethod
+    def _normalize_optional_strings(cls, value: Any) -> str | None:
+        return _normalize_optional_string(value)
+
+    @field_validator("query_path", mode="before")
+    @classmethod
+    def _normalize_query_path(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError("query_path must be a string")
+        normalized = value.strip() or "/api/traces/{trace_id}"
+        if "{trace_id}" not in normalized:
+            raise ValueError("query_path must contain {trace_id}")
+        if not normalized.startswith("/"):
+            normalized = f"/{normalized}"
+        return normalized
+
+
 class ServiceRecord(BaseModel):
     service_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -154,6 +192,7 @@ class ServiceRecord(BaseModel):
     last_seen_at: datetime | None = None
     log_config: LokiLogConfig | None = None
     metrics_config: PrometheusMetricsConfig | None = None
+    trace_config: TempoTraceConfig | None = None
     health: dict[str, Any] | None = None
 
     @field_validator("service_id", "name", "environment", "auth_mode", mode="before")
@@ -202,6 +241,7 @@ class CreateServiceRequest(BaseModel):
     auth_mode: str = Field(min_length=1)
     log_config: LokiLogConfig | None = None
     metrics_config: PrometheusMetricsConfig | None = None
+    trace_config: TempoTraceConfig | None = None
 
     @field_validator("service_id", "name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -236,6 +276,7 @@ class UpdateServiceRequest(BaseModel):
     status: ServiceStatus | None = None
     log_config: LokiLogConfig | None = None
     metrics_config: PrometheusMetricsConfig | None = None
+    trace_config: TempoTraceConfig | None = None
 
     @field_validator("name", "environment", "auth_mode", mode="before")
     @classmethod
@@ -627,6 +668,8 @@ class ServiceRegistryService:
                 record.metrics_config.base_url,
                 label="Prometheus metrics_config.base_url",
             )
+        if record.trace_config is not None:
+            self._outbound_policy.validate_url(record.trace_config.base_url, label="Tempo trace_config.base_url")
 
     async def delete_service(self, service_id: str) -> None:
         normalized_service_id = service_id.strip()
@@ -768,6 +811,7 @@ __all__ = [
     "ServiceRegistryStore",
     "ServiceStatus",
     "StudioOutboundUrlPolicy",
+    "TempoTraceConfig",
     "UpdateServiceRequest",
     "create_service_registry_router",
     "normalize_base_url",

@@ -181,6 +181,10 @@ graph reconstruction:
 - `ExecutionGraphService`
 - `build_execution_graph`
 - `execution_graph_mermaid`
+- `inject_trace_headers`
+- `extract_trace_context`
+- `relayna_span`
+- `active_trace_fields`
 
 ## Internal packages
 

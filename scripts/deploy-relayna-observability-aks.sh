@@ -5,11 +5,14 @@ NAMESPACE="${NAMESPACE:-observability}"
 LOKI_IMAGE="${LOKI_IMAGE:-grafana/loki:3.5.5}"
 ALLOY_IMAGE="${ALLOY_IMAGE:-grafana/alloy:v1.11.0}"
 PROMETHEUS_IMAGE="${PROMETHEUS_IMAGE:-prom/prometheus:v3.7.3}"
+TEMPO_IMAGE="${TEMPO_IMAGE:-grafana/tempo:latest}"
 KUBE_STATE_METRICS_IMAGE="${KUBE_STATE_METRICS_IMAGE:-registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.17.0}"
 LOKI_STORAGE_SIZE="${LOKI_STORAGE_SIZE:-10Gi}"
 PROMETHEUS_STORAGE_SIZE="${PROMETHEUS_STORAGE_SIZE:-20Gi}"
+TEMPO_STORAGE_SIZE="${TEMPO_STORAGE_SIZE:-10Gi}"
 LOKI_RETENTION="${LOKI_RETENTION:-168h}"
 PROMETHEUS_RETENTION="${PROMETHEUS_RETENTION:-15d}"
+TEMPO_RETENTION="${TEMPO_RETENTION:-168h}"
 STORAGE_CLASS="${STORAGE_CLASS:-}"
 
 STORAGE_CLASS_FIELD=""
@@ -18,7 +21,7 @@ if [[ -n "$STORAGE_CLASS" ]]; then
 fi
 
 echo "Deploying Relayna observability stack to namespace '$NAMESPACE'."
-echo "Set NAMESPACE, STORAGE_CLASS, LOKI_STORAGE_SIZE, PROMETHEUS_STORAGE_SIZE, LOKI_RETENTION, or PROMETHEUS_RETENTION to override defaults."
+echo "Set NAMESPACE, STORAGE_CLASS, image variables, storage sizes, or retention variables to override defaults."
 
 kubectl apply -f - <<YAML
 apiVersion: v1
@@ -149,6 +152,132 @@ YAML
 
 kubectl apply -f - <<YAML
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tempo-config
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/part-of: relayna-observability
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+      grpc_listen_port: 9095
+
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+
+    ingester:
+      trace_idle_period: 10s
+      max_block_bytes: 1000000
+      max_block_duration: 5m
+
+    compactor:
+      compaction:
+        block_retention: ${TEMPO_RETENTION}
+
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/traces
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/part-of: relayna-observability
+spec:
+  selector:
+    app.kubernetes.io/name: tempo
+  ports:
+    - name: http
+      port: 3200
+      targetPort: http
+    - name: grpc
+      port: 9095
+      targetPort: grpc
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tempo
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/part-of: relayna-observability
+spec:
+  serviceName: tempo
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tempo
+        app.kubernetes.io/part-of: relayna-observability
+    spec:
+      containers:
+        - name: tempo
+          image: ${TEMPO_IMAGE}
+          args:
+            - -config.file=/etc/tempo/tempo.yaml
+          ports:
+            - name: http
+              containerPort: 3200
+            - name: grpc
+              containerPort: 9095
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tempo
+            - name: data
+              mountPath: /var/tempo
+      volumes:
+        - name: config
+          configMap:
+            name: tempo-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+${STORAGE_CLASS_FIELD}
+        resources:
+          requests:
+            storage: ${TEMPO_STORAGE_SIZE}
+YAML
+
+kubectl apply -f - <<YAML
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: alloy
@@ -270,6 +399,57 @@ data:
         url = "http://loki.${NAMESPACE}.svc.cluster.local:3100/loki/api/v1/push"
       }
     }
+
+    otelcol.receiver.otlp "relayna" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+
+      http {
+        endpoint = "0.0.0.0:4318"
+      }
+
+      output {
+        traces = [otelcol.processor.batch.relayna.input]
+      }
+    }
+
+    otelcol.processor.batch "relayna" {
+      output {
+        traces = [otelcol.exporter.otlp.tempo.input]
+      }
+    }
+
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = "tempo.${NAMESPACE}.svc.cluster.local:4317"
+        tls {
+          insecure = true
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/part-of: relayna-observability
+spec:
+  selector:
+    app.kubernetes.io/name: alloy
+  ports:
+    - name: http
+      port: 12345
+      targetPort: http
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -300,6 +480,10 @@ spec:
           ports:
             - name: http
               containerPort: 12345
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
           volumeMounts:
             - name: config
               mountPath: /etc/alloy
@@ -595,6 +779,7 @@ kubectl -n "$NAMESPACE" rollout status statefulset/loki --timeout=180s
 kubectl -n "$NAMESPACE" rollout status daemonset/alloy --timeout=180s
 kubectl -n "$NAMESPACE" rollout status deployment/kube-state-metrics --timeout=180s
 kubectl -n "$NAMESPACE" rollout status statefulset/prometheus --timeout=180s
+kubectl -n "$NAMESPACE" rollout status statefulset/tempo --timeout=180s
 
 cat <<EOF
 
@@ -603,6 +788,8 @@ Relayna observability stack deployed.
 Cluster DNS endpoints:
   Loki:       http://loki.${NAMESPACE}.svc.cluster.local:3100
   Prometheus: http://prometheus.${NAMESPACE}.svc.cluster.local:9090
+  Tempo:      http://tempo.${NAMESPACE}.svc.cluster.local:3200
+  Alloy OTLP: http://alloy.${NAMESPACE}.svc.cluster.local:4317
 
 Annotate Relayna API, worker, and Studio backend pods that expose /metrics:
   prometheus.io/scrape: "true"
@@ -612,6 +799,9 @@ Annotate Relayna API, worker, and Studio backend pods that expose /metrics:
 Use stable labels:
   service: <studio service_id>
   app: <api-or-worker-name>
+
+Configure application OpenTelemetry exporters to send traces to:
+  OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy.${NAMESPACE}.svc.cluster.local:4317
 
 Studio backend should allow AKS DNS egress:
   RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS=.svc.cluster.local

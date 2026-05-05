@@ -1,6 +1,6 @@
 [project]
 name = "relayna"
-version = "1.4.9"
+version = "1.4.10"
 description = "Shared RabbitMQ/Redis infrastructure for Relayna."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -29,6 +29,7 @@ dependencies = [
     "aio-pika>=9.4.1",
     "fastapi>=0.115.11",
     "httpx>=0.28.1",
+    "opentelemetry-api>=1.28.0",
     "prometheus-client>=0.21.0",
     "pydantic>=2.11.0",
     "redis>=7.1.1",

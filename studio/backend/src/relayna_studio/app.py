@@ -45,6 +45,7 @@ from .search import (
     StudioSearchService,
     create_studio_search_router,
 )
+from .traces import StudioTraceQueryService, TempoTraceProvider, create_studio_traces_router
 
 
 @dataclass(slots=True)
@@ -61,6 +62,7 @@ class StudioRuntime:
     health_service: StudioHealthRefreshService
     log_query_service: StudioLogQueryService
     metrics_query_service: StudioMetricsQueryService
+    trace_query_service: StudioTraceQueryService
     metrics: RelaynaMetrics
     outbound_policy: StudioOutboundUrlPolicy
     search_store: RedisStudioSearchStore
@@ -184,6 +186,12 @@ class _StudioLifespan:
                 },
                 federation_service=federation_service,
             )
+            trace_query_service = StudioTraceQueryService(
+                registry_service=registry_service,
+                providers={"tempo": TempoTraceProvider(http_client=http_client, outbound_policy=outbound_policy)},
+                federation_service=federation_service,
+                log_query_service=log_query_service,
+            )
             event_ingest_service = StudioEventIngestService(
                 registry_service=registry_service,
                 event_store=event_store,
@@ -229,6 +237,7 @@ class _StudioLifespan:
                 health_service=health_service,
                 log_query_service=log_query_service,
                 metrics_query_service=metrics_query_service,
+                trace_query_service=trace_query_service,
                 metrics=metrics,
                 outbound_policy=outbound_policy,
                 search_store=search_store,
@@ -373,6 +382,7 @@ def create_studio_app(
     )
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     app.include_router(create_studio_metrics_router(metrics_query_service=runtime.metrics_query_service))
+    app.include_router(create_studio_traces_router(trace_query_service=runtime.trace_query_service))
     app.include_router(create_metrics_router(runtime.metrics))
     return app
 

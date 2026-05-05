@@ -1,8 +1,9 @@
 # Relayna Studio Observability Plan
 
-This internal-only file is the source of truth for the Relayna Studio logs and
-metrics feature plan. It is intentionally kept outside `docs/` and must not be
-linked from `mkdocs.yml` or treated as public product documentation.
+This internal-only file is the source of truth for the Relayna Studio logs,
+metrics, runtime resource, and trace-correlation feature plan. It is
+intentionally kept outside `docs/` and must not be linked from `mkdocs.yml` or
+treated as public product documentation.
 
 ## Summary
 
@@ -10,24 +11,26 @@ The first production observability stack for Relayna Studio is:
 
 ```text
 Relayna API pods / long-running worker pods
-  -> stdout JSON logs + /metrics
+  -> stdout JSON logs + /metrics + OpenTelemetry spans
   -> Grafana Alloy
   -> Loki for logs
   -> Prometheus for metrics
+  -> Tempo for traces
   -> Relayna Studio as the task-aware query and visualization layer
 ```
 
-Relayna Studio must not ingest every log line. Studio should query Loki,
-Prometheus, and Relayna APIs, then merge those results into service and
-task views. Relayna Redis remains the source of truth for task lifecycle, status
-history, DLQ records, observations, and execution graphs.
+Relayna Studio must not ingest every log line or trace span. Studio should
+query Loki, Prometheus, Tempo, and Relayna APIs, then merge those results into
+service and task views. Relayna Redis remains the source of truth for task
+lifecycle, status history, DLQ records, observations, and execution graphs.
 
 Grafana may remain available for generic observability, but Relayna Studio is
 the product-specific task and runtime UI.
 
 ## Key Decisions
 
-- Use Alloy + Loki + Prometheus + Relayna Studio as the first production stack.
+- Use Alloy + Loki + Prometheus + Tempo + Relayna Studio as the first
+  production stack.
 - Use Option A, the safer default for Loki: keep `task_id` inside the JSON log
   body, not as a Loki label.
 - Treat Case 2, many tasks per long-running worker pod, as the real usage model.
@@ -36,6 +39,17 @@ the product-specific task and runtime UI.
   per-task CPU/memory requires Relayna runtime instrumentation.
 - Keep task lifecycle, status history, DLQ, observations, and execution graph
   data in Relayna/Redis. Do not replace those stores with Loki.
+- Keep tracing optional and no-op unless application code configures an
+  OpenTelemetry SDK/exporter. Relayna core depends only on `opentelemetry-api`.
+
+## Four-Phase Scope
+
+| Phase | Scope | Backend | Studio surface |
+| --- | --- | --- | --- |
+| 1 | Centralized logs | Alloy + Loki | Service logs, task logs, level/source/text/window filters, JSON rendering. |
+| 2 | Kubernetes infrastructure metrics | Prometheus + kube-state-metrics + cAdvisor | Service and task-window CPU, memory, restarts, OOM, readiness, pod phase, and network metrics. |
+| 3 | Relayna runtime metrics and exact resource observations | Relayna `/metrics` + Redis observations | Aggregate task/queue/status/observation charts and exact per-task CPU/RSS samples. |
+| 4 | Trace correlation | OpenTelemetry propagation + Tempo | Trace discovery, Studio span details, log filtering by trace ID, and task-to-span correlation. |
 
 ## Interfaces And Data Model
 
@@ -92,7 +106,7 @@ pod
 worker_id
 ```
 
-Studio service observability config should cover both logs and metrics:
+Studio service observability config should cover logs, metrics, and traces:
 
 - Logs:
   - `backend`: `loki`
@@ -108,6 +122,12 @@ Studio service observability config should cover both logs and metrics:
   - namespace selector
   - service label
   - pod label
+- Traces:
+  - `backend`: `tempo`
+  - Tempo base URL
+  - optional public/browser URL
+  - optional tenant ID
+  - trace query path template
 
 Studio endpoints should include or evolve toward:
 
@@ -116,6 +136,7 @@ GET /studio/services/{service_id}/logs
 GET /studio/tasks/{service_id}/{task_id}/logs
 GET /studio/services/{service_id}/metrics
 GET /studio/tasks/{service_id}/{task_id}/metrics
+GET /studio/tasks/{service_id}/{task_id}/traces
 ```
 
 Relayna API pods, Relayna worker pods, and the Studio backend should expose
@@ -599,22 +620,22 @@ Acceptance criteria:
 
 Checklist:
 
-- [ ] Define trace propagation model.
-- [ ] Add trace context to API publish path.
-- [ ] Add trace context to broker message metadata.
-- [ ] Add trace context to worker consume path.
-- [ ] Add trace context to handler execution spans.
-- [ ] Add trace context to status/result publish spans.
-- [ ] Add trace identifiers to structured logs.
-- [ ] Add trace identifiers to Relayna observations.
-- [ ] Add no-op behavior when tracing is not configured.
-- [ ] Define Studio trace provider contract.
-- [ ] Add optional trace backend config.
-- [ ] Add task-to-trace backend lookup.
-- [ ] Add frontend links from task views to trace spans.
-- [ ] Add tests for trace-disabled behavior.
-- [ ] Add tests for trace-context propagation.
-- [ ] Add tests for Studio trace lookup and fallback UI.
+- [x] Define trace propagation model.
+- [x] Add trace context to API publish path.
+- [x] Add trace context to broker message metadata.
+- [x] Add trace context to worker consume path.
+- [x] Add trace context to handler execution spans.
+- [x] Add trace context to status/result publish spans.
+- [x] Add trace identifiers to structured logs.
+- [x] Add trace identifiers to Relayna observations.
+- [x] Add no-op behavior when tracing is not configured.
+- [x] Define Studio trace provider contract.
+- [x] Add optional trace backend config.
+- [x] Add task-to-trace backend lookup.
+- [x] Add frontend links from task views to trace spans.
+- [x] Add tests for trace-disabled behavior.
+- [x] Add tests for trace-context propagation.
+- [x] Add tests for Studio trace lookup and fallback UI.
 
 ## Test Plan
 

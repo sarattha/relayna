@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { buildServicePayload, serviceToDraft } from "./api";
 import { App } from "./App";
+import type { ServiceRecord } from "./types";
 
 vi.mock("@xyflow/react", async () => {
   const React = await import("react");
@@ -53,6 +55,7 @@ type MockServiceRecord = {
   last_seen_at?: string | null;
   log_config?: Record<string, unknown> | null;
   metrics_config?: Record<string, unknown> | null;
+  trace_config?: Record<string, unknown> | null;
   health?: Record<string, unknown> | null;
 };
 
@@ -149,6 +152,11 @@ function buildMockService(): MockServiceRecord {
       level_label: "level",
       task_match_mode: "label",
       task_match_template: null,
+    },
+    trace_config: {
+      provider: "tempo",
+      base_url: "https://tempo.example.test",
+      public_base_url: "https://tempo-public.example.test",
     },
   };
 }
@@ -615,6 +623,30 @@ describe("App", () => {
             },
           ],
           next_cursor: null,
+        });
+      }
+      if (url === "/studio/tasks/payments-api/task-123/traces" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          task_id: "task-123",
+          trace_ids: ["trace-abc"],
+          warnings: [],
+          spans: [
+            {
+              trace_id: "trace-abc",
+              span_id: "span-123",
+              parent_span_id: "parent-456",
+              name: "payments.process_payment",
+              kind: "consumer",
+              service: "payments-api",
+              source: "tempo",
+              start_time: "2026-04-08T10:00:00Z",
+              end_time: "2026-04-08T10:00:01Z",
+              duration_ms: 1000,
+              attributes: { "messaging.system": "rabbitmq", task_id: "task-123" },
+              backend_url: "https://tempo-public.example.test/api/traces/trace-abc",
+            },
+          ],
         });
       }
       if (url.startsWith("/studio/tasks/payments-api/task-empty-dlq/logs?") && method === "GET") {
@@ -1302,6 +1334,19 @@ describe("App", () => {
     expect(screen.getByLabelText("Base URL")).toHaveValue("https://service.example.test");
   });
 
+  it("clears trace config when the trace provider is disabled", () => {
+    const draft = serviceToDraft(buildMockService() as unknown as ServiceRecord);
+    const payloadWithTrace = buildServicePayload(draft);
+    expect(payloadWithTrace.trace_config).toMatchObject({
+      provider: "tempo",
+      base_url: "https://tempo.example.test",
+    });
+
+    draft.trace_provider = "";
+    const payloadWithoutTrace = buildServicePayload(draft);
+    expect(payloadWithoutTrace.trace_config).toBeNull();
+  });
+
   it("keeps the edit context visible when service deletion fails", async () => {
     const baseImpl = fetchMock.getMockImplementation();
     let deleteCalls = 0;
@@ -1418,6 +1463,7 @@ describe("App", () => {
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(screen.getByText("Task Timeline")).toBeInTheDocument();
     expect(screen.getByText("Task Logs")).toBeInTheDocument();
+    expect(await screen.findByText("Trace Correlation")).toBeInTheDocument();
     expect(screen.getByText("Joined Refs")).toBeInTheDocument();
     expect(screen.getByText("Join Warnings")).toBeInTheDocument();
     expect(screen.getByText("Section Errors")).toBeInTheDocument();
@@ -1428,6 +1474,16 @@ describe("App", () => {
     expect(screen.getByText(/"stage": "received"/)).toBeInTheDocument();
     expect(screen.getByText("{\"oops\":")).toBeInTheDocument();
     expect(screen.getAllByText("null").length).toBeGreaterThan(0);
+    expect(await screen.findByText("payments.process_payment")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open Span" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View Span" }));
+    const spanDialog = await screen.findByRole("dialog", { name: "Span Details" });
+    expect(within(spanDialog).getByText("span-123")).toBeInTheDocument();
+    expect(within(spanDialog).getByText("parent-456")).toBeInTheDocument();
+    expect(within(spanDialog).getByDisplayValue(/"messaging.system": "rabbitmq"/)).toBeInTheDocument();
+    expect(within(spanDialog).getByDisplayValue("https://tempo-public.example.test/api/traces/trace-abc")).toBeInTheDocument();
+    fireEvent.click(within(spanDialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Span Details" })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("\u001b[31m");
     expect(MockEventSource.instances.some((item) => item.url === "/studio/tasks/payments-api/task-123/events/stream")).toBe(true);
 

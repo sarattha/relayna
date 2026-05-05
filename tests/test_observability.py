@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from opentelemetry import context as otel_context
 
 from relayna.observability import (
     RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS,
@@ -11,8 +12,11 @@ from relayna.observability import (
     SSEKeepaliveSent,
     TaskHandlerFailed,
     TaskMessageReceived,
+    active_trace_fields,
     bind_studio_log_context,
     emit_observation,
+    extract_trace_context,
+    inject_trace_headers,
     make_redis_observation_sink,
     make_structlog_observation_sink,
     observation_to_studio_log_fields,
@@ -224,6 +228,26 @@ def test_studio_loki_label_contract_keeps_task_identifiers_in_body() -> None:
         RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS
     )
     assert RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST.isdisjoint(RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS)
+
+
+def test_trace_helpers_are_noop_without_active_trace() -> None:
+    headers = inject_trace_headers({"task_id": "task-123"})
+
+    assert headers == {"task_id": "task-123"}
+    assert active_trace_fields() == {}
+
+
+def test_trace_helpers_extract_w3c_trace_context() -> None:
+    traceparent = "00-11111111111111111111111111111111-2222222222222222-01"
+    token = otel_context.attach(extract_trace_context({"traceparent": traceparent}))
+    try:
+        assert active_trace_fields() == {
+            "trace_id": "11111111111111111111111111111111",
+            "span_id": "2222222222222222",
+        }
+        assert inject_trace_headers()["traceparent"].startswith("00-11111111111111111111111111111111-")
+    finally:
+        otel_context.detach(token)
 
 
 @pytest.mark.asyncio

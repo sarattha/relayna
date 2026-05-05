@@ -6,6 +6,7 @@ import time
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from opentelemetry.trace import SpanKind
 from pydantic import ValidationError
 
 from ..contracts import BatchTaskEnvelope, ContractAliasConfig, StatusEventEnvelope, TaskEnvelope, is_batch_task_payload
@@ -30,6 +31,7 @@ from ..observability import (
     TaskResourceSampled,
     emit_observation,
 )
+from ..observability.tracing import relayna_span
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
 from ..topology import RoutedTasksSharedStatusTopology
 from .context import (
@@ -166,6 +168,26 @@ class TaskConsumer:
                         pass
 
     async def _handle_message(
+        self, message: Any, *, source_queue_name: str, retry_infrastructure: RetryInfrastructure | None
+    ) -> None:
+        with relayna_span(
+            "relayna.consumer.task_message",
+            headers=_message_headers(message),
+            attributes={
+                "messaging.system": "rabbitmq",
+                "messaging.source.name": source_queue_name,
+                "relayna.consumer_name": self._consumer_name,
+                "relayna.retry_attempt": _retry_attempt(message),
+            },
+            kind=SpanKind.CONSUMER,
+        ):
+            await self._handle_message_impl(
+                message,
+                source_queue_name=source_queue_name,
+                retry_infrastructure=retry_infrastructure,
+            )
+
+    async def _handle_message_impl(
         self, message: Any, *, source_queue_name: str, retry_infrastructure: RetryInfrastructure | None
     ) -> None:
         try:

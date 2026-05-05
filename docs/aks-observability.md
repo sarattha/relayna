@@ -1,9 +1,9 @@
 # AKS observability stack
 
-Relayna can run without Studio, Loki, Alloy, or Prometheus. A complete Relayna
-Studio deployment on AKS needs those components when operators want centralized
-logs, Kubernetes metrics, aggregate Relayna runtime metrics, and exact task
-resource samples in one place.
+Relayna can run without Studio, Loki, Alloy, Prometheus, or Tempo. A complete
+Relayna Studio deployment on AKS needs those components when operators want
+centralized logs, Kubernetes metrics, aggregate Relayna runtime metrics, exact
+task resource samples, and trace correlation in one place.
 
 ## Required components
 
@@ -14,10 +14,11 @@ resource samples in one place.
 | Redis | Relayna status, DLQ indexes, observation history, Studio registry/events | API pods, worker pods, and Studio must share the same logical Redis data plane for complete task detail. |
 | RabbitMQ | Relayna task queues, status fanout, retry/DLQ flows | Workers publish lifecycle status and observations around RabbitMQ task handling. |
 | Loki | Studio log panels | Studio queries Loki from the backend. The browser does not connect to Loki directly. |
-| Alloy | Kubernetes pod log collection and Loki forwarding | Runs as a DaemonSet and reads `/var/log/pods` or `/var/log/containers`. |
+| Alloy | Kubernetes pod log collection, Loki forwarding, and optional OTLP trace receiving | Runs as a DaemonSet for logs. It can also run an OpenTelemetry collector pipeline that forwards spans to Tempo. |
 | Prometheus | Studio Kubernetes metrics and Relayna runtime charts | Scrapes cAdvisor, kube-state-metrics, Relayna API `/metrics`, worker `/metrics`, and Studio backend `/metrics`. |
 | kube-state-metrics | Pod phase, readiness, resource requests/limits, restart/OOM metrics | Prometheus needs this for the Phase 2 Kubernetes metric groups. |
-| Studio backend | Service registry, federation, log query proxy, metrics query proxy, `/metrics` | Configure egress allowlists for AKS service DNS and observability services. |
+| Tempo | Studio trace panels | Stores OpenTelemetry spans. Studio queries Tempo by `trace_id` through the backend. |
+| Studio backend | Service registry, federation, log query proxy, metrics query proxy, trace query proxy, `/metrics` | Configure egress allowlists for AKS service DNS and observability services. |
 | Studio frontend | Operator UI | Talks only to the Studio backend. |
 
 Prometheus labels must stay low-cardinality. Do not use `task_id`,
@@ -28,8 +29,8 @@ are Relayna observations stored with task lifecycle data, not Prometheus series.
 ## Architecture
 
 The overall system looks like this when Relayna services, service workers,
-Studio, Redis, RabbitMQ, Loki, Alloy, Prometheus, and kube-state-metrics run
-inside AKS:
+Studio, Redis, RabbitMQ, Loki, Alloy, Prometheus, Tempo, and
+kube-state-metrics run inside AKS:
 
 ![Relayna AKS observability architecture](assets/relayna-aks-observability-architecture.svg)
 
@@ -48,11 +49,12 @@ flowchart TB
       alloy["Grafana Alloy DaemonSet\nCRI log tail + Kubernetes labels"]
       loki["Loki\nLog storage/query"]
       prom["Prometheus\nKubernetes + Relayna runtime metrics"]
+      tempo["Tempo\nTrace storage/query"]
       ksm["kube-state-metrics\nPod/resource/status metrics"]
     end
 
     subgraph studio["Studio namespace"]
-      studioBackend["Studio backend\nRegistry, federation,\nLoki proxy, Prometheus proxy, /metrics"]
+      studioBackend["Studio backend\nRegistry, federation,\nLoki, Prometheus, Tempo proxy, /metrics"]
       studioFrontend["Studio frontend\nOperator UI"]
     end
   end
@@ -65,6 +67,9 @@ flowchart TB
   api -->|stdout JSON logs| alloy
   workers -->|stdout JSON logs| alloy
   alloy -->|push logs| loki
+  api -->|OTLP spans| alloy
+  workers -->|OTLP spans| alloy
+  alloy -->|export spans| tempo
 
   prom -->|scrape /metrics| api
   prom -->|scrape worker :8001/metrics| workers
@@ -76,8 +81,24 @@ flowchart TB
   studioBackend -->|read/write| redis
   studioBackend -->|LogQL query| loki
   studioBackend -->|PromQL query_range| prom
+  studioBackend -->|trace lookup| tempo
   studioFrontend -->|Studio API only| studioBackend
 ```
+
+## Feature layers
+
+The same AKS stack supports all four Studio observability phases:
+
+1. Centralized logs: pods write JSON logs to stdout, Alloy attaches Kubernetes
+   metadata, and Loki stores the result for Studio log panels.
+2. Kubernetes metrics: Prometheus scrapes cAdvisor and kube-state-metrics so
+   Studio can show service and task-window infrastructure metrics.
+3. Relayna runtime metrics and observations: API/worker `/metrics` endpoints
+   expose aggregate counters/histograms while Redis observations preserve exact
+   per-task CPU/RSS samples for execution graphs.
+4. Trace correlation: Relayna propagates W3C `traceparent`/`tracestate` through
+   RabbitMQ headers, the application-owned OpenTelemetry SDK exports spans to
+   Alloy/Tempo, and Studio links task detail to trace spans.
 
 ## Relayna pod conventions
 
@@ -128,7 +149,7 @@ If your runtime metrics use the SDK default service label value `relayna`, set
 `RelaynaMetrics(service="checker-service")`, that value can match the Studio
 `service_id` instead.
 
-## Loki and Alloy setup
+## Loki and Alloy log setup
 
 Alloy should collect container stdout, parse Kubernetes metadata, keep
 low-cardinality labels, and push to Loki. Relayna task identifiers should remain
@@ -288,9 +309,60 @@ scrape_configs:
         target_label: app
 ```
 
+## Tempo trace setup
+
+Relayna core only depends on `opentelemetry-api`; each registered service that
+wants real spans must add and configure its own OpenTelemetry SDK/exporter.
+Relayna will propagate W3C trace context through RabbitMQ headers and create
+safe spans around publish/consume/status/retry/DLQ paths when a tracer provider
+is installed.
+
+One practical AKS pattern is to send OTLP spans to Alloy and let Alloy export to
+Tempo:
+
+```river
+otelcol.receiver.otlp "relayna" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.relayna.input]
+  }
+}
+
+otelcol.processor.batch "relayna" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo.observability.svc.cluster.local:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+```
+
+For local development, sending spans directly to Tempo also works if Tempo's
+OTLP ports are exposed:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_SERVICE_NAME=orders-api
+```
+
 ## Studio service registration
 
-Register each Relayna service with both `log_config` and `metrics_config`:
+Register each Relayna service with `log_config`, `metrics_config`, and
+`trace_config` when all observability phases are enabled:
 
 ```json
 {
@@ -327,6 +399,13 @@ Register each Relayna service with both `log_config` and `metrics_config`:
     "container_label": "container",
     "step_seconds": 30,
     "task_window_padding_seconds": 120
+  },
+  "trace_config": {
+    "provider": "tempo",
+    "base_url": "http://tempo.observability.svc.cluster.local:3200",
+    "public_base_url": null,
+    "tenant_id": null,
+    "query_path": "/api/traces/{trace_id}"
   }
 }
 ```
@@ -337,9 +416,225 @@ Configure Studio backend egress for AKS DNS:
 RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS=.svc.cluster.local
 ```
 
-If you use literal private IPs for Loki, Prometheus, Redis, or registered
-services, also set the matching CIDRs in
+If you use literal private IPs for Loki, Prometheus, Tempo, Redis, or
+registered services, also set the matching CIDRs in
 `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`.
+
+## Complete registered service example
+
+The example below shows a single `orders-api` registered service with API pods,
+worker pods, JSON logs for Loki, `/metrics` for Prometheus, Redis observations
+for exact task resource samples, and OpenTelemetry spans for Tempo.
+
+Install application-owned tracing dependencies in the service image:
+
+```toml
+[project]
+dependencies = [
+  "relayna>=1.4.10",
+  "opentelemetry-sdk>=1.28.0",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
+  "structlog>=24.0.0",
+]
+```
+
+Configure structured logs and tracing once at process startup:
+
+```python
+import logging
+import structlog
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+from relayna.observability import bind_studio_log_context
+
+
+def configure_observability(*, service: str, app: str, env: str) -> structlog.BoundLogger:
+    logging.basicConfig(format="%(message)s", level=logging.INFO)
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso", key="timestamp"),
+            structlog.processors.add_log_level,
+            structlog.processors.JSONRenderer(),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    )
+
+    provider = TracerProvider(
+        resource=Resource.create(
+            {
+                "service.name": app,
+                "relayna.service_id": service,
+                "deployment.environment": env,
+            }
+        )
+    )
+    provider.add_span_processor(
+        BatchSpanProcessor(
+            OTLPSpanExporter(endpoint="http://alloy.observability.svc.cluster.local:4317", insecure=True)
+        )
+    )
+    trace.set_tracer_provider(provider)
+
+    return bind_studio_log_context(
+        structlog.get_logger(),
+        service=service,
+        app=app,
+        env=env,
+        runtime=app,
+    )
+```
+
+Expose Relayna federation routes, metrics, status history, events, execution
+graphs, and observations from the API process:
+
+```python
+from fastapi import FastAPI
+
+from relayna.api import (
+    create_capabilities_router,
+    create_events_router,
+    create_execution_router,
+    create_metrics_router,
+    create_relayna_lifespan,
+    create_status_router,
+    get_relayna_runtime,
+)
+
+app = FastAPI(
+    lifespan=create_relayna_lifespan(
+        topology=topology,
+        redis_url="redis://redis.default.svc.cluster.local:6379/0",
+        observation_store_prefix="orders:observations",
+        service_event_store_prefix="orders:events",
+        metrics_service_name="orders-api",
+    )
+)
+runtime = get_relayna_runtime(app)
+logger = configure_observability(service="orders-api", app="orders-api", env="prod-aks")
+
+app.include_router(create_capabilities_router(topology=topology))
+app.include_router(create_metrics_router(runtime.metrics))
+app.include_router(
+    create_status_router(
+        sse_stream=runtime.sse_stream,
+        history_reader=runtime.history_reader,
+        latest_status_store=runtime.store,
+    )
+)
+app.include_router(create_events_router(service_event_store=runtime.service_event_store))
+app.include_router(create_execution_router(execution_graph_service=runtime.execution_graph_service))
+```
+
+Wire the worker to the same Redis observation store, expose worker metrics, and
+emit task-aware JSON logs. Relayna handles trace propagation across RabbitMQ
+headers; the worker only needs the OpenTelemetry SDK configured at startup.
+
+```python
+from redis.asyncio import Redis
+
+from relayna.api import RelaynaMetrics, start_metrics_http_server
+from relayna.consumer import RetryPolicy, TaskConsumer
+from relayna.observability import RedisObservationStore, make_redis_observation_sink
+
+redis = Redis.from_url("redis://redis.default.svc.cluster.local:6379/0")
+observation_store = RedisObservationStore(redis, prefix="orders:observations")
+logger = configure_observability(service="orders-api", app="orders-worker", env="prod-aks")
+metrics = RelaynaMetrics(service="orders-api")
+
+
+async def handle_order(message: dict) -> None:
+    logger.info(
+        "order_handler_started",
+        task_id=message["task_id"],
+        correlation_id=message.get("correlation_id"),
+        stage="worker",
+    )
+    ...
+
+
+consumer = TaskConsumer(
+    rabbitmq=rabbitmq_client,
+    handler=handle_order,
+    retry_policy=RetryPolicy(max_retries=3, delay_ms=30_000),
+    observation_sink=make_redis_observation_sink(observation_store),
+    metrics=metrics,
+)
+
+start_metrics_http_server(metrics, port=8001)
+await consumer.run_forever()
+```
+
+Use low-cardinality pod labels and Prometheus scrape annotations on both API and
+worker workloads:
+
+```yaml
+metadata:
+  labels:
+    service: orders-api
+    app: orders-worker
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8001"
+    prometheus.io/path: "/metrics"
+```
+
+Register the service in Studio with all three provider configs:
+
+```bash
+curl -X POST http://studio-backend.studio.svc.cluster.local:8000/studio/services \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "service_id": "orders-api",
+    "name": "Orders API",
+    "base_url": "http://orders-api.default.svc.cluster.local:8000",
+    "environment": "prod-aks",
+    "tags": ["orders", "aks"],
+    "auth_mode": "internal_network",
+    "log_config": {
+      "provider": "loki",
+      "base_url": "http://loki.observability.svc.cluster.local:3100",
+      "service_selector_labels": {"service": "orders-api"},
+      "source_label": "app",
+      "task_match_mode": "contains",
+      "task_match_template": "{task_id}",
+      "correlation_id_label": null,
+      "level_label": "level"
+    },
+    "metrics_config": {
+      "provider": "prometheus",
+      "base_url": "http://prometheus.observability.svc.cluster.local:9090",
+      "namespace": "default",
+      "service_selector_labels": {"service": "orders-api"},
+      "runtime_service_label_value": "orders-api",
+      "namespace_label": "namespace",
+      "pod_label": "pod",
+      "container_label": "container",
+      "step_seconds": 30,
+      "task_window_padding_seconds": 120
+    },
+    "trace_config": {
+      "provider": "tempo",
+      "base_url": "http://tempo.observability.svc.cluster.local:3200",
+      "public_base_url": null,
+      "tenant_id": null,
+      "query_path": "/api/traces/{trace_id}"
+    }
+  }'
+```
+
+After a task runs, Studio should be able to show:
+
+- service logs and task logs from Loki
+- service and task-window metrics from Prometheus
+- Relayna runtime charts and exact task CPU/RSS samples
+- execution graph and task timeline from Redis-backed Relayna status and
+  observation data
+- trace IDs discovered from task detail/log fields and Tempo spans in the task
+  detail Trace Correlation section
 
 ## Bootstrap script
 
@@ -349,7 +644,21 @@ The repository includes a starter AKS deployment script:
 scripts/deploy-relayna-observability-aks.sh
 ```
 
-It installs a namespace, Loki, Alloy, Prometheus, and kube-state-metrics with
-Relayna-compatible scrape and log-label defaults. Review storage classes,
-resource requests, retention, auth, and network policy before using it in
-production.
+It installs a namespace, Loki, Alloy, Prometheus, Tempo, and
+kube-state-metrics with Relayna-compatible scrape, log-label, and OTLP trace
+forwarding defaults for all four phases. Review storage classes, resource
+requests, retention, auth, and network policy before using it in production.
+
+Useful overrides:
+
+```bash
+NAMESPACE=observability
+STORAGE_CLASS=managed-csi
+LOKI_STORAGE_SIZE=10Gi
+PROMETHEUS_STORAGE_SIZE=20Gi
+TEMPO_STORAGE_SIZE=10Gi
+LOKI_RETENTION=168h
+PROMETHEUS_RETENTION=15d
+TEMPO_RETENTION=168h
+TEMPO_IMAGE=grafana/tempo:latest
+```

@@ -75,7 +75,7 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RELAYNA_STUDIO_REGISTRY_PREFIX` | `studio:services` | Redis prefix for persisted service registry entries. |
-| `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` | unset | Comma-separated host suffix allowlist for Studio backend egress to registered services and Loki. |
+| `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` | unset | Comma-separated host suffix allowlist for Studio backend egress to registered services, Loki, Prometheus, and Tempo. |
 | `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` | unset | Comma-separated CIDR allowlist for Studio backend egress to literal IP targets. |
 | `RELAYNA_STUDIO_CAPABILITY_STALE_AFTER_SECONDS` | `180` | Threshold after which a cached capability snapshot is considered stale. |
 
@@ -217,7 +217,7 @@ Operational expectations:
 Studio backend egress guardrails:
 
 - `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` filters allowed host suffixes
-  for registered service URLs and Loki URLs
+  for registered service URLs, Loki URLs, Prometheus URLs, and Tempo URLs
 - `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` filters allowed literal
   IP networks
 - AKS service DNS should normally be allowed with host suffixes such as
@@ -372,6 +372,62 @@ Prometheus needs kubelet/cAdvisor, kube-state-metrics, Relayna API/worker
 `/metrics`, and Studio backend `/metrics` scrape targets for complete Studio
 charts. See [AKS observability stack](aks-observability.md) for a deployable
 starter stack and architecture diagram.
+
+### Tempo `trace_config` for task trace correlation
+
+Studio trace queries are backend-driven. The browser asks Studio for normalized
+trace summaries and spans; Studio discovers candidate trace IDs from task detail
+and task log fields, validates the registered Tempo URL, queries Tempo, and
+returns a Studio-shaped response.
+
+Registered services that export OpenTelemetry traces to Tempo can add
+`trace_config`:
+
+```json
+{
+  "service_id": "checker-service",
+  "trace_config": {
+    "provider": "tempo",
+    "base_url": "http://tempo.observability.svc.cluster.local:3200",
+    "public_base_url": null,
+    "tenant_id": null,
+    "query_path": "/api/traces/{trace_id}"
+  }
+}
+```
+
+Field-by-field guidance:
+
+- `base_url`
+  - Tempo URL reachable from the Studio backend
+  - validated by the same outbound URL policy used for registered services,
+    Loki, and Prometheus
+- `public_base_url`
+  - optional browser-safe Tempo URL for operators
+  - useful when Studio queries `host.docker.internal` or cluster DNS but the
+    browser needs `localhost` or an ingress URL
+- `tenant_id`
+  - optional `X-Scope-OrgID` tenant header for multi-tenant Tempo deployments
+- `query_path`
+  - path template containing `{trace_id}`
+  - defaults to `/api/traces/{trace_id}`
+
+Relayna SDK trace propagation is optional and off by default. Relayna carries
+W3C `traceparent` and `tracestate` through RabbitMQ headers and attaches
+`trace_id`/`span_id` to structured logs and observations only when an
+application-owned OpenTelemetry SDK has an active span. Relayna core does not
+install exporters or send spans to Tempo by itself.
+
+Studio exposes:
+
+```text
+GET /studio/tasks/{service_id}/{task_id}/traces
+```
+
+The task detail UI renders a Trace Correlation section. When traces are present,
+operators can open a Studio-native span detail modal and filter task logs by the
+span's trace ID. When `trace_config` is missing or no trace IDs are found,
+Studio shows a non-error empty state.
 
 ### Broker DLQ setup for Studio federation
 
@@ -612,7 +668,7 @@ Symptoms:
 Checks:
 
 - confirm the service `base_url` is reachable from the backend host
-- confirm the service or Loki host suffix matches `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS`
+- confirm the service or observability backend host suffix matches `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS`
 - for literal IP URLs, confirm the IP is within `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`
 
 ### Service unavailable vs stale capability vs stale observation

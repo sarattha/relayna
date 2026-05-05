@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.10 - 2026-05-05
+
+### Added
+
+- Added optional OpenTelemetry trace correlation across Relayna RabbitMQ publish/consume paths, retry/DLQ forwarding, workflow stage publishing, status/result publishing, structured logs, and observations.
+- Added Studio Tempo trace configuration, trace lookup endpoint, and task detail trace correlation UI with a native span detail modal.
+- Added regression coverage for no-op tracing, W3C RabbitMQ trace headers, consumer child spans, trace-aware logs/observations, Tempo provider normalization, and Studio trace UI states.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.10`, the Studio backend package version to `0.1.9`, and the Studio frontend package version to `0.1.11`.
+- Updated release-install documentation to reference `relayna 1.4.10`, `relayna-studio 0.1.9`, and the matching frontend package version `0.1.11`.
+
+### Fixed
+
+- Studio now normalizes Tempo OTLP base64 trace/span identifiers into hex IDs before returning them to the frontend.
+- Trace provider links now use browser-safe/public Tempo URLs when the backend queries Tempo through an internal host.
+
 ## 1.4.9 - 2026-05-03
 
 ### Added

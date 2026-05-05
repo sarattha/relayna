@@ -76,6 +76,14 @@ export type ServiceMetricsConfig = {
   task_window_padding_seconds: number;
 };
 
+export type ServiceTraceConfig = {
+  provider: "tempo";
+  base_url: string;
+  public_base_url?: string | null;
+  tenant_id?: string | null;
+  query_path: string;
+};
+
 export type ServiceRecord = {
   service_id: string;
   name: string;
@@ -88,6 +96,7 @@ export type ServiceRecord = {
   last_seen_at?: string | null;
   log_config?: ServiceLogConfig | null;
   metrics_config?: ServiceMetricsConfig | null;
+  trace_config?: ServiceTraceConfig | null;
   health?: ServiceHealthSummary | null;
 };
 
@@ -128,6 +137,11 @@ export type ServiceDraft = {
   metrics_container_label: string;
   metrics_step_seconds: string;
   metrics_task_window_padding_seconds: string;
+  trace_provider: "" | "tempo";
+  trace_base_url: string;
+  trace_public_base_url: string;
+  trace_tenant_id: string;
+  trace_query_path: string;
 };
 
 export type StudioTaskPointer = {
@@ -489,6 +503,29 @@ export type StudioMetricsResponse = {
   approximate: boolean;
   warnings: string[];
   series: StudioMetricSeries[];
+};
+
+export type StudioTraceSpan = {
+  trace_id: string;
+  span_id: string;
+  parent_span_id?: string | null;
+  name: string;
+  kind?: string | null;
+  service?: string | null;
+  source?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  duration_ms?: number | null;
+  attributes: Record<string, unknown>;
+  backend_url?: string | null;
+};
+
+export type StudioTraceResponse = {
+  service_id: string;
+  task_id: string;
+  trace_ids: string[];
+  spans: StudioTraceSpan[];
+  warnings: string[];
 };
 
 export type DlqMode = "indexed" | "broker";

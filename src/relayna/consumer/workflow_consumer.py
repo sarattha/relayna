@@ -5,6 +5,7 @@ import json
 import time
 from typing import Any
 
+from opentelemetry.trace import SpanKind
 from pydantic import ValidationError
 
 from ..contracts import ContractAliasConfig, WorkflowEnvelope
@@ -20,6 +21,7 @@ from ..observability import (
     WorkflowStageStarted,
     emit_observation,
 )
+from ..observability.tracing import relayna_span
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
 from ..storage import WorkflowContractStore
 from ..topology import SharedStatusWorkflowTopology
@@ -169,6 +171,35 @@ class WorkflowConsumer:
                         pass
 
     async def _handle_message(
+        self,
+        message: Any,
+        *,
+        stage: str,
+        source_queue_name: str,
+        retry_infrastructure: RetryInfrastructure | None,
+        retry_policy: RetryPolicy | None,
+    ) -> bool:
+        with relayna_span(
+            "relayna.consumer.workflow_message",
+            headers=_message_headers(message),
+            attributes={
+                "messaging.system": "rabbitmq",
+                "messaging.source.name": source_queue_name,
+                "relayna.consumer_name": self._consumer_name,
+                "relayna.stage": stage,
+                "relayna.retry_attempt": _retry_attempt(message),
+            },
+            kind=SpanKind.CONSUMER,
+        ):
+            return await self._handle_message_impl(
+                message,
+                stage=stage,
+                source_queue_name=source_queue_name,
+                retry_infrastructure=retry_infrastructure,
+                retry_policy=retry_policy,
+            )
+
+    async def _handle_message_impl(
         self,
         message: Any,
         *,
