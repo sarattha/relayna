@@ -83,8 +83,9 @@ Use the v2 package roots by responsibility:
 - `relayna.workflow` owns workflow control-plane helpers such as policies,
   transitions, fan-in, lineage, replay, and diagnostics.
 - `relayna.dlq` owns DLQ persistence, queue summaries, and replay orchestration.
-- `relayna.observability` owns typed runtime observations plus collector and
-  exporter helpers.
+- `relayna.observability` owns typed runtime observations, execution graph
+  helpers, structured log helpers, Prometheus runtime metrics, and lightweight
+  OpenTelemetry trace propagation.
 - `relayna.mcp` adapts Relayna runtime state into MCP resources and tools.
 
 `relayna.storage` is an internal support package. It backs the public runtime

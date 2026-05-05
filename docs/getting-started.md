@@ -2295,6 +2295,8 @@ For fuller functionality:
 - `GET /workflow/topology` and `GET /workflow/stages` for workflow views
 - DLQ routes for operator replay and queue inspection
 - `GET /relayna/health/workers` for worker liveness snapshots
+- `GET /metrics` on API and worker processes for Prometheus-backed runtime
+  charts
 
 For log panels, Studio does not read logs from Relayna directly. Instead, the
 service record in Studio can carry a `log_config` pointing at a supported log
@@ -2327,6 +2329,44 @@ That means:
   instead of requiring a Loki `task_id` label
 - if your service emits JSON logs, Studio pretty-prints parseable objects and
   arrays in both log panels and falls back to plain-text rendering for the rest
+
+For metric panels, Studio reads `metrics_config` from the same registered
+service record and queries Prometheus through the Studio backend:
+
+```json
+{
+  "provider": "prometheus",
+  "base_url": "http://prometheus.observability.svc.cluster.local:9090",
+  "namespace": "default",
+  "service_selector_labels": {
+    "service": "checker-service"
+  },
+  "runtime_service_label_value": "checker-service",
+  "namespace_label": "namespace",
+  "pod_label": "pod",
+  "container_label": "container",
+  "step_seconds": 30,
+  "task_window_padding_seconds": 120
+}
+```
+
+For trace panels, Studio reads `trace_config` and queries Tempo by trace IDs
+discovered from task detail or task log fields:
+
+```json
+{
+  "provider": "tempo",
+  "base_url": "http://tempo.observability.svc.cluster.local:3200",
+  "public_base_url": null,
+  "tenant_id": null,
+  "query_path": "/api/traces/{trace_id}"
+}
+```
+
+Relayna propagates W3C `traceparent` and `tracestate` through RabbitMQ headers,
+but it does not install an OpenTelemetry SDK or exporter. Add
+`opentelemetry-sdk` and an OTLP exporter to your service image when you want
+spans to appear in Tempo.
 
 ### Metadata that should stay stable
 
@@ -2412,6 +2452,12 @@ your operating model:
   Gives you a structured path to push Relayna observation metadata into your
   logging backend. For Loki-backed services, pair it with `structlog` JSON
   rendering so Studio can display structured log entries directly.
+- `RelaynaMetrics` and `/metrics`
+  Lets Prometheus scrape aggregate service/runtime metrics without task IDs as
+  labels.
+- OpenTelemetry SDK/exporter in the application
+  Lets Relayna's W3C RabbitMQ trace propagation produce spans that Studio can
+  look up through Tempo.
 
 ## Verification Checklist
 
@@ -2435,6 +2481,7 @@ curl -s http://localhost:8000/relayna/health/workers
 curl -s http://localhost:8000/dlq/queues
 curl -s http://localhost:8000/workflow/topology
 curl -s http://localhost:8000/workflow/stages
+curl -s http://localhost:8000/metrics
 ```
 
 ### Studio-ready definition
@@ -2445,6 +2492,8 @@ A service is effectively Studio-ready when:
 - the Studio backend can reach the service `base_url`
 - capability refresh succeeds
 - task detail can be fetched through the Studio backend
+- logs, metrics, runtime samples, and traces are configured only when their
+  backing providers are intentionally deployed
 - events, execution views, health, workflow, and DLQ panels degrade only when
   those routes were intentionally omitted
 

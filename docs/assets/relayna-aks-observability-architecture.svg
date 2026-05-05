@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1100" height="688" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
   <title id="title">Relayna AKS observability architecture</title>
-  <desc id="desc">Overall AKS architecture for Relayna registered services, workers, Redis, RabbitMQ, Loki, Alloy, Prometheus, kube-state-metrics, and Studio.</desc>
+  <desc id="desc">Overall AKS architecture for Relayna registered services, workers, Redis, RabbitMQ, Loki, Alloy, Prometheus, Tempo, kube-state-metrics, and Studio.</desc>
   <defs>
     <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L0,6 L9,3 z" fill="#2563eb" />
@@ -49,7 +49,7 @@
 
   <rect class="bg" width="1600" height="1000" />
   <text x="56" y="58" class="title">Relayna on AKS: complete Studio observability system</text>
-  <text x="56" y="88" class="subtitle">Logs, Kubernetes infrastructure metrics, aggregate Relayna runtime metrics, exact task resource observations, and Studio query paths.</text>
+  <text x="56" y="88" class="subtitle">Logs, Kubernetes infrastructure metrics, aggregate Relayna runtime metrics, exact task resource observations, traces, and Studio query paths.</text>
 
   <rect x="40" y="118" width="1520" height="816" class="cluster" />
   <text x="68" y="154" class="cluster-title">AKS cluster</text>
@@ -160,7 +160,7 @@
   <text x="594" y="768" class="node-title">Studio backend</text>
   <text x="592" y="794" class="node-body">Registry</text>
   <text x="592" y="814" class="node-body">Federation</text>
-  <text x="592" y="834" class="node-body">Loki + Prom proxy</text>
+  <text x="592" y="834" class="node-body">Loki + Prom + Tempo</text>
 
   <circle cx="468" cy="350" r="13" class="badge" stroke="#7c3aed" />
   <text x="464" y="355" class="badge-text" fill="#7c3aed">1</text>
@@ -180,8 +180,8 @@
   <circle cx="966" cy="790" r="6" fill="#2563eb" />
   <text x="984" y="794" class="legend-text">Metrics: Relayna /metrics, cAdvisor, and kube-state-metrics</text>
   <circle cx="966" cy="820" r="6" fill="#16a34a" />
-  <text x="984" y="824" class="legend-text">Studio queries: backend to services, Redis, Loki, and Prometheus</text>
+  <text x="984" y="824" class="legend-text">Studio queries: backend to services, Redis, Loki, Prometheus, and Tempo</text>
 
   <rect x="80" y="890" width="1260" height="36" rx="10" fill="#e2e8f0" stroke="#cbd5e1" />
-  <text x="104" y="913" class="small">Studio frontend never talks directly to Redis, RabbitMQ, Loki, or Prometheus. Studio backend owns egress policy checks and normalized responses.</text>
+  <text x="104" y="913" class="small">Studio frontend never talks directly to Redis, RabbitMQ, Loki, Prometheus, or Tempo. Studio backend owns egress policy checks and normalized responses.</text>
 </svg>

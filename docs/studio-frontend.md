@@ -170,6 +170,8 @@ The UI manages service records with fields including:
 - `auth_mode`
 - `tags`
 - optional `log_config`
+- optional `metrics_config`
+- optional `trace_config`
 
 These are not cosmetic fields. They determine how the backend resolves and
 federates the service.
@@ -212,6 +214,20 @@ Recommended AKS example:
 That lets the service page query all logs under the shared `service` label while
 the task page finds logs whose line text mentions the current task ID.
 
+For Prometheus-backed metric views, the service editor exposes provider,
+backend URL, namespace, selector labels, runtime service label value, step, and
+task-window padding fields. These map to backend `metrics_config` and drive
+service metrics, task-window Kubernetes metrics, aggregate Relayna runtime
+charts, and the exact task resource sample panel.
+
+For Tempo-backed trace views, the service editor exposes provider, backend URL,
+optional public URL, tenant ID, and query path fields. These map to backend
+`trace_config`. The task detail page uses that config to load traces through:
+
+```text
+GET /studio/tasks/{service_id}/{task_id}/traces
+```
+
 ### Task search and task detail
 
 The UI addresses tasks as:
@@ -230,6 +246,8 @@ Task views may also render:
 - event timelines
 - execution graphs
 - logs
+- metrics
+- trace correlation spans
 
 Task detail log behavior is now intentionally lifecycle-aware:
 
@@ -241,12 +259,25 @@ Task detail log behavior is now intentionally lifecycle-aware:
   discovered from the returned logs and exposed as input suggestions rather than
   a hard-coded list
 
+Task detail trace behavior is optional:
+
+- if no `trace_config` is registered, the Trace Correlation section shows a
+  non-error empty state
+- if trace IDs are present in task detail, observations, or log fields, Studio
+  queries Tempo through the backend
+- span rows open a Studio-native detail modal instead of sending the operator to
+  Tempo's raw API response
+- the trace action can apply the trace ID to the task log text filter so logs
+  and spans can be compared in one task view
+
 ### Workflow, logs, events, and DLQ views
 
 These views depend on backend support:
 
 - workflow pages depend on federated workflow routes
 - log pages depend on Studio-side `log_config`
+- metric pages depend on Studio-side `metrics_config`
+- trace panels depend on Studio-side `trace_config`
 - event views depend on Studio event ingestion or service-scoped event reads
 - DLQ pages depend on service DLQ routes
 
