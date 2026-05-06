@@ -1,6 +1,6 @@
 [project]
 name = "relayna-studio"
-version = "0.1.9"
+version = "0.1.10"
 description = "Deployable Relayna Studio backend package."
 requires-python = ">=3.13"
 license = { text = "MIT" }

@@ -224,7 +224,7 @@ helpers, and retention behavior. It is not part of the documented public API.
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
-package version is `0.1.9`, the Studio frontend package version is `0.1.11`, and
+package version is `0.1.10`, the Studio frontend package version is `0.1.11`, and
 the backend requires `relayna>=1.4.10`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
