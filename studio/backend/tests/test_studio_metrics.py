@@ -144,10 +144,13 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
         assert response.series[0].points[-1].value == 0.25
 
     asyncio.run(scenario())
-    assert observed_queries == [
+    assert observed_queries[0].startswith(
         'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
-        ' * on(namespace, pod) group_left() kube_pod_labels{label_app="payments-api",namespace="prod"})'
-    ]
+        " * on(namespace, pod) group_left() "
+    )
+    assert 'kube_pod_labels{namespace="prod"}' in observed_queries[0]
+    assert 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in observed_queries[0]
+    assert 'kube_pod_labels{label_app_conflict1="payments-api",namespace="prod"}' in observed_queries[0]
 
 
 def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> None:
@@ -189,9 +192,12 @@ def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> No
     asyncio.run(scenario())
     assert len(observed_queries) == len(platform_groups)
     assert all(
-        ' * on(namespace, pod) group_left() kube_pod_labels{label_app="payments-api",namespace="prod"}' in query
+        ' * on(namespace, pod) group_left() (kube_pod_labels{namespace="prod"}' in query
+        and 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in query
         for query in observed_queries
     )
+    assert observed_queries[7].startswith("sum(max_over_time(")
+    assert "increase(kube_pod_container_status_last_terminated_reason" not in observed_queries[7]
     assert observed_queries[8].startswith("sum by (phase) (")
     assert observed_queries[9].startswith("sum(kube_pod_container_status_ready{")
     assert 'condition="true"' in observed_queries[9]
@@ -226,12 +232,17 @@ def test_prometheus_provider_translates_service_selectors_to_kube_pod_labels() -
         )
 
     asyncio.run(scenario())
-    assert observed_queries == [
+    query = observed_queries[0]
+    assert query.startswith(
         'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
-        " * on(namespace, pod) group_left() kube_pod_labels{"
-        'label_app_kubernetes_io_name="payments",label_service="payments-api",'
-        'label_team_service="payments-platform",namespace="prod"})'
-    ]
+        " * on(namespace, pod) group_left() "
+    )
+    assert 'kube_pod_labels{label_app_kubernetes_io_name="payments",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_app_kubernetes_io_name_conflict1="payments",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_service="payments-api",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_service_conflict1="payments-api",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_team_service="payments-platform",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_team_service_conflict9="payments-platform",namespace="prod"}' in query
 
 
 def test_prometheus_provider_builds_relayna_runtime_queries() -> None:

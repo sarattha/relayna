@@ -51,6 +51,7 @@ _TASK_APPROXIMATION_WARNING = (
     "Task-window Kubernetes pod/container metrics are approximate for long-running workers that process many tasks."
 )
 _KUBE_POD_LABEL_UNSAFE_CHARS = re.compile(r"[^a-zA-Z0-9_]")
+_KUBE_POD_LABEL_CONFLICT_SUFFIXES = ("", *(f"_conflict{index}" for index in range(1, 10)))
 
 
 def _normalize_optional_string(value: Any) -> str | None:
@@ -77,6 +78,11 @@ def _escape_promql_string(value: str) -> str:
 
 def _kube_pod_label_metric_name(value: str) -> str:
     return f"label_{_KUBE_POD_LABEL_UNSAFE_CHARS.sub('_', value)}"
+
+
+def _kube_pod_label_metric_name_candidates(value: str) -> tuple[str, ...]:
+    name = _kube_pod_label_metric_name(value)
+    return tuple(f"{name}{suffix}" for suffix in _KUBE_POD_LABEL_CONFLICT_SUFFIXES)
 
 
 class StudioMetricPoint(BaseModel):
@@ -307,7 +313,10 @@ class PrometheusMetricsProvider:
         if group == StudioMetricGroup.OOM_KILLED:
             return self._owned_pod_sum(
                 config,
-                f'increase(kube_pod_container_status_last_terminated_reason{{{container_selector},reason="OOMKilled"}}[5m])',
+                (
+                    "max_over_time("
+                    f'kube_pod_container_status_last_terminated_reason{{{container_selector},reason="OOMKilled"}}[5m])'
+                ),
             )
         if group == StudioMetricGroup.POD_PHASE:
             return self._owned_pod_sum_by(config, "phase", f"kube_pod_status_phase{{{selector}}}")
@@ -359,10 +368,18 @@ class PrometheusMetricsProvider:
         )
 
     def _pod_ownership_selector(self, config: PrometheusMetricsConfig) -> str:
-        labels: dict[str, tuple[str, str]] = {config.namespace_label: ("=", config.namespace)}
-        labels.update(
-            {_kube_pod_label_metric_name(key): ("=", value) for key, value in config.service_selector_labels.items()}
-        )
+        namespace_selector = self._format_selector({config.namespace_label: ("=", config.namespace)})
+        ownership = f"kube_pod_labels{{{namespace_selector}}}"
+        for key, value in config.service_selector_labels.items():
+            selectors = [
+                self._format_selector({config.namespace_label: ("=", config.namespace), candidate: ("=", value)})
+                for candidate in _kube_pod_label_metric_name_candidates(key)
+            ]
+            candidates = " or ".join(f"kube_pod_labels{{{selector}}}" for selector in selectors)
+            ownership = f"({ownership} and on({config.namespace_label}, {config.pod_label}) ({candidates}))"
+        return ownership
+
+    def _format_selector(self, labels: Mapping[str, tuple[str, str]]) -> str:
         return ",".join(
             f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())
         )
@@ -371,7 +388,7 @@ class PrometheusMetricsProvider:
         return self._owned_pod_sum_by(config, None, expression)
 
     def _owned_pod_sum_by(self, config: PrometheusMetricsConfig, group_label: str | None, expression: str) -> str:
-        ownership = f"kube_pod_labels{{{self._pod_ownership_selector(config)}}}"
+        ownership = self._pod_ownership_selector(config)
         join = f"{expression} * on({config.namespace_label}, {config.pod_label}) group_left() {ownership}"
         if group_label is not None:
             return f"sum by ({group_label}) ({join})"
