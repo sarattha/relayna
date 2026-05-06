@@ -361,10 +361,7 @@ class PrometheusMetricsProvider:
     def _pod_ownership_selector(self, config: PrometheusMetricsConfig) -> str:
         labels: dict[str, tuple[str, str]] = {config.namespace_label: ("=", config.namespace)}
         labels.update(
-            {
-                _kube_pod_label_metric_name(key): ("=", value)
-                for key, value in config.service_selector_labels.items()
-            }
+            {_kube_pod_label_metric_name(key): ("=", value) for key, value in config.service_selector_labels.items()}
         )
         return ",".join(
             f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())

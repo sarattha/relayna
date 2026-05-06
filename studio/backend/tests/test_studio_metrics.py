@@ -15,6 +15,7 @@ from relayna_studio import (
     ServiceRecord,
     ServiceRegistryService,
     ServiceStatus,
+    StudioMetricGroup,
     StudioMetricsQuery,
     UpdateServiceRequest,
     create_studio_app,
@@ -135,7 +136,7 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
             query=StudioMetricsQuery(
                 from_time="2024-04-10T21:00:00Z",
                 to_time="2024-04-10T21:01:00Z",
-                groups=["cpu_usage"],
+                groups=[StudioMetricGroup.CPU_USAGE],
             ),
         )
         assert response.series[0].metric == "cpu_usage"
@@ -157,18 +158,18 @@ def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> No
         return httpx.Response(200, json=prometheus_success_response())
 
     platform_groups = [
-        "cpu_usage",
-        "memory_usage",
-        "cpu_requests",
-        "cpu_limits",
-        "memory_requests",
-        "memory_limits",
-        "restarts",
-        "oom_killed",
-        "pod_phase",
-        "readiness",
-        "network_receive",
-        "network_transmit",
+        StudioMetricGroup.CPU_USAGE,
+        StudioMetricGroup.MEMORY_USAGE,
+        StudioMetricGroup.CPU_REQUESTS,
+        StudioMetricGroup.CPU_LIMITS,
+        StudioMetricGroup.MEMORY_REQUESTS,
+        StudioMetricGroup.MEMORY_LIMITS,
+        StudioMetricGroup.RESTARTS,
+        StudioMetricGroup.OOM_KILLED,
+        StudioMetricGroup.POD_PHASE,
+        StudioMetricGroup.READINESS,
+        StudioMetricGroup.NETWORK_RECEIVE,
+        StudioMetricGroup.NETWORK_TRANSMIT,
     ]
 
     async def scenario() -> None:
@@ -188,8 +189,7 @@ def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> No
     asyncio.run(scenario())
     assert len(observed_queries) == len(platform_groups)
     assert all(
-        ' * on(namespace, pod) group_left() kube_pod_labels{label_app="payments-api",namespace="prod"}'
-        in query
+        ' * on(namespace, pod) group_left() kube_pod_labels{label_app="payments-api",namespace="prod"}' in query
         for query in observed_queries
     )
     assert observed_queries[8].startswith("sum by (phase) (")
@@ -221,14 +221,14 @@ def test_prometheus_provider_translates_service_selectors_to_kube_pod_labels() -
             query=StudioMetricsQuery(
                 from_time="2024-04-10T21:00:00Z",
                 to_time="2024-04-10T21:01:00Z",
-                groups=["cpu_usage"],
+                groups=[StudioMetricGroup.CPU_USAGE],
             ),
         )
 
     asyncio.run(scenario())
     assert observed_queries == [
         'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
-        ' * on(namespace, pod) group_left() kube_pod_labels{'
+        " * on(namespace, pod) group_left() kube_pod_labels{"
         'label_app_kubernetes_io_name="payments",label_service="payments-api",'
         'label_team_service="payments-platform",namespace="prod"})'
     ]
@@ -251,7 +251,7 @@ def test_prometheus_provider_builds_relayna_runtime_queries() -> None:
             query=StudioMetricsQuery(
                 from_time="2024-04-10T21:00:00Z",
                 to_time="2024-04-10T21:01:00Z",
-                groups=["tasks_started_rate", "task_duration_p95"],
+                groups=[StudioMetricGroup.TASKS_STARTED_RATE, StudioMetricGroup.TASK_DURATION_P95],
             ),
         )
 
