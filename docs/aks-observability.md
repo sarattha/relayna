@@ -92,7 +92,9 @@ The same AKS stack supports all four Studio observability phases:
 1. Centralized logs: pods write JSON logs to stdout, Alloy attaches Kubernetes
    metadata, and Loki stores the result for Studio log panels.
 2. Kubernetes metrics: Prometheus scrapes cAdvisor and kube-state-metrics so
-   Studio can show service and task-window infrastructure metrics.
+   Studio can show service and task-window infrastructure metrics. Studio uses
+   `kube_pod_labels` to resolve registered service selector labels to owned
+   pods, then joins platform metrics by namespace and pod.
 3. Relayna runtime metrics and observations: API/worker `/metrics` endpoints
    expose aggregate counters/histograms while Redis observations preserve exact
    per-task CPU/RSS samples for execution graphs.

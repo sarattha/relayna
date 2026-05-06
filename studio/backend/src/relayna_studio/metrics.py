@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -49,6 +50,7 @@ _DEFAULT_GROUPS = tuple(StudioMetricGroup)
 _TASK_APPROXIMATION_WARNING = (
     "Task-window Kubernetes pod/container metrics are approximate for long-running workers that process many tasks."
 )
+_KUBE_POD_LABEL_UNSAFE_CHARS = re.compile(r"[^a-zA-Z0-9_]")
 
 
 def _normalize_optional_string(value: Any) -> str | None:
@@ -71,6 +73,10 @@ def _iso(value: datetime) -> str:
 
 def _escape_promql_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _kube_pod_label_metric_name(value: str) -> str:
+    return f"label_{_KUBE_POD_LABEL_UNSAFE_CHARS.sub('_', value)}"
 
 
 class StudioMetricPoint(BaseModel):
@@ -246,39 +252,74 @@ class PrometheusMetricsProvider:
         return self._normalize_response(group=group, payload=payload)
 
     def _build_query(self, *, service: ServiceRecord, config: PrometheusMetricsConfig, group: StudioMetricGroup) -> str:
-        selector = self._selector(config)
-        container_selector = self._selector(
+        selector = self._metric_selector(config)
+        cadvisor_container_selector = self._metric_selector(
             config,
-            extra={config.container_label: ("!=", ""), config.pod_label: ("=~", ".+")},
+            extra={
+                config.container_label: ("!=", ""),
+                "image": ("!=", ""),
+                config.pod_label: ("=~", ".+"),
+            },
+        )
+        container_selector = self._metric_selector(
+            config,
+            extra={
+                config.container_label: ("!=", ""),
+                config.pod_label: ("=~", ".+"),
+            },
         )
         runtime_service_label_value = (
             config.runtime_service_label_value or config.service_selector_labels.get("service") or service.service_id
         )
         runtime_selector = f'service="{_escape_promql_string(runtime_service_label_value)}"'
         if group == StudioMetricGroup.CPU_USAGE:
-            return f"rate(container_cpu_usage_seconds_total{{{container_selector}}}[5m])"
+            return self._owned_pod_sum(
+                config,
+                f"rate(container_cpu_usage_seconds_total{{{cadvisor_container_selector}}}[5m])",
+            )
         if group == StudioMetricGroup.MEMORY_USAGE:
-            return f"container_memory_working_set_bytes{{{container_selector}}}"
+            return self._owned_pod_sum(config, f"container_memory_working_set_bytes{{{cadvisor_container_selector}}}")
         if group == StudioMetricGroup.CPU_REQUESTS:
-            return f'kube_pod_container_resource_requests{{{container_selector},resource="cpu"}}'
+            return self._owned_pod_sum(
+                config,
+                f'kube_pod_container_resource_requests{{{container_selector},resource="cpu"}}',
+            )
         if group == StudioMetricGroup.CPU_LIMITS:
-            return f'kube_pod_container_resource_limits{{{container_selector},resource="cpu"}}'
+            return self._owned_pod_sum(
+                config,
+                f'kube_pod_container_resource_limits{{{container_selector},resource="cpu"}}',
+            )
         if group == StudioMetricGroup.MEMORY_REQUESTS:
-            return f'kube_pod_container_resource_requests{{{container_selector},resource="memory"}}'
+            return self._owned_pod_sum(
+                config,
+                f'kube_pod_container_resource_requests{{{container_selector},resource="memory"}}',
+            )
         if group == StudioMetricGroup.MEMORY_LIMITS:
-            return f'kube_pod_container_resource_limits{{{container_selector},resource="memory"}}'
+            return self._owned_pod_sum(
+                config,
+                f'kube_pod_container_resource_limits{{{container_selector},resource="memory"}}',
+            )
         if group == StudioMetricGroup.RESTARTS:
-            return f"kube_pod_container_status_restarts_total{{{container_selector}}}"
+            return self._owned_pod_sum(
+                config,
+                f"increase(kube_pod_container_status_restarts_total{{{container_selector}}}[5m])",
+            )
         if group == StudioMetricGroup.OOM_KILLED:
-            return f'kube_pod_container_status_last_terminated_reason{{{container_selector},reason="OOMKilled"}}'
+            return self._owned_pod_sum(
+                config,
+                f'increase(kube_pod_container_status_last_terminated_reason{{{container_selector},reason="OOMKilled"}}[5m])',
+            )
         if group == StudioMetricGroup.POD_PHASE:
-            return f"kube_pod_status_phase{{{selector}}}"
+            return self._owned_pod_sum_by(config, "phase", f"kube_pod_status_phase{{{selector}}}")
         if group == StudioMetricGroup.READINESS:
-            return f"kube_pod_container_status_ready{{{container_selector}}}"
+            return self._owned_pod_sum(
+                config,
+                f'kube_pod_container_status_ready{{{container_selector},condition="true"}}',
+            )
         if group == StudioMetricGroup.NETWORK_RECEIVE:
-            return f"rate(container_network_receive_bytes_total{{{selector}}}[5m])"
+            return self._owned_pod_sum(config, f"rate(container_network_receive_bytes_total{{{selector}}}[5m])")
         if group == StudioMetricGroup.NETWORK_TRANSMIT:
-            return f"rate(container_network_transmit_bytes_total{{{selector}}}[5m])"
+            return self._owned_pod_sum(config, f"rate(container_network_transmit_bytes_total{{{selector}}}[5m])")
         if group == StudioMetricGroup.TASKS_STARTED_RATE:
             return f"sum(rate(relayna_tasks_started_total{{{runtime_selector}}}[5m]))"
         if group == StudioMetricGroup.TASKS_FAILED_RATE:
@@ -304,19 +345,40 @@ class PrometheusMetricsProvider:
             return f"sum(rate(relayna_observation_events_total{{{runtime_selector}}}[5m]))"
         raise StudioMetricsConfigError(f"Unsupported metric group '{group}'.")
 
-    def _selector(
+    def _metric_selector(
         self,
         config: PrometheusMetricsConfig,
         *,
         extra: Mapping[str, tuple[str, str]] | None = None,
     ) -> str:
         labels: dict[str, tuple[str, str]] = {config.namespace_label: ("=", config.namespace)}
-        labels.update({key: ("=", value) for key, value in config.service_selector_labels.items()})
         if extra:
             labels.update(extra)
         return ",".join(
             f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())
         )
+
+    def _pod_ownership_selector(self, config: PrometheusMetricsConfig) -> str:
+        labels: dict[str, tuple[str, str]] = {config.namespace_label: ("=", config.namespace)}
+        labels.update(
+            {
+                _kube_pod_label_metric_name(key): ("=", value)
+                for key, value in config.service_selector_labels.items()
+            }
+        )
+        return ",".join(
+            f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())
+        )
+
+    def _owned_pod_sum(self, config: PrometheusMetricsConfig, expression: str) -> str:
+        return self._owned_pod_sum_by(config, None, expression)
+
+    def _owned_pod_sum_by(self, config: PrometheusMetricsConfig, group_label: str | None, expression: str) -> str:
+        ownership = f"kube_pod_labels{{{self._pod_ownership_selector(config)}}}"
+        join = f"{expression} * on({config.namespace_label}, {config.pod_label}) group_left() {ownership}"
+        if group_label is not None:
+            return f"sum by ({group_label}) ({join})"
+        return f"sum({join})"
 
     def _normalize_response(self, *, group: StudioMetricGroup, payload: Mapping[str, Any]) -> list[StudioMetricSeries]:
         if payload.get("status") != "success":

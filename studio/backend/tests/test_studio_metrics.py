@@ -26,13 +26,14 @@ from test_studio_logs import FakeRedis, TrackingAsyncClient
 def make_metrics_config(
     *,
     base_url: str = "https://prometheus.example.test",
+    service_selector_labels: dict[str, str] | None = None,
     runtime_service_label_value: str | None = None,
 ) -> PrometheusMetricsConfig:
     return PrometheusMetricsConfig(
         provider="prometheus",
         base_url=base_url,
         namespace="prod",
-        service_selector_labels={"app": "payments-api"},
+        service_selector_labels=service_selector_labels or {"app": "payments-api"},
         runtime_service_label_value=runtime_service_label_value,
     )
 
@@ -143,7 +144,93 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
 
     asyncio.run(scenario())
     assert observed_queries == [
-        'rate(container_cpu_usage_seconds_total{app="payments-api",container!="",namespace="prod",pod=~".+"}[5m])'
+        'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
+        ' * on(namespace, pod) group_left() kube_pod_labels{label_app="payments-api",namespace="prod"})'
+    ]
+
+
+def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> None:
+    observed_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    platform_groups = [
+        "cpu_usage",
+        "memory_usage",
+        "cpu_requests",
+        "cpu_limits",
+        "memory_requests",
+        "memory_limits",
+        "restarts",
+        "oom_killed",
+        "pod_phase",
+        "readiness",
+        "network_receive",
+        "network_transmit",
+    ]
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=make_metrics_config()),
+            config=make_metrics_config(),
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=platform_groups,
+            ),
+        )
+
+    asyncio.run(scenario())
+    assert len(observed_queries) == len(platform_groups)
+    assert all(
+        ' * on(namespace, pod) group_left() kube_pod_labels{label_app="payments-api",namespace="prod"}'
+        in query
+        for query in observed_queries
+    )
+    assert observed_queries[8].startswith("sum by (phase) (")
+    assert observed_queries[9].startswith("sum(kube_pod_container_status_ready{")
+    assert 'condition="true"' in observed_queries[9]
+
+
+def test_prometheus_provider_translates_service_selectors_to_kube_pod_labels() -> None:
+    observed_queries: list[str] = []
+    config = make_metrics_config(
+        service_selector_labels={
+            "app.kubernetes.io/name": "payments",
+            "service": "payments-api",
+            "team/service": "payments-platform",
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=config),
+            config=config,
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=["cpu_usage"],
+            ),
+        )
+
+    asyncio.run(scenario())
+    assert observed_queries == [
+        'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
+        ' * on(namespace, pod) group_left() kube_pod_labels{'
+        'label_app_kubernetes_io_name="payments",label_service="payments-api",'
+        'label_team_service="payments-platform",namespace="prod"})'
     ]
 
 

@@ -587,7 +587,9 @@ Studio can also query Prometheus and Tempo when a registered service includes
 Prometheus integration covers two metric classes:
 
 - Kubernetes pod/container metrics from cAdvisor and kube-state-metrics, shown
-  at service scope and over a task lifecycle window
+  at service scope and over a task lifecycle window. Studio resolves
+  `service_selector_labels` through `kube_pod_labels` and joins platform
+  metrics by namespace and pod.
 - Relayna runtime metrics from API and worker `/metrics` endpoints, shown as
   aggregate throughput, failure, retry, DLQ, queue, status, and observation
   charts
