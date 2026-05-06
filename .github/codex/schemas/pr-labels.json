@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["labels"],
+  "properties": {
+    "labels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "documentation",
+          "project",
+          "bug",
+          "enhancement",
+          "dependencies",
+          "area:sdk",
+          "area:studio-backend",
+          "area:studio-frontend",
+          "area:ci",
+          "feature:rabbitmq",
+          "feature:redis-status",
+          "feature:workflow",
+          "feature:dlq",
+          "feature:observability",
+          "feature:mcp"
+        ]
+      }
+    }
+  }
+}
