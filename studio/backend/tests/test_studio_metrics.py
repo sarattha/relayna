@@ -15,6 +15,7 @@ from relayna_studio import (
     ServiceRecord,
     ServiceRegistryService,
     ServiceStatus,
+    StudioMetricGroup,
     StudioMetricsQuery,
     UpdateServiceRequest,
     create_studio_app,
@@ -26,13 +27,14 @@ from test_studio_logs import FakeRedis, TrackingAsyncClient
 def make_metrics_config(
     *,
     base_url: str = "https://prometheus.example.test",
+    service_selector_labels: dict[str, str] | None = None,
     runtime_service_label_value: str | None = None,
 ) -> PrometheusMetricsConfig:
     return PrometheusMetricsConfig(
         provider="prometheus",
         base_url=base_url,
         namespace="prod",
-        service_selector_labels={"app": "payments-api"},
+        service_selector_labels=service_selector_labels or {"app": "payments-api"},
         runtime_service_label_value=runtime_service_label_value,
     )
 
@@ -134,7 +136,7 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
             query=StudioMetricsQuery(
                 from_time="2024-04-10T21:00:00Z",
                 to_time="2024-04-10T21:01:00Z",
-                groups=["cpu_usage"],
+                groups=[StudioMetricGroup.CPU_USAGE],
             ),
         )
         assert response.series[0].metric == "cpu_usage"
@@ -142,9 +144,105 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
         assert response.series[0].points[-1].value == 0.25
 
     asyncio.run(scenario())
-    assert observed_queries == [
-        'rate(container_cpu_usage_seconds_total{app="payments-api",container!="",namespace="prod",pod=~".+"}[5m])'
+    assert observed_queries[0].startswith(
+        'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
+        " * on(namespace, pod) group_left() "
+    )
+    assert 'kube_pod_labels{namespace="prod"}' in observed_queries[0]
+    assert 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in observed_queries[0]
+    assert 'kube_pod_labels{label_app_conflict1="payments-api",namespace="prod"}' in observed_queries[0]
+
+
+def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> None:
+    observed_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    platform_groups = [
+        StudioMetricGroup.CPU_USAGE,
+        StudioMetricGroup.MEMORY_USAGE,
+        StudioMetricGroup.CPU_REQUESTS,
+        StudioMetricGroup.CPU_LIMITS,
+        StudioMetricGroup.MEMORY_REQUESTS,
+        StudioMetricGroup.MEMORY_LIMITS,
+        StudioMetricGroup.RESTARTS,
+        StudioMetricGroup.OOM_KILLED,
+        StudioMetricGroup.POD_PHASE,
+        StudioMetricGroup.READINESS,
+        StudioMetricGroup.NETWORK_RECEIVE,
+        StudioMetricGroup.NETWORK_TRANSMIT,
     ]
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=make_metrics_config()),
+            config=make_metrics_config(),
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=platform_groups,
+            ),
+        )
+
+    asyncio.run(scenario())
+    assert len(observed_queries) == len(platform_groups)
+    assert all(
+        ' * on(namespace, pod) group_left() (kube_pod_labels{namespace="prod"}' in query
+        and 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in query
+        for query in observed_queries
+    )
+    assert observed_queries[7].startswith("sum(max_over_time(")
+    assert "increase(kube_pod_container_status_last_terminated_reason" not in observed_queries[7]
+    assert observed_queries[8].startswith("sum by (phase) (")
+    assert observed_queries[9].startswith("sum(kube_pod_container_status_ready{")
+    assert 'condition="true"' in observed_queries[9]
+
+
+def test_prometheus_provider_translates_service_selectors_to_kube_pod_labels() -> None:
+    observed_queries: list[str] = []
+    config = make_metrics_config(
+        service_selector_labels={
+            "app.kubernetes.io/name": "payments",
+            "service": "payments-api",
+            "team/service": "payments-platform",
+        }
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=config),
+            config=config,
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=[StudioMetricGroup.CPU_USAGE],
+            ),
+        )
+
+    asyncio.run(scenario())
+    query = observed_queries[0]
+    assert query.startswith(
+        'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
+        " * on(namespace, pod) group_left() "
+    )
+    assert 'kube_pod_labels{label_app_kubernetes_io_name="payments",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_app_kubernetes_io_name_conflict1="payments",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_service="payments-api",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_service_conflict1="payments-api",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_team_service="payments-platform",namespace="prod"}' in query
+    assert 'kube_pod_labels{label_team_service_conflict9="payments-platform",namespace="prod"}' in query
 
 
 def test_prometheus_provider_builds_relayna_runtime_queries() -> None:
@@ -164,7 +262,7 @@ def test_prometheus_provider_builds_relayna_runtime_queries() -> None:
             query=StudioMetricsQuery(
                 from_time="2024-04-10T21:00:00Z",
                 to_time="2024-04-10T21:01:00Z",
-                groups=["tasks_started_rate", "task_duration_p95"],
+                groups=[StudioMetricGroup.TASKS_STARTED_RATE, StudioMetricGroup.TASK_DURATION_P95],
             ),
         )
 

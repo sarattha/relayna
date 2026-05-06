@@ -343,8 +343,11 @@ For AKS, a registered service should usually carry both `log_config` and
 Field-by-field guidance:
 
 - `service_selector_labels`
-  - low-cardinality Prometheus labels that select Kubernetes pod/container
-    series for this logical service
+  - low-cardinality Kubernetes pod labels that identify pods owned by this
+    logical service
+  - Studio translates these to `kube_pod_labels` matchers such as
+    `label_service="<logical-service-name>"` and joins platform metrics by
+    namespace and pod
   - for AKS, this is usually `{ "service": "<logical-service-name>" }`
 - `runtime_service_label_value`
   - optional value for Relayna runtime metrics where the Prometheus label is
@@ -354,14 +357,16 @@ Field-by-field guidance:
   - set it to the logical service name when you construct
     `RelaynaMetrics(service="<logical-service-name>")`
 - `namespace`, `namespace_label`, `pod_label`, and `container_label`
-  - tell Studio how to select Kubernetes/cAdvisor/kube-state-metrics series
+  - tell Studio how to select and join Kubernetes/cAdvisor/kube-state-metrics
+    series
 - `task_window_padding_seconds`
   - expands automatic task metric windows before and after the task lifecycle
 
 Studio renders two different metric classes:
 
 - Kubernetes pod/container metrics from Prometheus. These are service-level or
-  task-window approximations and are never exact per-task CPU/memory.
+  task-window approximations scoped through `kube_pod_labels` pod ownership
+  joins, and are never exact per-task CPU/memory.
 - Relayna runtime metrics from Prometheus. These are aggregate counters,
   gauges, and histograms with low-cardinality labels only.
 

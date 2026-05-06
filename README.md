@@ -224,7 +224,7 @@ helpers, and retention behavior. It is not part of the documented public API.
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
-package version is `0.1.9`, the Studio frontend package version is `0.1.11`, and
+package version is `0.1.10`, the Studio frontend package version is `0.1.11`, and
 the backend requires `relayna>=1.4.10`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
@@ -587,7 +587,9 @@ Studio can also query Prometheus and Tempo when a registered service includes
 Prometheus integration covers two metric classes:
 
 - Kubernetes pod/container metrics from cAdvisor and kube-state-metrics, shown
-  at service scope and over a task lifecycle window
+  at service scope and over a task lifecycle window. Studio resolves
+  `service_selector_labels` through `kube_pod_labels` and joins platform
+  metrics by namespace and pod.
 - Relayna runtime metrics from API and worker `/metrics` endpoints, shown as
   aggregate throughput, failure, retry, DLQ, queue, status, and observation
   charts
