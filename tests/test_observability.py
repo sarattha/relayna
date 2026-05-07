@@ -8,10 +8,16 @@ from opentelemetry import context as otel_context
 from relayna.observability import (
     RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS,
     RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST,
+    AggregationHandlerFailed,
+    ConsumerDLQRecordPersistFailed,
     RedisObservationStore,
     SSEKeepaliveSent,
+    StatusHubLoopError,
+    StatusHubStoreWriteFailed,
+    TaskConsumerLoopError,
     TaskHandlerFailed,
     TaskMessageReceived,
+    WorkflowStageFailed,
     active_trace_fields,
     bind_studio_log_context,
     emit_observation,
@@ -185,6 +191,7 @@ def test_studio_log_contract_marks_failure_observations_as_error() -> None:
             correlation_id="corr-123",
             retry_attempt=1,
             exception_type="ValueError",
+            exception_message="bad amount",
         ),
         service="payments",
         app="payments-worker",
@@ -194,6 +201,74 @@ def test_studio_log_contract_marks_failure_observations_as_error() -> None:
     assert fields["event"] == "task_handler_failed"
     assert fields["level"] == "error"
     assert fields["attempt"] == 1
+    assert fields["exception_message"] == "bad amount"
+
+
+def test_failure_observation_events_include_exception_message() -> None:
+    events = [
+        TaskHandlerFailed("worker", "tasks", "task-123", exception_type="RuntimeError"),
+        AggregationHandlerFailed("worker", "aggregations", "task-123", None, exception_type="RuntimeError"),
+        WorkflowStageFailed(
+            "worker", "stage.queue", "stage-a", None, "task-123", None, None, None, "RuntimeError", False
+        ),
+        ConsumerDLQRecordPersistFailed("worker", "task-123", "tasks.dlq", "tasks", exception_type="RuntimeError"),
+        TaskConsumerLoopError("worker", "RuntimeError", 2.0),
+        StatusHubStoreWriteFailed("task-123", "RuntimeError"),
+        StatusHubLoopError("RuntimeError", 2.0),
+    ]
+
+    for event in events:
+        assert event.exception_message == ""
+
+
+def test_failure_observation_events_preserve_positional_constructor_order() -> None:
+    task_failed = TaskHandlerFailed("worker", "tasks", "task-123", "RuntimeError", True)
+    assert task_failed.exception_type == "RuntimeError"
+    assert task_failed.requeue is True
+    assert task_failed.exception_message == ""
+
+    aggregation_failed = AggregationHandlerFailed(
+        "worker", "aggregations", "task-123", "parent-123", "corr-123", 1, "RuntimeError", True
+    )
+    assert aggregation_failed.exception_type == "RuntimeError"
+    assert aggregation_failed.requeue is True
+    assert aggregation_failed.exception_message == ""
+
+    workflow_failed = WorkflowStageFailed(
+        "worker",
+        "stage.queue",
+        "stage-a",
+        None,
+        "task-123",
+        None,
+        None,
+        None,
+        "RuntimeError",
+        True,
+    )
+    assert workflow_failed.exception_type == "RuntimeError"
+    assert workflow_failed.requeue is True
+    assert workflow_failed.exception_message == ""
+
+    dlq_failed = ConsumerDLQRecordPersistFailed(
+        "worker", "task-123", "tasks.dlq", "tasks", 1, 2, "handler_error", "RuntimeError"
+    )
+    assert dlq_failed.exception_type == "RuntimeError"
+    assert dlq_failed.exception_message == ""
+
+    loop_error = TaskConsumerLoopError("worker", "RuntimeError", 2.0)
+    assert loop_error.exception_type == "RuntimeError"
+    assert loop_error.retry_delay_seconds == 2.0
+    assert loop_error.exception_message == ""
+
+    store_failed = StatusHubStoreWriteFailed("task-123", "RuntimeError")
+    assert store_failed.exception_type == "RuntimeError"
+    assert store_failed.exception_message == ""
+
+    status_loop_error = StatusHubLoopError("RuntimeError", 2.0)
+    assert status_loop_error.exception_type == "RuntimeError"
+    assert status_loop_error.retry_delay_seconds == 2.0
+    assert status_loop_error.exception_message == ""
 
 
 def test_studio_log_contract_keeps_canonical_fields_when_mapping_contains_reserved_keys() -> None:
@@ -269,6 +344,7 @@ async def test_make_structlog_observation_sink_emits_structlog_style_event() -> 
             correlation_id="corr-123",
             retry_attempt=1,
             exception_type="ValueError",
+            exception_message="bad amount",
         )
     )
 
@@ -287,6 +363,7 @@ async def test_make_structlog_observation_sink_emits_structlog_style_event() -> 
     assert call["correlation_id"] == "corr-123"
     assert call["attempt"] == 1
     assert call["exception_type"] == "ValueError"
+    assert call["exception_message"] == "bad amount"
     assert call["requeue"] is False
     assert call["component"] == "consumer"
     assert str(call["timestamp"]).endswith("Z")

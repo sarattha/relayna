@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.11 - 2026-05-07
+
+### Added
+
+- Added `exception_message` to failure observation events that already report `exception_type`, preserving the original error text for structured logs, observation sinks, and execution graph diagnostics.
+- Added regression coverage for exception message emission across task, aggregation, workflow, DLQ persistence, and status hub failure paths.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.11`.
+- Updated release-install documentation to reference `relayna 1.4.11`.
+
+### Fixed
+
+- Preserved positional constructor compatibility for exported failure observation dataclasses while adding `exception_message`.
+
 ## 1.4.10 - 2026-05-05
 
 ### Added

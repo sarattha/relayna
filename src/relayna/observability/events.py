@@ -144,6 +144,7 @@ class TaskHandlerFailed:
     retry_attempt: int = 0
     task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["consumer"] = field(init=False, default="consumer")
 
 
@@ -180,6 +181,7 @@ class TaskConsumerLoopError:
     exception_type: str
     retry_delay_seconds: float
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["consumer"] = field(init=False, default="consumer")
 
 
@@ -249,6 +251,7 @@ class WorkflowStageFailed:
     exception_type: str
     requeue: bool
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["workflow"] = field(init=False, default="workflow")
 
 
@@ -293,6 +296,7 @@ class ConsumerDLQRecordPersistFailed:
     reason: str = ""
     exception_type: str = ""
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["consumer"] = field(init=False, default="consumer")
 
 
@@ -333,6 +337,7 @@ class AggregationHandlerFailed:
     exception_type: str = ""
     requeue: bool = False
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["aggregation"] = field(init=False, default="aggregation")
 
 
@@ -394,6 +399,7 @@ class StatusHubStoreWriteFailed:
     task_id: str
     exception_type: str
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["status_hub"] = field(init=False, default="status_hub")
 
 
@@ -402,6 +408,7 @@ class StatusHubLoopError:
     exception_type: str
     retry_delay_seconds: float
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["status_hub"] = field(init=False, default="status_hub")
 
 

@@ -23,6 +23,7 @@ from relayna.contracts import ActionSchema, PayloadSchema, StatusEventEnvelope, 
 from relayna.dlq import DLQRecord
 from relayna.metrics import RelaynaMetrics
 from relayna.observability import (
+    AggregationHandlerFailed,
     ConsumerDeadLetterPublished,
     ConsumerDLQRecordPersistFailed,
     ConsumerRetryScheduled,
@@ -37,6 +38,7 @@ from relayna.observability import (
     WorkflowMessagePublished,
     WorkflowMessageReceived,
     WorkflowStageAcked,
+    WorkflowStageFailed,
     WorkflowStageStarted,
 )
 from relayna.rabbitmq import RetryInfrastructure
@@ -1347,7 +1349,8 @@ async def test_task_consumer_emits_rejected_and_failed_observations() -> None:
         observation_sink=failing_sink,
     )
     await run_consumer_until_message_done(failed_consumer, failed)
-    assert any(isinstance(event, TaskHandlerFailed) for event in failed_observed)
+    handler_failed = next(event for event in failed_observed if isinstance(event, TaskHandlerFailed))
+    assert handler_failed.exception_message == "boom"
     rejected = [event for event in failed_observed if isinstance(event, TaskMessageRejected)]
     assert rejected[-1].reason == "handler_error"
 
@@ -1378,6 +1381,7 @@ async def test_task_consumer_emits_loop_error_observation(monkeypatch: pytest.Mo
     loop_errors = [event for event in observed if isinstance(event, TaskConsumerLoopError)]
     assert loop_errors
     assert loop_errors[0].retry_delay_seconds == 0.25
+    assert loop_errors[0].exception_message == "temporary failure"
 
 
 @pytest.mark.asyncio
@@ -1580,6 +1584,7 @@ async def test_task_consumer_emits_observation_when_dlq_index_write_fails() -> N
     assert persist_failed.max_retries == 3
     assert persist_failed.reason == "handler_error"
     assert persist_failed.exception_type == "RuntimeError"
+    assert persist_failed.exception_message == "dlq store unavailable"
 
 
 @pytest.mark.asyncio
@@ -2116,6 +2121,10 @@ async def test_aggregation_consumer_retries_failed_messages_and_preserves_parent
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
+    observations: list[object] = []
+
+    async def sink(event: object) -> None:
+        observations.append(event)
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise RuntimeError("agg failed")
@@ -2126,6 +2135,7 @@ async def test_aggregation_consumer_retries_failed_messages_and_preserves_parent
         shards=[0],
         retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
         retry_statuses=RetryStatusConfig(enabled=True),
+        observation_sink=sink,
     )
 
     await run_consumer_until_message_done(consumer, message)
@@ -2135,6 +2145,8 @@ async def test_aggregation_consumer_retries_failed_messages_and_preserves_parent
     assert rabbit.published_statuses[0]["status"] == "retrying"
     assert rabbit.published_statuses[0]["meta"]["parent_task_id"] == "parent-1"
     assert rabbit.published_status_calls[0][0] == "status"
+    handler_failed = next(event for event in observations if isinstance(event, AggregationHandlerFailed))
+    assert handler_failed.exception_message == "agg failed"
 
 
 @pytest.mark.asyncio
@@ -2270,6 +2282,10 @@ async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure()
     queue = FakeQueue([message])
     channel = FakeChannel(queue)
     rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[channel])
+    observations: list[object] = []
+
+    async def sink(event: object) -> None:
+        observations.append(event)
 
     async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
         raise RuntimeError("workflow failed")
@@ -2280,6 +2296,7 @@ async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure()
         stage="docsearch_planner",
         retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
         retry_statuses=RetryStatusConfig(enabled=True),
+        observation_sink=sink,
     )
 
     await run_consumer_until_message_done(consumer, message)
@@ -2287,6 +2304,8 @@ async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure()
     assert message.acked is True
     assert rabbit.raw_queue_publishes[0]["queue_name"] == "cq.docsearch_planner.in_queue.retry"
     assert rabbit.published_statuses[0]["status"] == "retrying"
+    stage_failed = next(event for event in observations if isinstance(event, WorkflowStageFailed))
+    assert stage_failed.exception_message == "workflow failed"
 
 
 @pytest.mark.asyncio

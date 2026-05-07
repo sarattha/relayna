@@ -159,6 +159,7 @@ class WorkflowConsumer:
                         origin_stage=None,
                         correlation_id=None,
                         exception_type=type(exc).__name__,
+                        exception_message=str(exc),
                         requeue=False,
                     ),
                 )
@@ -381,6 +382,7 @@ class WorkflowConsumer:
                     origin_stage=workflow_message.origin_stage,
                     correlation_id=context.correlation_id,
                     exception_type=type(exc).__name__,
+                    exception_message=str(exc),
                     requeue=False,
                 ),
             )
@@ -432,6 +434,7 @@ class WorkflowConsumer:
                     origin_stage=workflow_message.origin_stage,
                     correlation_id=context.correlation_id,
                     exception_type=type(exc).__name__,
+                    exception_message=str(exc),
                     requeue=False,
                 ),
             )
