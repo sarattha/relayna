@@ -1,6 +1,6 @@
 [project]
 name = "relayna"
-version = "1.4.10"
+version = "1.4.11"
 description = "Shared RabbitMQ/Redis infrastructure for Relayna."
 readme = "README.md"
 requires-python = ">=3.13"

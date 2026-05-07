@@ -30,13 +30,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.10/relayna-1.4.10-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.11/relayna-1.4.11-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.10/relayna-1.4.10.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.11/relayna-1.4.11.tar.gz
 ```
 
 For local development in this repository:
@@ -225,7 +225,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
 package version is `0.1.10`, the Studio frontend package version is `0.1.11`, and
-the backend requires `relayna>=1.4.10`.
+the backend requires `relayna>=1.4.11`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
