@@ -716,6 +716,7 @@ async def _persist_dlq_record(
                 max_retries=max_retries,
                 reason=reason,
                 exception_type=type(exc).__name__,
+                exception_message=str(exc),
             ),
         )
         return

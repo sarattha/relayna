@@ -156,6 +156,7 @@ class TaskConsumer:
                     TaskConsumerLoopError(
                         consumer_name=self._consumer_name,
                         exception_type=type(exc).__name__,
+                        exception_message=str(exc),
                         retry_delay_seconds=self._idle_retry_seconds,
                     ),
                 )
@@ -471,6 +472,7 @@ class TaskConsumer:
                     retry_attempt=context.retry_attempt,
                     task_type=task.task_type,
                     exception_type=type(exc).__name__,
+                    exception_message=str(exc),
                     requeue=self._retry_policy is None and self._failure_action is FailureAction.REQUEUE,
                 ),
             )
@@ -941,6 +943,7 @@ class AggregationConsumer:
                                     correlation_id=context.correlation_id,
                                     retry_attempt=current_retry_attempt,
                                     exception_type=type(exc).__name__,
+                                    exception_message=str(exc),
                                 ),
                             )
                             if self._retry_policy is None:

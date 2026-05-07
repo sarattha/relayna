@@ -118,6 +118,7 @@ class StatusHub:
                                 StatusHubStoreWriteFailed(
                                     task_id=task_id,
                                     exception_type=type(exc).__name__,
+                                    exception_message=str(exc),
                                 ),
                             )
                             continue
@@ -129,7 +130,11 @@ class StatusHub:
                     return
                 await emit_observation(
                     self._observation_sink,
-                    StatusHubLoopError(exception_type=type(exc).__name__, retry_delay_seconds=2.0),
+                    StatusHubLoopError(
+                        exception_type=type(exc).__name__,
+                        exception_message=str(exc),
+                        retry_delay_seconds=2.0,
+                    ),
                 )
                 await asyncio.sleep(2)
             finally:

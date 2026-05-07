@@ -227,7 +227,8 @@ async def test_status_hub_emits_store_write_failed_observation() -> None:
 
     await hub.run_forever()
 
-    assert any(isinstance(event, StatusHubStoreWriteFailed) for event in observed)
+    write_failed = next(event for event in observed if isinstance(event, StatusHubStoreWriteFailed))
+    assert write_failed.exception_message == "redis down"
 
 
 @pytest.mark.asyncio
@@ -261,6 +262,7 @@ async def test_status_hub_emits_loop_error_observation(monkeypatch: pytest.Monke
     loop_errors = [event for event in observed if isinstance(event, StatusHubLoopError)]
     assert loop_errors
     assert loop_errors[0].retry_delay_seconds == 2.0
+    assert loop_errors[0].exception_message == "temporary failure"
 
 
 @pytest.mark.asyncio
