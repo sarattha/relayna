@@ -139,12 +139,12 @@ class TaskHandlerFailed:
     queue_name: str | None
     task_id: str
     exception_type: str = ""
-    exception_message: str = ""
     requeue: bool = False
     correlation_id: str | None = None
     retry_attempt: int = 0
     task_type: str | None = None
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["consumer"] = field(init=False, default="consumer")
 
 
@@ -179,9 +179,9 @@ class TaskResourceSampled:
 class TaskConsumerLoopError:
     consumer_name: str
     exception_type: str
-    exception_message: str = ""
-    retry_delay_seconds: float = 0.0
+    retry_delay_seconds: float
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["consumer"] = field(init=False, default="consumer")
 
 
@@ -249,9 +249,9 @@ class WorkflowStageFailed:
     origin_stage: str | None
     correlation_id: str | None
     exception_type: str
-    exception_message: str = ""
-    requeue: bool = False
+    requeue: bool
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["workflow"] = field(init=False, default="workflow")
 
 
@@ -295,8 +295,8 @@ class ConsumerDLQRecordPersistFailed:
     max_retries: int = 0
     reason: str = ""
     exception_type: str = ""
-    exception_message: str = ""
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["consumer"] = field(init=False, default="consumer")
 
 
@@ -335,9 +335,9 @@ class AggregationHandlerFailed:
     correlation_id: str | None = None
     retry_attempt: int = 0
     exception_type: str = ""
-    exception_message: str = ""
     requeue: bool = False
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["aggregation"] = field(init=False, default="aggregation")
 
 
@@ -398,17 +398,17 @@ class StatusHubMalformedMessage:
 class StatusHubStoreWriteFailed:
     task_id: str
     exception_type: str
-    exception_message: str = ""
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["status_hub"] = field(init=False, default="status_hub")
 
 
 @dataclass(slots=True)
 class StatusHubLoopError:
     exception_type: str
-    exception_message: str = ""
-    retry_delay_seconds: float = 0.0
+    retry_delay_seconds: float
     timestamp: datetime = field(default_factory=_utcnow)
+    exception_message: str = ""
     component: Literal["status_hub"] = field(init=False, default="status_hub")
 
 
