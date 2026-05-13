@@ -82,6 +82,12 @@ The production image is built from the repo root:
 docker build -f apps/studio/Dockerfile -t relayna-studio-frontend .
 ```
 
+Tag releases publish the frontend image to GHCR as:
+
+```text
+ghcr.io/sarattha/relayna-studio-frontend
+```
+
 The image:
 
 - builds the SPA with Node
@@ -125,6 +131,7 @@ The frontend API layer in `apps/studio/src/api.ts` calls only backend routes.
 Primary requests include:
 
 - `/studio/services`
+- `/studio/gateway/services`
 - `/studio/services/search`
 - `/studio/tasks/search`
 - `/studio/tasks/{service_id}/{task_id}`
@@ -181,6 +188,30 @@ The registered-services screen reads this data through the shared
 seconds so backend health-refresh results appear without a manual browser
 reload. The explicit `Reload List` action remains available for operator-driven
 refreshes.
+
+The same screen exposes a Gateway Import panel. Its `Open Export` link points
+to `/studio/gateway/services`, a backend catalog that Relayna Gateway Admin can
+use to preview and import Studio-registered services. The export maps Studio
+`service_id` to `studio_service_id`, provides a lowercase Gateway-safe `name`
+and `default_route_pattern`, appends stable fingerprints when normalized names
+would collide, and omits Studio log, metric, trace, and credential
+configuration.
+
+In a deployment where Gateway runs outside the Studio namespace, configure
+Gateway with the Studio backend origin, for example:
+
+```bash
+RELAYNA_STUDIO_BASE_URL=http://relayna-studio-backend.studio.svc.cluster.local:8000
+RELAYNA_STUDIO_TOKEN=optional-admin-or-service-token
+```
+
+The Admin portal should fetch
+`$RELAYNA_STUDIO_BASE_URL/studio/gateway/services`, show the returned
+`display_name`, `studio_service_id`, `environment`, `status`, `base_url`, tags,
+and `default_route_pattern`, then let the operator choose which records to
+import. Studio provides metadata and route suggestions only; Gateway remains
+the owner of traffic credentials, enabled state, policy, budgets, limits, and
+fail-closed runtime enforcement.
 
 For Loki-backed log views, the service editor now exposes AKS-friendly inputs in
 addition to the raw generic contract:

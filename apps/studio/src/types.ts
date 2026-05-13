@@ -105,6 +105,24 @@ export type ServiceListResponse = {
   services: ServiceRecord[];
 };
 
+export type GatewayServiceExport = {
+  studio_service_id: string;
+  name: string;
+  display_name: string;
+  base_url: string;
+  environment: string;
+  tags: string[];
+  auth_mode: string;
+  status: string;
+  capabilities: Record<string, unknown>;
+  default_route_pattern: string;
+};
+
+export type GatewayServiceExportResponse = {
+  count: number;
+  services: GatewayServiceExport[];
+};
+
 export type ServiceDraft = {
   service_id: string;
   name: string;

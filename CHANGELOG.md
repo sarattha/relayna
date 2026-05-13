@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## Studio Backend 0.1.11 / Studio Frontend 0.1.12 - 2026-05-13
+
+### Added
+
+- Added a dedicated Studio Gateway import catalog at `/studio/gateway/services`, returning Gateway-safe service metadata, deterministic route hints, health-aware status, and capability hints without Studio log, metrics, trace, or credential configuration.
+- Added a Studio frontend Gateway Import panel that links operators directly to the export catalog.
+- Added release automation to publish `relayna-studio-backend` and `relayna-studio-frontend` images to GHCR on `v*` tags.
+- Added regression coverage for Gateway export response shape, omitted internal configuration fields, and stable unique Gateway service names when Studio service IDs normalize to the same slug.
+
+### Changed
+
+- Bumped the Studio backend package version to `0.1.11` and the Studio frontend package version to `0.1.12`.
+- Expanded Studio backend and frontend documentation for Gateway import configuration, response fields, route hints, and operator ownership boundaries.
+
+### Fixed
+
+- Gateway export names and `default_route_pattern` values now remain unique across a catalog response by appending a stable short fingerprint when normalized Studio service IDs collide.
+
 ## 1.4.11 - 2026-05-07
 
 ### Added

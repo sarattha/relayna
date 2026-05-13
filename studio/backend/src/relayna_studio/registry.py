@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
+from collections import Counter
 from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime
 from enum import StrEnum
+from hashlib import sha256
 from ipaddress import ip_address, ip_network
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 from urllib.parse import SplitResult, urlsplit, urlunsplit
@@ -309,6 +312,85 @@ class UpdateServiceRequest(BaseModel):
 class ServiceListResponse(BaseModel):
     count: int
     services: list[ServiceRecord] = Field(default_factory=list)
+
+
+class GatewayServiceExport(BaseModel):
+    studio_service_id: str
+    name: str
+    display_name: str
+    base_url: str
+    environment: str
+    tags: list[str] = Field(default_factory=list)
+    auth_mode: str
+    status: str
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    default_route_pattern: str
+
+
+class GatewayServiceExportResponse(BaseModel):
+    count: int
+    services: list[GatewayServiceExport] = Field(default_factory=list)
+
+
+def _gateway_safe_service_name(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "-", value.strip().lower())
+    normalized = normalized.strip("-")
+    return normalized
+
+
+def _gateway_service_name_fingerprint(value: str) -> str:
+    return sha256(value.encode("utf-8")).hexdigest()[:8]
+
+
+def _gateway_unique_service_names(records: list[ServiceRecord]) -> dict[str, str]:
+    base_names = {record.service_id: _gateway_safe_service_name(record.service_id) or "service" for record in records}
+    name_counts = Counter(base_names.values())
+    return {
+        service_id: (
+            base_name
+            if name_counts[base_name] == 1 and _gateway_safe_service_name(service_id)
+            else f"{base_name}-{_gateway_service_name_fingerprint(service_id)}"
+        )
+        for service_id, base_name in base_names.items()
+    }
+
+
+def _gateway_service_status(record: ServiceRecord) -> str:
+    health = record.health
+    if isinstance(health, dict):
+        overall_status = health.get("overall_status")
+        if isinstance(overall_status, str) and overall_status.strip():
+            return overall_status.strip()
+    return str(record.status)
+
+
+def gateway_service_export_from_record(
+    record: ServiceRecord, *, gateway_name: str | None = None
+) -> GatewayServiceExport:
+    gateway_name = (
+        gateway_name
+        or _gateway_safe_service_name(record.service_id)
+        or (f"service-{_gateway_service_name_fingerprint(record.service_id)}")
+    )
+    return GatewayServiceExport(
+        studio_service_id=record.service_id,
+        name=gateway_name,
+        display_name=record.name,
+        base_url=record.base_url,
+        environment=record.environment,
+        tags=list(record.tags),
+        auth_mode=record.auth_mode,
+        status=_gateway_service_status(record),
+        capabilities=dict(record.capabilities or {}),
+        default_route_pattern=f"/services/{gateway_name}/*",
+    )
+
+
+def gateway_service_exports_from_records(records: list[ServiceRecord]) -> list[GatewayServiceExport]:
+    unique_names = _gateway_unique_service_names(records)
+    return [
+        gateway_service_export_from_record(record, gateway_name=unique_names[record.service_id]) for record in records
+    ]
 
 
 def normalize_base_url(url: str) -> str:
@@ -745,6 +827,14 @@ def create_service_registry_router(
             services = await health_service.build_service_records(services)
         return ServiceListResponse(count=len(services), services=services)
 
+    @router.get("/studio/gateway/services", response_model=GatewayServiceExportResponse)
+    async def list_gateway_services() -> GatewayServiceExportResponse:
+        services = await service_registry.list_services()
+        if health_service is not None:
+            services = await health_service.build_service_records(services)
+        exports = gateway_service_exports_from_records(services)
+        return GatewayServiceExportResponse(count=len(exports), services=exports)
+
     @router.get(f"{prefix}" + "/{service_id}", response_model=ServiceRecord)
     async def get_service(service_id: str) -> ServiceRecord:
         try:
@@ -799,6 +889,8 @@ __all__ = [
     "CapabilityRefreshError",
     "CreateServiceRequest",
     "DuplicateServiceError",
+    "GatewayServiceExport",
+    "GatewayServiceExportResponse",
     "HttpCapabilityFetcher",
     "LokiLogConfig",
     "OutboundUrlPolicyError",
@@ -814,6 +906,7 @@ __all__ = [
     "TempoTraceConfig",
     "UpdateServiceRequest",
     "create_service_registry_router",
+    "gateway_service_export_from_record",
     "normalize_base_url",
     "service_record_from_mapping",
 ]

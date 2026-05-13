@@ -68,6 +68,8 @@ from .metrics import (
 from .registry import (
     CapabilityRefreshError,
     CreateServiceRequest,
+    GatewayServiceExport,
+    GatewayServiceExportResponse,
     HttpCapabilityFetcher,
     LokiLogConfig,
     OutboundUrlPolicyError,
@@ -81,6 +83,7 @@ from .registry import (
     TempoTraceConfig,
     UpdateServiceRequest,
     create_service_registry_router,
+    gateway_service_export_from_record,
     normalize_base_url,
 )
 from .run_view import build_run_view
@@ -111,6 +114,8 @@ __all__ = [
     "CapabilityRefreshError",
     "CreateServiceRequest",
     "FederatedError",
+    "GatewayServiceExport",
+    "GatewayServiceExportResponse",
     "HttpCapabilityFetcher",
     "CapabilityHealthState",
     "JoinMode",
@@ -191,6 +196,7 @@ __all__ = [
     "create_app",
     "create_federation_router",
     "create_service_registry_router",
+    "gateway_service_export_from_record",
     "create_studio_health_router",
     "create_studio_events_router",
     "create_studio_logs_router",
