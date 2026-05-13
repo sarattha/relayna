@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 - Bumped the Studio backend package version to `0.1.11` and the Studio frontend package version to `0.1.12`.
 - Expanded Studio backend and frontend documentation for Gateway import configuration, response fields, route hints, and operator ownership boundaries.
+- CI now publishes Studio backend and frontend GHCR images on `main` pushes when their package versions are bumped, using package-version, major.minor, and `latest` tags.
 
 ### Fixed
 
