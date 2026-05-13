@@ -2,6 +2,7 @@ import type {
   BrokerDlqMessageListResponse,
   DlqMessageListResponse,
   DlqQueryState,
+  GatewayServiceExportResponse,
   ServiceDraft,
   ServiceListResponse,
   ServiceRecord,
@@ -212,6 +213,10 @@ export function buildServicePayload(draft: ServiceDraft) {
 
 export async function listServices() {
   return requestJson<ServiceListResponse>("/studio/services");
+}
+
+export async function listGatewayServiceExports() {
+  return requestJson<GatewayServiceExportResponse>("/studio/gateway/services");
 }
 
 export async function createService(draft: ServiceDraft) {

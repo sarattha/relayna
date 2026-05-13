@@ -7,6 +7,10 @@ on:
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
   release:
@@ -34,6 +38,51 @@ jobs:
 
       - name: Validate built distributions
         run: uv run twine check dist/*
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Studio backend Docker metadata
+        id: studio-backend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push Studio backend Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: studio/backend/Dockerfile
+          push: true
+          tags: ${{ steps.studio-backend-meta.outputs.tags }}
+          labels: ${{ steps.studio-backend-meta.outputs.labels }}
+
+      - name: Extract Studio frontend Docker metadata
+        id: studio-frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push Studio frontend Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/studio/Dockerfile
+          push: true
+          tags: ${{ steps.studio-frontend-meta.outputs.tags }}
+          labels: ${{ steps.studio-frontend-meta.outputs.labels }}
 
       - name: Extract release notes from changelog
         env:

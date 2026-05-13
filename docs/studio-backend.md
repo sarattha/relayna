@@ -178,6 +178,12 @@ Build:
 docker build -f studio/backend/Dockerfile -t relayna-studio-backend .
 ```
 
+Tag releases publish the backend image to GHCR as:
+
+```text
+ghcr.io/sarattha/relayna-studio-backend
+```
+
 Run:
 
 ```bash
@@ -599,9 +605,50 @@ The main operator surfaces are:
   - `/studio/services/{service_id}/broker/dlq/messages`
 - federated execution view
   - `/studio/services/{service_id}/executions/{task_id}/graph`
+- Gateway import catalog
+  - `/studio/gateway/services`
 
 The frontend contract that consumes these routes is documented in
 [Studio Frontend](studio-frontend.md).
+
+### Gateway Import Catalog
+
+Relayna Gateway Admin can import Studio-registered services from:
+
+```bash
+curl -s http://localhost:8000/studio/gateway/services
+```
+
+The response is a stable, read-only catalog:
+
+```json
+{
+  "count": 1,
+  "services": [
+    {
+      "studio_service_id": "payments-api",
+      "name": "payments-api",
+      "display_name": "Payments API",
+      "base_url": "https://payments.example.test",
+      "environment": "prod",
+      "tags": ["core"],
+      "auth_mode": "internal_network",
+      "status": "healthy",
+      "capabilities": {},
+      "default_route_pattern": "/services/payments-api/*"
+    }
+  ]
+}
+```
+
+`studio_service_id` maps to the Studio registry `service_id`. `name` is a
+lowercase URL-safe Gateway service-name suggestion derived from `service_id`,
+and `default_route_pattern` is a deterministic route hint. Gateway remains
+responsible for virtual-key authorization, upstream credentials or secret
+references, enabled traffic state, timeout, max body bytes, fallback services,
+cost mode, budgets, and fail-closed routing. Studio does not export
+`log_config`, `metrics_config`, `trace_config`, or credential material through
+this endpoint.
 
 ## Verification
 
@@ -609,6 +656,7 @@ With the backend running on `localhost:8000`, verify the core surfaces:
 
 ```bash
 curl -s http://localhost:8000/studio/services
+curl -s http://localhost:8000/studio/gateway/services
 curl -s "http://localhost:8000/studio/services/search?limit=20"
 curl -s "http://localhost:8000/studio/tasks/search?task_id=task-123"
 ```

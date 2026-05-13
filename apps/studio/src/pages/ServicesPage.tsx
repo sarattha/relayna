@@ -180,6 +180,25 @@ export function ServicesPage() {
       </SectionCard>
 
       <SectionCard
+        title="Gateway Import"
+        subtitle="Gateway Admin can import these registered services from `/studio/gateway/services`."
+        className="studio-section-card--compact"
+        action={
+          <a href="/studio/gateway/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
+            <StudioIcon name="open" />
+            Open Export
+          </a>
+        }
+      >
+        <div className="studio-metrics-grid studio-metrics-grid--4 studio-metrics-grid--compact">
+          <MetricCard label="Exportable" value={String(servicesState.services.length)} className="studio-metric-card--compact" />
+          <MetricCard label="Route Prefix" value="/services/*" className="studio-metric-card--compact" />
+          <MetricCard label="Owner" value="Gateway" className="studio-metric-card--compact" />
+          <MetricCard label="Credentials" value="Excluded" className="studio-metric-card--compact" />
+        </div>
+      </SectionCard>
+
+      <SectionCard
         title="Service Search"
         subtitle="Find services by name, id, environment, registry state, runtime health, or tag."
         className="studio-section-card--compact"

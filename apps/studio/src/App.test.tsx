@@ -667,6 +667,8 @@ describe("App", () => {
     expect(await screen.findByText("Registered Services")).toBeInTheDocument();
     await waitFor(() => expect(window.location.pathname).toBe("/services"));
     expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
+    expect(screen.getByText("Gateway Import")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Export" })).toHaveAttribute("href", "/studio/gateway/services");
   });
 
   it("polls the registered services list silently and stops after unmount", async () => {

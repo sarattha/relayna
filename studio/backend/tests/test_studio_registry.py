@@ -408,6 +408,76 @@ def test_service_registry_router_supports_crud_duplicate_handling_and_live_refre
     assert recreate_response.status_code == 201
 
 
+def test_service_registry_router_exports_gateway_safe_service_catalog() -> None:
+    store = RedisServiceRegistryStore(FakeRedis())
+    registry_service = ServiceRegistryService(
+        store=store,
+        capability_fetcher=FakeCapabilityFetcher(make_capability_document(supported_routes=["status.latest"])),
+    )
+    app = FastAPI()
+    app.include_router(create_service_registry_router(service_registry=registry_service))
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/studio/services",
+        json={
+            "service_id": "Payments API++",
+            "name": "Payments API",
+            "base_url": "https://PAYMENTS.example.test/",
+            "environment": "prod",
+            "tags": ["core", "money", "core"],
+            "auth_mode": "internal_network",
+            "log_config": {
+                "provider": "loki",
+                "base_url": "https://loki.example.test",
+                "tenant_id": "tenant-a",
+                "service_selector_labels": {"service": "payments-api"},
+            },
+            "metrics_config": {
+                "provider": "prometheus",
+                "base_url": "https://prometheus.example.test",
+                "namespace": "payments",
+                "service_selector_labels": {"service": "payments-api"},
+            },
+            "trace_config": {
+                "provider": "tempo",
+                "base_url": "https://tempo.example.test",
+                "tenant_id": "tenant-a",
+                "query_path": "/api/traces/{trace_id}",
+            },
+        },
+    )
+    assert create_response.status_code == 201
+
+    refresh_response = client.post("/studio/services/Payments%20API++/refresh")
+    assert refresh_response.status_code == 200
+
+    response = client.get("/studio/gateway/services")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["services"] == [
+        {
+            "studio_service_id": "Payments API++",
+            "name": "payments-api",
+            "display_name": "Payments API",
+            "base_url": "https://payments.example.test",
+            "environment": "prod",
+            "tags": ["core", "money"],
+            "auth_mode": "internal_network",
+            "status": "healthy",
+            "capabilities": make_capability_document(supported_routes=["status.latest"]).model_dump(mode="json"),
+            "default_route_pattern": "/services/payments-api/*",
+        }
+    ]
+    exported_service = payload["services"][0]
+    assert "log_config" not in exported_service
+    assert "metrics_config" not in exported_service
+    assert "trace_config" not in exported_service
+    assert "last_seen_at" not in exported_service
+
+
 def test_http_capability_fetcher_rejects_untrusted_refresh_target_before_request() -> None:
     async def scenario() -> None:
         fake_client = FakeAsyncClient(httpx.Response(status_code=200, json={"relayna_version": "1.3.4"}))
