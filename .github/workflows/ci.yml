@@ -93,7 +93,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -136,16 +136,20 @@ jobs:
       - name: Detect Studio backend version bump
         id: studio-backend-version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PUSH_BASE_SHA: ${{ github.event.before }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import re
+          import os
           import subprocess
           from pathlib import Path
 
           path = "studio/backend/pyproject.toml"
+          push_base_sha = os.environ["PUSH_BASE_SHA"]
           current_text = Path(path).read_text()
           previous_text = subprocess.run(
-              ["git", "show", f"HEAD^:{path}"],
+              ["git", "show", f"{push_base_sha}:{path}"],
               check=True,
               capture_output=True,
               text=True,
@@ -197,7 +201,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -221,17 +225,21 @@ jobs:
       - name: Detect Studio frontend version bump
         id: studio-frontend-version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PUSH_BASE_SHA: ${{ github.event.before }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
+          import os
           import subprocess
           from pathlib import Path
 
           path = "apps/studio/package.json"
+          push_base_sha = os.environ["PUSH_BASE_SHA"]
           current = json.loads(Path(path).read_text())["version"]
           previous = json.loads(
               subprocess.run(
-                  ["git", "show", f"HEAD^:{path}"],
+                  ["git", "show", f"{push_base_sha}:{path}"],
                   check=True,
                   capture_output=True,
                   text=True,
