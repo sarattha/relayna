@@ -4,6 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
 jobs:
   sdk:
     name: sdk (py${{ matrix.python-version }})
@@ -85,6 +92,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -124,12 +133,75 @@ jobs:
       - name: Build Studio backend Docker image
         run: make -C studio/backend docker-build
 
+      - name: Detect Studio backend version bump
+        id: studio-backend-version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          import os
+          import subprocess
+          from pathlib import Path
+
+          path = "studio/backend/pyproject.toml"
+          push_base_sha = os.environ["PUSH_BASE_SHA"]
+          current_text = Path(path).read_text()
+          previous_text = subprocess.run(
+              ["git", "show", f"{push_base_sha}:{path}"],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout
+
+          version_pattern = re.compile(r'^version = "([^"]+)"$', re.MULTILINE)
+          current = version_pattern.search(current_text).group(1)
+          previous = version_pattern.search(previous_text).group(1)
+          major_minor = ".".join(current.split(".")[:2])
+
+          print(f"version={current}")
+          print(f"major_minor={major_minor}")
+          print(f"changed={str(current != previous).lower()}")
+          PY
+
+      - name: Log in to GitHub Container Registry
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Studio backend Docker metadata
+        id: studio-backend-meta
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend
+          tags: |
+            type=raw,value=${{ steps.studio-backend-version.outputs.version }}
+            type=raw,value=${{ steps.studio-backend-version.outputs.major_minor }}
+            type=raw,value=latest
+
+      - name: Push Studio backend Docker image
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: studio/backend/Dockerfile
+          push: true
+          tags: ${{ steps.studio-backend-meta.outputs.tags }}
+          labels: ${{ steps.studio-backend-meta.outputs.labels }}
+
   studio-frontend:
     name: studio-frontend
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -149,3 +221,62 @@ jobs:
 
       - name: Build Studio frontend Docker image
         run: make -C apps/studio docker-build
+
+      - name: Detect Studio frontend version bump
+        id: studio-frontend-version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          path = "apps/studio/package.json"
+          push_base_sha = os.environ["PUSH_BASE_SHA"]
+          current = json.loads(Path(path).read_text())["version"]
+          previous = json.loads(
+              subprocess.run(
+                  ["git", "show", f"{push_base_sha}:{path}"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout
+          )["version"]
+          major_minor = ".".join(current.split(".")[:2])
+
+          print(f"version={current}")
+          print(f"major_minor={major_minor}")
+          print(f"changed={str(current != previous).lower()}")
+          PY
+
+      - name: Log in to GitHub Container Registry
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Studio frontend Docker metadata
+        id: studio-frontend-meta
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend
+          tags: |
+            type=raw,value=${{ steps.studio-frontend-version.outputs.version }}
+            type=raw,value=${{ steps.studio-frontend-version.outputs.major_minor }}
+            type=raw,value=latest
+
+      - name: Push Studio frontend Docker image
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/studio/Dockerfile
+          push: true
+          tags: ${{ steps.studio-frontend-meta.outputs.tags }}
+          labels: ${{ steps.studio-frontend-meta.outputs.labels }}
