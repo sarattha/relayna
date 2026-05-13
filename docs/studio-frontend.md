@@ -197,6 +197,22 @@ and `default_route_pattern`, appends stable fingerprints when normalized names
 would collide, and omits Studio log, metric, trace, and credential
 configuration.
 
+In a deployment where Gateway runs outside the Studio namespace, configure
+Gateway with the Studio backend origin, for example:
+
+```bash
+RELAYNA_STUDIO_BASE_URL=http://relayna-studio-backend.studio.svc.cluster.local:8000
+RELAYNA_STUDIO_TOKEN=optional-admin-or-service-token
+```
+
+The Admin portal should fetch
+`$RELAYNA_STUDIO_BASE_URL/studio/gateway/services`, show the returned
+`display_name`, `studio_service_id`, `environment`, `status`, `base_url`, tags,
+and `default_route_pattern`, then let the operator choose which records to
+import. Studio provides metadata and route suggestions only; Gateway remains
+the owner of traffic credentials, enabled state, policy, budgets, limits, and
+fail-closed runtime enforcement.
+
 For Loki-backed log views, the service editor now exposes AKS-friendly inputs in
 addition to the raw generic contract:
 

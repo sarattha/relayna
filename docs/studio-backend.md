@@ -613,17 +613,38 @@ The frontend contract that consumes these routes is documented in
 
 ### Gateway Import Catalog
 
-Relayna Gateway Admin can import Studio-registered services from:
+Relayna Gateway Admin can import Studio-registered services from the Studio
+backend catalog endpoint:
 
 ```bash
 curl -s http://localhost:8000/studio/gateway/services
 ```
 
+Gateway should configure the Studio backend base URL and then fetch the catalog
+from that base URL. A Gateway deployment can expose settings like these:
+
+```bash
+export RELAYNA_STUDIO_BASE_URL=http://relayna-studio-backend.studio.svc.cluster.local:8000
+export RELAYNA_STUDIO_TOKEN=optional-admin-or-service-token
+```
+
+With that configuration, Gateway reads:
+
+```bash
+curl -s "$RELAYNA_STUDIO_BASE_URL/studio/gateway/services"
+```
+
+The current Studio endpoint does not require a token by itself. If an ingress,
+service mesh, or Gateway-side Studio client adds authentication, pass that token
+outside the catalog payload, for example as an `Authorization` header. Do not
+store Studio tokens in service records or forward them into imported upstream
+credential fields.
+
 The response is a stable, read-only catalog:
 
 ```json
 {
-  "count": 1,
+  "count": 2,
   "services": [
     {
       "studio_service_id": "payments-api",
@@ -631,26 +652,70 @@ The response is a stable, read-only catalog:
       "display_name": "Payments API",
       "base_url": "https://payments.example.test",
       "environment": "prod",
-      "tags": ["core"],
+      "tags": ["core", "payments"],
       "auth_mode": "internal_network",
       "status": "healthy",
-      "capabilities": {},
+      "capabilities": {
+        "supported_routes": ["status.latest", "history.list"],
+        "feature_flags": ["execution_graphs"]
+      },
       "default_route_pattern": "/services/payments-api/*"
+    },
+    {
+      "studio_service_id": "Payments API",
+      "name": "payments-api-185bfb25",
+      "display_name": "Payments API Legacy",
+      "base_url": "https://payments-legacy.example.test",
+      "environment": "prod",
+      "tags": ["legacy"],
+      "auth_mode": "internal_network",
+      "status": "degraded",
+      "capabilities": {},
+      "default_route_pattern": "/services/payments-api-185bfb25/*"
     }
   ]
 }
 ```
 
+Field mapping:
+
+| Export field | Meaning for Gateway import |
+| --- | --- |
+| `studio_service_id` | Stable Studio registry key. Gateway should persist this as `studio_service_id` and use it for idempotent re-import/sync. |
+| `name` | Gateway-safe service-name suggestion derived from `studio_service_id`. Values are lowercase, URL-safe, and unique within the export response. |
+| `display_name` | Operator-facing label from the Studio service `name`. |
+| `base_url` | Candidate upstream base URL. Gateway should treat it as an import preview/default, not as a credential or policy decision. |
+| `environment` | Studio environment label for filtering or preview grouping. |
+| `tags` | Studio registry tags for preview, filtering, or optional Gateway labels. |
+| `auth_mode` | Studio's registered auth mode. Gateway still owns upstream credentials and secret references. |
+| `status` | Health-aware status hint. Gateway should use this for preview/sync state only and continue to fail closed for incomplete services. |
+| `capabilities` | Optional Relayna capability document hints. Gateway may use these to suggest allowed methods or UI defaults, but Studio does not enforce Gateway traffic policy. |
+| `default_route_pattern` | Deterministic route-pattern suggestion based on the exported `name`. |
+
 `studio_service_id` maps to the Studio registry `service_id`. `name` is a
 lowercase URL-safe Gateway service-name suggestion derived from `service_id`.
 When two Studio IDs normalize to the same Gateway-safe name, Studio appends a
 stable short fingerprint so each `name` and `default_route_pattern` remains
-unique in the export response. `default_route_pattern` is a deterministic route
-hint. Gateway remains responsible for virtual-key authorization, upstream
-credentials or secret references, enabled traffic state, timeout, max body
-bytes, fallback services, cost mode, budgets, and fail-closed routing. Studio
-does not export `log_config`, `metrics_config`, `trace_config`, or credential
-material through this endpoint.
+unique in the export response.
+
+Gateway remains responsible for virtual-key authorization, upstream credentials
+or secret references, enabled traffic state, timeout, max body bytes, fallback
+services, cost mode, budgets, and fail-closed routing. Studio does not export
+`log_config`, `metrics_config`, `trace_config`, `health` internals,
+`last_seen_at`, or credential material through this endpoint.
+
+Recommended Gateway import flow:
+
+1. Read `$RELAYNA_STUDIO_BASE_URL/studio/gateway/services`.
+2. Show operators a picker with `display_name`, `studio_service_id`,
+   `environment`, `status`, `base_url`, `tags`, and `default_route_pattern`.
+3. Persist imported records with `source = studio` and the selected
+   `studio_service_id`.
+4. Preserve Gateway-owned fields on re-import, including credentials, enabled
+   state, route overrides, timeout, body limits, fallback services, cost mode,
+   project link, and budgets.
+5. Mark imported records incomplete until required Gateway-owned runtime fields
+   are configured.
 
 ## Verification
 
