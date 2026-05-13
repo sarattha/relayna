@@ -478,6 +478,44 @@ def test_service_registry_router_exports_gateway_safe_service_catalog() -> None:
     assert "last_seen_at" not in exported_service
 
 
+def test_service_registry_router_exports_unique_gateway_service_names_for_collisions() -> None:
+    store = RedisServiceRegistryStore(FakeRedis())
+    registry_service = ServiceRegistryService(store=store)
+    app = FastAPI()
+    app.include_router(create_service_registry_router(service_registry=registry_service))
+    client = TestClient(app)
+
+    for service_id, base_url in (
+        ("Payments API", "https://payments-name.example.test"),
+        ("payments-api", "https://payments-slug.example.test"),
+        ("!!!", "https://punctuation.example.test"),
+    ):
+        response = client.post(
+            "/studio/services",
+            json={
+                "service_id": service_id,
+                "name": service_id,
+                "base_url": base_url,
+                "environment": "prod",
+                "tags": [],
+                "auth_mode": "internal_network",
+            },
+        )
+        assert response.status_code == 201
+
+    response = client.get("/studio/gateway/services")
+
+    assert response.status_code == 200
+    services = response.json()["services"]
+    names_by_studio_id = {service["studio_service_id"]: service["name"] for service in services}
+    route_patterns = [service["default_route_pattern"] for service in services]
+    assert len(set(names_by_studio_id.values())) == len(names_by_studio_id)
+    assert len(set(route_patterns)) == len(route_patterns)
+    assert names_by_studio_id["Payments API"].startswith("payments-api-")
+    assert names_by_studio_id["payments-api"].startswith("payments-api-")
+    assert names_by_studio_id["!!!"].startswith("service-")
+
+
 def test_http_capability_fetcher_rejects_untrusted_refresh_target_before_request() -> None:
     async def scenario() -> None:
         fake_client = FakeAsyncClient(httpx.Response(status_code=200, json={"relayna_version": "1.3.4"}))

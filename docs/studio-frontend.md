@@ -193,7 +193,8 @@ The same screen exposes a Gateway Import panel. Its `Open Export` link points
 to `/studio/gateway/services`, a backend catalog that Relayna Gateway Admin can
 use to preview and import Studio-registered services. The export maps Studio
 `service_id` to `studio_service_id`, provides a lowercase Gateway-safe `name`
-and `default_route_pattern`, and omits Studio log, metric, trace, and credential
+and `default_route_pattern`, appends stable fingerprints when normalized names
+would collide, and omits Studio log, metric, trace, and credential
 configuration.
 
 For Loki-backed log views, the service editor now exposes AKS-friendly inputs in

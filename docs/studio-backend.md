@@ -642,13 +642,15 @@ The response is a stable, read-only catalog:
 ```
 
 `studio_service_id` maps to the Studio registry `service_id`. `name` is a
-lowercase URL-safe Gateway service-name suggestion derived from `service_id`,
-and `default_route_pattern` is a deterministic route hint. Gateway remains
-responsible for virtual-key authorization, upstream credentials or secret
-references, enabled traffic state, timeout, max body bytes, fallback services,
-cost mode, budgets, and fail-closed routing. Studio does not export
-`log_config`, `metrics_config`, `trace_config`, or credential material through
-this endpoint.
+lowercase URL-safe Gateway service-name suggestion derived from `service_id`.
+When two Studio IDs normalize to the same Gateway-safe name, Studio appends a
+stable short fingerprint so each `name` and `default_route_pattern` remains
+unique in the export response. `default_route_pattern` is a deterministic route
+hint. Gateway remains responsible for virtual-key authorization, upstream
+credentials or secret references, enabled traffic state, timeout, max body
+bytes, fallback services, cost mode, budgets, and fail-closed routing. Studio
+does not export `log_config`, `metrics_config`, `trace_config`, or credential
+material through this endpoint.
 
 ## Verification
 
