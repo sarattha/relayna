@@ -41,6 +41,22 @@ churn. Interfaces introduced or changed after the latest release tag may be
 rewritten directly unless they define a released or explicitly supported durable
 external state boundary, or the user explicitly asks for a migration path.
 
+#### `$production-freeze-guard`
+
+Relayna `v1.4.11` is the strict production freeze boundary. Before adding new
+features or changing SDK public exports, exported function/class signatures,
+external configuration, persisted schemas, wire protocols, task/status/workflow
+contracts, route response shapes, Studio backend behavior, or Studio frontend
+API/type contracts, use `$production-freeze-guard`.
+
+Strict freeze means public API removals, signature changes, response-shape
+breaks, and new exported APIs/functions are blocked unless the user explicitly
+approves changing the production perimeter. Freeze manifests live under
+`tests/freeze/`, `studio/backend/tests/freeze/`, and
+`apps/studio/src/test/production-freeze-manifest.json`. Do not update these
+manifests just to make tests pass; manifest changes are intentional review items
+and must include a compatibility note in the plan, PR summary, or final handoff.
+
 #### `$pr-draft-summary`
 
 When a task finishes with moderate-or-larger changes, invoke
@@ -140,6 +156,10 @@ Use `$implementation-strategy` before editing compatibility-sensitive behavior.
 Prefer direct replacement for unreleased branch-local interfaces, and preserve
 compatibility or add migration coverage when a change crosses a released SDK,
 Studio API, persisted data, or wire-protocol boundary.
+
+Use `$production-freeze-guard` first for feature work or public-surface changes.
+The current frozen production boundary is `v1.4.11`, and the default answer to
+new public API or exported function additions is no unless explicitly approved.
 
 ## Project Structure Guide
 
