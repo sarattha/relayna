@@ -1,0 +1,33 @@
+{
+  "freeze_version": "v1.4.11",
+  "route_declarations": [
+    {"file": "studio/backend/src/relayna_studio/events.py", "method": "post", "path_expression": "f'{prefix}/ingest/events'"},
+    {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/events'"},
+    {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/events'"},
+    {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/events/stream'"},
+    {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/events/stream'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/status/{{task_id}}'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/history'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/workflow/topology'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/dlq/messages'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/broker/dlq/messages'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/executions/{{task_id}}/graph'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}'"},
+    {"file": "studio/backend/src/relayna_studio/health.py", "method": "get", "path_expression": "f'{prefix}' + '/{service_id}/health'"},
+    {"file": "studio/backend/src/relayna_studio/health.py", "method": "post", "path_expression": "f'{prefix}' + '/{service_id}/health/refresh'"},
+    {"file": "studio/backend/src/relayna_studio/logs.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/logs'"},
+    {"file": "studio/backend/src/relayna_studio/logs.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/logs'"},
+    {"file": "studio/backend/src/relayna_studio/metrics.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/metrics'"},
+    {"file": "studio/backend/src/relayna_studio/metrics.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/metrics'"},
+    {"file": "studio/backend/src/relayna_studio/registry.py", "method": "post", "path_expression": "prefix"},
+    {"file": "studio/backend/src/relayna_studio/registry.py", "method": "get", "path_expression": "prefix"},
+    {"file": "studio/backend/src/relayna_studio/registry.py", "method": "get", "path_expression": "'/studio/gateway/services'"},
+    {"file": "studio/backend/src/relayna_studio/registry.py", "method": "get", "path_expression": "f'{prefix}' + '/{service_id}'"},
+    {"file": "studio/backend/src/relayna_studio/registry.py", "method": "patch", "path_expression": "f'{prefix}' + '/{service_id}'"},
+    {"file": "studio/backend/src/relayna_studio/registry.py", "method": "delete", "path_expression": "f'{prefix}' + '/{service_id}'"},
+    {"file": "studio/backend/src/relayna_studio/registry.py", "method": "post", "path_expression": "f'{prefix}' + '/{service_id}/refresh'"},
+    {"file": "studio/backend/src/relayna_studio/search.py", "method": "get", "path_expression": "f'{prefix}/tasks/search'"},
+    {"file": "studio/backend/src/relayna_studio/search.py", "method": "get", "path_expression": "f'{prefix}/services/search'"},
+    {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/traces'"}
+  ]
+}

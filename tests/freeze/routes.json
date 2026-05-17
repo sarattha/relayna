@@ -1,0 +1,21 @@
+{
+  "freeze_version": "v1.4.11",
+  "sdk_route_declarations": [
+    {"file": "src/relayna/api/capabilities_routes.py", "method": "get", "path_expression": "capability_path"},
+    {"file": "src/relayna/api/events_routes.py", "method": "get", "path_expression": "feed_path"},
+    {"file": "src/relayna/api/execution_routes.py", "method": "get", "path_expression": "resolved_graph_path"},
+    {"file": "src/relayna/api/health_routes.py", "method": "get", "path_expression": "f'{prefix}/workers'"},
+    {"file": "src/relayna/api/replay_routes.py", "method": "get", "path_expression": "queues_path"},
+    {"file": "src/relayna/api/replay_routes.py", "method": "get", "path_expression": "messages_path"},
+    {"file": "src/relayna/api/replay_routes.py", "method": "post", "path_expression": "replay_path"},
+    {"file": "src/relayna/api/replay_routes.py", "method": "get", "path_expression": "message_path"},
+    {"file": "src/relayna/api/replay_routes.py", "method": "get", "path_expression": "broker_queues_path"},
+    {"file": "src/relayna/api/replay_routes.py", "method": "get", "path_expression": "broker_messages_path"},
+    {"file": "src/relayna/api/status_routes.py", "method": "get", "path_expression": "resolved_events_path"},
+    {"file": "src/relayna/api/status_routes.py", "method": "get", "path_expression": "resolved_status_path"},
+    {"file": "src/relayna/api/status_routes.py", "method": "get", "path_expression": "history_path"},
+    {"file": "src/relayna/api/workflow_routes.py", "method": "get", "path_expression": "f'{base_path}/topology'"},
+    {"file": "src/relayna/api/workflow_routes.py", "method": "get", "path_expression": "f'{base_path}/stages'"},
+    {"file": "src/relayna/metrics.py", "method": "get", "path_expression": "path"}
+  ]
+}
