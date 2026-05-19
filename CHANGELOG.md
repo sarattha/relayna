@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.4.12 / Studio Backend 0.1.12 - 2026-05-19
+## 1.4.12 - 2026-05-19
 
 ### Added
 
