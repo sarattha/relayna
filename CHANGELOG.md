@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.12 / Studio Backend 0.1.12 - 2026-05-19
+
+### Added
+
+- Added a Redis key reference documenting SDK runtime, Studio backend, and Studio frontend Redis ownership boundaries.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.12` and the Studio backend package version to `0.1.12`.
+- Updated release-install documentation to reference `relayna 1.4.12`.
+- Updated the Studio backend package dependency floor to require `relayna>=1.4.12`.
+
 ## Studio Backend 0.1.11 / Studio Frontend 0.1.12 - 2026-05-13
 
 ### Added
