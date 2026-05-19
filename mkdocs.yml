@@ -26,6 +26,7 @@ nav:
   - Getting Started: getting-started.md
   - Studio Backend: studio-backend.md
   - Studio Frontend: studio-frontend.md
+  - Redis Keys: redis-keys.md
   - Migration v1 to v2: migration-v1-to-v2.md
   - Components: components.md
   - Observability: observability.md

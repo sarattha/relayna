@@ -1,6 +1,6 @@
 [project]
 name = "relayna-studio"
-version = "0.1.11"
+version = "0.1.12"
 description = "Deployable Relayna Studio backend package."
 requires-python = ">=3.13"
 license = { text = "MIT" }
@@ -15,7 +15,7 @@ dependencies = [
     "pydantic>=2.11.0",
     "redis>=7.1.1",
     "uvicorn>=0.34.0",
-    "relayna>=1.4.10",
+    "relayna>=1.4.12",
 ]
 
 [project.optional-dependencies]
