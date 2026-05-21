@@ -23,11 +23,11 @@ from ..observability import (
     emit_observation,
 )
 from ..observability.tracing import relayna_span
+from ..policies import RetryDecisionAction, RetryDecisionContext, RuntimePolicyEngine
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
 from ..storage import LeasePolicy, TaskLease, TaskLeaseStore, WorkflowContractStore
 from ..topology import SharedStatusWorkflowTopology
 from ..topology.workflow_contract import WorkflowContractError, validate_inbound_message_contract
-from ._retry_decision import RetryDecisionAction, RetryDecisionContext, decide_static_retry
 from .context import (
     RetryPolicy,
     RetryStatusConfig,
@@ -88,6 +88,7 @@ class WorkflowConsumer:
         self._lease_store = lease_store
         self._lease_policy = lease_policy or LeasePolicy()
         self._lease_owner_id = lease_owner_id or consumer_name
+        self._policy_engine = RuntimePolicyEngine()
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -435,7 +436,7 @@ class WorkflowConsumer:
                     requeue=False,
                 ),
             )
-            decision = decide_static_retry(
+            decision = self._policy_engine.decide_retry(
                 RetryDecisionContext(
                     worker_type="workflow",
                     queue_name=source_queue_name,
@@ -446,8 +447,8 @@ class WorkflowConsumer:
                     task_type=workflow_message.action,
                     workflow_stage=stage,
                     headers=dict(context.headers),
+                    max_retries=retry_policy.max_retries if retry_policy is not None else None,
                 ),
-                retry_policy=retry_policy,
             )
             if decision.action is RetryDecisionAction.REJECT:
                 await message.reject(requeue=False)
@@ -507,7 +508,7 @@ class WorkflowConsumer:
                     requeue=False,
                 ),
             )
-            decision = decide_static_retry(
+            decision = self._policy_engine.decide_retry(
                 RetryDecisionContext(
                     worker_type="workflow",
                     queue_name=source_queue_name,
@@ -518,8 +519,8 @@ class WorkflowConsumer:
                     task_type=workflow_message.action,
                     workflow_stage=stage,
                     headers=dict(context.headers),
+                    max_retries=retry_policy.max_retries if retry_policy is not None else None,
                 ),
-                retry_policy=retry_policy,
             )
             if decision.action is RetryDecisionAction.REJECT:
                 await message.reject(requeue=False)

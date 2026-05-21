@@ -33,10 +33,10 @@ from ..observability import (
     emit_observation,
 )
 from ..observability.tracing import relayna_span
+from ..policies import RetryDecisionAction, RetryDecisionContext, RuntimePolicyEngine
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
 from ..storage import LeasePolicy, TaskLease, TaskLeaseStore
 from ..topology import RoutedTasksSharedStatusTopology
-from ._retry_decision import RetryDecisionAction, RetryDecisionContext, decide_static_retry
 from .context import (
     AggregationHandler,
     FailureAction,
@@ -103,6 +103,7 @@ class TaskConsumer:
         self._lease_store = lease_store
         self._lease_policy = lease_policy or LeasePolicy()
         self._lease_owner_id = lease_owner_id or consumer_name
+        self._policy_engine = RuntimePolicyEngine()
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -485,7 +486,7 @@ class TaskConsumer:
                     requeue=self._retry_policy is None and self._failure_action is FailureAction.REQUEUE,
                 ),
             )
-            decision = decide_static_retry(
+            decision = self._policy_engine.decide_retry(
                 RetryDecisionContext(
                     worker_type="task",
                     queue_name=source_queue_name,
@@ -495,9 +496,9 @@ class TaskConsumer:
                     task_id=task.task_id,
                     task_type=task.task_type,
                     headers=dict(context.headers),
+                    max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
+                    failure_action=self._failure_action.value,
                 ),
-                retry_policy=self._retry_policy,
-                failure_action=self._failure_action,
             )
             if decision.action in {RetryDecisionAction.REJECT, RetryDecisionAction.REQUEUE}:
                 failed_message = _failure_message(

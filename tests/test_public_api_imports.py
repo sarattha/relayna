@@ -8,6 +8,7 @@ PUBLIC_MODULES = [
     "relayna.api",
     "relayna.workflow",
     "relayna.observability",
+    "relayna.policies",
     "relayna.topology",
     "relayna.mcp",
     "relayna.dlq",
