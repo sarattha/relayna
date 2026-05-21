@@ -144,6 +144,7 @@ class RedisTaskLeaseStore:
             lease = await self.get(lease_id)
             await self._redis.zrem(self._expiries_key, lease_id)
             if lease is None:
+                await self._redis.srem(self._expired_claims_key, lease_id)
                 continue
             if lease.expires_at > now:
                 await self._redis.zadd(self._expiries_key, {lease_id: lease.expires_at.timestamp()})
@@ -151,6 +152,12 @@ class RedisTaskLeaseStore:
                 continue
             expired.append(lease)
         return expired
+
+    async def _release_expired_claim(self, lease_id: str, *, retry: bool) -> None:
+        lease = await self.get(lease_id)
+        if retry and lease is not None:
+            await self._redis.zadd(self._expiries_key, {lease_id: lease.expires_at.timestamp()})
+        await self._redis.srem(self._expired_claims_key, lease_id)
 
 
 LeaseStatusPublisher = Callable[[TaskLease], Awaitable[None]]
@@ -185,7 +192,12 @@ class TaskLeaseExpiryScanner:
                 LeaseRecoveryAction.RETRY,
                 LeaseRecoveryAction.DEAD_LETTER,
             }:
-                await self._status_publisher(lease)
+                try:
+                    await self._status_publisher(lease)
+                except Exception:
+                    release_claim = getattr(self._store, "_release_expired_claim", None)
+                    if release_claim is not None:
+                        await release_claim(lease.lease_id, retry=True)
         return expired
 
     async def run_forever(self) -> None:

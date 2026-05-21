@@ -142,6 +142,33 @@ async def test_task_lease_expiry_scanner_claims_once_and_publishes_status() -> N
 
 
 @pytest.mark.asyncio
+async def test_task_lease_expiry_scanner_retries_after_publisher_failure() -> None:
+    redis = FakeRedis()
+    store = RedisTaskLeaseStore(redis)
+    expired = make_lease(
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        recovery_action=LeaseRecoveryAction.PUBLISH_STALE_STATUS,
+    )
+    attempts: list[str] = []
+
+    async def publish(lease: TaskLease) -> None:
+        attempts.append(lease.lease_id)
+        if len(attempts) == 1:
+            raise RuntimeError("publisher unavailable")
+
+    await store.acquire(expired)
+    scanner = TaskLeaseExpiryScanner(store=store, status_publisher=publish)
+
+    assert await scanner.scan_once() == [expired]
+    assert attempts == ["task-1"]
+    assert redis.sets["relayna:lease:expired_claims"] == set()
+    assert redis.sorted_sets["relayna:lease:expiries"] == {"task-1": expired.expires_at.timestamp()}
+
+    assert await scanner.scan_once() == [expired]
+    assert attempts == ["task-1", "task-1"]
+
+
+@pytest.mark.asyncio
 async def test_task_lease_expiry_claim_allows_later_reacquire_of_same_lease_id() -> None:
     redis = FakeRedis()
     store = RedisTaskLeaseStore(redis)
@@ -154,6 +181,17 @@ async def test_task_lease_expiry_claim_allows_later_reacquire_of_same_lease_id()
     replacement = make_lease(owner_id="worker-b")
     assert await store.acquire(replacement) is True
     assert await store.claim_expired(now=datetime.now(UTC) + timedelta(seconds=120)) == [replacement]
+
+
+@pytest.mark.asyncio
+async def test_task_lease_expiry_claim_clears_marker_when_payload_is_missing() -> None:
+    redis = FakeRedis()
+    store = RedisTaskLeaseStore(redis)
+    await redis.zadd("relayna:lease:expiries", {"missing-task": datetime.now(UTC).timestamp() - 1})
+
+    assert await store.claim_expired() == []
+    assert redis.sorted_sets["relayna:lease:expiries"] == {}
+    assert redis.sets["relayna:lease:expired_claims"] == set()
 
 
 def test_lease_policy_defaults_to_disabled_observe_only() -> None:
