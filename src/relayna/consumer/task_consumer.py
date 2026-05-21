@@ -36,6 +36,7 @@ from ..observability.tracing import relayna_span
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
 from ..storage import LeasePolicy, TaskLease, TaskLeaseStore
 from ..topology import RoutedTasksSharedStatusTopology
+from ._retry_decision import RetryDecisionAction, RetryDecisionContext, decide_static_retry
 from .context import (
     AggregationHandler,
     FailureAction,
@@ -484,7 +485,21 @@ class TaskConsumer:
                     requeue=self._retry_policy is None and self._failure_action is FailureAction.REQUEUE,
                 ),
             )
-            if self._retry_policy is None:
+            decision = decide_static_retry(
+                RetryDecisionContext(
+                    worker_type="task",
+                    queue_name=source_queue_name,
+                    retry_attempt=context.retry_attempt,
+                    reason="handler_error",
+                    exception_type=type(exc).__name__,
+                    task_id=task.task_id,
+                    task_type=task.task_type,
+                    headers=dict(context.headers),
+                ),
+                retry_policy=self._retry_policy,
+                failure_action=self._failure_action,
+            )
+            if decision.action in {RetryDecisionAction.REJECT, RetryDecisionAction.REQUEUE}:
                 failed_message = _failure_message(
                     exc, include_error_message=self._lifecycle_statuses.include_error_message
                 )
@@ -509,9 +524,11 @@ class TaskConsumer:
                     )
                 return False
 
-            max_retries = self._retry_policy.max_retries
-            if context.retry_attempt < max_retries:
-                next_attempt = context.retry_attempt + 1
+            if decision.action is RetryDecisionAction.RETRY:
+                next_attempt = decision.retry_attempt
+                max_retries = decision.max_retries
+                if max_retries is None:
+                    raise RuntimeError("Retry decision is missing max_retries") from None
                 if self._metrics is not None:
                     self._metrics.record_task_retry(
                         stage=task.task_type,
@@ -525,7 +542,7 @@ class TaskConsumer:
                     task_id=task.task_id,
                     retry_attempt=next_attempt,
                     max_retries=max_retries,
-                    reason="handler_error",
+                    reason=decision.reason,
                     exception_type=type(exc).__name__,
                     body=retry_body,
                     correlation_id=retry_correlation_id,
@@ -536,6 +553,8 @@ class TaskConsumer:
                     await message.ack()
                 return False
 
+            if decision.action is not RetryDecisionAction.DEAD_LETTER:
+                raise RuntimeError(f"Unsupported retry decision action: {decision.action}") from None
             if self._metrics is not None:
                 self._metrics.record_task_dlq(stage=task.task_type, queue=source_queue_name, worker_type="task")
             await self._publish_dead_letter(
@@ -543,8 +562,8 @@ class TaskConsumer:
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=task.task_id,
-                retry_attempt=context.retry_attempt,
-                reason="handler_error",
+                retry_attempt=decision.retry_attempt,
+                reason=decision.reason,
                 exception_type=type(exc).__name__,
                 body=retry_body,
                 correlation_id=retry_correlation_id,

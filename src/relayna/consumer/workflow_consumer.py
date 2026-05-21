@@ -27,6 +27,7 @@ from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
 from ..storage import LeasePolicy, TaskLease, TaskLeaseStore, WorkflowContractStore
 from ..topology import SharedStatusWorkflowTopology
 from ..topology.workflow_contract import WorkflowContractError, validate_inbound_message_contract
+from ._retry_decision import RetryDecisionAction, RetryDecisionContext, decide_static_retry
 from .context import (
     RetryPolicy,
     RetryStatusConfig,
@@ -434,12 +435,28 @@ class WorkflowConsumer:
                     requeue=False,
                 ),
             )
-            if retry_policy is None:
+            decision = decide_static_retry(
+                RetryDecisionContext(
+                    worker_type="workflow",
+                    queue_name=source_queue_name,
+                    retry_attempt=context.retry_attempt,
+                    reason="stage_timeout",
+                    exception_type=type(exc).__name__,
+                    task_id=workflow_message.task_id,
+                    task_type=workflow_message.action,
+                    workflow_stage=stage,
+                    headers=dict(context.headers),
+                ),
+                retry_policy=retry_policy,
+            )
+            if decision.action is RetryDecisionAction.REJECT:
                 await message.reject(requeue=False)
                 return False
-            max_retries = retry_policy.max_retries
-            if context.retry_attempt < max_retries:
-                next_attempt = context.retry_attempt + 1
+            if decision.action is RetryDecisionAction.RETRY:
+                next_attempt = decision.retry_attempt
+                max_retries = decision.max_retries
+                if max_retries is None:
+                    raise RuntimeError("Retry decision is missing max_retries") from None
                 if self._metrics is not None:
                     self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
@@ -449,11 +466,15 @@ class WorkflowConsumer:
                     task_id=workflow_message.task_id,
                     retry_attempt=next_attempt,
                     max_retries=max_retries,
-                    reason="stage_timeout",
+                    reason=decision.reason,
                     exception_type=type(exc).__name__,
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
+            if decision.action is not RetryDecisionAction.DEAD_LETTER:
+                raise RuntimeError(f"Unsupported retry decision action: {decision.action}") from None
+            if retry_policy is None:
+                raise RuntimeError("Dead-letter retry decision is missing retry policy") from None
             if self._metrics is not None:
                 self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
@@ -461,8 +482,8 @@ class WorkflowConsumer:
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=workflow_message.task_id,
-                retry_attempt=context.retry_attempt,
-                reason="stage_timeout",
+                retry_attempt=decision.retry_attempt,
+                reason=decision.reason,
                 exception_type=type(exc).__name__,
                 retry_policy=retry_policy,
             )
@@ -486,13 +507,29 @@ class WorkflowConsumer:
                     requeue=False,
                 ),
             )
-            if retry_policy is None:
+            decision = decide_static_retry(
+                RetryDecisionContext(
+                    worker_type="workflow",
+                    queue_name=source_queue_name,
+                    retry_attempt=context.retry_attempt,
+                    reason="handler_error",
+                    exception_type=type(exc).__name__,
+                    task_id=workflow_message.task_id,
+                    task_type=workflow_message.action,
+                    workflow_stage=stage,
+                    headers=dict(context.headers),
+                ),
+                retry_policy=retry_policy,
+            )
+            if decision.action is RetryDecisionAction.REJECT:
                 await message.reject(requeue=False)
                 return False
 
-            max_retries = retry_policy.max_retries
-            if context.retry_attempt < max_retries:
-                next_attempt = context.retry_attempt + 1
+            if decision.action is RetryDecisionAction.RETRY:
+                next_attempt = decision.retry_attempt
+                max_retries = decision.max_retries
+                if max_retries is None:
+                    raise RuntimeError("Retry decision is missing max_retries") from None
                 if self._metrics is not None:
                     self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
@@ -502,12 +539,16 @@ class WorkflowConsumer:
                     task_id=workflow_message.task_id,
                     retry_attempt=next_attempt,
                     max_retries=max_retries,
-                    reason="handler_error",
+                    reason=decision.reason,
                     exception_type=type(exc).__name__,
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
 
+            if decision.action is not RetryDecisionAction.DEAD_LETTER:
+                raise RuntimeError(f"Unsupported retry decision action: {decision.action}") from None
+            if retry_policy is None:
+                raise RuntimeError("Dead-letter retry decision is missing retry policy") from None
             if self._metrics is not None:
                 self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
@@ -515,8 +556,8 @@ class WorkflowConsumer:
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=workflow_message.task_id,
-                retry_attempt=context.retry_attempt,
-                reason="handler_error",
+                retry_attempt=decision.retry_attempt,
+                reason=decision.reason,
                 exception_type=type(exc).__name__,
                 retry_policy=retry_policy,
             )
