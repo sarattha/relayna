@@ -22,11 +22,14 @@ if the worker disappears?
 ## Progress
 
 - [x] (2026-05-20) Created future implementation plan.
-- [ ] Confirm freeze boundary and implementation strategy before code changes.
-- [ ] Design lease record schema, Redis keys, and ownership transition rules.
-- [ ] Implement lease acquisition, heartbeat refresh, expiry detection, and
-  recovery behavior.
-- [ ] Add SDK and Studio backend tests plus verification commands.
+- [x] (2026-05-21) Confirmed freeze boundary and implementation strategy before
+  code changes.
+- [x] (2026-05-21) Designed lease record schema, Redis keys, and ownership
+  transition rules.
+- [x] (2026-05-21) Implemented opt-in lease acquisition, heartbeat refresh,
+  release, and observe-first expiry detection.
+- [x] (2026-05-21) Added SDK and Studio backend tests and ran the full
+  `$code-change-verification` stack.
 
 ## Surprises & Discoveries
 
@@ -37,6 +40,11 @@ if the worker disappears?
   `TaskConsumer` and `WorkflowConsumer`.
   Evidence: `src/relayna/consumer/task_consumer.py` and
   `src/relayna/consumer/workflow_consumer.py`.
+- Observation: The repository contains a newer `v1.4.12` tag while the freeze
+  manifest remains fixed at `v1.4.11`.
+  Evidence: `git tag -l 'v*' --sort=-v:refname | head -n 3` lists `v1.4.12`,
+  `v1.4.11`, and `v1.4.10`; `tests/freeze/public_surface.json` keeps
+  `freeze_version` at `v1.4.11`.
 
 ## Decision Log
 
@@ -50,10 +58,20 @@ if the worker disappears?
   Rationale: New expiry behavior can change failure timing and duplicate-work
   risk for existing deployments.
   Date/Author: 2026-05-20 / Codex.
+- Decision: Add a narrow approved public perimeter for opt-in lease
+  configuration and storage interfaces.
+  Rationale: Lease enforcement cannot be enabled usefully without additive
+  constructor configuration and a public store contract, while disabled-by-
+  default behavior preserves existing deployments.
+  Date/Author: 2026-05-21 / Codex.
 
 ## Outcomes & Retrospective
 
-Planning only. No runtime behavior has changed.
+Implemented opt-in task leases. Existing consumers keep current behavior when
+lease support is not configured. When configured, task and workflow consumers
+acquire, heartbeat, and release Redis-backed leases around handler execution;
+expired leases can be claimed by an observe-first scanner. Studio health can
+surface stale active leases through additive worker health fields.
 
 ## Context and Orientation
 
@@ -198,4 +216,3 @@ Potential configuration:
 - `lease_heartbeat_interval_seconds`
 - `lease_recovery_action`
 - `lease_expiry_scan_interval_seconds`
-

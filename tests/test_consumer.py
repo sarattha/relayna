@@ -42,6 +42,7 @@ from relayna.observability import (
     WorkflowStageStarted,
 )
 from relayna.rabbitmq import RetryInfrastructure
+from relayna.storage import LeasePolicy, TaskLease
 from relayna.topology import (
     RoutedTasksSharedStatusTopology,
     SharedStatusWorkflowTopology,
@@ -395,6 +396,38 @@ class FakeContractStore:
         if self.fail_clear_inflight:
             raise RuntimeError("clear unavailable")
         self.inflight_clear_calls.append({"stage": stage, "task_id": task_id, "action": action})
+
+
+class FakeLeaseStore:
+    def __init__(self, *, acquire_result: bool = True) -> None:
+        self.acquire_result = acquire_result
+        self.acquired: list[TaskLease] = []
+        self.heartbeats: list[dict[str, Any]] = []
+        self.releases: list[dict[str, str]] = []
+
+    async def acquire(self, lease: TaskLease) -> bool:
+        if not self.acquire_result:
+            return False
+        self.acquired.append(lease)
+        return True
+
+    async def heartbeat(self, lease_id: str, *, owner_id: str, expires_at: Any) -> TaskLease | None:
+        self.heartbeats.append({"lease_id": lease_id, "owner_id": owner_id, "expires_at": expires_at})
+        return self.acquired[-1] if self.acquired else None
+
+    async def release(self, lease_id: str, *, owner_id: str) -> bool:
+        self.releases.append({"lease_id": lease_id, "owner_id": owner_id})
+        return True
+
+    async def get(self, lease_id: str) -> TaskLease | None:
+        return next((lease for lease in self.acquired if lease.lease_id == lease_id), None)
+
+    async def list_by_owner(self, owner_id: str) -> list[TaskLease]:
+        return [lease for lease in self.acquired if lease.owner_id == owner_id]
+
+    async def claim_expired(self, *, now: Any = None, limit: int = 100) -> list[TaskLease]:
+        del now, limit
+        return []
 
 
 def make_topology() -> SharedTasksSharedStatusTopology:
@@ -983,6 +1016,62 @@ async def test_task_consumer_acknowledges_successful_messages() -> None:
     assert rabbit.acquire_channel_calls == [1]
     assert channel.declare_queue_calls == [{"name": "tasks.queue", "durable": True, "arguments": None}]
     assert channel.close_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_acquires_heartbeats_and_releases_task_lease() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "task_type": "payment", "payload": {}}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    lease_store = FakeLeaseStore()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+        await asyncio.sleep(0.03)
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        consumer_name="worker-a",
+        lease_store=lease_store,
+        lease_policy=LeasePolicy(enabled=True, ttl_seconds=1, heartbeat_interval_seconds=0.01),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert lease_store.acquired[0].lease_id == "task-123"
+    assert lease_store.acquired[0].task_type == "payment"
+    assert lease_store.heartbeats
+    assert lease_store.releases == [{"lease_id": "task-123", "owner_id": "worker-a"}]
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_requeues_when_task_lease_is_already_owned() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "payload": {}}).encode("utf-8"))
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    lease_store = FakeLeaseStore(acquire_result=False)
+    handled = False
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        nonlocal handled
+        del task, context
+        handled = True
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        lease_store=lease_store,
+        lease_policy=LeasePolicy(enabled=True),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert handled is False
+    assert message.acked is False
+    assert message.rejected_with is True
+    assert lease_store.releases == []
 
 
 @pytest.mark.asyncio
@@ -2263,6 +2352,45 @@ async def test_workflow_consumer_consumes_stage_queue_and_emits_workflow_observa
     assert isinstance(observations[0], WorkflowStageStarted)
     assert any(isinstance(event, WorkflowMessageReceived) for event in observations)
     assert any(isinstance(event, WorkflowStageAcked) for event in observations)
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_acquires_heartbeats_and_releases_message_lease() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[FakeChannel(queue)])
+    lease_store = FakeLeaseStore()
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del workflow, context
+        await asyncio.sleep(0.03)
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        consumer_name="workflow-a",
+        lease_store=lease_store,
+        lease_policy=LeasePolicy(enabled=True, ttl_seconds=1, heartbeat_interval_seconds=0.01),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert lease_store.acquired[0].lease_id == "msg-123"
+    assert lease_store.acquired[0].stage == "docsearch_planner"
+    assert lease_store.heartbeats
+    assert lease_store.releases == [{"lease_id": "msg-123", "owner_id": "workflow-a"}]
 
 
 @pytest.mark.asyncio

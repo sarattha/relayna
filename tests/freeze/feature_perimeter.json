@@ -9,6 +9,7 @@
     "observability and execution graph": ["tests/test_execution_graph.py", "tests/test_observability.py"],
     "public package surface": ["tests/test_package_root.py", "tests/test_public_api_imports.py", "tests/test_package_export_consistency.py"],
     "routing and topology": ["tests/test_routing.py", "tests/test_v2_packages.py"],
-    "status storage and hub": ["tests/test_status_store.py", "tests/test_status_hub.py"]
+    "status storage and hub": ["tests/test_status_store.py", "tests/test_status_hub.py"],
+    "task leases": ["tests/test_task_leases.py", "tests/test_consumer.py"]
   }
 }
