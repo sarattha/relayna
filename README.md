@@ -16,6 +16,8 @@ It provides:
 - FastAPI lifecycle and route helpers
 - Best-effort runtime observability hooks
 - Task execution graph reconstruction with Mermaid and Studio rendering support
+- Worker leases, heartbeat health, runtime backpressure snapshots, DLQ
+  diagnosis bundles, and retry policy decision helpers
 
 ## Requirements
 
@@ -30,13 +32,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.12/relayna-1.4.12-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.13/relayna-1.4.13-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.12/relayna-1.4.12.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.13/relayna-1.4.13.tar.gz
 ```
 
 For local development in this repository:
@@ -101,7 +103,7 @@ Relayna observations, not metric labels.
 - Worker runtimes, retry behavior, and workflow transport
 - Redis-backed status, DLQ, and observability persistence
 - FastAPI route factories for status, capabilities, workflow, execution graph,
-  events feed, and optional worker health
+  events feed, optional worker health, and runtime backpressure
 
 `relayna-studio` is the separate control-plane deployment. It owns:
 
@@ -218,14 +220,17 @@ boundaries:
   Owns MCP-facing resources, adapters, and operator tools built on top of the
   runtime packages.
 
-`relayna.storage` exists as an internal package for Redis models, repository
-helpers, and retention behavior. It is not part of the documented public API.
+- `relayna.storage`
+  Owns public task lease models, Redis lease storage, expiry scanning, and
+  worker-health lease summaries.
+- `relayna.policies`
+  Owns runtime policy decision models and the default retry decision engine.
 
 Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The current Studio backend
-package version is `0.1.12`, the Studio frontend package version is `0.1.12`, and
-the backend requires `relayna>=1.4.12`.
+package version is `0.1.13`, the Studio frontend package version is `0.1.12`, and
+the backend requires `relayna>=1.4.13`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -848,6 +853,8 @@ The v2 public package roots are:
 - `relayna.status`
 - `relayna.observability`
 - `relayna.api`
+- `relayna.storage`
+- `relayna.policies`
 - `relayna.mcp`
 - `relayna.dlq`
 
@@ -865,6 +872,7 @@ Studio deployment and presenter helpers now live in the separate
 - Studio backend: [docs/studio-backend.md](docs/studio-backend.md)
 - Studio frontend: [docs/studio-frontend.md](docs/studio-frontend.md)
 - Observability guide: [docs/observability.md](docs/observability.md)
+- Runtime controls: [docs/runtime-controls.md](docs/runtime-controls.md)
 - AKS observability stack: [docs/aks-observability.md](docs/aks-observability.md)
 - Execution graph guide: [docs/execution-graphs.md](docs/execution-graphs.md)
 - GitHub Releases: [github.com/sarattha/relayna/releases](https://github.com/sarattha/relayna/releases)

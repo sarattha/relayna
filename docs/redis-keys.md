@@ -97,6 +97,27 @@ to `relayna`.
 `RedisWorkflowContractStore` retention is controlled by its `ttl_seconds`
 argument.
 
+### Task Lease Store
+
+`RedisTaskLeaseStore` stores optional in-flight task and workflow lease
+ownership. Leases are used by `TaskConsumer` and `WorkflowConsumer` when a
+`LeasePolicy(enabled=True)` and lease store are supplied.
+
+Default prefix: `relayna`.
+
+| Key | Type | Purpose |
+| --- | --- | --- |
+| `{prefix}:lease:task:{lease_id}` | string | Serialized `TaskLease` payload with a Redis TTL matching the lease expiry. |
+| `{prefix}:lease:owner:{owner_id}` | set | Lease ids currently owned by one worker or consumer owner. |
+| `{prefix}:lease:expiries` | sorted set | Lease ids scored by expiry timestamp for expiry scans. |
+| `{prefix}:lease:expired_claims` | set | Claim markers used to prevent duplicate recovery processing for the same expired lease. |
+
+`TaskLeaseExpiryScanner` claims expired leases from the sorted set and can call
+a recovery publisher for leases whose `recovery_action` asks for a stale
+status, requeue, retry, or dead-letter action. If the publisher fails
+transiently, the Redis claim marker is released and the expiry index is restored
+so the next scan can retry recovery.
+
 ## Studio Backend Keys
 
 The Studio backend requires Redis. It owns control-plane state for service

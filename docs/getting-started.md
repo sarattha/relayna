@@ -18,7 +18,7 @@ If you are deploying the centralized Relayna Studio control plane itself, see
 - worker runtimes and retry behavior
 - Redis-backed latest status, history, DLQ, and observability storage
 - FastAPI route factories for status, capabilities, workflow, execution graph,
-  DLQ, events feed, and worker health
+  DLQ, events feed, worker health, and runtime backpressure
 
 Relayna Studio is the separate control plane. It owns:
 
@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.12/relayna-1.4.12-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.13/relayna-1.4.13-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.12/relayna-1.4.12.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.13/relayna-1.4.13.tar.gz
 ```
 
 For local development in this repository:
@@ -94,9 +94,8 @@ The v2 API is organized by responsibility. In practice:
 - import DLQ indexing and replay services from `relayna.dlq`
 - import workflow control-plane helpers from `relayna.workflow`
 - import observation events and exporters from `relayna.observability`
-
-`relayna.storage` is internal support code and is not part of the documented
-public API.
+- import task lease models and lease stores from `relayna.storage`
+- import retry policy decision helpers from `relayna.policies`
 
 ## Integration Path
 
@@ -559,11 +558,14 @@ Add these when you need richer operations or Studio federation:
 - `GET /executions/{task_id}/graph`
 - `GET /events/feed`
 - `GET /relayna/health/workers`
+- `GET /relayna/runtime/backpressure`
 - `GET /workflow/topology`
 - `GET /workflow/stages`
 
 Only include workflow routes when your service uses
 `SharedStatusWorkflowTopology`.
+See [Runtime Controls](runtime-controls.md) for worker lease, active lease
+health, runtime backpressure, retry policy, and DLQ diagnosis examples.
 
 ### Worker Health For Studio
 

@@ -123,6 +123,8 @@ FastAPI integration helpers:
 - `create_execution_router`
 - `create_workflow_router`
 - `create_dlq_router`
+- `create_worker_health_router`
+- `create_backpressure_router`
 
 This package owns FastAPI runtime composition only: lifespan setup, runtime
 lookup, and route factories. It composes the lower-level runtime packages and
@@ -160,6 +162,8 @@ Dead-letter models, persistence, service operations, and replay helpers.
 This package owns DLQ state and replay orchestration. It is separate from
 `relayna.rabbitmq` so broker infrastructure and DLQ indexing/replay remain
 distinct concerns.
+Indexed DLQ details now include an optional diagnosis bundle with failure,
+retry, ownership, envelope, and replay guidance fields.
 
 Studio-specific presenter helpers and the deployable backend now live in the
 separate `relayna-studio` package.
@@ -185,9 +189,41 @@ graph reconstruction:
 - `extract_trace_context`
 - `relayna_span`
 - `active_trace_fields`
+- `RuntimePressureService`
+- `RuntimePressureSignal`
+- `RuntimePressureSnapshot`
+- `QueuePressureCollector`
+- `WorkerHealthPressureCollector`
+- `DLQPressureCollector`
 
-## Internal packages
+## `relayna.storage`
 
-`relayna.storage` contains internal Redis models, repository helpers, and
-retention logic shared by the public runtime packages. It is intentionally not
-part of the documented public API surface.
+Task lease models and Redis-backed lease helpers:
+
+- `LeasePolicy`
+- `LeaseRecoveryAction`
+- `TaskLease`
+- `TaskLeaseStore`
+- `RedisTaskLeaseStore`
+- `TaskLeaseExpiryScanner`
+- `task_leases_for_health`
+
+This package owns task lease ownership, heartbeat expiry state, and the
+health-route shape used to expose active leases to Studio. Other storage
+helpers remain implementation-owned.
+
+## `relayna.policies`
+
+Runtime policy decision helpers:
+
+- `RetryDecision`
+- `RetryDecisionAction`
+- `RetryDecisionContext`
+- `RetryDecisionPolicy`
+- `RuntimePolicyEngine`
+- `StaticRetryDecisionPolicy`
+- `decide_static_retry`
+
+The first policy surface centralizes retry, reject, requeue, and dead-letter
+decisions. Existing `RetryPolicy` configuration in `relayna.consumer` still
+controls broker retry infrastructure.

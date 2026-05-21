@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.13 - 2026-05-21
+
+### Added
+
+- Added task lease and heartbeat expiry support with Redis-backed lease
+  ownership, worker health lease summaries, and expiry scanning.
+- Added runtime backpressure signals, collectors, and
+  `GET /relayna/runtime/backpressure` for queue, worker, and DLQ pressure
+  snapshots.
+- Added public `relayna.policies` retry decision models and
+  `RuntimePolicyEngine` as the first runtime policy engine surface.
+- Added DLQ diagnosis bundles to retained DLQ records and details, including
+  failure, retry, ownership, envelope, and replay guidance.
+- Added live execution-graph state fields so graph nodes and edges can show
+  retrying, failed, dead-lettered, completed, and pending status.
+- Added runtime controls documentation with examples for leases, worker health,
+  backpressure, policy decisions, and DLQ diagnosis usage.
+
+### Changed
+
+- Bumped the SDK package version to `1.4.13` and the Studio backend package
+  version to `0.1.13`.
+- Updated release-install documentation to reference `relayna 1.4.13`.
+- Updated the Studio backend package dependency floor to require
+  `relayna>=1.4.13`.
+
+### Fixed
+
+- Studio worker health now preserves unhealthy precedence when a stopped worker
+  also has expired leases.
+- Lease expiry scans now retry recovery publication after transient publisher
+  failures and clear stale claim markers for missing lease payloads.
+
 ## 1.4.12 - 2026-05-19
 
 ### Added
