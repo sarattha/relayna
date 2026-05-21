@@ -20,6 +20,7 @@ def test_relayna_metrics_exports_expected_names() -> None:
     metrics.record_queue_publish(queue="payments", status="task", worker_type="api")
     metrics.record_status_event(status="completed", worker_type="task")
     metrics.record_observation_event(status="TaskResourceSampled", worker_type="task")
+    metrics.record_pressure_signal(scope="queue", kind="queue_depth_high", severity="warning", value=12)
     rendered = metrics.render().decode("utf-8")
 
     for name in [
@@ -32,6 +33,7 @@ def test_relayna_metrics_exports_expected_names() -> None:
         "relayna_queue_publish_total",
         "relayna_status_events_published_total",
         "relayna_observation_events_total",
+        "relayna_runtime_pressure_signal",
     ]:
         assert name in rendered
     assert 'task_id="' not in rendered

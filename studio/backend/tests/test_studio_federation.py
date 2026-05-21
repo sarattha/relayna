@@ -198,9 +198,32 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
                 json={
                     "task_id": "task-123",
                     "topology_kind": "shared_tasks_shared_status",
-                    "summary": {"status": "completed", "graph_completeness": "full"},
-                    "nodes": [],
-                    "edges": [],
+                    "summary": {
+                        "status": "completed",
+                        "graph_completeness": "full",
+                        "live_state_counts": {"succeeded": 1},
+                    },
+                    "nodes": [
+                        {
+                            "id": "task:task-123",
+                            "kind": "task",
+                            "task_id": "task-123",
+                            "state": "succeeded",
+                            "state_reason": "latest_status:completed",
+                            "updated_at": "2026-04-06T10:00:01+00:00",
+                            "annotations": {},
+                        }
+                    ],
+                    "edges": [
+                        {
+                            "source": "task:task-123",
+                            "target": "status:task-123:1",
+                            "kind": "published_status",
+                            "state": "traversed",
+                            "state_reason": "published_status",
+                            "updated_at": "2026-04-06T10:00:01+00:00",
+                        }
+                    ],
                     "annotations": {},
                     "related_task_ids": [],
                 },
@@ -260,6 +283,9 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
         assert history_response.json()["events"][0]["task_ref"]["task_id"] == "task-123"
         assert graph_response.json()["service_id"] == "payments-api"
         assert graph_response.json()["task_ref"]["task_id"] == "task-123"
+        assert graph_response.json()["summary"]["live_state_counts"] == {"succeeded": 1}
+        assert graph_response.json()["nodes"][0]["state"] == "succeeded"
+        assert graph_response.json()["edges"][0]["state"] == "traversed"
 
 
 def test_service_broker_dlq_messages_proxy_and_normalize_task_refs(monkeypatch) -> None:
@@ -388,6 +414,88 @@ def test_service_broker_dlq_messages_returns_unsupported_route_when_capability_m
         "upstream_status": None,
         "retryable": False,
     }
+
+
+def test_service_runtime_backpressure_proxies_supported_service(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/relayna/runtime/backpressure":
+            return httpx.Response(
+                200,
+                json={
+                    "reported_at": "2026-05-21T00:00:00Z",
+                    "signals": [
+                        {
+                            "scope": "queue",
+                            "scope_id": "tasks.queue",
+                            "kind": "queue_depth_high",
+                            "severity": "warning",
+                            "value": 25,
+                            "threshold": 10,
+                            "observed_at": "2026-05-21T00:00:00Z",
+                        }
+                    ],
+                },
+            )
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=["runtime.backpressure"]),
+            ),
+        )
+
+        response = client.get("/studio/services/payments-api/runtime/backpressure")
+
+    assert response.status_code == 200
+    assert response.json()["service_id"] == "payments-api"
+    assert response.json()["signals"][0]["kind"] == "queue_depth_high"
+
+
+def test_service_runtime_backpressure_returns_unsupported_route_when_capability_missing(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=["status.latest"]),
+            ),
+        )
+
+        response = client.get("/studio/services/payments-api/runtime/backpressure")
+
+    assert response.status_code == 501
+    assert response.json()["code"] == "unsupported_route"
+    assert "runtime.backpressure" in response.json()["detail"]
 
 
 def test_task_search_returns_retained_indexed_matches(monkeypatch) -> None:

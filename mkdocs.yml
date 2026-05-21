@@ -29,6 +29,7 @@ nav:
   - Redis Keys: redis-keys.md
   - Migration v1 to v2: migration-v1-to-v2.md
   - Components: components.md
+  - Runtime Controls: runtime-controls.md
   - Observability: observability.md
   - AKS Observability: aks-observability.md
   - Execution Graphs: execution-graphs.md

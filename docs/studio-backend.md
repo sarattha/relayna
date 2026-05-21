@@ -805,6 +805,21 @@ Checks:
 These states are different. A service can be registered but stale, or reachable
 for some reads while still showing stale activity.
 
+### Worker health and active leases
+
+When a registered service advertises `health.workers`, Studio reads
+`GET /relayna/health/workers` during health refresh. Worker health supports
+active lease summaries from the SDK task lease store:
+
+- `running=False` marks the worker `unhealthy`, even if it also has expired
+  leases
+- expired active leases on otherwise running workers mark worker health `stale`
+- missing or stale heartbeat timestamps also mark worker health `stale`
+
+Use this to distinguish a stopped worker from a running worker that is stuck on
+one or more expired leases. See [Runtime Controls](runtime-controls.md) for the
+service-side lease and heartbeat provider examples.
+
 ## Relationship To Downstream Services
 
 The backend works best when downstream services:

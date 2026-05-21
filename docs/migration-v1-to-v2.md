@@ -187,6 +187,8 @@ If you are moving a larger codebase, use the package boundaries intentionally:
 - use `relayna.consumer` for worker execution and handler contexts only
 - use `relayna.api` for FastAPI runtime and route composition only
 - use `relayna.status` for Redis-backed status state and delivery only
+- use `relayna.storage` for public task lease models and lease stores only
+- use `relayna.policies` for runtime retry decision models only
 
 This matters because v2 is designed around those ownership boundaries. If you
 continue treating the library like a flat module namespace, future upgrades

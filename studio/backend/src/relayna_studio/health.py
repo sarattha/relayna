@@ -414,6 +414,8 @@ class StudioHealthRefreshService:
         latest_heartbeat_at = _parse_datetime(status.latest_heartbeat_at)
         if any(not worker.running for worker in status.workers):
             state = WorkerHealthState.UNHEALTHY
+        elif any(lease.expired for worker in status.workers for lease in worker.active_leases):
+            state = WorkerHealthState.STALE
         elif latest_heartbeat_at is None:
             state = WorkerHealthState.STALE
         elif now - latest_heartbeat_at > timedelta(seconds=self.worker_heartbeat_stale_after_seconds):

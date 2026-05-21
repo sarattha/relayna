@@ -12,6 +12,7 @@
     {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/dlq/messages'"},
     {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/broker/dlq/messages'"},
     {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/executions/{{task_id}}/graph'"},
+    {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/runtime/backpressure'"},
     {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}'"},
     {"file": "studio/backend/src/relayna_studio/health.py", "method": "get", "path_expression": "f'{prefix}' + '/{service_id}/health'"},
     {"file": "studio/backend/src/relayna_studio/health.py", "method": "post", "path_expression": "f'{prefix}' + '/{service_id}/health/refresh'"},

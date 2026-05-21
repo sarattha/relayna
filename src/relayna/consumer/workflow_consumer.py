@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from opentelemetry.trace import SpanKind
@@ -22,8 +23,9 @@ from ..observability import (
     emit_observation,
 )
 from ..observability.tracing import relayna_span
+from ..policies import RetryDecisionAction, RetryDecisionContext, RuntimePolicyEngine
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
-from ..storage import WorkflowContractStore
+from ..storage import LeasePolicy, TaskLease, TaskLeaseStore, WorkflowContractStore
 from ..topology import SharedStatusWorkflowTopology
 from ..topology.workflow_contract import WorkflowContractError, validate_inbound_message_contract
 from .context import (
@@ -61,6 +63,9 @@ class WorkflowConsumer:
         alias_config: ContractAliasConfig | None = None,
         contract_store: WorkflowContractStore | None = None,
         metrics: RelaynaMetrics | None = None,
+        lease_store: TaskLeaseStore | None = None,
+        lease_policy: LeasePolicy | None = None,
+        lease_owner_id: str | None = None,
     ) -> None:
         if stage is None and queue_name is None:
             raise ValueError("WorkflowConsumer requires stage=... or queue_name=...")
@@ -80,6 +85,10 @@ class WorkflowConsumer:
         self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
         self._contract_store = contract_store
         self._metrics = metrics or getattr(rabbitmq, "metrics", None)
+        self._lease_store = lease_store
+        self._lease_policy = lease_policy or LeasePolicy()
+        self._lease_owner_id = lease_owner_id or consumer_name
+        self._policy_engine = RuntimePolicyEngine()
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -359,6 +368,47 @@ class WorkflowConsumer:
                 worker_type="workflow",
                 retry_attempt=context.retry_attempt,
             )
+        lease: TaskLease | None = None
+        heartbeat_task: asyncio.Task[None] | None = None
+        if self._lease_policy.enabled and self._lease_store is not None:
+            lease = self._build_workflow_lease(workflow_message=workflow_message, context=context, stage=stage)
+            if not await self._lease_store.acquire(lease):
+                outcome = "failed"
+                await emit_observation(
+                    self._observation_sink,
+                    WorkflowStageFailed(
+                        consumer_name=self._consumer_name,
+                        queue_name=source_queue_name,
+                        stage=stage,
+                        routing_key=None,
+                        task_id=workflow_message.task_id,
+                        message_id=workflow_message.message_id,
+                        origin_stage=workflow_message.origin_stage,
+                        correlation_id=context.correlation_id,
+                        exception_type="LeaseConflict",
+                        exception_message="Workflow message lease is already owned.",
+                        requeue=True,
+                    ),
+                )
+                await message.reject(requeue=True)
+                if dedup_acquired and stage_config.dedup_key_fields and self._contract_store is not None:
+                    await self._cleanup_dedup_state(
+                        stage=stage,
+                        task_id=workflow_message.task_id,
+                        action=workflow_message.action,
+                        payload=workflow_message.payload,
+                        dedup_key_fields=stage_config.dedup_key_fields,
+                    )
+                if self._metrics is not None:
+                    self._metrics.record_task_finished(
+                        outcome="failed",
+                        stage=stage,
+                        queue=source_queue_name,
+                        worker_type="workflow",
+                        duration_seconds=time.perf_counter() - started_at,
+                    )
+                return False
+            heartbeat_task = asyncio.create_task(self._heartbeat_lease(lease.lease_id))
         try:
             timeout_seconds = stage_config.timeout_seconds
             if timeout_seconds is None:
@@ -386,12 +436,28 @@ class WorkflowConsumer:
                     requeue=False,
                 ),
             )
-            if retry_policy is None:
+            decision = self._policy_engine.decide_retry(
+                RetryDecisionContext(
+                    worker_type="workflow",
+                    queue_name=source_queue_name,
+                    retry_attempt=context.retry_attempt,
+                    reason="stage_timeout",
+                    exception_type=type(exc).__name__,
+                    task_id=workflow_message.task_id,
+                    task_type=workflow_message.action,
+                    workflow_stage=stage,
+                    headers=dict(context.headers),
+                    max_retries=retry_policy.max_retries if retry_policy is not None else None,
+                ),
+            )
+            if decision.action is RetryDecisionAction.REJECT:
                 await message.reject(requeue=False)
                 return False
-            max_retries = retry_policy.max_retries
-            if context.retry_attempt < max_retries:
-                next_attempt = context.retry_attempt + 1
+            if decision.action is RetryDecisionAction.RETRY:
+                next_attempt = decision.retry_attempt
+                max_retries = decision.max_retries
+                if max_retries is None:
+                    raise RuntimeError("Retry decision is missing max_retries") from None
                 if self._metrics is not None:
                     self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
@@ -401,11 +467,15 @@ class WorkflowConsumer:
                     task_id=workflow_message.task_id,
                     retry_attempt=next_attempt,
                     max_retries=max_retries,
-                    reason="stage_timeout",
+                    reason=decision.reason,
                     exception_type=type(exc).__name__,
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
+            if decision.action is not RetryDecisionAction.DEAD_LETTER:
+                raise RuntimeError(f"Unsupported retry decision action: {decision.action}") from None
+            if retry_policy is None:
+                raise RuntimeError("Dead-letter retry decision is missing retry policy") from None
             if self._metrics is not None:
                 self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
@@ -413,8 +483,8 @@ class WorkflowConsumer:
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=workflow_message.task_id,
-                retry_attempt=context.retry_attempt,
-                reason="stage_timeout",
+                retry_attempt=decision.retry_attempt,
+                reason=decision.reason,
                 exception_type=type(exc).__name__,
                 retry_policy=retry_policy,
             )
@@ -438,13 +508,29 @@ class WorkflowConsumer:
                     requeue=False,
                 ),
             )
-            if retry_policy is None:
+            decision = self._policy_engine.decide_retry(
+                RetryDecisionContext(
+                    worker_type="workflow",
+                    queue_name=source_queue_name,
+                    retry_attempt=context.retry_attempt,
+                    reason="handler_error",
+                    exception_type=type(exc).__name__,
+                    task_id=workflow_message.task_id,
+                    task_type=workflow_message.action,
+                    workflow_stage=stage,
+                    headers=dict(context.headers),
+                    max_retries=retry_policy.max_retries if retry_policy is not None else None,
+                ),
+            )
+            if decision.action is RetryDecisionAction.REJECT:
                 await message.reject(requeue=False)
                 return False
 
-            max_retries = retry_policy.max_retries
-            if context.retry_attempt < max_retries:
-                next_attempt = context.retry_attempt + 1
+            if decision.action is RetryDecisionAction.RETRY:
+                next_attempt = decision.retry_attempt
+                max_retries = decision.max_retries
+                if max_retries is None:
+                    raise RuntimeError("Retry decision is missing max_retries") from None
                 if self._metrics is not None:
                     self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
@@ -454,12 +540,16 @@ class WorkflowConsumer:
                     task_id=workflow_message.task_id,
                     retry_attempt=next_attempt,
                     max_retries=max_retries,
-                    reason="handler_error",
+                    reason=decision.reason,
                     exception_type=type(exc).__name__,
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
 
+            if decision.action is not RetryDecisionAction.DEAD_LETTER:
+                raise RuntimeError(f"Unsupported retry decision action: {decision.action}") from None
+            if retry_policy is None:
+                raise RuntimeError("Dead-letter retry decision is missing retry policy") from None
             if self._metrics is not None:
                 self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
@@ -467,8 +557,8 @@ class WorkflowConsumer:
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=workflow_message.task_id,
-                retry_attempt=context.retry_attempt,
-                reason="handler_error",
+                retry_attempt=decision.retry_attempt,
+                reason=decision.reason,
                 exception_type=type(exc).__name__,
                 retry_policy=retry_policy,
             )
@@ -491,6 +581,14 @@ class WorkflowConsumer:
                     worker_type="workflow",
                     duration_seconds=time.perf_counter() - started_at,
                 )
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+            if lease is not None and self._lease_store is not None:
+                await self._lease_store.release(lease.lease_id, owner_id=self._lease_owner_id)
 
         await emit_observation(
             self._observation_sink,
@@ -506,6 +604,37 @@ class WorkflowConsumer:
             ),
         )
         return True
+
+    def _build_workflow_lease(
+        self, *, workflow_message: WorkflowEnvelope, context: WorkflowContext, stage: str
+    ) -> TaskLease:
+        now = datetime.now(UTC)
+        lease_id = workflow_message.message_id or f"{workflow_message.task_id}:{stage}"
+        return TaskLease(
+            lease_id=lease_id,
+            task_id=workflow_message.task_id,
+            message_id=workflow_message.message_id,
+            task_type=workflow_message.action,
+            stage=stage,
+            owner_id=self._lease_owner_id,
+            consumer_name=self._consumer_name,
+            attempt=context.retry_attempt,
+            acquired_at=now,
+            heartbeat_at=now,
+            expires_at=now + timedelta(seconds=self._lease_policy.ttl_seconds),
+            recovery_action=self._lease_policy.recovery_action,
+        )
+
+    async def _heartbeat_lease(self, lease_id: str) -> None:
+        if self._lease_store is None:
+            return
+        while True:
+            await asyncio.sleep(self._lease_policy.heartbeat_interval_seconds)
+            await self._lease_store.heartbeat(
+                lease_id,
+                owner_id=self._lease_owner_id,
+                expires_at=datetime.now(UTC) + timedelta(seconds=self._lease_policy.ttl_seconds),
+            )
 
     async def _publish_retry_status(self, context: WorkflowContext, *, next_attempt: int, max_retries: int) -> None:
         if not self._retry_statuses.enabled:

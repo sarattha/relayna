@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from opentelemetry.trace import SpanKind
@@ -32,7 +33,9 @@ from ..observability import (
     emit_observation,
 )
 from ..observability.tracing import relayna_span
+from ..policies import RetryDecisionAction, RetryDecisionContext, RuntimePolicyEngine
 from ..rabbitmq import RelaynaRabbitClient, RetryInfrastructure
+from ..storage import LeasePolicy, TaskLease, TaskLeaseStore
 from ..topology import RoutedTasksSharedStatusTopology
 from .context import (
     AggregationHandler,
@@ -78,6 +81,9 @@ class TaskConsumer:
         dlq_store: DLQRecorder | None = None,
         alias_config: ContractAliasConfig | None = None,
         metrics: RelaynaMetrics | None = None,
+        lease_store: TaskLeaseStore | None = None,
+        lease_policy: LeasePolicy | None = None,
+        lease_owner_id: str | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._handler = handler
@@ -94,6 +100,10 @@ class TaskConsumer:
         self._dlq_store = dlq_store
         self._alias_config = alias_config or getattr(rabbitmq, "alias_config", None)
         self._metrics = metrics or getattr(rabbitmq, "metrics", None)
+        self._lease_store = lease_store
+        self._lease_policy = lease_policy or LeasePolicy()
+        self._lease_owner_id = lease_owner_id or consumer_name
+        self._policy_engine = RuntimePolicyEngine()
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -294,7 +304,7 @@ class TaskConsumer:
         context = self._make_task_context(
             task=task, raw_payload=dict(normalized_payload), message=message, source_queue_name=source_queue_name
         )
-        success = await self._process_task(
+        success = await self._process_task_with_lease(
             task=task,
             context=context,
             message=message,
@@ -476,7 +486,21 @@ class TaskConsumer:
                     requeue=self._retry_policy is None and self._failure_action is FailureAction.REQUEUE,
                 ),
             )
-            if self._retry_policy is None:
+            decision = self._policy_engine.decide_retry(
+                RetryDecisionContext(
+                    worker_type="task",
+                    queue_name=source_queue_name,
+                    retry_attempt=context.retry_attempt,
+                    reason="handler_error",
+                    exception_type=type(exc).__name__,
+                    task_id=task.task_id,
+                    task_type=task.task_type,
+                    headers=dict(context.headers),
+                    max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
+                    failure_action=self._failure_action.value,
+                ),
+            )
+            if decision.action in {RetryDecisionAction.REJECT, RetryDecisionAction.REQUEUE}:
                 failed_message = _failure_message(
                     exc, include_error_message=self._lifecycle_statuses.include_error_message
                 )
@@ -501,9 +525,11 @@ class TaskConsumer:
                     )
                 return False
 
-            max_retries = self._retry_policy.max_retries
-            if context.retry_attempt < max_retries:
-                next_attempt = context.retry_attempt + 1
+            if decision.action is RetryDecisionAction.RETRY:
+                next_attempt = decision.retry_attempt
+                max_retries = decision.max_retries
+                if max_retries is None:
+                    raise RuntimeError("Retry decision is missing max_retries") from None
                 if self._metrics is not None:
                     self._metrics.record_task_retry(
                         stage=task.task_type,
@@ -517,7 +543,7 @@ class TaskConsumer:
                     task_id=task.task_id,
                     retry_attempt=next_attempt,
                     max_retries=max_retries,
-                    reason="handler_error",
+                    reason=decision.reason,
                     exception_type=type(exc).__name__,
                     body=retry_body,
                     correlation_id=retry_correlation_id,
@@ -528,6 +554,8 @@ class TaskConsumer:
                     await message.ack()
                 return False
 
+            if decision.action is not RetryDecisionAction.DEAD_LETTER:
+                raise RuntimeError(f"Unsupported retry decision action: {decision.action}") from None
             if self._metrics is not None:
                 self._metrics.record_task_dlq(stage=task.task_type, queue=source_queue_name, worker_type="task")
             await self._publish_dead_letter(
@@ -535,8 +563,8 @@ class TaskConsumer:
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=task.task_id,
-                retry_attempt=context.retry_attempt,
-                reason="handler_error",
+                retry_attempt=decision.retry_attempt,
+                reason=decision.reason,
                 exception_type=type(exc).__name__,
                 body=retry_body,
                 correlation_id=retry_correlation_id,
@@ -559,6 +587,98 @@ class TaskConsumer:
                     worker_type="task",
                     duration_seconds=time.perf_counter() - started_at,
                 )
+
+    async def _process_task_with_lease(
+        self,
+        *,
+        task: TaskEnvelope,
+        context: TaskContext,
+        message: Any,
+        retry_infrastructure: RetryInfrastructure | None,
+        source_queue_name: str,
+        ack_message: bool = True,
+        retry_body: bytes | None = None,
+        retry_correlation_id: str | None = None,
+        retry_headers: Mapping[str, Any] | None = None,
+    ) -> bool:
+        if not self._lease_policy.enabled or self._lease_store is None:
+            return await self._process_task(
+                task=task,
+                context=context,
+                message=message,
+                retry_infrastructure=retry_infrastructure,
+                source_queue_name=source_queue_name,
+                ack_message=ack_message,
+                retry_body=retry_body,
+                retry_correlation_id=retry_correlation_id,
+                retry_headers=retry_headers,
+            )
+
+        lease = self._build_task_lease(task=task, context=context)
+        if not await self._lease_store.acquire(lease):
+            await emit_observation(
+                self._observation_sink,
+                TaskMessageRejected(
+                    consumer_name=self._consumer_name,
+                    queue_name=source_queue_name,
+                    task_id=task.task_id,
+                    correlation_id=context.correlation_id,
+                    retry_attempt=context.retry_attempt,
+                    task_type=task.task_type,
+                    requeue=True,
+                    reason="lease_conflict",
+                ),
+            )
+            if ack_message:
+                await message.reject(requeue=True)
+            return False
+
+        heartbeat_task = asyncio.create_task(self._heartbeat_lease(lease.lease_id))
+        try:
+            return await self._process_task(
+                task=task,
+                context=context,
+                message=message,
+                retry_infrastructure=retry_infrastructure,
+                source_queue_name=source_queue_name,
+                ack_message=ack_message,
+                retry_body=retry_body,
+                retry_correlation_id=retry_correlation_id,
+                retry_headers=retry_headers,
+            )
+        finally:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
+            await self._lease_store.release(lease.lease_id, owner_id=self._lease_owner_id)
+
+    def _build_task_lease(self, *, task: TaskEnvelope, context: TaskContext) -> TaskLease:
+        now = datetime.now(UTC)
+        return TaskLease(
+            lease_id=task.task_id,
+            task_id=task.task_id,
+            task_type=task.task_type,
+            owner_id=self._lease_owner_id,
+            consumer_name=self._consumer_name,
+            attempt=context.retry_attempt,
+            acquired_at=now,
+            heartbeat_at=now,
+            expires_at=now + timedelta(seconds=self._lease_policy.ttl_seconds),
+            recovery_action=self._lease_policy.recovery_action,
+        )
+
+    async def _heartbeat_lease(self, lease_id: str) -> None:
+        if self._lease_store is None:
+            return
+        while True:
+            await asyncio.sleep(self._lease_policy.heartbeat_interval_seconds)
+            await self._lease_store.heartbeat(
+                lease_id,
+                owner_id=self._lease_owner_id,
+                expires_at=datetime.now(UTC) + timedelta(seconds=self._lease_policy.ttl_seconds),
+            )
 
     async def _emit_task_resource_sample(
         self,

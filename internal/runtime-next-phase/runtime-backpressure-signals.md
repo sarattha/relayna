@@ -21,11 +21,13 @@ runtime policies can consume.
 ## Progress
 
 - [x] (2026-05-20) Created future implementation plan.
-- [ ] Confirm freeze boundary and implementation strategy before code changes.
-- [ ] Inventory current metrics, observations, health, DLQ, and RabbitMQ
-  management surfaces.
-- [ ] Define pressure signal model and severity thresholds.
-- [ ] Implement signal collection, API exposure, tests, and Studio views.
+- [x] (2026-05-21) Confirmed freeze boundary and implementation strategy before
+  code changes.
+- [x] (2026-05-21) Inventoried current metrics, observations, health, DLQ,
+  task lease, and RabbitMQ inspection surfaces.
+- [x] (2026-05-21) Defined pressure signal model and severity thresholds.
+- [x] (2026-05-21) Implemented signal collection, API exposure, tests, and
+  Studio federation.
 
 ## Surprises & Discoveries
 
@@ -35,6 +37,11 @@ runtime policies can consume.
 - Observation: Studio planning already expects Prometheus metrics and exact
   runtime observations.
   Evidence: `internal/studio-observability-log-metrics-plan.md`.
+- Observation: The first task lease implementation already adds worker health
+  lease summaries that can feed pressure signals.
+  Evidence: `src/relayna/api/health_routes.py` includes active lease summaries,
+  and `studio/backend/src/relayna_studio/health.py` treats expired active leases
+  as stale worker health.
 
 ## Decision Log
 
@@ -47,10 +54,20 @@ runtime policies can consume.
   Rationale: Observability-first delivery reduces risk during the production
   freeze and gives operators a baseline before policies act on the signals.
   Date/Author: 2026-05-20 / Codex.
+- Decision: Add SDK and Studio read-only routes in the first implementation.
+  Rationale: Operators need an immediately consumable structured surface, and
+  the route/federation additions are additive under the approved freeze
+  perimeter.
+  Date/Author: 2026-05-21 / Codex.
 
 ## Outcomes & Retrospective
 
-Planning only. No runtime behavior has changed.
+Implemented read-only runtime backpressure signals. Relayna now has structured
+pressure signal models, collectors for queues, workers, leases, and DLQs, a
+runtime backpressure route/capability, low-cardinality Prometheus pressure
+metrics, and Studio federation for service-level backpressure snapshots.
+Runtime enforcement remains out of scope; no throttling or retry behavior
+changed.
 
 ## Context and Orientation
 
@@ -192,4 +209,3 @@ Potential SDK interfaces:
 Potential route:
 
 - `GET /runtime/backpressure`
-

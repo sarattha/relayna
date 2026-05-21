@@ -9,10 +9,27 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 
+class TaskLeaseHealthSummary(BaseModel):
+    lease_id: str
+    task_id: str
+    owner_id: str
+    consumer_name: str
+    heartbeat_at: datetime
+    expires_at: datetime
+    expired: bool = False
+    message_id: str | None = None
+    task_type: str | None = None
+    stage: str | None = None
+    attempt: int = 0
+    acquired_at: datetime | None = None
+    recovery_action: str | None = None
+
+
 class WorkerHeartbeatSummary(BaseModel):
     worker_name: str
     running: bool
     last_heartbeat_at: datetime | None = None
+    active_leases: list[TaskLeaseHealthSummary] = Field(default_factory=list)
 
 
 class WorkerHeartbeatListResponse(BaseModel):
@@ -53,6 +70,7 @@ def create_worker_health_router(
 
 
 __all__ = [
+    "TaskLeaseHealthSummary",
     "WorkerHeartbeatListResponse",
     "WorkerHeartbeatProvider",
     "WorkerHeartbeatSummary",

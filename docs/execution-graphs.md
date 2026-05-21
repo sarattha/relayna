@@ -179,6 +179,9 @@ Each node carries:
 - `task_id`
 - `label`
 - `timestamp`
+- `state`
+- `state_reason`
+- `updated_at`
 - `annotations`
 
 Common annotations include:
@@ -224,7 +227,42 @@ Each edge carries:
 - `target`
 - `kind`
 - `timestamp`
+- `state`
+- `state_reason`
 - `annotations`
+
+## Live State Fields
+
+Execution graph nodes and edges include live state fields so API clients and
+Studio can render whether a path is pending, running, retrying, completed,
+failed, or dead-lettered.
+
+State is derived from the best available durable evidence:
+
+- received observations mark attempts and stages as running
+- status events update task and attempt state to processing, retrying,
+  completed, failed, or manual retrying
+- retry observations add retry nodes and mark retry edges as retry paths
+- DLQ observations and persisted DLQ records mark terminal dead-letter state
+- missing observations still produce partial state from status and DLQ data
+
+Example node fragment:
+
+```json
+{
+  "id": "task-attempt:task-123:2",
+  "kind": "task_attempt",
+  "task_id": "task-123",
+  "label": "task-123 attempt 2",
+  "state": "retrying",
+  "state_reason": "retry_scheduled",
+  "updated_at": "2026-05-21T10:00:03+00:00",
+  "annotations": {
+    "retry_attempt": 2,
+    "queue_name": "orders.tasks.queue.retry"
+  }
+}
+```
 
 ## Topology-specific behavior
 

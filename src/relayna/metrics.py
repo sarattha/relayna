@@ -16,7 +16,7 @@ from prometheus_client import (
     start_http_server,
 )
 
-ALLOWED_METRIC_LABELS = frozenset({"service", "stage", "queue", "status", "worker_type"})
+ALLOWED_METRIC_LABELS = frozenset({"service", "stage", "queue", "status", "worker_type", "scope", "kind", "severity"})
 HIGH_CARDINALITY_METRIC_LABELS = frozenset(
     {"task_id", "correlation_id", "request_id", "worker_id", "pod", "pod_name", "container", "message_id"}
 )
@@ -132,6 +132,12 @@ class RelaynaMetrics:
             "relayna_observation_events_total",
             "Relayna observation events emitted.",
             ("service", "stage", "queue", "status", "worker_type"),
+            registry=self.registry,
+        )
+        self.runtime_pressure = Gauge(
+            "relayna_runtime_pressure_signal",
+            "Relayna runtime pressure signal value.",
+            ("service", "scope", "kind", "severity"),
             registry=self.registry,
         )
 
@@ -250,6 +256,21 @@ class RelaynaMetrics:
         self.worker_heartbeat.labels(**self.worker_labels(stage=stage, queue=queue, worker_type=worker_type)).set(
             time.time()
         )
+
+    def record_pressure_signal(
+        self,
+        *,
+        scope: str,
+        kind: str,
+        severity: str,
+        value: float | int | None = None,
+    ) -> None:
+        self.runtime_pressure.labels(
+            service=self.service,
+            scope=_label(scope),
+            kind=_label(kind),
+            severity=_label(severity),
+        ).set(0.0 if value is None else float(value))
 
 
 def create_metrics_router(metrics: RelaynaMetrics, *, prefix: str = "") -> APIRouter:

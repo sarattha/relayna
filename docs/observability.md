@@ -13,7 +13,9 @@ execution; those live in `relayna.status`, `relayna.api`, and
 `relayna.consumer`.
 
 It now also owns the persisted observation store and execution-graph
-reconstruction helpers that sit on top of those event streams.
+reconstruction helpers that sit on top of those event streams. Runtime pressure
+collectors also live here so services can expose queue, worker, and DLQ
+backpressure snapshots without adding task identity to Prometheus labels.
 
 For AKS deployments that use Relayna Studio, see
 [AKS observability stack](aks-observability.md) for the full Redis, RabbitMQ,
@@ -63,6 +65,7 @@ The SDK exports:
 - `relayna_queue_publish_total`
 - `relayna_status_events_published_total`
 - `relayna_observation_events_total`
+- `relayna_runtime_pressure_signal`
 
 Never add task identity as Prometheus labels. `task_id`, `correlation_id`,
 `request_id`, `worker_id`, `pod`, `pod_name`, `container`, and `message_id` are
@@ -90,6 +93,46 @@ start_metrics_http_server(runtime.metrics, port=8001)
 Exact per-task CPU and RSS samples are stored as Relayna observations around
 handler execution. Studio reads them from task detail/execution graph data; it
 does not query Prometheus by `task_id`.
+
+## Runtime pressure snapshots
+
+Runtime pressure snapshots are point-in-time operational signals, not automatic
+traffic throttles. Use `RuntimePressureService` with one or more collectors and
+mount `create_backpressure_router(...)` when you want an API route for Studio
+or operators:
+
+```python
+from relayna.api import create_backpressure_router
+from relayna.observability import QueuePressureCollector, RuntimePressureService
+
+
+def record_pressure(signal) -> None:
+    runtime.metrics.record_pressure_signal(
+        scope=signal.scope,
+        kind=signal.kind,
+        severity=signal.severity.value,
+        value=signal.value,
+    )
+
+
+pressure_service = RuntimePressureService(
+    collectors=[
+        QueuePressureCollector(
+            queue_names=["orders.tasks.queue"],
+            inspect_queue=runtime.rabbitmq.inspect_queue,
+            warning_depth=100,
+            critical_depth=1000,
+        )
+    ],
+    metrics_recorder=record_pressure,
+)
+
+app.include_router(create_backpressure_router(pressure_service=pressure_service))
+```
+
+The route returns `RuntimePressureSnapshot` with `normal`, `warning`,
+`critical`, or `unknown` signals. See [Runtime Controls](runtime-controls.md)
+for queue, worker, and DLQ collector examples.
 
 ## OpenTelemetry trace correlation
 

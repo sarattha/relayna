@@ -700,6 +700,7 @@ async def _persist_dlq_record(
                 headers=dict(headers),
                 content_type=content_type,
                 body=body,
+                consumer_name=consumer_name,
             )
         )
     except asyncio.CancelledError:

@@ -395,6 +395,129 @@ def test_studio_health_service_reports_stale_heartbeat() -> None:
     asyncio.run(scenario())
 
 
+def test_studio_health_service_reports_stale_active_task_lease() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        store = RedisServiceRegistryStore(redis)
+        registry = ServiceRegistryService(
+            store=store,
+            capability_fetcher=FakeCapabilityFetcher(
+                make_capability_document(supported_routes=["status.latest", "health.workers"])
+            ),
+        )
+        await store.create(make_record(status=ServiceStatus.HEALTHY))
+        event_store = RedisStudioEventStore(redis, ttl_seconds=60, history_maxlen=10)
+        await insert_service_event(
+            event_store,
+            service_id="payments-api",
+            source_kind=ServiceEventSourceKind.STATUS,
+            timestamp=datetime.now(UTC).isoformat(),
+        )
+        now = datetime.now(UTC)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/relayna/health/workers"
+            return httpx.Response(
+                200,
+                json={
+                    "reported_at": now.isoformat(),
+                    "workers": [
+                        {
+                            "worker_name": "worker-a",
+                            "running": True,
+                            "last_heartbeat_at": now.isoformat(),
+                            "active_leases": [
+                                {
+                                    "lease_id": "task-123",
+                                    "task_id": "task-123",
+                                    "owner_id": "worker-a",
+                                    "consumer_name": "worker-a",
+                                    "heartbeat_at": now.isoformat(),
+                                    "expires_at": (now - timedelta(seconds=1)).isoformat(),
+                                    "expired": True,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+        health = StudioHealthRefreshService(
+            registry_service=registry,
+            health_store=RedisStudioHealthStore(redis),
+            activity_reader=event_store,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+        document = await health.refresh_health("payments-api")
+        assert document.worker_health.state == "stale"
+        assert document.worker_health.workers[0].active_leases[0].task_id == "task-123"
+        assert document.overall_status == "stale"
+
+    asyncio.run(scenario())
+
+
+def test_studio_health_service_preserves_unhealthy_precedence_over_expired_lease() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        store = RedisServiceRegistryStore(redis)
+        registry = ServiceRegistryService(
+            store=store,
+            capability_fetcher=FakeCapabilityFetcher(
+                make_capability_document(supported_routes=["status.latest", "health.workers"])
+            ),
+        )
+        await store.create(make_record(status=ServiceStatus.HEALTHY))
+        event_store = RedisStudioEventStore(redis, ttl_seconds=60, history_maxlen=10)
+        await insert_service_event(
+            event_store,
+            service_id="payments-api",
+            source_kind=ServiceEventSourceKind.STATUS,
+            timestamp=datetime.now(UTC).isoformat(),
+        )
+        now = datetime.now(UTC)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/relayna/health/workers"
+            return httpx.Response(
+                200,
+                json={
+                    "reported_at": now.isoformat(),
+                    "workers": [
+                        {
+                            "worker_name": "worker-a",
+                            "running": False,
+                            "last_heartbeat_at": now.isoformat(),
+                            "active_leases": [
+                                {
+                                    "lease_id": "task-123",
+                                    "task_id": "task-123",
+                                    "owner_id": "worker-a",
+                                    "consumer_name": "worker-a",
+                                    "heartbeat_at": now.isoformat(),
+                                    "expires_at": (now - timedelta(seconds=1)).isoformat(),
+                                    "expired": True,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+        health = StudioHealthRefreshService(
+            registry_service=registry,
+            health_store=RedisStudioHealthStore(redis),
+            activity_reader=event_store,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+        document = await health.refresh_health("payments-api")
+        assert document.worker_health.state == "unhealthy"
+        assert document.overall_status == "degraded"
+
+    asyncio.run(scenario())
+
+
 def test_studio_health_service_accepts_naive_worker_heartbeat_timestamp() -> None:
     async def scenario() -> None:
         redis = FakeRedis()

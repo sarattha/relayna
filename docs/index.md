@@ -86,10 +86,11 @@ Use the v2 package roots by responsibility:
 - `relayna.observability` owns typed runtime observations, execution graph
   helpers, structured log helpers, Prometheus runtime metrics, and lightweight
   OpenTelemetry trace propagation.
+- `relayna.storage` owns public task lease models, Redis lease storage, expiry
+  scanning, and worker-health lease summaries.
+- `relayna.policies` owns runtime retry decision models and the default policy
+  engine.
 - `relayna.mcp` adapts Relayna runtime state into MCP resources and tools.
-
-`relayna.storage` is an internal support package. It backs the public runtime
-packages but is not itself a documented public API root.
 
 Studio deployment is packaged separately as `relayna-studio`.
 
@@ -98,6 +99,7 @@ Studio deployment is packaged separately as `relayna-studio`.
 - [Migration v1 to v2](migration-v1-to-v2.md)
 - [Getting started](getting-started.md)
 - [Observability](observability.md)
+- [Runtime controls](runtime-controls.md)
 - [AKS observability stack](aks-observability.md)
 - [Execution graphs](execution-graphs.md)
 - [Components](components.md)

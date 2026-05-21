@@ -15,6 +15,7 @@ from relayna.api import (
     BROKER_DLQ_MESSAGES_ROUTE_ID,
     DLQ_MESSAGES_ROUTE_ID,
     EXECUTION_GRAPH_ROUTE_ID,
+    RUNTIME_BACKPRESSURE_ROUTE_ID,
     STATUS_HISTORY_ROUTE_ID,
     STATUS_LATEST_ROUTE_ID,
     WORKFLOW_TOPOLOGY_ROUTE_ID,
@@ -46,6 +47,7 @@ SERVICE_WORKFLOW_TOPOLOGY_PATH = "/workflow/topology"
 SERVICE_DLQ_MESSAGES_PATH = "/dlq/messages"
 SERVICE_BROKER_DLQ_MESSAGES_PATH = "/broker/dlq/messages"
 SERVICE_EXECUTION_GRAPH_PATH = "/executions/{task_id}/graph"
+SERVICE_RUNTIME_BACKPRESSURE_PATH = "/relayna/runtime/backpressure"
 TASK_SEARCH_QUERY = Query(min_length=1)
 JOIN_MODE_QUERY = Query(default=JoinMode.NONE)
 
@@ -227,6 +229,10 @@ class StudioFederationService:
     async def get_service_execution_graph(self, service_id: str, task_id: str) -> dict[str, Any]:
         service = await self._get_proxyable_service(service_id)
         return await self._fetch_execution_graph(service, task_id)
+
+    async def get_service_runtime_backpressure(self, service_id: str) -> dict[str, Any]:
+        service = await self._get_proxyable_service(service_id)
+        return await self._fetch_runtime_backpressure(service)
 
     async def search_tasks(self, task_id: str, *, join: JoinMode = JoinMode.NONE) -> StudioTaskSearchResponse:
         normalized_task_id = task_id.strip()
@@ -677,6 +683,14 @@ class StudioFederationService:
             missing_route_404=self._missing_route_404_enabled(service),
         )
         return self._normalize_execution_graph_payload(service, payload, requested_task_id=task_id)
+
+    async def _fetch_runtime_backpressure(self, service: ServiceRecord) -> dict[str, Any]:
+        return await self._request_json(
+            service,
+            capability_id=RUNTIME_BACKPRESSURE_ROUTE_ID,
+            path=SERVICE_RUNTIME_BACKPRESSURE_PATH,
+            missing_route_404=True,
+        )
 
     def _normalize_status_payload(
         self,
@@ -1186,6 +1200,14 @@ def create_federation_router(
             return exc.to_response()
         return JSONResponse(payload)
 
+    @router.get(f"{prefix}/services/{{service_id}}/runtime/backpressure")
+    async def service_runtime_backpressure(service_id: str):
+        try:
+            payload = await federation_service.get_service_runtime_backpressure(service_id)
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(payload)
+
     @router.get(f"{prefix}/tasks/{{service_id}}/{{task_id}}", response_model=StudioTaskDetailResponse)
     async def task_detail(
         service_id: str,
@@ -1374,6 +1396,7 @@ __all__ = [
     "SERVICE_DLQ_MESSAGES_PATH",
     "SERVICE_EXECUTION_GRAPH_PATH",
     "SERVICE_HISTORY_PATH",
+    "SERVICE_RUNTIME_BACKPRESSURE_PATH",
     "SERVICE_STATUS_PATH",
     "SERVICE_WORKFLOW_TOPOLOGY_PATH",
     "StudioFederationError",
