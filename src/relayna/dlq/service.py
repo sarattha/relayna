@@ -101,6 +101,7 @@ class DLQService:
             body=record.body,
             latest_status=latest_status,
             status_history=status_history,
+            diagnosis=record.diagnosis,
         )
 
     async def list_broker_messages(

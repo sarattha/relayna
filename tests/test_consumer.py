@@ -1633,6 +1633,13 @@ async def test_task_consumer_indexes_dead_lettered_messages() -> None:
     assert record.body == {"task_id": "task-123", "payload": {"kind": "demo"}}
     assert record.body_encoding == "json"
     assert record.headers["x-relayna-source-queue"] == "tasks.queue"
+    assert record.diagnosis is not None
+    assert record.diagnosis.failure.reason == "handler_error"
+    assert record.diagnosis.failure.exception_type == "RuntimeError"
+    assert record.diagnosis.retry.attempt == 3
+    assert record.diagnosis.retry.max_retries == 3
+    assert record.diagnosis.ownership.consumer_name == "relayna-task-consumer"
+    assert record.diagnosis.ownership.task_id == "task-123"
 
 
 @pytest.mark.asyncio
@@ -2434,6 +2441,53 @@ async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure()
     assert rabbit.published_statuses[0]["status"] == "retrying"
     stage_failed = next(event for event in observations if isinstance(event, WorkflowStageFailed))
     assert stage_failed.exception_message == "workflow failed"
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_indexes_dead_lettered_messages_with_diagnosis() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-123",
+                "message_id": "msg-123",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "action": "collect",
+                "payload": {"docs": ["a"]},
+            }
+        ).encode("utf-8"),
+        correlation_id="corr-123",
+        headers={"x-relayna-retry-attempt": 3},
+    )
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[channel])
+    dlq_store = FakeDLQStore()
+
+    async def handler(workflow: WorkflowEnvelope, context: WorkflowContext) -> None:
+        raise RuntimeError("workflow failed")
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
+        dlq_store=dlq_store,
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert len(dlq_store.records) == 1
+    record = dlq_store.records[0]
+    assert record.queue_name == "cq.docsearch_planner.in_queue.dlq"
+    assert record.reason == "handler_error"
+    assert record.diagnosis is not None
+    assert record.diagnosis.failure.exception_type == "RuntimeError"
+    assert record.diagnosis.retry.attempt == 3
+    assert record.diagnosis.ownership.consumer_name == "relayna-workflow-consumer"
+    assert record.diagnosis.envelope.workflow_stage == "docsearch_planner"
+    assert record.diagnosis.envelope.action == "collect"
 
 
 @pytest.mark.asyncio

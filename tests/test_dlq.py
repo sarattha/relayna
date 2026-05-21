@@ -167,6 +167,31 @@ def make_record(
     )
 
 
+def test_dlq_record_builds_structured_diagnosis() -> None:
+    record = make_record()
+
+    assert record.diagnosis is not None
+    assert record.diagnosis.failure.reason == "handler_error"
+    assert record.diagnosis.failure.exception_type == "RuntimeError"
+    assert record.diagnosis.failure.terminal_retry_attempt == 2
+    assert record.diagnosis.retry.source_queue_name == "tasks.queue"
+    assert record.diagnosis.retry.retry_queue_name == "tasks.queue.retry"
+    assert record.diagnosis.ownership.task_id == "task-123"
+    assert record.diagnosis.envelope.body_encoding == "json"
+    assert "Message reached the configured retry limit." in record.diagnosis.replay.warnings
+
+
+def test_dlq_record_still_validates_without_diagnosis() -> None:
+    record = make_record()
+    payload = record.model_dump(mode="json")
+    payload.pop("diagnosis", None)
+
+    restored = type(record).model_validate(payload)
+
+    assert restored.diagnosis is None
+    assert restored.dlq_id == record.dlq_id
+
+
 @pytest.mark.asyncio
 async def test_redis_dlq_store_lists_filters_and_marks_replayed() -> None:
     redis = FakeRedis()
@@ -197,6 +222,7 @@ async def test_redis_dlq_store_lists_filters_and_marks_replayed() -> None:
     assert updated is not None
     assert updated.state == DLQRecordState.REPLAYED
     assert updated.replay_count == 1
+    assert updated.diagnosis == record_b.diagnosis
 
     replayed_only, _ = await store.list_records(state=DLQRecordState.REPLAYED, limit=10)
     assert [record.dlq_id for record in replayed_only] == [record_b.dlq_id]
@@ -266,6 +292,7 @@ async def test_dlq_service_detail_and_queue_summary_use_status_store_and_rabbitm
         {"task_id": "task-123", "status": "failed"},
         {"task_id": "task-123", "status": "retrying"},
     ]
+    assert detail.diagnosis == record.diagnosis
     assert queue_summaries[0].queue_name == "tasks.queue.dlq"
     assert queue_summaries[0].indexed_count == 1
     assert queue_summaries[0].exists is True
