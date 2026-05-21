@@ -390,6 +390,88 @@ def test_service_broker_dlq_messages_returns_unsupported_route_when_capability_m
     }
 
 
+def test_service_runtime_backpressure_proxies_supported_service(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/relayna/runtime/backpressure":
+            return httpx.Response(
+                200,
+                json={
+                    "reported_at": "2026-05-21T00:00:00Z",
+                    "signals": [
+                        {
+                            "scope": "queue",
+                            "scope_id": "tasks.queue",
+                            "kind": "queue_depth_high",
+                            "severity": "warning",
+                            "value": 25,
+                            "threshold": 10,
+                            "observed_at": "2026-05-21T00:00:00Z",
+                        }
+                    ],
+                },
+            )
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=["runtime.backpressure"]),
+            ),
+        )
+
+        response = client.get("/studio/services/payments-api/runtime/backpressure")
+
+    assert response.status_code == 200
+    assert response.json()["service_id"] == "payments-api"
+    assert response.json()["signals"][0]["kind"] == "queue_depth_high"
+
+
+def test_service_runtime_backpressure_returns_unsupported_route_when_capability_missing(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        push_ingest_enabled=True,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=["status.latest"]),
+            ),
+        )
+
+        response = client.get("/studio/services/payments-api/runtime/backpressure")
+
+    assert response.status_code == 501
+    assert response.json()["code"] == "unsupported_route"
+    assert "runtime.backpressure" in response.json()["detail"]
+
+
 def test_task_search_returns_retained_indexed_matches(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 

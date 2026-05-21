@@ -1,5 +1,16 @@
 from . import events as _events
 from .alerts import detect_stage_alerts
+from .backpressure import (
+    DLQPressureCollector,
+    PressureSeverity,
+    PressureSignalCollector,
+    QueuePressureCollector,
+    RuntimePressureService,
+    RuntimePressureSignal,
+    RuntimePressureSnapshot,
+    WorkerHealthPressureCollector,
+    severity_for_thresholds,
+)
 from .collectors import AsyncQueueObservationCollector, MemoryObservationCollector
 from .events import *  # noqa: F401,F403
 from .execution_graph import (
@@ -50,16 +61,23 @@ from .tracing import (
 
 __all__ = [
     "AsyncQueueObservationCollector",
+    "DLQPressureCollector",
     "ExecutionGraph",
     "ExecutionGraphEdge",
     "ExecutionGraphNode",
     "ExecutionGraphService",
     "ExecutionGraphSummary",
     "MemoryObservationCollector",
+    "PressureSeverity",
+    "PressureSignalCollector",
+    "QueuePressureCollector",
     "RedisObservationStore",
     "RedisServiceEventFeedStore",
     "RelaynaServiceEvent",
     "RelaynaServiceEventFeedResponse",
+    "RuntimePressureService",
+    "RuntimePressureSignal",
+    "RuntimePressureSnapshot",
     "RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS",
     "RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST",
     "RELAYNA_STUDIO_OPTIONAL_LOG_FIELDS",
@@ -73,6 +91,7 @@ __all__ = [
     "TRACE_HEADERS",
     "TRACEPARENT_HEADER",
     "TRACESTATE_HEADER",
+    "WorkerHealthPressureCollector",
     "active_trace_fields",
     "bind_studio_log_context",
     "build_execution_graph",
@@ -91,6 +110,7 @@ __all__ = [
     "normalize_status_feed_event",
     "observation_to_studio_log_fields",
     "relayna_span",
+    "severity_for_thresholds",
     "span_trace_fields",
     "validate_studio_log_fields",
     *_events.__all__,

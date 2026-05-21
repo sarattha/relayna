@@ -1,4 +1,5 @@
 from ..metrics import RelaynaMetrics, create_metrics_router, start_metrics_http_server
+from .backpressure_routes import create_backpressure_router
 from .capabilities_routes import (
     ALL_CAPABILITY_ROUTE_IDS,
     BROKER_DLQ_CAPABILITY_ROUTE_IDS,
@@ -14,6 +15,8 @@ from .capabilities_routes import (
     EXECUTION_GRAPH_ROUTE_ID,
     HEALTH_CAPABILITY_ROUTE_IDS,
     HEALTH_WORKERS_ROUTE_ID,
+    RUNTIME_BACKPRESSURE_ROUTE_ID,
+    RUNTIME_CAPABILITY_ROUTE_IDS,
     STATUS_CAPABILITY_ROUTE_IDS,
     STATUS_EVENTS_ROUTE_ID,
     STATUS_HISTORY_ROUTE_ID,
@@ -57,6 +60,8 @@ __all__ = [
     "EXECUTION_GRAPH_ROUTE_ID",
     "HEALTH_CAPABILITY_ROUTE_IDS",
     "HEALTH_WORKERS_ROUTE_ID",
+    "RUNTIME_BACKPRESSURE_ROUTE_ID",
+    "RUNTIME_CAPABILITY_ROUTE_IDS",
     "AliasConfigSummary",
     "CapabilityDocument",
     "CapabilityServiceMetadata",
@@ -77,6 +82,7 @@ __all__ = [
     "WORKFLOW_TOPOLOGY_ROUTE_ID",
     "build_capability_document",
     "build_legacy_fallback_capability_document",
+    "create_backpressure_router",
     "create_capabilities_router",
     "create_dlq_router",
     "create_events_router",
