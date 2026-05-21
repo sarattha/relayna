@@ -76,10 +76,23 @@ def test_build_execution_graph_shared_task_includes_retry_and_dlq_nodes() -> Non
     assert graph.summary.graph_completeness == "full"
     assert {"task", "task_attempt", "retry", "dlq_record", "status_event"} <= node_kinds
     assert {"received_by", "retried_as", "dead_lettered_to", "published_status"} <= edge_kinds
+    assert graph.summary.live_state_counts["dead_lettered"] >= 1
+    assert graph.summary.live_state_counts["retrying"] >= 1
+    assert graph.summary.live_state_counts["failed"] >= 1
     assert any(
         edge.kind == "received_by" and edge.source == "retry:task-123:1" and edge.target == "task-attempt:task-123:2"
         for edge in graph.edges
     )
+    retry_node = next(node for node in graph.nodes if node.kind == "retry")
+    dlq_node = next(node for node in graph.nodes if node.kind == "dlq_record")
+    retry_edge = next(edge for edge in graph.edges if edge.kind == "retried_as")
+    dlq_edge = next(edge for edge in graph.edges if edge.kind == "dead_lettered_to")
+    assert retry_node.state == "retrying"
+    assert retry_node.state_reason == "retry_scheduled"
+    assert dlq_node.state == "dead_lettered"
+    assert dlq_node.state_reason == "dlq_recorded"
+    assert retry_edge.state == "retry_path"
+    assert dlq_edge.state == "blocked"
 
 
 def test_build_execution_graph_workflow_tracks_stage_transitions() -> None:
@@ -153,6 +166,11 @@ def test_build_execution_graph_workflow_tracks_stage_transitions() -> None:
     assert graph.topology_kind == "shared_status_workflow"
     assert {"workflow_message", "stage_attempt", "status_event"} <= node_kinds
     assert {"entered_stage", "stage_transitioned_to", "published_status"} <= edge_kinds
+    assert graph.summary.live_state_counts["succeeded"] >= 1
+    stage_attempt = next(node for node in graph.nodes if node.kind == "stage_attempt" and "writer" in node.id)
+    transition_edge = next(edge for edge in graph.edges if edge.kind == "stage_transitioned_to")
+    assert stage_attempt.state == "succeeded"
+    assert transition_edge.state == "traversed"
 
 
 def test_build_execution_graph_returns_partial_when_observations_are_missing() -> None:
@@ -176,7 +194,50 @@ def test_build_execution_graph_returns_partial_when_observations_are_missing() -
     )
 
     assert graph.summary.graph_completeness == "partial"
+    assert graph.summary.live_state_counts == {"succeeded": 2}
     assert [node.kind for node in graph.nodes] == ["task", "status_event"]
+
+
+def test_build_execution_graph_marks_replayed_dlq_records() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+
+    graph = build_execution_graph(
+        topology=topology,
+        task_id="task-123",
+        status_histories={},
+        observation_histories={},
+        dlq_records={
+            "task-123": [
+                {
+                    "dlq_id": "dlq-1",
+                    "queue_name": "tasks.queue.dlq",
+                    "source_queue_name": "tasks.queue",
+                    "retry_queue_name": "tasks.queue.retry",
+                    "task_id": "task-123",
+                    "reason": "handler_error",
+                    "retry_attempt": 3,
+                    "max_retries": 3,
+                    "body_encoding": "json",
+                    "dead_lettered_at": "2026-04-06T10:00:03+00:00",
+                    "state": "replayed",
+                    "replayed_at": "2026-04-06T10:05:00+00:00",
+                }
+            ]
+        },
+    )
+
+    dlq_node = next(node for node in graph.nodes if node.kind == "dlq_record")
+    assert dlq_node.state == "replayed"
+    assert dlq_node.state_reason == "dlq_replayed"
+    assert dlq_node.updated_at == "2026-04-06T10:05:00+00:00"
+    assert graph.summary.live_state_counts["replayed"] == 1
 
 
 def test_create_execution_router_supports_alias_task_id_path() -> None:
@@ -187,8 +248,20 @@ def test_create_execution_router_supports_alias_task_id_path() -> None:
             return ExecutionGraph(
                 task_id=task_id,
                 topology_kind="shared_tasks_shared_status",
-                summary={"status": "completed", "graph_completeness": "partial"},
-                nodes=[],
+                summary={
+                    "status": "completed",
+                    "graph_completeness": "partial",
+                    "live_state_counts": {"succeeded": 1},
+                },
+                nodes=[
+                    {
+                        "id": "task:task-123",
+                        "kind": "task",
+                        "state": "succeeded",
+                        "state_reason": "latest_status:completed",
+                        "updated_at": "2026-04-06T10:00:01+00:00",
+                    }
+                ],
                 edges=[],
                 related_task_ids=[],
             )
@@ -207,6 +280,8 @@ def test_create_execution_router_supports_alias_task_id_path() -> None:
 
     assert response.status_code == 200
     assert response.json()["attempt_id"] == "task-123"
+    assert response.json()["summary"]["live_state_counts"] == {"succeeded": 1}
+    assert response.json()["nodes"][0]["state"] == "succeeded"
 
 
 def test_execution_graph_mermaid_renders_nodes_and_edges() -> None:

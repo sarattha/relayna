@@ -198,9 +198,32 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
                 json={
                     "task_id": "task-123",
                     "topology_kind": "shared_tasks_shared_status",
-                    "summary": {"status": "completed", "graph_completeness": "full"},
-                    "nodes": [],
-                    "edges": [],
+                    "summary": {
+                        "status": "completed",
+                        "graph_completeness": "full",
+                        "live_state_counts": {"succeeded": 1},
+                    },
+                    "nodes": [
+                        {
+                            "id": "task:task-123",
+                            "kind": "task",
+                            "task_id": "task-123",
+                            "state": "succeeded",
+                            "state_reason": "latest_status:completed",
+                            "updated_at": "2026-04-06T10:00:01+00:00",
+                            "annotations": {},
+                        }
+                    ],
+                    "edges": [
+                        {
+                            "source": "task:task-123",
+                            "target": "status:task-123:1",
+                            "kind": "published_status",
+                            "state": "traversed",
+                            "state_reason": "published_status",
+                            "updated_at": "2026-04-06T10:00:01+00:00",
+                        }
+                    ],
                     "annotations": {},
                     "related_task_ids": [],
                 },
@@ -260,6 +283,9 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
         assert history_response.json()["events"][0]["task_ref"]["task_id"] == "task-123"
         assert graph_response.json()["service_id"] == "payments-api"
         assert graph_response.json()["task_ref"]["task_id"] == "task-123"
+        assert graph_response.json()["summary"]["live_state_counts"] == {"succeeded": 1}
+        assert graph_response.json()["nodes"][0]["state"] == "succeeded"
+        assert graph_response.json()["edges"][0]["state"] == "traversed"
 
 
 def test_service_broker_dlq_messages_proxy_and_normalize_task_refs(monkeypatch) -> None:

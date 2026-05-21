@@ -22,6 +22,9 @@ class ExecutionGraphNode(BaseModel):
     task_id: str | None = None
     label: str | None = None
     timestamp: str | None = None
+    state: str | None = None
+    state_reason: str | None = None
+    updated_at: str | None = None
     annotations: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -30,6 +33,9 @@ class ExecutionGraphEdge(BaseModel):
     target: str
     kind: str
     timestamp: str | None = None
+    state: str | None = None
+    state_reason: str | None = None
+    updated_at: str | None = None
     annotations: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -39,6 +45,7 @@ class ExecutionGraphSummary(BaseModel):
     ended_at: str | None = None
     duration_ms: int | None = None
     graph_completeness: str = "partial"
+    live_state_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class ExecutionGraph(BaseModel):
@@ -510,11 +517,16 @@ def build_execution_graph(
                 )
             )
 
+    nodes = sorted(node_map.values(), key=lambda item: (_coerce_timestamp(item.timestamp), item.id))
+    edges = sorted(edges, key=lambda item: (_coerce_timestamp(item.timestamp), item.kind, item.source, item.target))
+    _project_live_state(nodes=nodes, edges=edges, status_histories=status_histories)
+
     summary = _build_summary(
         task_id=task_id,
         status_history=status_histories.get(task_id, []),
         all_timestamps=all_timestamps,
         has_observations=bool(observation_histories),
+        nodes=nodes,
     )
     annotations: dict[str, Any] = {}
     if task_types:
@@ -524,8 +536,8 @@ def build_execution_graph(
         task_id=task_id,
         topology_kind=current_topology_kind,
         summary=summary,
-        nodes=sorted(node_map.values(), key=lambda item: (_coerce_timestamp(item.timestamp), item.id)),
-        edges=sorted(edges, key=lambda item: (_coerce_timestamp(item.timestamp), item.kind, item.source, item.target)),
+        nodes=nodes,
+        edges=edges,
         annotations=annotations,
         related_task_ids=related_ids,
     )
@@ -564,6 +576,7 @@ def _build_summary(
     status_history: list[dict[str, Any]],
     all_timestamps: list[str],
     has_observations: bool,
+    nodes: list[ExecutionGraphNode],
 ) -> ExecutionGraphSummary:
     latest_root_status = None
     ended_at = None
@@ -585,7 +598,149 @@ def _build_summary(
         ended_at=ended_at,
         duration_ms=duration_ms,
         graph_completeness="full" if has_observations else "partial",
+        live_state_counts=_live_state_counts(nodes),
     )
+
+
+def _project_live_state(
+    *,
+    nodes: list[ExecutionGraphNode],
+    edges: list[ExecutionGraphEdge],
+    status_histories: dict[str, list[dict[str, Any]]],
+) -> None:
+    nodes_by_id = {node.id: node for node in nodes}
+    latest_status_by_task = {
+        task_id: _sort_by_timestamp(history)[-1]
+        for task_id, history in status_histories.items()
+        if _sort_by_timestamp(history)
+    }
+
+    for node in nodes:
+        state, reason, updated_at = _initial_node_state(node, latest_status_by_task)
+        _set_node_state(node, state=state, reason=reason, updated_at=updated_at)
+
+    for edge in edges:
+        state, reason = _edge_state(edge)
+        _set_edge_state(edge, state=state, reason=reason, updated_at=_coerce_timestamp(edge.timestamp) or None)
+
+    for edge in edges:
+        source = nodes_by_id.get(edge.source)
+        target = nodes_by_id.get(edge.target)
+        if edge.kind == "dead_lettered_to":
+            if source is not None:
+                _set_node_state(source, state="dead_lettered", reason="dead_lettered_to", updated_at=edge.timestamp)
+            if target is not None:
+                _set_node_state(
+                    target,
+                    state=target.state or "dead_lettered",
+                    reason=target.state_reason,
+                    updated_at=target.updated_at,
+                )
+            continue
+        if edge.kind in {"retried_as", "manual_retry_to"}:
+            if source is not None and source.state not in {"dead_lettered", "replayed", "succeeded", "failed"}:
+                _set_node_state(source, state="retrying", reason=edge.kind, updated_at=edge.timestamp)
+            continue
+        if edge.kind == "published_status" and target is not None:
+            status_state = target.state
+            if status_state in {"succeeded", "failed", "retrying"} and source is not None:
+                if source.state not in {"dead_lettered", "replayed"}:
+                    _set_node_state(source, state=status_state, reason="latest_status", updated_at=target.updated_at)
+
+
+def _initial_node_state(
+    node: ExecutionGraphNode,
+    latest_status_by_task: dict[str, dict[str, Any]],
+) -> tuple[str, str, str | None]:
+    timestamp = _coerce_timestamp(node.timestamp) or None
+    if node.kind == "status_event":
+        status = str(node.annotations.get("status") or node.label or "").strip()
+        return _state_from_status(status), f"status:{status}" if status else "status_event", timestamp
+    if node.kind == "retry":
+        return "retrying", "retry_scheduled", timestamp
+    if node.kind == "dlq_record":
+        record_state = str(node.annotations.get("state") or "").strip().lower()
+        if record_state == "replayed":
+            replayed_at = _coerce_timestamp(node.annotations.get("replayed_at")) or timestamp
+            return "replayed", "dlq_replayed", replayed_at
+        return "dead_lettered", "dlq_recorded", timestamp
+    if node.kind in {"task_attempt", "stage_attempt"}:
+        return "running", "message_received", timestamp
+    if node.kind == "workflow_message":
+        return "queued", "workflow_message_created", timestamp
+    if node.kind in {"task", "aggregation_child"} and node.task_id is not None:
+        latest_status = latest_status_by_task.get(node.task_id)
+        if latest_status is not None:
+            status = str(latest_status.get("status") or "").strip()
+            return (
+                _state_from_status(status),
+                f"latest_status:{status}" if status else "latest_status",
+                _coerce_timestamp(latest_status.get("timestamp")) or timestamp,
+            )
+    return "unknown", "insufficient_evidence", timestamp
+
+
+def _state_from_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized in {"processing", "running", "started", "planning"}:
+        return "running"
+    if normalized in {"retrying", "manual_retrying"}:
+        return "retrying"
+    if normalized in {"completed", "complete", "succeeded", "success"}:
+        return "succeeded"
+    if normalized in {"dead_lettered", "dlq", "dead-lettered"}:
+        return "dead_lettered"
+    if normalized in {"failed", "failure", "error"}:
+        return "failed"
+    if normalized in {"expired", "lease_expired"}:
+        return "expired"
+    if normalized in {"queued", "pending", "waiting"}:
+        return "queued"
+    if normalized in {"blocked"}:
+        return "blocked"
+    return "unknown"
+
+
+def _edge_state(edge: ExecutionGraphEdge) -> tuple[str, str]:
+    if edge.kind in {"retried_as", "manual_retry_to"}:
+        return "retry_path", edge.kind
+    if edge.kind == "dead_lettered_to":
+        return "blocked", edge.kind
+    if edge.kind == "replayed_as":
+        return "replay_path", edge.kind
+    if edge.kind in {"received_by", "entered_stage", "stage_transitioned_to", "published_status", "aggregated_into"}:
+        return "traversed", edge.kind
+    return "unknown", edge.kind or "unknown"
+
+
+def _set_node_state(node: ExecutionGraphNode, *, state: str, reason: str | None, updated_at: str | None) -> None:
+    node.state = state
+    node.state_reason = reason
+    node.updated_at = _latest_timestamp(node.updated_at, updated_at)
+
+
+def _set_edge_state(edge: ExecutionGraphEdge, *, state: str, reason: str | None, updated_at: str | None) -> None:
+    edge.state = state
+    edge.state_reason = reason
+    edge.updated_at = _latest_timestamp(edge.updated_at, updated_at)
+
+
+def _latest_timestamp(current: str | None, candidate: str | None) -> str | None:
+    current_timestamp = _coerce_timestamp(current) or None
+    candidate_timestamp = _coerce_timestamp(candidate) or None
+    if current_timestamp is None:
+        return candidate_timestamp
+    if candidate_timestamp is None:
+        return current_timestamp
+    return max(current_timestamp, candidate_timestamp)
+
+
+def _live_state_counts(nodes: list[ExecutionGraphNode]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for node in nodes:
+        state = node.state or "unknown"
+        counts[state] = counts.get(state, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def _sort_by_timestamp(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
