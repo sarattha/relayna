@@ -114,7 +114,7 @@ security-frontend: ## Audit Studio frontend npm dependencies
 security-fs: ## Run repository filesystem, secret, and static-analysis checks
 	trivy fs --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .venv --skip-dirs dist --skip-dirs site .
 	gitleaks detect --source . --redact
-	semgrep scan --config .semgrep.yml
+	semgrep scan --config .semgrep.yml --error
 
 security-image: ## Scan a local Docker image; set IMAGE=relayna-studio-backend:latest
 	@if [[ -z "$${IMAGE:-}" ]]; then \
