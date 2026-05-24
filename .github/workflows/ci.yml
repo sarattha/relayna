@@ -63,6 +63,9 @@ jobs:
       - name: Validate built SDK distributions
         run: uv run twine check dist/*
 
+      - name: Validate release metadata
+        run: python3 scripts/validate-release-metadata.py
+
       - name: Smoke test installed SDK wheel
         run: |
           python -m venv "$RUNNER_TEMP/relayna-smoke"

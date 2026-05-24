@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.14 - 2026-05-24
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.14`, moving all shipped Relayna artifacts onto the same stable SemVer
+  release line.
+- Updated the Studio backend package dependency floor to require
+  `relayna>=1.4.14`.
+- Updated release-install documentation to reference `relayna 1.4.14`.
+- Added release metadata validation so CI and tag releases require the SDK,
+  Studio backend, and Studio frontend versions to match strict
+  `MAJOR.MINOR.PATCH` SemVer.
+
 ## 1.4.13 - 2026-05-21
 
 ### Added

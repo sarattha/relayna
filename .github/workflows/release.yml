@@ -26,6 +26,9 @@ jobs:
         with:
           python-version: "3.13"
 
+      - name: Validate release metadata
+        run: python3 scripts/validate-release-metadata.py "${{ github.ref_name }}"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
