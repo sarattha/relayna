@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.13/relayna-1.4.13-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.14/relayna-1.4.14-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.13/relayna-1.4.13.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.14/relayna-1.4.14.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,11 +32,12 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.4.13.tar.gz`
-- `dist/relayna-1.4.13-py3-none-any.whl`
+- `dist/relayna-1.4.14.tar.gz`
+- `dist/relayna-1.4.14-py3-none-any.whl`
 
 ## Versioning policy
 
-`relayna` follows semantic versioning for the documented public API only. The
-stable v1 surface is the documented symbol set from the supported submodules.
-Undocumented internals may change outside of semver guarantees.
+The SDK, Studio backend, and Studio frontend share one stable SemVer release
+line. The documented SDK API, documented Studio backend API, and
+frontend/backend Studio contract follow semantic versioning. Undocumented
+internals may change outside of SemVer guarantees.

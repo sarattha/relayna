@@ -1,0 +1,15 @@
+rules:
+  - id: relayna-python-hardcoded-live-token
+    message: Do not hard-code provider, SDK, Gateway, or Studio live tokens.
+    severity: ERROR
+    languages:
+      - python
+    pattern-regex: '["''](?:sk-[A-Za-z0-9_-]{20,}|(?:relayna|studio|gateway)_(?:live|prod)_[A-Za-z0-9_=-]{16,})["'']'
+
+  - id: relayna-typescript-hardcoded-live-token
+    message: Do not hard-code provider, SDK, Gateway, or Studio live tokens.
+    severity: ERROR
+    languages:
+      - typescript
+      - javascript
+    pattern-regex: '["''](?:sk-[A-Za-z0-9_-]{20,}|(?:relayna|studio|gateway)_(?:live|prod)_[A-Za-z0-9_=-]{16,})["'']'
