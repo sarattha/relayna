@@ -1,0 +1,3 @@
+# Trivy vulnerability exceptions go here, one vulnerability ID per line.
+# Every entry must also be documented in docs/security-exceptions.md with
+# owner, reason, tracking link, and expiration date.

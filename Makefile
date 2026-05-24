@@ -9,6 +9,7 @@ RUFF            := $(UV) ruff
 TY              := $(UV) ty
 COVERAGE        := $(UV) coverage
 PYTEST          := $(UV) pytest
+PIP_AUDIT       := $(UV) --with pip-audit pip-audit
 SDK_PY_PATHS     := src tests
 
 #  Ruff & Black share the same default 88-char line length.                   #
@@ -102,6 +103,31 @@ studio-frontend-docker-build: ## Build the Studio frontend Docker image
 studio-docker-build: ## Build both Studio Docker images
 	$(MAKE) -C studio/backend docker-build
 	$(MAKE) -C apps/studio docker-build
+
+.PHONY: security-sdk security-frontend security-fs security-image security
+security-sdk: ## Audit SDK Python dependencies
+	$(PIP_AUDIT) --skip-editable
+
+security-frontend: ## Audit Studio frontend npm dependencies
+	cd apps/studio && npm audit --audit-level=high
+
+security-fs: ## Run repository filesystem, secret, and static-analysis checks
+	trivy fs --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .venv --skip-dirs dist --skip-dirs site .
+	gitleaks detect --source . --redact
+	semgrep scan --config .semgrep.yml
+
+security-image: ## Scan a local Docker image; set IMAGE=relayna-studio-backend:latest
+	@if [[ -z "$${IMAGE:-}" ]]; then \
+		echo "Set IMAGE to the local image tag to scan, for example IMAGE=relayna-studio-backend:latest"; \
+		exit 2; \
+	fi
+	trivy image --severity HIGH,CRITICAL --exit-code 1 "$${IMAGE}"
+
+security: ## Run local hardening checks except image scan
+	$(MAKE) security-sdk
+	$(MAKE) -C studio/backend security
+	$(MAKE) security-frontend
+	$(MAKE) security-fs
 
 studio-mocks-serve: ## Serve local Relayna-compatible Studio mock services on port 9100
 	./.venv/bin/python scripts/studio_mock_services.py serve

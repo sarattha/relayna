@@ -6,6 +6,7 @@ RUFF            := $(RUN) ruff
 PYTEST          := $(RUN) pytest
 TY              := $(RUN) ty
 BUILD           := $(UV) build
+PIP_AUDIT       := $(RUN) --with pip-audit pip-audit
 LINE_LENGTH     := 120
 RUFF_FLAGS      := --line-length $(LINE_LENGTH)
 PY_PATHS        := src tests
@@ -53,6 +54,10 @@ run: ## Run the Studio backend from source (requires RELAYNA_STUDIO_REDIS_URL)
 .PHONY: docker-build
 docker-build: ## Build the Studio backend Docker image
 	docker build -f Dockerfile -t $(IMAGE_NAME) ../..
+
+.PHONY: security
+security: ## Audit Studio backend Python dependencies
+	$(PIP_AUDIT) --skip-editable
 
 .PHONY: clean
 clean: ## Remove Studio backend caches & artefacts

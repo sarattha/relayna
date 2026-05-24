@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
+  attestations: write
 
 env:
   REGISTRY: ghcr.io
@@ -45,12 +47,30 @@ jobs:
       - name: Validate built distributions
         run: uv run twine check dist/*
 
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate SDK SBOM
+        run: |
+          syft dist --output spdx-json=relayna-sdk-${{ github.ref_name }}.spdx.json
+
+      - name: Attest SDK provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Cosign
+        uses: sigstore/cosign-installer@v3
 
       - name: Extract Studio backend Docker metadata
         id: studio-backend-meta
@@ -63,6 +83,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push Studio backend Docker image
+        id: studio-backend-build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -70,6 +91,33 @@ jobs:
           push: true
           tags: ${{ steps.studio-backend-meta.outputs.tags }}
           labels: ${{ steps.studio-backend-meta.outputs.labels }}
+          provenance: true
+          sbom: false
+
+      - name: Generate Studio backend image SBOM
+        run: |
+          syft "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}" \
+            --output spdx-json=relayna-studio-backend-${{ github.ref_name }}.spdx.json
+
+      - name: Scan Studio backend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Sign Studio backend image
+        env:
+          COSIGN_YES: "true"
+        run: cosign sign "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}"
+
+      - name: Attest Studio backend image provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend
+          subject-digest: ${{ steps.studio-backend-build.outputs.digest }}
+          push-to-registry: true
 
       - name: Extract Studio frontend Docker metadata
         id: studio-frontend-meta
@@ -82,6 +130,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push Studio frontend Docker image
+        id: studio-frontend-build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -89,6 +138,33 @@ jobs:
           push: true
           tags: ${{ steps.studio-frontend-meta.outputs.tags }}
           labels: ${{ steps.studio-frontend-meta.outputs.labels }}
+          provenance: true
+          sbom: false
+
+      - name: Generate Studio frontend image SBOM
+        run: |
+          syft "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}" \
+            --output spdx-json=relayna-studio-frontend-${{ github.ref_name }}.spdx.json
+
+      - name: Scan Studio frontend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Sign Studio frontend image
+        env:
+          COSIGN_YES: "true"
+        run: cosign sign "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}"
+
+      - name: Attest Studio frontend image provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend
+          subject-digest: ${{ steps.studio-frontend-build.outputs.digest }}
+          push-to-registry: true
 
       - name: Extract release notes from changelog
         env:
@@ -126,3 +202,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.whl
+            relayna-sdk-${{ github.ref_name }}.spdx.json
+            relayna-studio-backend-${{ github.ref_name }}.spdx.json
+            relayna-studio-frontend-${{ github.ref_name }}.spdx.json

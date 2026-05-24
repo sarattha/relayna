@@ -1,0 +1,37 @@
+title = "Relayna secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "relayna-live-token"
+description = "Relayna live service or Studio token"
+regex = '''\b(relayna|studio|gateway)_(live|prod)_[A-Za-z0-9_=-]{16,}\b'''
+keywords = ["relayna", "studio", "gateway", "live", "prod"]
+
+[[rules]]
+id = "relayna-provider-token"
+description = "Provider-style live API token"
+regex = '''\bsk-[A-Za-z0-9_-]{20,}\b'''
+keywords = ["sk-"]
+
+[[allowlists]]
+description = "Generated and local dependency artifacts only"
+paths = [
+    '''^\.venv/.*''',
+    '''^\.pytest_cache/.*''',
+    '''^\.ruff_cache/.*''',
+    '''^apps/studio/node_modules/.*''',
+    '''^dist/.*''',
+    '''^site/.*''',
+    '''^studio/backend/dist/.*''',
+]
+
+[[allowlists]]
+description = "Documented placeholder values only"
+regexTarget = "match"
+regexes = [
+    '''RELAYNA_STUDIO_TOKEN=optional-admin-or-service-token''',
+    '''relayna_live_placeholder_token''',
+    '''studio_live_placeholder_token''',
+]

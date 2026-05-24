@@ -7,6 +7,8 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
+  attestations: write
 
 env:
   REGISTRY: ghcr.io
@@ -86,6 +88,70 @@ jobs:
               importlib.import_module(name)
           PY
 
+  security:
+    name: security hardening
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+
+      - name: Sync SDK dependencies
+        run: make sync
+
+      - name: Audit SDK dependencies
+        run: make security-sdk
+
+      - name: Sync Studio backend dependencies
+        run: make -C studio/backend sync
+
+      - name: Audit Studio backend dependencies
+        run: make -C studio/backend security
+
+      - name: Sync Studio frontend dependencies
+        run: make -C apps/studio sync
+
+      - name: Audit Studio frontend dependencies
+        run: make security-frontend
+
+      - name: Scan repository filesystem with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Detect committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: .semgrep.yml
+
   studio-backend:
     name: studio-backend
     runs-on: ubuntu-latest
@@ -133,6 +199,14 @@ jobs:
       - name: Build Studio backend Docker image
         run: make -C studio/backend docker-build
 
+      - name: Scan Studio backend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: relayna-studio-backend:latest
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
       - name: Detect Studio backend version bump
         id: studio-backend-version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -173,6 +247,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Syft
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Set up Cosign
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: sigstore/cosign-installer@v3
+
       - name: Extract Studio backend Docker metadata
         id: studio-backend-meta
         if: steps.studio-backend-version.outputs.changed == 'true'
@@ -186,6 +272,7 @@ jobs:
 
       - name: Push Studio backend Docker image
         if: steps.studio-backend-version.outputs.changed == 'true'
+        id: studio-backend-build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -193,6 +280,37 @@ jobs:
           push: true
           tags: ${{ steps.studio-backend-meta.outputs.tags }}
           labels: ${{ steps.studio-backend-meta.outputs.labels }}
+          provenance: true
+          sbom: false
+
+      - name: Generate Studio backend image SBOM
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        run: |
+          syft "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}" \
+            --output spdx-json=relayna-studio-backend-${{ steps.studio-backend-version.outputs.version }}.spdx.json
+
+      - name: Scan pushed Studio backend image with Trivy
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Sign Studio backend image
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        env:
+          COSIGN_YES: "true"
+        run: cosign sign "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}"
+
+      - name: Attest Studio backend image provenance
+        if: steps.studio-backend-version.outputs.changed == 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend
+          subject-digest: ${{ steps.studio-backend-build.outputs.digest }}
+          push-to-registry: true
 
   studio-frontend:
     name: studio-frontend
@@ -221,6 +339,14 @@ jobs:
 
       - name: Build Studio frontend Docker image
         run: make -C apps/studio docker-build
+
+      - name: Scan Studio frontend image with Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: relayna-studio-frontend:latest
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
 
       - name: Detect Studio frontend version bump
         id: studio-frontend-version
@@ -260,6 +386,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Docker Buildx
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Syft
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Set up Cosign
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: sigstore/cosign-installer@v3
+
       - name: Extract Studio frontend Docker metadata
         id: studio-frontend-meta
         if: steps.studio-frontend-version.outputs.changed == 'true'
@@ -273,6 +411,7 @@ jobs:
 
       - name: Push Studio frontend Docker image
         if: steps.studio-frontend-version.outputs.changed == 'true'
+        id: studio-frontend-build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -280,3 +419,34 @@ jobs:
           push: true
           tags: ${{ steps.studio-frontend-meta.outputs.tags }}
           labels: ${{ steps.studio-frontend-meta.outputs.labels }}
+          provenance: true
+          sbom: false
+
+      - name: Generate Studio frontend image SBOM
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        run: |
+          syft "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}" \
+            --output spdx-json=relayna-studio-frontend-${{ steps.studio-frontend-version.outputs.version }}.spdx.json
+
+      - name: Scan pushed Studio frontend image with Trivy
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+      - name: Sign Studio frontend image
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        env:
+          COSIGN_YES: "true"
+        run: cosign sign "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}"
+
+      - name: Attest Studio frontend image provenance
+        if: steps.studio-frontend-version.outputs.changed == 'true'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend
+          subject-digest: ${{ steps.studio-frontend-build.outputs.digest }}
+          push-to-registry: true
