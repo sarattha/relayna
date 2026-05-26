@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.15 - 2026-05-26
+
+### Added
+
+- Added failed-task snapshot routes for Relayna services so terminal DLQ
+  failures can expose payload, traceback, retry metadata, investigation state,
+  and replay actions through the SDK API surface.
+- Added Studio backend federation for cross-service failed-task lists, details,
+  investigation marking, retry, delete, and cursor pagination when aggregated
+  results exceed the requested page size.
+- Added the Studio frontend Failed Tasks page with filters, detail inspection,
+  payload/error copy and download actions, investigation controls, retry
+  submission, pagination, and invalid override JSON validation.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.15`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.15`.
+- Updated release-install and Studio operation documentation for the `1.4.15`
+  release line and the failed-task snapshot workflow.
+
 ## 1.4.14 - 2026-05-24
 
 ### Changed

@@ -520,6 +520,77 @@ describe("App", () => {
           ],
         });
       }
+      if (url === "/studio/failed-tasks?limit=50&investigation_status=unreviewed" && method === "GET") {
+        return jsonResponse({
+          items: [
+            {
+              service_id: "payments-api",
+              service_name: "Payments API",
+              failure_id: "failure-1",
+              task_id: "task-123",
+              correlation_id: "corr-123",
+              queue_name: "payments.stage",
+              source_queue_name: "payments.stage",
+              retry_queue_name: "payments.retry",
+              dlq_name: "payments.dlq",
+              status: "DLQ",
+              attempt: 3,
+              max_attempts: 3,
+              failed_at: "2026-05-26T10:30:00Z",
+              error_type: "RuntimeError",
+              error_message: "boom",
+              investigation_status: "unreviewed",
+              retry_status: "not_retried",
+              payload_available: true,
+              task_ref: {
+                service_id: "payments-api",
+                task_id: "task-123",
+                correlation_id: "corr-123",
+                parent_refs: [],
+                child_refs: [],
+              },
+            },
+          ],
+          next_cursor: null,
+          errors: [],
+          scanned_services: ["payments-api"],
+        });
+      }
+      if (url === "/studio/failed-tasks/payments-api/failure-1" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          service_name: "Payments API",
+          failure_id: "failure-1",
+          task_id: "task-123",
+          correlation_id: "corr-123",
+          queue_name: "payments.stage",
+          source_queue_name: "payments.stage",
+          retry_queue_name: "payments.retry",
+          dlq_name: "payments.dlq",
+          status: "DLQ",
+          attempt: 3,
+          max_attempts: 3,
+          failed_at: "2026-05-26T10:30:00Z",
+          error_type: "RuntimeError",
+          error_message: "boom",
+          investigation_status: "unreviewed",
+          retry_status: "not_retried",
+          payload_available: true,
+          body: { task_id: "task-123" },
+          input_preview: { task_id: "task-123" },
+          metadata: { tenant: "default" },
+          last_logs: [{ message: "failed" }],
+          raw_body_b64: "e30=",
+          body_encoding: "json",
+          task_ref: {
+            service_id: "payments-api",
+            task_id: "task-123",
+            correlation_id: "corr-123",
+            parent_refs: [],
+            child_refs: [],
+          },
+        });
+      }
       if (url === "/studio/tasks/search?task_id=task-123&limit=50" && method === "GET") {
         return jsonResponse({
           count: 1,
@@ -1442,6 +1513,44 @@ describe("App", () => {
     expect(screen.getByPlaceholderText("Reason")).toBeDisabled();
     expect(screen.getByPlaceholderText("Source queue")).toBeDisabled();
     expect(screen.getByPlaceholderText("State")).toBeDisabled();
+  });
+
+  it("renders the global failed tasks page and opens a failure detail", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Failed Tasks" })).toBeInTheDocument();
+    expect(await screen.findByText("RuntimeError")).toBeInTheDocument();
+    expect(screen.getByText("boom")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+
+    expect(await screen.findByText("Failure Detail")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(/task-123/)).toBeInTheDocument();
+  });
+
+  it("shows a validation error instead of retrying with malformed failed-task payload override", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Failed Tasks" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View" }));
+    expect(await screen.findByText("Failure Detail")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Optional JSON payload override"), {
+      target: { value: '{"task_id": "task-123",}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Override payload must be valid JSON.")).toBeInTheDocument();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/studio/failed-tasks/payments-api/failure-1/retry",
+      expect.objectContaining({ method: "POST" }),
+    );
+    confirmSpy.mockRestore();
   });
 
   it("submits task search and renders indexed task results", async () => {

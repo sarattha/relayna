@@ -681,6 +681,7 @@ async def _persist_dlq_record(
     headers: Mapping[str, Any],
     content_type: str | None,
     body: bytes,
+    exception_message: str | None = None,
     observation_sink: ObservationSink | None = None,
 ) -> None:
     if dlq_store is None:
@@ -695,6 +696,7 @@ async def _persist_dlq_record(
                 correlation_id=correlation_id,
                 reason=reason,
                 exception_type=exception_type,
+                exception_message=exception_message,
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
                 headers=dict(headers),

@@ -28,6 +28,9 @@ class FakePipeline:
     def expire(self, key: str, ttl: int) -> None:
         self._ops.append(("expire", (key, ttl), {}))
 
+    def zadd(self, key: str, mapping: dict[str, float]) -> None:
+        self._ops.append(("zadd", (key, mapping), {}))
+
     async def execute(self) -> list[object]:
         results: list[object] = []
         for op, args, kwargs in self._ops:
@@ -45,6 +48,10 @@ class FakePipeline:
                 key, ttl = args
                 self._redis.expirations[str(key)] = int(ttl)
                 results.append(True)
+            elif op == "zadd":
+                key, mapping = args
+                self._redis.sorted_sets.setdefault(str(key), {}).update(mapping)  # type: ignore[arg-type]
+                results.append(1)
         return results
 
 
@@ -52,6 +59,7 @@ class FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
         self.lists: dict[str, list[str]] = {}
+        self.sorted_sets: dict[str, dict[str, float]] = {}
         self.expirations: dict[str, int] = {}
 
     def pipeline(self) -> FakePipeline:
@@ -78,6 +86,38 @@ class FakeRedis:
         if stop == -1:
             return values[start:]
         return values[start : stop + 1]
+
+    async def zadd(self, key: str, mapping: dict[str, float]) -> int:
+        self.sorted_sets.setdefault(key, {}).update(mapping)
+        return len(mapping)
+
+    async def zrem(self, key: str, *values: str) -> int:
+        stored = self.sorted_sets.setdefault(key, {})
+        removed = 0
+        for value in values:
+            if value in stored:
+                removed += 1
+                stored.pop(value, None)
+        return removed
+
+    async def zrevrangebyscore(self, key: str, max_score: object, min_score: object) -> list[str]:
+        stored = self.sorted_sets.get(key, {})
+        high = float("inf") if max_score == "+inf" else float(max_score)
+        low = float("-inf") if min_score == "-inf" else float(min_score)
+        return [
+            member
+            for member, score in sorted(stored.items(), key=lambda item: item[1], reverse=True)
+            if low <= score <= high
+        ]
+
+    async def zremrangebyscore(self, key: str, min_score: object, max_score: object) -> int:
+        stored = self.sorted_sets.setdefault(key, {})
+        low = float("-inf") if min_score == "-inf" else float(min_score)
+        high = float("inf") if max_score == "+inf" else float(max_score)
+        to_remove = [member for member, score in stored.items() if low <= score <= high]
+        for member in to_remove:
+            stored.pop(member, None)
+        return len(to_remove)
 
 
 class FakeRabbit:
@@ -230,6 +270,7 @@ async def test_redis_dlq_store_lists_filters_and_marks_replayed() -> None:
     queue_summary = await store.summarize_queues()
     assert ("tasks.queue.dlq", 1, datetime(2026, 3, 21, 1, tzinfo=UTC)) in queue_summary
     assert ("aggregation.queue.0.dlq", 1, datetime(2026, 3, 21, 2, tzinfo=UTC)) in queue_summary
+    assert record_b.dlq_id in redis.sorted_sets[store.failed_tasks_index_key()]
 
 
 @pytest.mark.asyncio
@@ -339,3 +380,63 @@ async def test_dlq_service_replay_conflicts_when_claim_already_exists() -> None:
         await service.replay_message(record.dlq_id)
 
     assert rabbit.publishes == []
+
+
+@pytest.mark.asyncio
+async def test_failed_task_registry_lists_detail_investigation_retry_and_delete() -> None:
+    redis = FakeRedis()
+    store = RedisDLQStore(redis, prefix="relayna-dlq", ttl_seconds=604800)
+    rabbit = FakeRabbit()
+    status_store = FakeStatusStore()
+    status_store.history["task-123"] = [{"timestamp": "2026-03-21T00:00:00Z", "message": "failed"}]
+    service = DLQService(rabbitmq=rabbit, dlq_store=store, status_store=status_store)
+    record = make_record(dead_lettered_at=datetime(2026, 3, 21, 1, tzinfo=UTC))
+    await store.add(record)
+
+    listed = await service.list_failed_tasks(investigation_status="unreviewed", limit=10)
+
+    assert listed.next_cursor is None
+    assert listed.items[0].failure_id == record.dlq_id
+    assert listed.items[0].dlq_name == "tasks.queue.dlq"
+    assert listed.items[0].error_type == "RuntimeError"
+
+    detail = await service.get_failed_task_detail(record.dlq_id)
+    assert detail is not None
+    assert detail.last_logs == [{"timestamp": "2026-03-21T00:00:00Z", "message": "failed"}]
+    assert detail.raw_body_b64 == record.raw_body_b64
+
+    investigated = await service.mark_failed_task_investigated(
+        record.dlq_id, investigated_by="admin@example.test", note="known issue"
+    )
+    assert investigated is not None
+    assert investigated.investigation_status == "investigated"
+    assert investigated.investigated_by == "admin@example.test"
+    assert investigated.investigation_note == "known issue"
+
+    retry_result = await service.retry_failed_task(record.dlq_id)
+    assert retry_result is not None
+    assert retry_result.target_queue == "tasks.queue"
+    assert rabbit.publishes[0]["queue_name"] == "tasks.queue"
+    assert rabbit.publishes[0]["headers"]["x-relayna-manual-retry-from-failure-id"] == record.dlq_id
+    stored = await store.get(record.dlq_id)
+    assert stored is not None
+    assert stored.retry_status == "retried"
+
+    uninvestigated = await service.mark_failed_task_uninvestigated(record.dlq_id)
+    assert uninvestigated is not None
+    assert uninvestigated.investigation_status == "unreviewed"
+
+    assert await service.delete_failed_task(record.dlq_id) is True
+    assert await service.get_failed_task_detail(record.dlq_id) is None
+
+
+@pytest.mark.asyncio
+async def test_failed_task_retry_rejects_non_terminal_status() -> None:
+    redis = FakeRedis()
+    store = RedisDLQStore(redis, prefix="relayna-dlq")
+    service = DLQService(rabbitmq=FakeRabbit(), dlq_store=store)
+    record = make_record().model_copy(update={"status": "retrying"})
+    await store.add(record)
+
+    with pytest.raises(Exception, match="Manual retry is only allowed"):
+        await service.retry_failed_task(record.dlq_id)

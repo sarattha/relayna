@@ -142,6 +142,8 @@ Primary requests include:
 - `/studio/services/{service_id}/workflow/topology`
 - `/studio/services/{service_id}/dlq/messages`
 - `/studio/services/{service_id}/broker/dlq/messages`
+- `/studio/failed-tasks`
+- `/studio/failed-tasks/{service_id}/{failure_id}`
 
 Important constraint:
 
@@ -351,6 +353,31 @@ Expectations to communicate to operators:
 
 The frontend is intentionally thin here: if the backend cannot provide a route,
 the UI should degrade rather than invent client-side service calls.
+
+### Failed Tasks page
+
+The global Failed Tasks page reads `/studio/failed-tasks` through the Studio
+backend and is meant for cross-service terminal failure triage. Operators can
+filter by service, queue, DLQ, task, worker, error type, status,
+investigation-state, failure window, and page size.
+
+Each list item keeps the Studio `service_id` attached to the task reference so
+links remain unambiguous in a federated deployment. When the backend returns
+`next_cursor`, the UI exposes `Load Next Page` and appends the next aggregate
+page.
+
+Opening a failure detail shows:
+
+- payload preview and raw payload metadata
+- error message or traceback
+- recent logs
+- metadata and task reference context
+- investigation note/operator inputs
+- retry target queue, retry note, and optional JSON payload override
+
+The retry action validates the override payload as JSON before confirmation or
+submission. Malformed input stays on the page with a validation error instead
+of sending a retry request.
 
 ## Local Verification
 

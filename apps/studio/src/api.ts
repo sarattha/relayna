@@ -2,6 +2,10 @@ import type {
   BrokerDlqMessageListResponse,
   DlqMessageListResponse,
   DlqQueryState,
+  FailedTaskDetail,
+  FailedTaskListResponse,
+  FailedTaskQueryState,
+  FailedTaskRetryResponse,
   GatewayServiceExportResponse,
   ServiceDraft,
   ServiceListResponse,
@@ -501,5 +505,68 @@ export async function fetchBrokerDlq(serviceId: string, state: Pick<DlqQueryStat
   }
   return requestJson<BrokerDlqMessageListResponse>(
     `/studio/services/${encodeURIComponent(serviceId)}/broker/dlq/messages?${params.toString()}`,
+  );
+}
+
+export async function fetchFailedTasks(state: FailedTaskQueryState) {
+  const params = new URLSearchParams({ limit: state.limit || "50" });
+  for (const [key, value] of Object.entries(state)) {
+    if (key === "limit") {
+      continue;
+    }
+    if (typeof value === "string" && value.trim()) {
+      params.set(key, value.trim());
+    }
+  }
+  return requestJson<FailedTaskListResponse>(`/studio/failed-tasks?${params.toString()}`);
+}
+
+export async function fetchFailedTaskDetail(serviceId: string, failureId: string) {
+  return requestJson<FailedTaskDetail>(
+    `/studio/failed-tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(failureId)}`,
+  );
+}
+
+export async function markFailedTaskInvestigated(
+  serviceId: string,
+  failureId: string,
+  payload: { investigated_by?: string; note?: string },
+) {
+  return requestJson<FailedTaskDetail>(
+    `/studio/failed-tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(failureId)}/mark-investigated`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function markFailedTaskUninvestigated(serviceId: string, failureId: string) {
+  return requestJson<FailedTaskDetail>(
+    `/studio/failed-tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(failureId)}/mark-uninvestigated`,
+    { method: "POST" },
+  );
+}
+
+export async function retryFailedTask(
+  serviceId: string,
+  failureId: string,
+  payload: { target_queue?: string; override_payload?: unknown; retried_by?: string; note?: string },
+) {
+  return requestJson<FailedTaskRetryResponse>(
+    `/studio/failed-tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(failureId)}/retry`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function deleteFailedTask(serviceId: string, failureId: string) {
+  return requestJson<{ service_id: string; failure_id: string; deleted: boolean }>(
+    `/studio/failed-tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(failureId)}`,
+    { method: "DELETE" },
   );
 }

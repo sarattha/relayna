@@ -546,6 +546,32 @@ Broker-mode reminders:
 - indexed `/studio/services/{service_id}/dlq/messages` should remain the default
   operator view when Redis-backed DLQ indexing is healthy
 
+### Failed task snapshots for Studio federation
+
+Studio can federate terminal failed-task snapshots through:
+
+- `GET /studio/failed-tasks`
+- `GET /studio/failed-tasks/{service_id}/{failure_id}`
+- `POST /studio/failed-tasks/{service_id}/{failure_id}/mark-investigated`
+- `POST /studio/failed-tasks/{service_id}/{failure_id}/mark-uninvestigated`
+- `POST /studio/failed-tasks/{service_id}/{failure_id}/retry`
+- `DELETE /studio/failed-tasks/{service_id}/{failure_id}`
+
+That only works when the registered Relayna service exposes the matching SDK
+failed-task routes from `create_dlq_router(...)` and advertises
+`FAILED_TASK_CAPABILITY_ROUTE_IDS` in its capability document.
+
+The list route fans out to healthy registered services, normalizes each item
+with the Studio `service_id`, sorts by `failed_at` descending, and returns an
+aggregate `next_cursor` when the combined result set exceeds the requested
+`limit`. Operators can scope reads to one service with `service_id`, or filter
+globally by queue, DLQ, task, worker, error type, terminal status,
+investigation status, and failure time window.
+
+Detail and mutation routes are service-scoped. The backend proxies them to the
+owning service so payload access, retry safety checks, and deletion semantics
+remain owned by the service that indexed the failed task.
+
 ## Background Workers
 
 The backend can run three periodic workers:
@@ -737,6 +763,7 @@ curl -s http://localhost:8000/studio/tasks/my-service/task-123
 curl -s http://localhost:8000/studio/services/my-service/workflow/topology
 curl -s http://localhost:8000/studio/services/my-service/dlq/messages
 curl -s "http://localhost:8000/studio/services/my-service/broker/dlq/messages?task_id=task-123"
+curl -s "http://localhost:8000/studio/failed-tasks?investigation_status=unreviewed&limit=50"
 curl -s "http://localhost:8000/studio/services/my-service/logs?limit=20&source=runtime-worker"
 curl -s "http://localhost:8000/studio/tasks/my-service/task-123/logs?limit=50&source=api&from=2026-04-22T10:00:00Z&to=2026-04-22T10:15:00Z"
 ```
@@ -760,6 +787,10 @@ Broker DLQ inspection is intentionally separate from indexed DLQ reads:
   - reads live broker messages through the registered service
   - is available only when the service advertises `broker.dlq.messages`
   - returns a read-only broker payload shape without `dlq_id`, replay state, or cursor pagination
+- `/studio/failed-tasks`
+  - aggregates terminal failed-task snapshots across registered services
+  - returns service-normalized task references, investigation state, retry
+    state, and cursor pagination for trimmed aggregate results
 
 ## Troubleshooting
 
