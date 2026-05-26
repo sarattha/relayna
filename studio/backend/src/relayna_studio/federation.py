@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -15,6 +15,12 @@ from relayna.api import (
     BROKER_DLQ_MESSAGES_ROUTE_ID,
     DLQ_MESSAGES_ROUTE_ID,
     EXECUTION_GRAPH_ROUTE_ID,
+    FAILED_TASK_DELETE_ROUTE_ID,
+    FAILED_TASK_DETAIL_ROUTE_ID,
+    FAILED_TASK_INVESTIGATE_ROUTE_ID,
+    FAILED_TASK_RETRY_ROUTE_ID,
+    FAILED_TASK_UNINVESTIGATE_ROUTE_ID,
+    FAILED_TASKS_ROUTE_ID,
     RUNTIME_BACKPRESSURE_ROUTE_ID,
     STATUS_HISTORY_ROUTE_ID,
     STATUS_LATEST_ROUTE_ID,
@@ -45,11 +51,17 @@ SERVICE_STATUS_PATH = "/status/{task_id}"
 SERVICE_HISTORY_PATH = "/history"
 SERVICE_WORKFLOW_TOPOLOGY_PATH = "/workflow/topology"
 SERVICE_DLQ_MESSAGES_PATH = "/dlq/messages"
+SERVICE_FAILED_TASKS_PATH = "/failed-tasks"
+SERVICE_FAILED_TASK_PATH = "/failed-tasks/{failure_id}"
+SERVICE_FAILED_TASK_INVESTIGATE_PATH = "/failed-tasks/{failure_id}/mark-investigated"
+SERVICE_FAILED_TASK_UNINVESTIGATE_PATH = "/failed-tasks/{failure_id}/mark-uninvestigated"
+SERVICE_FAILED_TASK_RETRY_PATH = "/failed-tasks/{failure_id}/retry"
 SERVICE_BROKER_DLQ_MESSAGES_PATH = "/broker/dlq/messages"
 SERVICE_EXECUTION_GRAPH_PATH = "/executions/{task_id}/graph"
 SERVICE_RUNTIME_BACKPRESSURE_PATH = "/relayna/runtime/backpressure"
 TASK_SEARCH_QUERY = Query(min_length=1)
 JOIN_MODE_QUERY = Query(default=JoinMode.NONE)
+JSON_BODY = Body(default_factory=dict)
 
 
 def _default_async_client_factory(timeout_seconds: float) -> httpx.AsyncClient:
@@ -225,6 +237,122 @@ class StudioFederationService:
             task_id=task_id,
             limit=limit,
         )
+
+    async def list_failed_tasks(
+        self,
+        *,
+        service_id: str | None = None,
+        service_name: str | None = None,
+        queue_name: str | None = None,
+        dlq_name: str | None = None,
+        error_type: str | None = None,
+        status: str | None = None,
+        task_id: str | None = None,
+        worker_id: str | None = None,
+        investigation_status: str | None = None,
+        failed_from: str | None = None,
+        failed_to: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        services = (
+            [await self._get_proxyable_service(service_id)]
+            if service_id
+            else await self.registry_service.list_services()
+        )
+        tasks = [
+            asyncio.create_task(
+                self._capture(
+                    self._fetch_failed_tasks(
+                        service,
+                        service_name=service_name,
+                        queue_name=queue_name,
+                        dlq_name=dlq_name,
+                        error_type=error_type,
+                        status=status,
+                        task_id=task_id,
+                        worker_id=worker_id,
+                        investigation_status=investigation_status,
+                        failed_from=failed_from,
+                        failed_to=failed_to,
+                        limit=limit,
+                    )
+                )
+            )
+            for service in services
+            if service.status != ServiceStatus.DISABLED
+        ]
+        results = await asyncio.gather(*tasks) if tasks else []
+        items: list[dict[str, Any]] = []
+        errors: list[dict[str, Any]] = []
+        scanned_services: list[str] = []
+        for payload, error in results:
+            if error is not None:
+                errors.append(error.to_model().model_dump(mode="json"))
+                continue
+            if payload is None:
+                continue
+            scanned_services.append(str(payload.get("service_id") or ""))
+            for item in payload.get("items", []):
+                if isinstance(item, dict):
+                    items.append(item)
+        items.sort(key=lambda item: str(item.get("failed_at") or ""), reverse=True)
+        return {
+            "items": items[:limit],
+            "next_cursor": None,
+            "errors": errors,
+            "scanned_services": [item for item in scanned_services if item],
+        }
+
+    async def get_failed_task_detail(self, service_id: str, failure_id: str) -> dict[str, Any]:
+        service = await self._get_proxyable_service(service_id)
+        return await self._fetch_failed_task_detail(service, failure_id)
+
+    async def mark_failed_task_investigated(
+        self,
+        service_id: str,
+        failure_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        service = await self._get_proxyable_service(service_id)
+        return await self._mutate_failed_task(
+            service,
+            failure_id,
+            capability_id=FAILED_TASK_INVESTIGATE_ROUTE_ID,
+            path_template=SERVICE_FAILED_TASK_INVESTIGATE_PATH,
+            payload=payload,
+        )
+
+    async def mark_failed_task_uninvestigated(self, service_id: str, failure_id: str) -> dict[str, Any]:
+        service = await self._get_proxyable_service(service_id)
+        return await self._mutate_failed_task(
+            service,
+            failure_id,
+            capability_id=FAILED_TASK_UNINVESTIGATE_ROUTE_ID,
+            path_template=SERVICE_FAILED_TASK_UNINVESTIGATE_PATH,
+            payload={},
+        )
+
+    async def retry_failed_task(self, service_id: str, failure_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        service = await self._get_proxyable_service(service_id)
+        return await self._mutate_failed_task(
+            service,
+            failure_id,
+            capability_id=FAILED_TASK_RETRY_ROUTE_ID,
+            path_template=SERVICE_FAILED_TASK_RETRY_PATH,
+            payload=payload,
+        )
+
+    async def delete_failed_task(self, service_id: str, failure_id: str) -> dict[str, Any]:
+        service = await self._get_proxyable_service(service_id)
+        path = SERVICE_FAILED_TASK_PATH.format(failure_id=_quote_path_segment(failure_id))
+        await self._request_json(
+            service,
+            capability_id=FAILED_TASK_DELETE_ROUTE_ID,
+            path=path,
+            method="DELETE",
+            missing_route_404=True,
+        )
+        return {"service_id": service.service_id, "failure_id": failure_id, "deleted": True}
 
     async def get_service_execution_graph(self, service_id: str, task_id: str) -> dict[str, Any]:
         service = await self._get_proxyable_service(service_id)
@@ -674,6 +802,73 @@ class StudioFederationService:
         )
         return self._normalize_broker_dlq_messages_payload(service, payload)
 
+    async def _fetch_failed_tasks(
+        self,
+        service: ServiceRecord,
+        *,
+        service_name: str | None = None,
+        queue_name: str | None = None,
+        dlq_name: str | None = None,
+        error_type: str | None = None,
+        status: str | None = None,
+        task_id: str | None = None,
+        worker_id: str | None = None,
+        investigation_status: str | None = None,
+        failed_from: str | None = None,
+        failed_to: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        payload = await self._request_json(
+            service,
+            capability_id=FAILED_TASKS_ROUTE_ID,
+            path=SERVICE_FAILED_TASKS_PATH,
+            params={
+                "service_name": service_name,
+                "queue_name": queue_name,
+                "dlq_name": dlq_name,
+                "error_type": error_type,
+                "status": status,
+                "task_id": task_id,
+                "worker_id": worker_id,
+                "investigation_status": investigation_status,
+                "failed_from": failed_from,
+                "failed_to": failed_to,
+                "limit": limit,
+            },
+            missing_route_404=True,
+        )
+        return self._normalize_failed_tasks_payload(service, payload)
+
+    async def _fetch_failed_task_detail(self, service: ServiceRecord, failure_id: str) -> dict[str, Any]:
+        path = SERVICE_FAILED_TASK_PATH.format(failure_id=_quote_path_segment(failure_id))
+        payload = await self._request_json(
+            service,
+            capability_id=FAILED_TASK_DETAIL_ROUTE_ID,
+            path=path,
+            missing_route_404=True,
+        )
+        return self._normalize_failed_task_payload(service, payload)
+
+    async def _mutate_failed_task(
+        self,
+        service: ServiceRecord,
+        failure_id: str,
+        *,
+        capability_id: str,
+        path_template: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        path = path_template.format(failure_id=_quote_path_segment(failure_id))
+        response = await self._request_json(
+            service,
+            capability_id=capability_id,
+            path=path,
+            method="POST",
+            json_payload=payload,
+            missing_route_404=True,
+        )
+        return self._normalize_failed_task_payload(service, response)
+
     async def _fetch_execution_graph(self, service: ServiceRecord, task_id: str) -> dict[str, Any]:
         path = SERVICE_EXECUTION_GRAPH_PATH.format(task_id=_quote_path_segment(task_id))
         payload = await self._request_json(
@@ -781,6 +976,31 @@ class StudioFederationService:
                 ).model_dump(mode="json")
             items.append(normalized_item)
         return {"service_id": service.service_id, "items": items}
+
+    def _normalize_failed_tasks_payload(self, service: ServiceRecord, payload: dict[str, Any]) -> dict[str, Any]:
+        items: list[Any] = []
+        for item in payload.get("items", []):
+            if not isinstance(item, dict):
+                items.append(item)
+                continue
+            items.append(self._normalize_failed_task_payload(service, item))
+        return dict(payload) | {"service_id": service.service_id, "items": items}
+
+    def _normalize_failed_task_payload(self, service: ServiceRecord, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(payload) | {
+            "service_id": service.service_id,
+            "service_name": payload.get("service_name") or service.name,
+        }
+        task_id = self._payload_value(service, payload, "task_id") or _normalize_string(payload.get("correlation_id"))
+        correlation_id = _normalize_string(payload.get("correlation_id"))
+        if task_id is not None:
+            normalized["task_id"] = task_id
+            normalized["task_ref"] = build_task_ref(
+                service_id=service.service_id,
+                task_id=task_id,
+                correlation_id=correlation_id,
+            ).model_dump(mode="json")
+        return normalized
 
     def _normalize_execution_graph_payload(
         self,
@@ -911,6 +1131,8 @@ class StudioFederationService:
         capability_id: str,
         path: str,
         params: Mapping[str, Any] | None = None,
+        method: str = "GET",
+        json_payload: Mapping[str, Any] | None = None,
         missing_route_404: bool = False,
     ) -> dict[str, Any]:
         if self._supports_capability(service, capability_id) is False:
@@ -918,9 +1140,11 @@ class StudioFederationService:
 
         try:
             self._validate_service_base_url(service)
-            response = await self.http_client.get(
+            response = await self.http_client.request(
+                method,
                 f"{service.base_url.rstrip('/')}{path}",
                 params=self._map_query_params(service, params),
+                json=dict(json_payload) if json_payload is not None else None,
             )
         except httpx.TimeoutException as exc:
             raise StudioFederationError(
@@ -985,6 +1209,9 @@ class StudioFederationService:
                 service_id=service.service_id,
                 upstream_status=response.status_code,
             )
+
+        if response.status_code == 204:
+            return {"service_id": service.service_id}
 
         try:
             payload = response.json()
@@ -1192,6 +1419,88 @@ def create_federation_router(
             return exc.to_response()
         return JSONResponse(payload)
 
+    @router.get(f"{prefix}/failed-tasks")
+    async def failed_tasks(
+        service_id: str | None = Query(default=None),
+        service_name: str | None = Query(default=None),
+        queue_name: str | None = Query(default=None),
+        dlq_name: str | None = Query(default=None),
+        error_type: str | None = Query(default=None),
+        status: str | None = Query(default=None),
+        task_id: str | None = Query(default=None),
+        worker_id: str | None = Query(default=None),
+        investigation_status: str | None = Query(default=None),
+        failed_from: str | None = Query(default=None),
+        failed_to: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ):
+        try:
+            payload = await federation_service.list_failed_tasks(
+                service_id=service_id,
+                service_name=service_name,
+                queue_name=queue_name,
+                dlq_name=dlq_name,
+                error_type=error_type,
+                status=status,
+                task_id=task_id,
+                worker_id=worker_id,
+                investigation_status=investigation_status,
+                failed_from=failed_from,
+                failed_to=failed_to,
+                limit=limit,
+            )
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(payload)
+
+    @router.get(f"{prefix}/failed-tasks/{{service_id}}/{{failure_id}}")
+    async def failed_task_detail(service_id: str, failure_id: str):
+        try:
+            payload = await federation_service.get_failed_task_detail(service_id, failure_id)
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(payload)
+
+    @router.post(f"{prefix}/failed-tasks/{{service_id}}/{{failure_id}}/mark-investigated")
+    async def mark_failed_task_investigated(
+        service_id: str,
+        failure_id: str,
+        payload: dict[str, Any] = JSON_BODY,
+    ):
+        try:
+            result = await federation_service.mark_failed_task_investigated(service_id, failure_id, payload)
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(result)
+
+    @router.post(f"{prefix}/failed-tasks/{{service_id}}/{{failure_id}}/mark-uninvestigated")
+    async def mark_failed_task_uninvestigated(service_id: str, failure_id: str):
+        try:
+            result = await federation_service.mark_failed_task_uninvestigated(service_id, failure_id)
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(result)
+
+    @router.post(f"{prefix}/failed-tasks/{{service_id}}/{{failure_id}}/retry")
+    async def retry_failed_task(
+        service_id: str,
+        failure_id: str,
+        payload: dict[str, Any] = JSON_BODY,
+    ):
+        try:
+            result = await federation_service.retry_failed_task(service_id, failure_id, payload)
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(result)
+
+    @router.delete(f"{prefix}/failed-tasks/{{service_id}}/{{failure_id}}")
+    async def delete_failed_task(service_id: str, failure_id: str):
+        try:
+            result = await federation_service.delete_failed_task(service_id, failure_id)
+        except StudioFederationError as exc:
+            return exc.to_response()
+        return JSONResponse(result)
+
     @router.get(f"{prefix}/services/{{service_id}}/executions/{{task_id}}/graph")
     async def service_execution_graph(service_id: str, task_id: str):
         try:
@@ -1395,6 +1704,11 @@ __all__ = [
     "SERVICE_BROKER_DLQ_MESSAGES_PATH",
     "SERVICE_DLQ_MESSAGES_PATH",
     "SERVICE_EXECUTION_GRAPH_PATH",
+    "SERVICE_FAILED_TASKS_PATH",
+    "SERVICE_FAILED_TASK_INVESTIGATE_PATH",
+    "SERVICE_FAILED_TASK_PATH",
+    "SERVICE_FAILED_TASK_RETRY_PATH",
+    "SERVICE_FAILED_TASK_UNINVESTIGATE_PATH",
     "SERVICE_HISTORY_PATH",
     "SERVICE_RUNTIME_BACKPRESSURE_PATH",
     "SERVICE_STATUS_PATH",

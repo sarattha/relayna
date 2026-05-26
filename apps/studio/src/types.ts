@@ -305,6 +305,85 @@ export type DlqMessageListResponse = {
   next_cursor?: string | null;
 };
 
+export type FailedTaskSummary = {
+  service_id: string;
+  service_name?: string | null;
+  failure_id: string;
+  task_id?: string | null;
+  correlation_id?: string | null;
+  queue_name: string;
+  source_queue_name: string;
+  retry_queue_name: string;
+  dlq_name: string;
+  status: string;
+  attempt: number;
+  max_attempts: number;
+  failed_at: string;
+  error_type?: string | null;
+  error_message?: string | null;
+  worker_id?: string | null;
+  runtime_name?: string | null;
+  runtime_version?: string | null;
+  investigation_status: "unreviewed" | "investigated" | string;
+  investigated_at?: string | null;
+  investigated_by?: string | null;
+  retry_status: "not_retried" | "retried" | string;
+  retried_at?: string | null;
+  retried_by?: string | null;
+  retried_task_id?: string | null;
+  retry_target_queue?: string | null;
+  payload_available: boolean;
+  task_ref?: StudioTaskRef | null;
+};
+
+export type FailedTaskDetail = FailedTaskSummary & {
+  dlq_id?: string | null;
+  reason?: string | null;
+  headers?: Record<string, unknown>;
+  content_type?: string | null;
+  body?: unknown;
+  body_encoding?: string | null;
+  raw_body_b64?: string | null;
+  traceback?: string | null;
+  input_preview?: unknown;
+  metadata?: Record<string, unknown>;
+  last_logs?: Array<Record<string, unknown>>;
+  latest_status?: Record<string, unknown> | null;
+  status_history?: Array<Record<string, unknown>>;
+  investigation_note?: string | null;
+  retry_note?: string | null;
+};
+
+export type FailedTaskListResponse = {
+  items: FailedTaskSummary[];
+  next_cursor?: string | null;
+  errors?: FederatedError[];
+  scanned_services?: string[];
+};
+
+export type FailedTaskQueryState = {
+  service_id: string;
+  queue_name: string;
+  dlq_name: string;
+  error_type: string;
+  status: string;
+  task_id: string;
+  worker_id: string;
+  investigation_status: string;
+  failed_from: string;
+  failed_to: string;
+  limit: string;
+};
+
+export type FailedTaskRetryResponse = {
+  failure_id: string;
+  target_queue: string;
+  retry_status: string;
+  retried_at: string;
+  retried_by?: string | null;
+  retried_task_id?: string | null;
+};
+
 export type BrokerDlqMessage = {
   service_id: string;
   queue_name: string;

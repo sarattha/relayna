@@ -1086,6 +1086,10 @@ export function AppHeader() {
             <StudioIcon name="tasks" />
             Task Search
           </Link>
+          <Link to="/failed-tasks" style={navStyle}>
+            <StudioIcon name="dlq" />
+            Failed Tasks
+          </Link>
         </div>
       </section>
     </header>

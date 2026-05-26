@@ -288,6 +288,113 @@ def test_service_scoped_routes_proxy_payloads_and_apply_http_aliases(monkeypatch
         assert graph_response.json()["edges"][0]["state"] == "traversed"
 
 
+def test_failed_tasks_routes_aggregate_detail_and_proxy_mutations(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed: dict[str, str] = {}
+
+    failed_routes = [
+        "failed_tasks.list",
+        "failed_tasks.detail",
+        "failed_tasks.investigate",
+        "failed_tasks.uninvestigate",
+        "failed_tasks.retry",
+        "failed_tasks.delete",
+    ]
+
+    def failed_item() -> dict[str, object]:
+        return {
+            "failure_id": "failure-1",
+            "task_id": "task-123",
+            "correlation_id": "corr-123",
+            "queue_name": "payments.authorize",
+            "source_queue_name": "payments.authorize",
+            "retry_queue_name": "payments.authorize.retry",
+            "dlq_name": "payments.authorize.dlq",
+            "status": "DLQ",
+            "attempt": 3,
+            "max_attempts": 3,
+            "failed_at": "2026-05-26T10:30:00Z",
+            "error_type": "RuntimeError",
+            "error_message": "boom",
+            "investigation_status": "unreviewed",
+            "retry_status": "not_retried",
+            "payload_available": True,
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/failed-tasks":
+            observed["list_query"] = str(request.url.query)
+            return httpx.Response(200, json={"items": [failed_item()], "next_cursor": None})
+        if request.url.path == "/failed-tasks/failure-1" and request.method == "GET":
+            return httpx.Response(200, json=failed_item() | {"raw_body_b64": "e30=", "body_encoding": "json"})
+        if request.url.path == "/failed-tasks/failure-1/mark-investigated":
+            observed["investigate_body"] = request.content.decode()
+            return httpx.Response(
+                200,
+                json=failed_item() | {"investigation_status": "investigated", "investigated_by": "admin@example.test"},
+            )
+        if request.url.path == "/failed-tasks/failure-1/mark-uninvestigated":
+            return httpx.Response(200, json=failed_item())
+        if request.url.path == "/failed-tasks/failure-1/retry":
+            observed["retry_body"] = request.content.decode()
+            return httpx.Response(
+                200,
+                json={
+                    "failure_id": "failure-1",
+                    "target_queue": "payments.authorize",
+                    "retry_status": "retried",
+                    "retried_at": "2026-05-26T10:31:00Z",
+                    "retried_by": "admin@example.test",
+                    "retried_task_id": "task-456",
+                },
+            )
+        if request.url.path == "/failed-tasks/failure-1" and request.method == "DELETE":
+            return httpx.Response(204)
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    transport = httpx.MockTransport(handler)
+    app = create_studio_app(
+        redis_url="redis://test",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(transport=transport, timeout=timeout),
+        pull_sync_interval_seconds=None,
+        health_refresh_interval_seconds=None,
+        retention_prune_interval_seconds=None,
+    )
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=failed_routes),
+            ),
+        )
+
+        list_response = client.get("/studio/failed-tasks?investigation_status=unreviewed&limit=50")
+        detail_response = client.get("/studio/failed-tasks/payments-api/failure-1")
+        investigate_response = client.post(
+            "/studio/failed-tasks/payments-api/failure-1/mark-investigated",
+            json={"investigated_by": "admin@example.test", "note": "checked"},
+        )
+        retry_response = client.post(
+            "/studio/failed-tasks/payments-api/failure-1/retry",
+            json={"target_queue": "payments.authorize", "note": "retry"},
+        )
+        delete_response = client.delete("/studio/failed-tasks/payments-api/failure-1")
+
+        assert list_response.status_code == 200
+        assert list_response.json()["items"][0]["service_id"] == "payments-api"
+        assert list_response.json()["items"][0]["task_ref"]["task_id"] == "task-123"
+        assert "investigation_status=unreviewed" in observed["list_query"]
+        assert detail_response.status_code == 200
+        assert detail_response.json()["service_name"] == "Payments Api"
+        assert investigate_response.json()["investigation_status"] == "investigated"
+        assert "admin@example.test" in observed["investigate_body"]
+        assert retry_response.json()["retry_status"] == "retried"
+        assert "payments.authorize" in observed["retry_body"]
+        assert delete_response.json() == {"service_id": "payments-api", "failure_id": "failure-1", "deleted": True}
+
+
 def test_service_broker_dlq_messages_proxy_and_normalize_task_refs(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
     observed_params: dict[str, str] = {}

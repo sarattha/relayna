@@ -566,6 +566,7 @@ class TaskConsumer:
                 retry_attempt=decision.retry_attempt,
                 reason=decision.reason,
                 exception_type=type(exc).__name__,
+                exception_message=str(exc),
                 body=retry_body,
                 correlation_id=retry_correlation_id,
                 extra_headers=_merge_batch_retry_headers(context, retry_headers),
@@ -836,6 +837,7 @@ class TaskConsumer:
         retry_attempt: int,
         reason: str,
         exception_type: str | None,
+        exception_message: str | None = None,
         body: bytes | None = None,
         correlation_id: str | None = None,
         extra_headers: Mapping[str, Any] | None = None,
@@ -882,6 +884,7 @@ class TaskConsumer:
             correlation_id=correlation_id or getattr(message, "correlation_id", None),
             reason=reason,
             exception_type=exception_type,
+            exception_message=exception_message,
             retry_attempt=retry_attempt,
             max_retries=self._retry_policy.max_retries,
             headers=headers,
@@ -1105,6 +1108,7 @@ class AggregationConsumer:
                                 retry_attempt=current_retry_attempt,
                                 reason="handler_error",
                                 exception_type=type(exc).__name__,
+                                exception_message=str(exc),
                             )
                             await self._publish_dead_letter_status(context, exc, meta=event.meta)
                             await message.ack()
@@ -1236,6 +1240,7 @@ class AggregationConsumer:
         retry_attempt: int,
         reason: str,
         exception_type: str | None,
+        exception_message: str | None = None,
     ) -> None:
         if retry_infrastructure is None or self._retry_policy is None:
             raise RuntimeError("Retry infrastructure is not initialized")
@@ -1278,6 +1283,7 @@ class AggregationConsumer:
             correlation_id=getattr(message, "correlation_id", None),
             reason=reason,
             exception_type=exception_type,
+            exception_message=exception_message,
             retry_attempt=retry_attempt,
             max_retries=self._retry_policy.max_retries,
             headers=headers,

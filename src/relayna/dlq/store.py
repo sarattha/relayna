@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
 
 from redis.asyncio import Redis
 
-from .models import DLQRecord, DLQRecordState, DLQReplayConflict
+from .models import DLQRecord, DLQRecordState, DLQReplayConflict, FailedTaskInvestigationStatus
 
 
 class DLQRecorder(Protocol):
@@ -44,6 +44,29 @@ class DLQStore(Protocol):
         target_queue_name: str,
     ) -> DLQRecord | None: ...
 
+    async def list_failed_task_records(
+        self,
+        *,
+        service_name: str | None = None,
+        queue_name: str | None = None,
+        dlq_name: str | None = None,
+        error_type: str | None = None,
+        status: str | None = None,
+        task_id: str | None = None,
+        worker_id: str | None = None,
+        investigation_status: FailedTaskInvestigationStatus | str | None = None,
+        failed_from: datetime | None = None,
+        failed_to: datetime | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> tuple[list[DLQRecord], str | None]: ...
+
+    async def update(self, record: DLQRecord) -> DLQRecord: ...
+
+    async def delete(self, dlq_id: str) -> bool: ...
+
+    async def cleanup_failed_task_index(self, *, older_than: datetime | None = None) -> int: ...
+
 
 class RedisDLQStore:
     def __init__(
@@ -63,6 +86,9 @@ class RedisDLQStore:
     def records_key(self) -> str:
         return f"{self.prefix}:dlq:records"
 
+    def failed_tasks_index_key(self) -> str:
+        return f"{self.prefix}:failed_tasks:index"
+
     def replay_lock_key(self, dlq_id: str) -> str:
         return f"{self.prefix}:dlq:replay-lock:{dlq_id}"
 
@@ -71,8 +97,10 @@ class RedisDLQStore:
         pipe = self.redis.pipeline()
         pipe.set(self.record_key(record.dlq_id), payload, ex=self.ttl_seconds)
         pipe.lpush(self.records_key(), record.dlq_id)
+        pipe.zadd(self.failed_tasks_index_key(), {record.dlq_id: _failed_score(record)})
         if self.ttl_seconds:
             pipe.expire(self.records_key(), self.ttl_seconds)
+            pipe.expire(self.failed_tasks_index_key(), self.ttl_seconds)
         await pipe.execute()
 
     async def get(self, dlq_id: str) -> DLQRecord | None:
@@ -145,6 +173,85 @@ class RedisDLQStore:
 
         return items, next_cursor
 
+    async def list_failed_task_records(
+        self,
+        *,
+        service_name: str | None = None,
+        queue_name: str | None = None,
+        dlq_name: str | None = None,
+        error_type: str | None = None,
+        status: str | None = None,
+        task_id: str | None = None,
+        worker_id: str | None = None,
+        investigation_status: FailedTaskInvestigationStatus | str | None = None,
+        failed_from: datetime | None = None,
+        failed_to: datetime | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> tuple[list[DLQRecord], str | None]:
+        max_score = _timestamp(failed_to) if failed_to is not None else "+inf"
+        min_score = _timestamp(failed_from) if failed_from is not None else "-inf"
+        raw_ids = await cast(
+            Awaitable[list[str | bytes]],
+            self.redis.zrevrangebyscore(self.failed_tasks_index_key(), max_score, min_score),
+        )
+        ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
+        start_index = 0
+        if cursor:
+            try:
+                start_index = ids.index(cursor) + 1
+            except ValueError:
+                start_index = 0
+
+        normalized_investigation: FailedTaskInvestigationStatus | None = None
+        if isinstance(investigation_status, FailedTaskInvestigationStatus):
+            normalized_investigation = investigation_status
+        elif isinstance(investigation_status, str) and investigation_status:
+            normalized_investigation = FailedTaskInvestigationStatus(investigation_status)
+        items: list[DLQRecord] = []
+        next_cursor: str | None = None
+
+        for index in range(start_index, len(ids)):
+            record = await self.get(ids[index])
+            if record is None:
+                continue
+            if not _failed_record_matches(
+                record,
+                service_name=service_name,
+                queue_name=queue_name,
+                dlq_name=dlq_name,
+                error_type=error_type,
+                status=status,
+                task_id=task_id,
+                worker_id=worker_id,
+                investigation_status=normalized_investigation,
+            ):
+                continue
+            items.append(record)
+            if len(items) == limit:
+                next_cursor = record.dlq_id
+                break
+
+        if next_cursor is not None:
+            for index in range(ids.index(next_cursor) + 1, len(ids)):
+                record = await self.get(ids[index])
+                if record is not None and _failed_record_matches(
+                    record,
+                    service_name=service_name,
+                    queue_name=queue_name,
+                    dlq_name=dlq_name,
+                    error_type=error_type,
+                    status=status,
+                    task_id=task_id,
+                    worker_id=worker_id,
+                    investigation_status=normalized_investigation,
+                ):
+                    break
+            else:
+                next_cursor = None
+
+        return items, next_cursor
+
     async def summarize_queues(self) -> list[tuple[str, int, datetime | None]]:
         raw_ids = await cast(Awaitable[list[str | bytes]], self.redis.lrange(self.records_key(), 0, -1))
         ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
@@ -199,6 +306,64 @@ class RedisDLQStore:
         )
         await self.redis.set(self.record_key(updated.dlq_id), updated.model_dump_json(), ex=self.ttl_seconds)
         return updated
+
+    async def update(self, record: DLQRecord) -> DLQRecord:
+        await self.redis.set(self.record_key(record.dlq_id), record.model_dump_json(), ex=self.ttl_seconds)
+        await self.redis.zadd(self.failed_tasks_index_key(), {record.dlq_id: _failed_score(record)})
+        return record
+
+    async def delete(self, dlq_id: str) -> bool:
+        deleted = await self.redis.delete(self.record_key(dlq_id))
+        await self.redis.zrem(self.failed_tasks_index_key(), dlq_id)
+        return bool(deleted)
+
+    async def cleanup_failed_task_index(self, *, older_than: datetime | None = None) -> int:
+        if older_than is None:
+            if self.ttl_seconds is None:
+                return 0
+            older_than = datetime.now(UTC) - timedelta(seconds=self.ttl_seconds)
+        return int(await self.redis.zremrangebyscore(self.failed_tasks_index_key(), "-inf", _timestamp(older_than)))
+
+
+def _timestamp(value: datetime) -> float:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC).timestamp()
+    return value.timestamp()
+
+
+def _failed_score(record: DLQRecord) -> float:
+    return _timestamp(record.failed_at or record.dead_lettered_at)
+
+
+def _failed_record_matches(
+    record: DLQRecord,
+    *,
+    service_name: str | None,
+    queue_name: str | None,
+    dlq_name: str | None,
+    error_type: str | None,
+    status: str | None,
+    task_id: str | None,
+    worker_id: str | None,
+    investigation_status: FailedTaskInvestigationStatus | None,
+) -> bool:
+    if service_name and record.service_name != service_name:
+        return False
+    if queue_name and record.source_queue_name != queue_name:
+        return False
+    if dlq_name and record.queue_name != dlq_name:
+        return False
+    if error_type and record.exception_type != error_type:
+        return False
+    if status and record.status != status:
+        return False
+    if task_id and record.task_id != task_id:
+        return False
+    if worker_id and record.worker_id != worker_id:
+        return False
+    if investigation_status is not None and record.investigation_status != investigation_status:
+        return False
+    return True
 
 
 __all__ = ["DLQRecorder", "DLQStore", "RedisDLQStore"]

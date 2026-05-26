@@ -2,6 +2,7 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { DlqPage } from "./pages/DlqPage";
+import { FailedTasksPage } from "./pages/FailedTasksPage";
 import { ServiceDetailPage } from "./pages/ServiceDetailPage";
 import { ServicesPage } from "./pages/ServicesPage";
 import { TaskDetailPage } from "./pages/TaskDetailPage";
@@ -23,6 +24,7 @@ export function App() {
               <Route path="/services/:serviceId" element={<ServiceDetailPage />} />
               <Route path="/services/:serviceId/topology" element={<TopologyPage />} />
               <Route path="/services/:serviceId/dlq" element={<DlqPage />} />
+              <Route path="/failed-tasks" element={<FailedTasksPage />} />
               <Route path="/tasks/search" element={<TaskSearchPage />} />
               <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
               <Route path="*" element={<Navigate to="/services" replace />} />

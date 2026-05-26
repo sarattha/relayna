@@ -19,6 +19,16 @@ class DLQRecordState(str, Enum):
     REPLAYED = "replayed"
 
 
+class FailedTaskInvestigationStatus(str, Enum):
+    UNREVIEWED = "unreviewed"
+    INVESTIGATED = "investigated"
+
+
+class FailedTaskRetryStatus(str, Enum):
+    NOT_RETRIED = "not_retried"
+    RETRIED = "retried"
+
+
 class DLQFailureDiagnosis(BaseModel):
     reason: str
     exception_type: str | None = None
@@ -69,13 +79,16 @@ class QueueInspectionResult(BaseModel):
 
 class DLQRecord(BaseModel):
     dlq_id: str
+    failure_id: str | None = None
     queue_name: str
     source_queue_name: str
     retry_queue_name: str
     task_id: str | None = None
     correlation_id: str | None = None
+    service_name: str | None = None
     reason: str
     exception_type: str | None = None
+    exception_message: str | None = None
     retry_attempt: int
     max_retries: int
     headers: dict[str, Any] = Field(default_factory=dict)
@@ -89,6 +102,26 @@ class DLQRecord(BaseModel):
     replayed_at: datetime | None = None
     replay_target_queue_name: str | None = None
     diagnosis: DLQDiagnosisBundle | None = None
+    failed_at: datetime | None = None
+    status: str = "DLQ"
+    traceback: str | None = None
+    worker_id: str | None = None
+    runtime_name: str | None = None
+    runtime_version: str | None = None
+    input_preview: Any = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    last_logs: list[dict[str, Any]] = Field(default_factory=list)
+    payload_available: bool = True
+    investigation_status: FailedTaskInvestigationStatus = FailedTaskInvestigationStatus.UNREVIEWED
+    investigated_at: datetime | None = None
+    investigated_by: str | None = None
+    investigation_note: str | None = None
+    retry_status: FailedTaskRetryStatus = FailedTaskRetryStatus.NOT_RETRIED
+    retried_at: datetime | None = None
+    retried_by: str | None = None
+    retried_task_id: str | None = None
+    retry_target_queue: str | None = None
+    retry_note: str | None = None
 
 
 class DLQMessageSummary(BaseModel):
@@ -109,6 +142,82 @@ class DLQMessageSummary(BaseModel):
     replay_count: int
     replayed_at: datetime | None = None
     replay_target_queue_name: str | None = None
+
+
+class FailedTaskSummary(BaseModel):
+    failure_id: str
+    service_id: str | None = None
+    service_name: str | None = None
+    task_id: str | None = None
+    correlation_id: str | None = None
+    queue_name: str
+    source_queue_name: str
+    retry_queue_name: str
+    dlq_name: str
+    status: str
+    attempt: int
+    max_attempts: int
+    failed_at: datetime
+    error_type: str | None = None
+    error_message: str | None = None
+    worker_id: str | None = None
+    runtime_name: str | None = None
+    runtime_version: str | None = None
+    investigation_status: FailedTaskInvestigationStatus
+    investigated_at: datetime | None = None
+    investigated_by: str | None = None
+    retry_status: FailedTaskRetryStatus
+    retried_at: datetime | None = None
+    retried_by: str | None = None
+    retried_task_id: str | None = None
+    retry_target_queue: str | None = None
+    payload_available: bool
+
+
+class FailedTaskDetail(FailedTaskSummary):
+    dlq_id: str
+    reason: str
+    headers: dict[str, Any] = Field(default_factory=dict)
+    content_type: str | None = None
+    body: Any = None
+    body_encoding: str
+    raw_body_b64: str
+    traceback: str | None = None
+    input_preview: Any = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    last_logs: list[dict[str, Any]] = Field(default_factory=list)
+    latest_status: dict[str, Any] | None = None
+    status_history: list[dict[str, Any]] = Field(default_factory=list)
+    investigation_note: str | None = None
+    retry_note: str | None = None
+    diagnosis: DLQDiagnosisBundle | None = None
+
+
+class FailedTaskList(BaseModel):
+    items: list[FailedTaskSummary]
+    next_cursor: str | None = None
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FailedTaskInvestigationRequest(BaseModel):
+    investigated_by: str | None = None
+    note: str | None = None
+
+
+class FailedTaskRetryRequest(BaseModel):
+    target_queue: str | None = None
+    override_payload: Any = None
+    retried_by: str | None = None
+    note: str | None = None
+
+
+class FailedTaskRetryResult(BaseModel):
+    failure_id: str
+    target_queue: str
+    retry_status: FailedTaskRetryStatus
+    retried_at: datetime
+    retried_by: str | None = None
+    retried_task_id: str | None = None
 
 
 class DLQMessageDetail(DLQMessageSummary):
@@ -167,6 +276,13 @@ class DLQReplayConflict(RuntimeError):
         self.dlq_id = dlq_id
 
 
+class FailedTaskRetryRejected(RuntimeError):
+    def __init__(self, failure_id: str, *, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.failure_id = failure_id
+        self.code = code
+
+
 def inspect_dead_letter_body(body: bytes) -> tuple[Any, str, str]:
     raw_body_b64 = base64.b64encode(body).decode("ascii")
     try:
@@ -216,9 +332,20 @@ def build_dlq_record(
     dead_lettered_at: datetime | None = None,
     consumer_name: str | None = None,
     diagnosis: DLQDiagnosisBundle | None = None,
+    exception_message: str | None = None,
+    traceback: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> DLQRecord:
     timestamp = dead_lettered_at or _utcnow()
     inspected_body, body_encoding, raw_body_b64 = inspect_dead_letter_body(body)
+    dlq_id = build_dlq_id(
+        queue_name=queue_name,
+        source_queue_name=source_queue_name,
+        correlation_id=correlation_id,
+        retry_attempt=retry_attempt,
+        body=body,
+        dead_lettered_at=timestamp,
+    )
     resolved_diagnosis = diagnosis or build_dlq_diagnosis(
         source_queue_name=source_queue_name,
         retry_queue_name=retry_queue_name,
@@ -234,21 +361,17 @@ def build_dlq_record(
         consumer_name=consumer_name,
     )
     return DLQRecord(
-        dlq_id=build_dlq_id(
-            queue_name=queue_name,
-            source_queue_name=source_queue_name,
-            correlation_id=correlation_id,
-            retry_attempt=retry_attempt,
-            body=body,
-            dead_lettered_at=timestamp,
-        ),
+        dlq_id=dlq_id,
+        failure_id=dlq_id,
         queue_name=queue_name,
         source_queue_name=source_queue_name,
         retry_queue_name=retry_queue_name,
         task_id=task_id,
         correlation_id=correlation_id,
+        service_name=consumer_name,
         reason=reason,
         exception_type=exception_type,
+        exception_message=exception_message,
         retry_attempt=retry_attempt,
         max_retries=max_retries,
         headers=dict(headers),
@@ -258,6 +381,12 @@ def build_dlq_record(
         raw_body_b64=raw_body_b64,
         dead_lettered_at=timestamp,
         diagnosis=resolved_diagnosis,
+        failed_at=timestamp,
+        traceback=traceback,
+        worker_id=consumer_name,
+        runtime_name="relayna-worker",
+        input_preview=inspected_body,
+        metadata=dict(metadata or {}),
     )
 
 
@@ -355,6 +484,15 @@ __all__ = [
     "DLQReplayResult",
     "DLQReplayConflict",
     "DLQRetryDiagnosis",
+    "FailedTaskDetail",
+    "FailedTaskInvestigationRequest",
+    "FailedTaskInvestigationStatus",
+    "FailedTaskList",
+    "FailedTaskRetryRejected",
+    "FailedTaskRetryRequest",
+    "FailedTaskRetryResult",
+    "FailedTaskRetryStatus",
+    "FailedTaskSummary",
     "QueueInspectionResult",
     "build_dlq_diagnosis",
     "build_dlq_record",
