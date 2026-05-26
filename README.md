@@ -11,6 +11,8 @@ It provides:
 - First-class stage-inbox workflow topology for multi-stage agent pipelines
 - Redis-backed status history and pubsub
 - Redis-backed DLQ indexing and replay helpers
+- Failed-task snapshots for terminal DLQ failures, investigation state, and
+  retry actions
 - Server-Sent Events replay plus live updates
 - RabbitMQ stream replay for history/debug endpoints
 - FastAPI lifecycle and route helpers
@@ -32,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.14/relayna-1.4.14-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.15/relayna-1.4.15-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.14/relayna-1.4.14.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.15/relayna-1.4.15.tar.gz
 ```
 
 For local development in this repository:
@@ -230,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.14`, and the backend requires `relayna>=1.4.14`.
+release version is `1.4.15`, and the backend requires `relayna>=1.4.15`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -371,11 +373,30 @@ When workers also receive `dlq_store=...`, this adds:
 - `GET /dlq/messages`
 - `GET /dlq/messages/{dlq_id}`
 - `POST /dlq/messages/{dlq_id}/replay`
+- `GET /failed-tasks`
+- `GET /failed-tasks/{failure_id}`
+- `POST /failed-tasks/{failure_id}/mark-investigated`
+- `POST /failed-tasks/{failure_id}/mark-uninvestigated`
+- `POST /failed-tasks/{failure_id}/retry`
+- `DELETE /failed-tasks/{failure_id}`
 - `GET /broker/dlq/queues` when `broker_dlq_queue_names=...` is configured
 
 `GET /dlq/queues` reports queues known from indexed DLQ records and then augments
 those queue names with live RabbitMQ counts. It does not discover every DLQ
 queue that exists in RabbitMQ.
+
+### Failed task snapshots
+
+`GET /failed-tasks` lists terminal failed-task snapshots derived from indexed
+DLQ records. The route supports queue, DLQ, task, worker, error, status,
+investigation-state, time-window, cursor, and limit filters. Detail responses
+include the failed payload preview, raw body metadata, traceback/error text,
+recent logs, retry metadata, and task references when available.
+
+The mutation routes let operators mark a snapshot investigated, return it to
+unreviewed, retry it through the configured DLQ replay path, or delete the
+snapshot after retention or triage. Advertise `FAILED_TASK_CAPABILITY_ROUTE_IDS`
+from the capability document so Studio can federate and render these controls.
 
 If you need broader visibility, configure `broker_dlq_queue_names=...` and use
 `GET /broker/dlq/queues`. That endpoint inspects the configured candidate queue
