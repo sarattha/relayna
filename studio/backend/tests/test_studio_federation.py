@@ -395,6 +395,101 @@ def test_failed_tasks_routes_aggregate_detail_and_proxy_mutations(monkeypatch) -
         assert delete_response.json() == {"service_id": "payments-api", "failure_id": "failure-1", "deleted": True}
 
 
+def test_failed_tasks_aggregate_returns_cursor_when_results_are_trimmed(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    failed_routes = ["failed_tasks.list"]
+
+    def failed_item(service_prefix: str, index: int, failed_at: str) -> dict[str, object]:
+        return {
+            "failure_id": f"{service_prefix}-failure-{index}",
+            "task_id": f"{service_prefix}-task-{index}",
+            "queue_name": f"{service_prefix}.stage",
+            "dlq_name": f"{service_prefix}.dlq",
+            "status": "DLQ",
+            "failed_at": failed_at,
+            "error_type": "RuntimeError",
+            "error_message": "boom",
+            "investigation_status": "unreviewed",
+            "retry_status": "not_retried",
+            "payload_available": True,
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/failed-tasks":
+            raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+        if request.url.host == "payments.example.test":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        failed_item("payments", 1, "2026-05-26T10:30:00Z"),
+                        failed_item("payments", 2, "2026-05-26T10:10:00Z"),
+                    ],
+                    "next_cursor": None,
+                },
+            )
+        if request.url.host == "orders.example.test":
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        failed_item("orders", 1, "2026-05-26T10:20:00Z"),
+                        failed_item("orders", 2, "2026-05-26T10:00:00Z"),
+                    ],
+                    "next_cursor": None,
+                },
+            )
+        raise AssertionError(f"Unhandled upstream host {request.url.host}")
+
+    transport = httpx.MockTransport(handler)
+    app = create_studio_app(
+        redis_url="redis://test",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(transport=transport, timeout=timeout),
+        pull_sync_interval_seconds=None,
+        health_refresh_interval_seconds=None,
+        retention_prune_interval_seconds=None,
+    )
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=failed_routes),
+            ),
+        )
+        install_service(
+            app,
+            make_record(
+                service_id="orders-api",
+                base_url="https://orders.example.test",
+                capabilities=make_capability_document(supported_routes=failed_routes),
+            ),
+        )
+
+        first_page_response = client.get("/studio/failed-tasks", params={"limit": 3})
+
+        assert first_page_response.status_code == 200
+        first_page = first_page_response.json()
+        assert [item["failure_id"] for item in first_page["items"]] == [
+            "payments-failure-1",
+            "orders-failure-1",
+            "payments-failure-2",
+        ]
+        assert first_page["next_cursor"] is not None
+
+        second_page_response = client.get(
+            "/studio/failed-tasks",
+            params={"limit": 3, "cursor": first_page["next_cursor"]},
+        )
+
+        assert second_page_response.status_code == 200
+        second_page = second_page_response.json()
+        assert [item["failure_id"] for item in second_page["items"]] == ["orders-failure-2"]
+        assert second_page["next_cursor"] is None
+
+
 def test_service_broker_dlq_messages_proxy_and_normalize_task_refs(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
     observed_params: dict[str, str] = {}

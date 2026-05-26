@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -66,6 +69,31 @@ JSON_BODY = Body(default_factory=dict)
 
 def _default_async_client_factory(timeout_seconds: float) -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=timeout_seconds)
+
+
+def _encode_failed_task_cursor(offset: int) -> str:
+    raw = json.dumps({"offset": str(offset)}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _decode_failed_task_cursor(cursor: str) -> int:
+    try:
+        raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("Invalid cursor.") from exc
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid cursor.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("offset"), str):
+        raise ValueError("Invalid cursor.")
+    try:
+        offset = int(payload["offset"])
+    except ValueError as exc:
+        raise ValueError("Invalid cursor.") from exc
+    if offset < 0:
+        raise ValueError("Invalid cursor.")
+    return offset
 
 
 class FederatedError(BaseModel):
@@ -252,8 +280,38 @@ class StudioFederationService:
         investigation_status: str | None = None,
         failed_from: str | None = None,
         failed_to: str | None = None,
+        cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
+        if service_id:
+            service = await self._get_proxyable_service(service_id)
+            payload = await self._fetch_failed_tasks(
+                service,
+                service_name=service_name,
+                queue_name=queue_name,
+                dlq_name=dlq_name,
+                error_type=error_type,
+                status=status,
+                task_id=task_id,
+                worker_id=worker_id,
+                investigation_status=investigation_status,
+                failed_from=failed_from,
+                failed_to=failed_to,
+                cursor=cursor,
+                limit=limit,
+            )
+            return {
+                "items": payload.get("items", [])[:limit],
+                "next_cursor": payload.get("next_cursor"),
+                "errors": [],
+                "scanned_services": [service.service_id],
+            }
+        offset = 0
+        if cursor:
+            try:
+                offset = _decode_failed_task_cursor(cursor)
+            except ValueError as exc:
+                raise StudioFederationError(status_code=400, detail=str(exc), code="invalid_cursor") from exc
         services = (
             [await self._get_proxyable_service(service_id)]
             if service_id
@@ -296,9 +354,11 @@ class StudioFederationService:
                 if isinstance(item, dict):
                     items.append(item)
         items.sort(key=lambda item: str(item.get("failed_at") or ""), reverse=True)
+        page = items[offset : offset + limit]
+        next_offset = offset + len(page)
         return {
-            "items": items[:limit],
-            "next_cursor": None,
+            "items": page,
+            "next_cursor": _encode_failed_task_cursor(next_offset) if next_offset < len(items) else None,
             "errors": errors,
             "scanned_services": [item for item in scanned_services if item],
         }
@@ -816,6 +876,7 @@ class StudioFederationService:
         investigation_status: str | None = None,
         failed_from: str | None = None,
         failed_to: str | None = None,
+        cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         payload = await self._request_json(
@@ -833,6 +894,7 @@ class StudioFederationService:
                 "investigation_status": investigation_status,
                 "failed_from": failed_from,
                 "failed_to": failed_to,
+                "cursor": cursor,
                 "limit": limit,
             },
             missing_route_404=True,
@@ -1432,6 +1494,7 @@ def create_federation_router(
         investigation_status: str | None = Query(default=None),
         failed_from: str | None = Query(default=None),
         failed_to: str | None = Query(default=None),
+        cursor: str | None = Query(default=None),
         limit: int = Query(default=50, ge=1, le=200),
     ):
         try:
@@ -1447,6 +1510,7 @@ def create_federation_router(
                 investigation_status=investigation_status,
                 failed_from=failed_from,
                 failed_to=failed_to,
+                cursor=cursor,
                 limit=limit,
             )
         except StudioFederationError as exc:

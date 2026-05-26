@@ -35,6 +35,7 @@ const initialQuery: FailedTaskQueryState = {
   failed_from: "",
   failed_to: "",
   limit: "50",
+  cursor: null,
 };
 
 export function FailedTasksPage() {
@@ -43,6 +44,7 @@ export function FailedTasksPage() {
   const [selected, setSelected] = useState<FailedTaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [investigationNote, setInvestigationNote] = useState("");
@@ -55,12 +57,13 @@ export function FailedTasksPage() {
     void load(initialQuery);
   }, []);
 
-  async function load(nextQuery: FailedTaskQueryState) {
+  async function load(nextQuery: FailedTaskQueryState, append = false) {
     setLoading(true);
     setError(null);
     try {
       const payload = await fetchFailedTasks(nextQuery);
-      setItems(payload.items);
+      setItems((current) => (append ? [...current, ...payload.items] : payload.items));
+      setNextCursor(payload.next_cursor || null);
       if (payload.errors?.length) {
         setNotice(`${payload.errors.length} service read failed while loading failed tasks.`);
       }
@@ -90,7 +93,9 @@ export function FailedTasksPage() {
 
   async function submitFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await load(query);
+    const nextQuery = { ...query, cursor: null };
+    setQuery(nextQuery);
+    await load(nextQuery);
   }
 
   async function investigate() {
@@ -115,19 +120,33 @@ export function FailedTasksPage() {
   }
 
   async function retry() {
-    if (!selected || !window.confirm("Retry this terminal failed task?")) {
+    if (!selected) {
       return;
     }
-    const parsedOverride = overridePayload.trim() ? JSON.parse(overridePayload) : undefined;
-    await retryFailedTask(selected.service_id, selected.failure_id, {
-      target_queue: retryTargetQueue || selected.queue_name,
-      override_payload: parsedOverride,
-      retried_by: operator,
-      note: retryNote,
-    });
-    const detail = await fetchFailedTaskDetail(selected.service_id, selected.failure_id);
-    setSelected(detail);
-    await load(query);
+    let parsedOverride: unknown;
+    try {
+      parsedOverride = overridePayload.trim() ? JSON.parse(overridePayload) : undefined;
+    } catch {
+      setError("Override payload must be valid JSON.");
+      return;
+    }
+    if (!window.confirm("Retry this terminal failed task?")) {
+      return;
+    }
+    setError(null);
+    try {
+      await retryFailedTask(selected.service_id, selected.failure_id, {
+        target_queue: retryTargetQueue || selected.queue_name,
+        override_payload: parsedOverride,
+        retried_by: operator,
+        note: retryNote,
+      });
+      const detail = await fetchFailedTaskDetail(selected.service_id, selected.failure_id);
+      setSelected(detail);
+      await load(query);
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : "Unable to retry failed task.");
+    }
   }
 
   async function remove() {
@@ -206,6 +225,19 @@ export function FailedTasksPage() {
               </div>
             </article>
           ))}
+          {nextCursor ? (
+            <button
+              type="button"
+              style={secondaryButtonStyle}
+              onClick={() => {
+                const nextQuery = { ...query, cursor: nextCursor };
+                setQuery(nextQuery);
+                void load(nextQuery, true);
+              }}
+            >
+              Load Next Page
+            </button>
+          ) : null}
         </div>
       </SectionCard>
 

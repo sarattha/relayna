@@ -373,6 +373,7 @@ export type FailedTaskQueryState = {
   failed_from: string;
   failed_to: string;
   limit: string;
+  cursor?: string | null;
 };
 
 export type FailedTaskRetryResponse = {

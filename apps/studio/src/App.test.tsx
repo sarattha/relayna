@@ -1529,6 +1529,30 @@ describe("App", () => {
     expect(screen.getByDisplayValue(/task-123/)).toBeInTheDocument();
   });
 
+  it("shows a validation error instead of retrying with malformed failed-task payload override", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Failed Tasks" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "View" }));
+    expect(await screen.findByText("Failure Detail")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Optional JSON payload override"), {
+      target: { value: '{"task_id": "task-123",}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("Override payload must be valid JSON.")).toBeInTheDocument();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/studio/failed-tasks/payments-api/failure-1/retry",
+      expect.objectContaining({ method: "POST" }),
+    );
+    confirmSpy.mockRestore();
+  });
+
   it("submits task search and renders indexed task results", async () => {
     window.history.replaceState({}, "", "/tasks/search");
 
