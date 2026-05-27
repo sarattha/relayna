@@ -587,6 +587,13 @@ The backend can run three periodic workers:
 - retention worker
   - prunes search-related retained state
   - controlled by `RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS`
+- failed-task email notification worker
+  - disabled by default
+  - scans unreviewed federated failed-task snapshots and sends one email per
+    newly discovered failure
+  - enabled by `RELAYNA_STUDIO_FAILED_TASK_EMAIL_ENABLED=true`
+  - requires `RELAYNA_STUDIO_FAILED_TASK_EMAIL_SERVICE_URL` and
+    `RELAYNA_STUDIO_FAILED_TASK_EMAIL_RECEIVERS`
 
 Disable a worker by setting its interval to `none`, `null`, or `off`.
 
@@ -600,6 +607,15 @@ Examples:
 export RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS=off
 export RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS=null
 export RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS=none
+```
+
+Failed-task email notifications call the configured email service with only
+`receivers`, `title`, and `body`. Configure receivers as a comma-separated list:
+
+```bash
+export RELAYNA_STUDIO_FAILED_TASK_EMAIL_ENABLED=true
+export RELAYNA_STUDIO_FAILED_TASK_EMAIL_SERVICE_URL=https://email-service/send
+export RELAYNA_STUDIO_FAILED_TASK_EMAIL_RECEIVERS=ops@example.com,oncall@example.com
 ```
 
 ## Operator-Facing API Surface
