@@ -61,12 +61,20 @@ class FakeRedis:
 
 
 class FakeFederationService:
-    def __init__(self, items: list[dict[str, object]]) -> None:
+    def __init__(
+        self,
+        items: list[dict[str, object]],
+        *,
+        pages: dict[str | None, dict[str, object]] | None = None,
+    ) -> None:
         self.items = items
+        self.pages = pages
         self.calls: list[dict[str, object]] = []
 
     async def list_failed_tasks(self, **kwargs: object) -> dict[str, object]:
         self.calls.append(kwargs)
+        if self.pages is not None:
+            return self.pages[cast(str | None, kwargs.get("cursor"))]
         return {"items": self.items, "errors": [], "scanned_services": ["payments-api"]}
 
 
@@ -158,6 +166,43 @@ async def test_failed_task_notification_deduplicates_repeated_scans() -> None:
     assert await service.notify_new_failed_tasks() == 0
 
     assert len(email_client.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_task_notification_pages_beyond_notified_first_page() -> None:
+    redis = FakeRedis()
+    email_client = RecordingEmailClient()
+    item_two = {**failed_task_item(), "failure_id": "failure-2", "task_id": "task-456"}
+    federation_service = FakeFederationService(
+        [],
+        pages={
+            None: {"items": [failed_task_item()], "next_cursor": "cursor-2"},
+            "cursor-2": {"items": [item_two], "next_cursor": None},
+        },
+    )
+    service = FailedTaskEmailNotificationService(
+        federation_service=cast(Any, federation_service),
+        redis=redis,
+        email_client=cast(Any, email_client),
+        config=FailedTaskEmailNotificationConfig(
+            service_url="https://email.example.test/send",
+            api_key="secret-key",
+            receivers=("ops@example.com",),
+            interval_seconds=0.0,
+            timeout_seconds=1.0,
+            dedupe_ttl_seconds=3600,
+            title_prefix="[Relayna] Failed task",
+            default_enabled=True,
+        ),
+        settings_store=RedisFailedTaskEmailSettingsStore(redis, default_enabled=True),
+    )
+    await service._mark_notified("payments-api", "failure-1")
+
+    assert await service.notify_new_failed_tasks() == 1
+
+    assert [call.get("cursor") for call in federation_service.calls] == [None, "cursor-2"]
+    assert len(email_client.sent) == 1
+    assert email_client.sent[0]["title"] == "[Relayna] Failed task: Payments API / failure-2"
 
 
 @pytest.mark.asyncio

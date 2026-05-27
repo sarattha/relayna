@@ -189,12 +189,8 @@ class FailedTaskEmailNotificationService:
             await self.redis.delete(lock_key)
 
     async def _notify_new_failed_tasks(self, settings: FailedTaskEmailRuntimeSettings) -> int:
-        payload = await self.federation_service.list_failed_tasks(
-            investigation_status="unreviewed",
-            limit=self.config.scan_limit,
-        )
         pending = await self._load_pending_batch()
-        for item in payload.get("items", []):
+        for item in await self._list_unreviewed_failed_task_items():
             if not isinstance(item, dict):
                 continue
             if await self._should_queue_item(item, pending):
@@ -271,6 +267,23 @@ class FailedTaskEmailNotificationService:
                 await self._mark_notified(service_id, failure_id)
         await self._clear_pending_batch()
         return len(valid_items)
+
+    async def _list_unreviewed_failed_task_items(self) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            payload = await self.federation_service.list_failed_tasks(
+                investigation_status="unreviewed",
+                cursor=cursor,
+                limit=self.config.scan_limit,
+            )
+            items.extend(item for item in payload.get("items", []) if isinstance(item, dict))
+            next_cursor = _string_payload_field(payload, "next_cursor")
+            if next_cursor is None or next_cursor in seen_cursors:
+                return items
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
     async def _mark_notified(self, service_id: str, failure_id: str) -> None:
         await self.redis.set(
@@ -416,6 +429,14 @@ def _settings_response(
 
 def _string_field(item: dict[str, Any], key: str) -> str | None:
     value = item.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _string_payload_field(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
     if value is None:
         return None
     text = str(value).strip()
