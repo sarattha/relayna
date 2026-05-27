@@ -10,9 +10,10 @@ This plan follows `PLANS.md`.
 
 Studio operators can enable automatic email notifications for newly discovered
 failed tasks. When enabled, the Studio backend periodically scans registered
-Relayna services for unreviewed failed-task snapshots and sends one email per
-failure through a configured email service. The feature is disabled by default
-and requires receiver emails to be configured through environment variables.
+Relayna services for unreviewed failed-task snapshots and sends alerts through
+a configured email service. The feature is disabled by default, requires
+receiver emails and an API key through environment variables, and exposes a
+Failed Tasks page control for runtime enablement and batch wait period.
 
 ## Progress
 
@@ -20,6 +21,7 @@ and requires receiver emails to be configured through environment variables.
 - [x] (2026-05-27 00:05Z) Added Studio backend configuration and runtime wiring.
 - [x] (2026-05-27 00:08Z) Added notification worker, email client, Redis dedupe, and tests.
 - [x] (2026-05-27 00:11Z) Ran required SDK and Studio backend verification.
+- [x] (2026-05-27 02:45Z) Added API-key delivery, Redis runtime settings, frontend controls, and batch-window behavior.
 
 ## Surprises & Discoveries
 
@@ -40,6 +42,11 @@ and requires receiver emails to be configured through environment variables.
   required for the first version.
   Date/Author: 2026-05-26 / Codex.
 
+- Decision: Add a runtime UI toggle and batch wait setting backed by Redis.
+  Rationale: Operators need to enable or disable delivery and tune batching
+  without restarting Studio; secrets and receivers remain environment-owned.
+  Date/Author: 2026-05-27 / Codex.
+
 - Decision: Treat config/runtime changes as an approved freeze-perimeter
   update.
   Rationale: Issue #84 explicitly allows API, config, and Studio backend
@@ -49,10 +56,9 @@ and requires receiver emails to be configured through environment variables.
 ## Outcomes & Retrospective
 
 Implemented automatic failed-task email notifications as a disabled-by-default
-Studio backend worker. The feature is enabled through environment variables,
-uses Redis lock/notified keys to prevent duplicate sends, and retries later
-after email-service failures. Verification passed through the repository
-`code-change-verification` script.
+Studio backend worker. The feature uses env-owned email service configuration,
+Redis-backed runtime settings, Redis lock/notified keys to prevent duplicate
+sends, and retries later after email-service failures.
 
 ## Context and Orientation
 
@@ -72,9 +78,11 @@ intentional review item.
 
 Add notification settings to `StudioBackendSettings` and pass them through
 `create_studio_app`. Add a new internal failed-task notification module with an
-email client, Redis-backed dedupe store, and background worker. Wire the worker
-into `StudioRuntime` and the lifespan lifecycle. Add focused tests for config,
-send behavior, dedupe, retry after failure, and worker resilience.
+email client, Redis-backed runtime settings, dedupe store, and background
+worker. Wire the worker into `StudioRuntime` and the lifespan lifecycle. Add
+Failed Tasks page controls for enablement and wait period. Add focused tests for
+config, send behavior, batching, dedupe, retry after failure, UI controls, and
+worker resilience.
 
 ## Concrete Steps
 
@@ -87,9 +95,12 @@ send behavior, dedupe, retry after failure, and worker resilience.
 Acceptance criteria:
 
 - Notifications are disabled by default.
-- Enabling the env toggle starts the worker only when email URL and receivers
-  are configured.
-- A new unreviewed failed task sends exactly one email.
+- Email service URL, receivers, and API key remain server-side env settings.
+- The Failed Tasks page can toggle delivery and set the wait period from 0 to
+  604800 seconds.
+- A 0 second wait sends one email per failed task.
+- A positive wait sends one email containing all newly discovered failures in
+  the batch window.
 - Failed email sends are retried later and do not create a notified marker.
 - Duplicate scans and multiple Studio replicas are protected by Redis lock and
   notified keys.
@@ -117,8 +128,10 @@ New environment variables:
 
 - `RELAYNA_STUDIO_FAILED_TASK_EMAIL_ENABLED`
 - `RELAYNA_STUDIO_FAILED_TASK_EMAIL_SERVICE_URL`
+- `RELAYNA_STUDIO_FAILED_TASK_EMAIL_API_KEY`
 - `RELAYNA_STUDIO_FAILED_TASK_EMAIL_RECEIVERS`
 - `RELAYNA_STUDIO_FAILED_TASK_EMAIL_INTERVAL_SECONDS`
 - `RELAYNA_STUDIO_FAILED_TASK_EMAIL_TIMEOUT_SECONDS`
 - `RELAYNA_STUDIO_FAILED_TASK_EMAIL_DEDUPE_TTL_SECONDS`
 - `RELAYNA_STUDIO_FAILED_TASK_EMAIL_TITLE_PREFIX`
+- `RELAYNA_STUDIO_FAILED_TASK_EMAIL_BATCH_WAIT_SECONDS`

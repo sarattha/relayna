@@ -520,6 +520,28 @@ describe("App", () => {
           ],
         });
       }
+      if (url === "/studio/failed-task-email-settings" && method === "GET") {
+        return jsonResponse({
+          configured: true,
+          enabled: false,
+          batch_wait_seconds: 0,
+          max_batch_wait_seconds: 604800,
+          receivers: ["ops@example.com"],
+        });
+      }
+      if (url === "/studio/failed-task-email-settings" && method === "PATCH") {
+        const body = JSON.parse(String(init?.body || "{}")) as {
+          enabled?: boolean;
+          batch_wait_seconds?: number;
+        };
+        return jsonResponse({
+          configured: true,
+          enabled: body.enabled ?? true,
+          batch_wait_seconds: body.batch_wait_seconds ?? 0,
+          max_batch_wait_seconds: 604800,
+          receivers: ["ops@example.com"],
+        });
+      }
       if (url === "/studio/failed-tasks?limit=50&investigation_status=unreviewed" && method === "GET") {
         return jsonResponse({
           items: [
@@ -1521,12 +1543,45 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Failed Tasks" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Email Notifications" })).toBeInTheDocument();
     expect(await screen.findByText("RuntimeError")).toBeInTheDocument();
     expect(screen.getByText("boom")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View" }));
 
     expect(await screen.findByText("Failure Detail")).toBeInTheDocument();
     expect(screen.getByDisplayValue(/task-123/)).toBeInTheDocument();
+  });
+
+  it("updates failed-task email notification settings", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Email Notifications" })).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Enabled"));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/studio/failed-task-email-settings",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ enabled: true }),
+        }),
+      ),
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("0"), { target: { value: "3600" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Wait" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/studio/failed-task-email-settings",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ batch_wait_seconds: 3600 }),
+        }),
+      ),
+    );
   });
 
   it("shows a validation error instead of retrying with malformed failed-task payload override", async () => {

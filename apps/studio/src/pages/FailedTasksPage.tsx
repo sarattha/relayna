@@ -3,11 +3,13 @@ import { useEffect, useState } from "react";
 
 import {
   deleteFailedTask,
+  fetchFailedTaskEmailSettings,
   fetchFailedTaskDetail,
   fetchFailedTasks,
   markFailedTaskInvestigated,
   markFailedTaskUninvestigated,
   retryFailedTask,
+  updateFailedTaskEmailSettings,
 } from "../api";
 import {
   InlineCodeBox,
@@ -21,7 +23,7 @@ import {
   primaryButtonStyle,
   secondaryButtonStyle,
 } from "../ui";
-import type { FailedTaskDetail, FailedTaskQueryState, FailedTaskSummary } from "../types";
+import type { FailedTaskDetail, FailedTaskEmailSettings, FailedTaskQueryState, FailedTaskSummary } from "../types";
 
 const initialQuery: FailedTaskQueryState = {
   service_id: "",
@@ -38,10 +40,29 @@ const initialQuery: FailedTaskQueryState = {
   cursor: null,
 };
 
+function formatBatchWait(seconds: number) {
+  if (seconds <= 0) {
+    return "0 sec";
+  }
+  if (seconds < 60) {
+    return `${seconds} sec`;
+  }
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)} min`;
+  }
+  if (seconds < 86400) {
+    return `${Math.round(seconds / 3600)} hr`;
+  }
+  return `${Math.round(seconds / 86400)} days`;
+}
+
 export function FailedTasksPage() {
   const [query, setQuery] = useState<FailedTaskQueryState>(initialQuery);
   const [items, setItems] = useState<FailedTaskSummary[]>([]);
   const [selected, setSelected] = useState<FailedTaskDetail | null>(null);
+  const [emailSettings, setEmailSettings] = useState<FailedTaskEmailSettings | null>(null);
+  const [emailSettingsLoading, setEmailSettingsLoading] = useState(true);
+  const [emailBatchWaitSeconds, setEmailBatchWaitSeconds] = useState("0");
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -55,7 +76,21 @@ export function FailedTasksPage() {
 
   useEffect(() => {
     void load(initialQuery);
+    void loadEmailSettings();
   }, []);
+
+  async function loadEmailSettings() {
+    setEmailSettingsLoading(true);
+    try {
+      const settings = await fetchFailedTaskEmailSettings();
+      setEmailSettings(settings);
+      setEmailBatchWaitSeconds(String(settings.batch_wait_seconds));
+    } catch (fetchError) {
+      setNotice(fetchError instanceof Error ? fetchError.message : "Unable to load email notification settings.");
+    } finally {
+      setEmailSettingsLoading(false);
+    }
+  }
 
   async function load(nextQuery: FailedTaskQueryState, append = false) {
     setLoading(true);
@@ -176,10 +211,80 @@ export function FailedTasksPage() {
     setNotice("Copied failed-task data.");
   }
 
+  async function updateEmailSettings(payload: { enabled?: boolean; batch_wait_seconds?: number }) {
+    setError(null);
+    try {
+      const settings = await updateFailedTaskEmailSettings(payload);
+      setEmailSettings(settings);
+      setEmailBatchWaitSeconds(String(settings.batch_wait_seconds));
+      setNotice("Updated email notification settings.");
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Unable to update email notification settings.");
+    }
+  }
+
+  function submitEmailBatchWait(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const max = emailSettings?.max_batch_wait_seconds ?? 604800;
+    const parsed = Number.parseInt(emailBatchWaitSeconds || "0", 10);
+    const nextValue = Math.max(0, Math.min(max, Number.isFinite(parsed) ? parsed : 0));
+    setEmailBatchWaitSeconds(String(nextValue));
+    void updateEmailSettings({ batch_wait_seconds: nextValue });
+  }
+
   return (
     <div className="studio-stack-lg">
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
       {notice ? <NoticeBanner>{notice}</NoticeBanner> : null}
+
+      <SectionCard title="Email Notifications" subtitle="Failed-task alert delivery.">
+        {emailSettingsLoading ? <p style={mutedTextStyle}>Loading email settings...</p> : null}
+        {emailSettings ? (
+          <div className="studio-stack-sm">
+            <div className="studio-action-row">
+              <label className="studio-inline-meta" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={emailSettings.enabled}
+                  disabled={!emailSettings.configured}
+                  onChange={(event) => void updateEmailSettings({ enabled: event.target.checked })}
+                />
+                Enabled
+              </label>
+              <span className="studio-inline-meta">
+                {emailSettings.configured ? `${emailSettings.receivers.length} receivers` : "Not configured"}
+              </span>
+              <span className="studio-inline-meta">Wait: {formatBatchWait(emailSettings.batch_wait_seconds)}</span>
+            </div>
+            <form onSubmit={submitEmailBatchWait} className="studio-form-grid studio-form-grid--triple">
+              <input
+                type="range"
+                min={0}
+                max={emailSettings.max_batch_wait_seconds}
+                step={60}
+                value={Math.min(Number(emailBatchWaitSeconds) || 0, emailSettings.max_batch_wait_seconds)}
+                disabled={!emailSettings.configured}
+                onChange={(event) => setEmailBatchWaitSeconds(event.target.value)}
+                style={{ width: "100%" }}
+                aria-label="Email batch wait seconds"
+              />
+              <input
+                type="number"
+                min={0}
+                max={emailSettings.max_batch_wait_seconds}
+                value={emailBatchWaitSeconds}
+                disabled={!emailSettings.configured}
+                onChange={(event) => setEmailBatchWaitSeconds(event.target.value)}
+                placeholder="0"
+                style={inputStyle}
+              />
+              <button type="submit" style={secondaryButtonStyle} disabled={!emailSettings.configured}>
+                Save Wait
+              </button>
+            </form>
+          </div>
+        ) : null}
+      </SectionCard>
 
       <SectionCard title="Failed Tasks" subtitle="Cross-service terminal failure registry backed by Relayna DLQ snapshots.">
         <form onSubmit={(event) => void submitFilters(event)} className="studio-form-grid studio-form-grid--triple">

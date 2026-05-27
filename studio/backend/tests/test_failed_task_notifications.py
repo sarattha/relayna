@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, cast
 
 import httpx
@@ -14,6 +15,7 @@ from relayna_studio.failed_task_notifications import (
     FailedTaskEmailNotificationError,
     FailedTaskEmailNotificationService,
     FailedTaskEmailNotificationWorker,
+    RedisFailedTaskEmailSettingsStore,
     build_failed_task_email_body,
     build_failed_task_email_title,
 )
@@ -102,18 +104,29 @@ def make_notification_service(
     *,
     redis: FakeRedis | None = None,
     email_client: RecordingEmailClient | None = None,
+    batch_wait_seconds: int = 0,
+    enabled: bool = True,
 ) -> FailedTaskEmailNotificationService:
+    resolved_redis = redis or FakeRedis()
     return FailedTaskEmailNotificationService(
         federation_service=cast(Any, FakeFederationService([failed_task_item()])),
-        redis=redis or FakeRedis(),
+        redis=resolved_redis,
         email_client=cast(Any, email_client or RecordingEmailClient()),
         config=FailedTaskEmailNotificationConfig(
             service_url="https://email.example.test/send",
+            api_key="secret-key",
             receivers=("ops@example.com", "oncall@example.com"),
             interval_seconds=0.0,
             timeout_seconds=1.0,
             dedupe_ttl_seconds=3600,
             title_prefix="[Relayna] Failed task",
+            default_enabled=enabled,
+            default_batch_wait_seconds=batch_wait_seconds,
+        ),
+        settings_store=RedisFailedTaskEmailSettingsStore(
+            resolved_redis,
+            default_enabled=enabled,
+            default_batch_wait_seconds=batch_wait_seconds,
         ),
     )
 
@@ -164,9 +177,75 @@ async def test_failed_task_notification_retries_when_email_send_fails() -> None:
 @pytest.mark.asyncio
 async def test_failed_task_notification_skips_when_lock_is_held() -> None:
     redis = FakeRedis()
-    await redis.set("studio:failed_task_email:lock:payments-api:failure-1", "locked")
+    await redis.set("studio:failed_task_email:batch:lock", "locked")
     email_client = RecordingEmailClient()
     service = make_notification_service(redis=redis, email_client=email_client)
+
+    assert await service.notify_new_failed_tasks() == 0
+    assert email_client.sent == []
+
+
+@pytest.mark.asyncio
+async def test_failed_task_notification_batches_until_wait_period_expires() -> None:
+    redis = FakeRedis()
+    email_client = RecordingEmailClient()
+    service = make_notification_service(redis=redis, email_client=email_client, batch_wait_seconds=60)
+
+    assert await service.notify_new_failed_tasks() == 0
+    assert email_client.sent == []
+    assert "studio:failed_task_email:pending" in redis.values
+
+    pending = {
+        "started_at": "2000-01-01T00:00:00+00:00",
+        "items": [failed_task_item()],
+    }
+    await redis.set("studio:failed_task_email:pending", json.dumps(pending))
+
+    assert await service.notify_new_failed_tasks() == 1
+    assert len(email_client.sent) == 1
+    assert email_client.sent[0]["title"] == "[Relayna] Failed task: Payments API / failure-1"
+    assert "studio:failed_task_email:pending" not in redis.values
+
+
+@pytest.mark.asyncio
+async def test_failed_task_notification_batches_multiple_failures_in_one_email() -> None:
+    redis = FakeRedis()
+    email_client = RecordingEmailClient()
+    item_two = {**failed_task_item(), "failure_id": "failure-2", "task_id": "task-456"}
+    service = FailedTaskEmailNotificationService(
+        federation_service=cast(Any, FakeFederationService([failed_task_item(), item_two])),
+        redis=redis,
+        email_client=cast(Any, email_client),
+        config=FailedTaskEmailNotificationConfig(
+            service_url="https://email.example.test/send",
+            api_key="secret-key",
+            receivers=("ops@example.com",),
+            interval_seconds=0.0,
+            timeout_seconds=1.0,
+            dedupe_ttl_seconds=3600,
+            title_prefix="[Relayna] Failed task",
+            default_enabled=True,
+            default_batch_wait_seconds=1,
+        ),
+        settings_store=RedisFailedTaskEmailSettingsStore(redis, default_enabled=True, default_batch_wait_seconds=1),
+    )
+    await redis.set(
+        "studio:failed_task_email:pending",
+        json.dumps({"started_at": "2000-01-01T00:00:00+00:00", "items": []}),
+    )
+
+    assert await service.notify_new_failed_tasks() == 2
+
+    assert len(email_client.sent) == 1
+    assert email_client.sent[0]["title"] == "[Relayna] Failed task: 2 failed tasks"
+    assert "Task ID: task-123" in str(email_client.sent[0]["body"])
+    assert "Task ID: task-456" in str(email_client.sent[0]["body"])
+
+
+@pytest.mark.asyncio
+async def test_failed_task_notification_respects_runtime_disabled_setting() -> None:
+    email_client = RecordingEmailClient()
+    service = make_notification_service(email_client=email_client, enabled=False)
 
     assert await service.notify_new_failed_tasks() == 0
     assert email_client.sent == []
@@ -184,17 +263,20 @@ async def test_failed_task_email_client_posts_expected_payload_and_rejects_non_s
         email_client = FailedTaskEmailClient(
             http_client=client,
             service_url="https://email.example.test/send",
+            api_key="secret-key",
             timeout_seconds=1.0,
         )
         await email_client.send(receivers=("ops@example.com",), title="Failure", body="Body")
 
     assert requests[0].url == "https://email.example.test/send"
+    assert requests[0].headers["X-API-Key"] == "secret-key"
     assert requests[0].read() == b'{"receivers":["ops@example.com"],"title":"Failure","body":"Body"}'
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(500))) as client:
         email_client = FailedTaskEmailClient(
             http_client=client,
             service_url="https://email.example.test/send",
+            api_key="secret-key",
             timeout_seconds=1.0,
         )
         with pytest.raises(FailedTaskEmailNotificationError, match="HTTP 500"):
@@ -251,6 +333,7 @@ def test_studio_runtime_builds_failed_task_email_worker_when_enabled(monkeypatch
         retention_prune_interval_seconds=None,
         failed_task_email_enabled=True,
         failed_task_email_service_url="https://email.example.test/send",
+        failed_task_email_api_key="secret-key",
         failed_task_email_receivers=("ops@example.com",),
         failed_task_email_interval_seconds=60.0,
     )
@@ -258,3 +341,37 @@ def test_studio_runtime_builds_failed_task_email_worker_when_enabled(monkeypatch
     with TestClient(app):
         runtime = get_studio_runtime(app)
         assert runtime.failed_task_email_worker is not None
+
+
+def test_failed_task_email_settings_routes_read_and_update_runtime_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", type("RedisFactory", (), {"from_url": staticmethod(FakeRedis.from_url)}))
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        health_refresh_interval_seconds=None,
+        retention_prune_interval_seconds=None,
+        failed_task_email_service_url="https://email.example.test/send",
+        failed_task_email_api_key="secret-key",
+        failed_task_email_receivers=("ops@example.com",),
+        failed_task_email_interval_seconds=60.0,
+    )
+
+    with TestClient(app) as client:
+        get_response = client.get("/studio/failed-task-email-settings")
+        assert get_response.status_code == 200
+        assert get_response.json() == {
+            "configured": True,
+            "enabled": False,
+            "batch_wait_seconds": 0,
+            "max_batch_wait_seconds": 604800,
+            "receivers": ["ops@example.com"],
+        }
+
+        patch_response = client.patch(
+            "/studio/failed-task-email-settings",
+            json={"enabled": True, "batch_wait_seconds": 3600},
+        )
+        assert patch_response.status_code == 200
+        assert patch_response.json()["enabled"] is True
+        assert patch_response.json()["batch_wait_seconds"] == 3600

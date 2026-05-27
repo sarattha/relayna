@@ -589,11 +589,12 @@ The backend can run three periodic workers:
   - controlled by `RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS`
 - failed-task email notification worker
   - disabled by default
-  - scans unreviewed federated failed-task snapshots and sends one email per
-    newly discovered failure
+  - scans unreviewed federated failed-task snapshots and sends email alerts
   - enabled by `RELAYNA_STUDIO_FAILED_TASK_EMAIL_ENABLED=true`
   - requires `RELAYNA_STUDIO_FAILED_TASK_EMAIL_SERVICE_URL` and
     `RELAYNA_STUDIO_FAILED_TASK_EMAIL_RECEIVERS`
+  - requires `RELAYNA_STUDIO_FAILED_TASK_EMAIL_API_KEY`, sent to the email
+    service as `X-API-Key`
 
 Disable a worker by setting its interval to `none`, `null`, or `off`.
 
@@ -610,13 +611,22 @@ export RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS=none
 ```
 
 Failed-task email notifications call the configured email service with only
-`receivers`, `title`, and `body`. Configure receivers as a comma-separated list:
+`receivers`, `title`, and `body`. Studio adds the configured API key as an
+`X-API-Key` header. Configure receivers as a comma-separated list:
 
 ```bash
 export RELAYNA_STUDIO_FAILED_TASK_EMAIL_ENABLED=true
 export RELAYNA_STUDIO_FAILED_TASK_EMAIL_SERVICE_URL=https://email-service/send
+export RELAYNA_STUDIO_FAILED_TASK_EMAIL_API_KEY=replace-me
 export RELAYNA_STUDIO_FAILED_TASK_EMAIL_RECEIVERS=ops@example.com,oncall@example.com
+export RELAYNA_STUDIO_FAILED_TASK_EMAIL_BATCH_WAIT_SECONDS=0
 ```
+
+The Failed Tasks page can toggle delivery and adjust the batch wait period at
+runtime. The wait period is stored in Redis and accepts `0` through `604800`
+seconds. `0` sends one email per failed task. A positive value starts a batch
+window when the first new failed task is discovered and sends all new failed
+tasks discovered before the window expires in one email.
 
 ## Operator-Facing API Surface
 
@@ -645,6 +655,8 @@ The main operator surfaces are:
   - `/studio/services/{service_id}/workflow/topology`
   - `/studio/services/{service_id}/dlq/messages`
   - `/studio/services/{service_id}/broker/dlq/messages`
+- failed-task email settings
+  - `/studio/failed-task-email-settings`
 - federated execution view
   - `/studio/services/{service_id}/executions/{task_id}/graph`
 - Gateway import catalog
