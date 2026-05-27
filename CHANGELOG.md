@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.16 - 2026-05-27
+
+### Added
+
+- Added automatic Studio failed-task email notifications with API-key
+  authentication, environment-provided receivers, runtime enable/disable
+  controls, and configurable batching from immediate sends through one week.
+- Added Failed Tasks page controls for email notification status and batch wait
+  settings.
+
+### Fixed
+
+- Updated the failed-task email worker to page through unreviewed failed tasks
+  before deduping already-notified failures, preventing older failures from
+  being hidden behind a full page of notified-but-unreviewed tasks.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.16`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.16`.
+- Updated release-install, Studio backend, and frontend documentation for the
+  `1.4.16` failed-task email notification workflow.
+
 ## 1.4.15 - 2026-05-26
 
 ### Added

@@ -379,6 +379,12 @@ The retry action validates the override payload as JSON before confirmation or
 submission. Malformed input stays on the page with a validation error instead
 of sending a retry request.
 
+When the Studio backend is configured for failed-task email notifications, the
+page also shows email delivery controls. Operators can enable or disable
+automatic delivery and save a batch wait period from `0` seconds through
+`604800` seconds. `0` sends one email per failed task; a positive value batches
+failures discovered during that wait window into one email.
+
 ## Local Verification
 
 Run the backend first on `localhost:8000`, then start the frontend dev server:
