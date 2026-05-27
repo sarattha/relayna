@@ -385,6 +385,14 @@ export type FailedTaskRetryResponse = {
   retried_task_id?: string | null;
 };
 
+export type FailedTaskEmailSettings = {
+  configured: boolean;
+  enabled: boolean;
+  batch_wait_seconds: number;
+  max_batch_wait_seconds: number;
+  receivers: string[];
+};
+
 export type BrokerDlqMessage = {
   service_id: string;
   queue_name: string;

@@ -26,6 +26,15 @@ class StudioAppKwargs(TypedDict):
     task_search_index_prefix: str
     task_index_ttl_seconds: int
     retention_prune_interval_seconds: float | None
+    failed_task_email_enabled: bool
+    failed_task_email_service_url: str | None
+    failed_task_email_api_key: str | None
+    failed_task_email_receivers: tuple[str, ...]
+    failed_task_email_interval_seconds: float
+    failed_task_email_timeout_seconds: float
+    failed_task_email_dedupe_ttl_seconds: int
+    failed_task_email_title_prefix: str
+    failed_task_email_batch_wait_seconds: int
 
 
 def _env_required(name: str) -> str:
@@ -41,6 +50,14 @@ def _env_str(name: str, default: str) -> str:
         return default
     stripped = value.strip()
     return stripped or default
+
+
+def _env_optional_str(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _env_int(name: str, default: int) -> int:
@@ -119,6 +136,31 @@ class StudioBackendSettings:
     task_search_index_prefix: str = "studio:search"
     task_index_ttl_seconds: int = 86400
     retention_prune_interval_seconds: float | None = 60.0
+    failed_task_email_enabled: bool = False
+    failed_task_email_service_url: str | None = None
+    failed_task_email_api_key: str | None = None
+    failed_task_email_receivers: tuple[str, ...] = ()
+    failed_task_email_interval_seconds: float = 30.0
+    failed_task_email_timeout_seconds: float = 5.0
+    failed_task_email_dedupe_ttl_seconds: int = 604800
+    failed_task_email_title_prefix: str = "[Relayna] Failed task"
+    failed_task_email_batch_wait_seconds: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.failed_task_email_enabled:
+            return
+        if not self.failed_task_email_service_url:
+            raise RuntimeError(
+                "RELAYNA_STUDIO_FAILED_TASK_EMAIL_SERVICE_URL must be set when failed-task email is enabled."
+            )
+        if not self.failed_task_email_receivers:
+            raise RuntimeError(
+                "RELAYNA_STUDIO_FAILED_TASK_EMAIL_RECEIVERS must be set when failed-task email is enabled."
+            )
+        if not self.failed_task_email_api_key:
+            raise RuntimeError(
+                "RELAYNA_STUDIO_FAILED_TASK_EMAIL_API_KEY must be set when failed-task email is enabled."
+            )
 
     @classmethod
     def from_env(cls) -> StudioBackendSettings:
@@ -154,6 +196,21 @@ class StudioBackendSettings:
                 "RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS",
                 60.0,
             ),
+            failed_task_email_enabled=_env_bool("RELAYNA_STUDIO_FAILED_TASK_EMAIL_ENABLED", False),
+            failed_task_email_service_url=_env_optional_str("RELAYNA_STUDIO_FAILED_TASK_EMAIL_SERVICE_URL"),
+            failed_task_email_api_key=_env_optional_str("RELAYNA_STUDIO_FAILED_TASK_EMAIL_API_KEY"),
+            failed_task_email_receivers=_env_csv("RELAYNA_STUDIO_FAILED_TASK_EMAIL_RECEIVERS") or (),
+            failed_task_email_interval_seconds=_env_float("RELAYNA_STUDIO_FAILED_TASK_EMAIL_INTERVAL_SECONDS", 30.0),
+            failed_task_email_timeout_seconds=_env_float("RELAYNA_STUDIO_FAILED_TASK_EMAIL_TIMEOUT_SECONDS", 5.0),
+            failed_task_email_dedupe_ttl_seconds=_env_int(
+                "RELAYNA_STUDIO_FAILED_TASK_EMAIL_DEDUPE_TTL_SECONDS",
+                604800,
+            ),
+            failed_task_email_title_prefix=_env_str(
+                "RELAYNA_STUDIO_FAILED_TASK_EMAIL_TITLE_PREFIX",
+                "[Relayna] Failed task",
+            ),
+            failed_task_email_batch_wait_seconds=_env_int("RELAYNA_STUDIO_FAILED_TASK_EMAIL_BATCH_WAIT_SECONDS", 0),
         )
 
     def to_app_kwargs(self) -> StudioAppKwargs:
@@ -178,6 +235,15 @@ class StudioBackendSettings:
             "task_search_index_prefix": self.task_search_index_prefix,
             "task_index_ttl_seconds": self.task_index_ttl_seconds,
             "retention_prune_interval_seconds": self.retention_prune_interval_seconds,
+            "failed_task_email_enabled": self.failed_task_email_enabled,
+            "failed_task_email_service_url": self.failed_task_email_service_url,
+            "failed_task_email_api_key": self.failed_task_email_api_key,
+            "failed_task_email_receivers": self.failed_task_email_receivers,
+            "failed_task_email_interval_seconds": self.failed_task_email_interval_seconds,
+            "failed_task_email_timeout_seconds": self.failed_task_email_timeout_seconds,
+            "failed_task_email_dedupe_ttl_seconds": self.failed_task_email_dedupe_ttl_seconds,
+            "failed_task_email_title_prefix": self.failed_task_email_title_prefix,
+            "failed_task_email_batch_wait_seconds": self.failed_task_email_batch_wait_seconds,
         }
 
 

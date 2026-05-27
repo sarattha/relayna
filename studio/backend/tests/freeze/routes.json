@@ -6,6 +6,8 @@
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/events'"},
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/events/stream'"},
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/events/stream'"},
+    {"file": "studio/backend/src/relayna_studio/failed_task_notifications.py", "method": "get", "path_expression": "f'{prefix}/failed-task-email-settings'"},
+    {"file": "studio/backend/src/relayna_studio/failed_task_notifications.py", "method": "patch", "path_expression": "f'{prefix}/failed-task-email-settings'"},
     {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/status/{{task_id}}'"},
     {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/history'"},
     {"file": "studio/backend/src/relayna_studio/federation.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/workflow/topology'"},

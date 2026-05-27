@@ -18,6 +18,14 @@ from .events import (
     StudioPullSyncWorker,
     create_studio_events_router,
 )
+from .failed_task_notifications import (
+    FailedTaskEmailClient,
+    FailedTaskEmailNotificationConfig,
+    FailedTaskEmailNotificationService,
+    FailedTaskEmailNotificationWorker,
+    RedisFailedTaskEmailSettingsStore,
+    create_failed_task_email_settings_router,
+)
 from .federation import (
     StudioFederationService,
     _default_async_client_factory,
@@ -73,6 +81,11 @@ class StudioRuntime:
     health_refresh_task: asyncio.Task[None] | None = None
     retention_worker: StudioRetentionWorker | None = None
     retention_task: asyncio.Task[None] | None = None
+    failed_task_email_settings_store: RedisFailedTaskEmailSettingsStore | None = None
+    failed_task_email_configured: bool = False
+    failed_task_email_receivers: tuple[str, ...] = ()
+    failed_task_email_worker: FailedTaskEmailNotificationWorker | None = None
+    failed_task_email_task: asyncio.Task[None] | None = None
 
 
 class _StudioLifespan:
@@ -100,6 +113,15 @@ class _StudioLifespan:
         task_search_index_prefix: str,
         task_index_ttl_seconds: int,
         retention_prune_interval_seconds: float | None,
+        failed_task_email_enabled: bool,
+        failed_task_email_service_url: str | None,
+        failed_task_email_api_key: str | None,
+        failed_task_email_receivers: tuple[str, ...],
+        failed_task_email_interval_seconds: float,
+        failed_task_email_timeout_seconds: float,
+        failed_task_email_dedupe_ttl_seconds: int,
+        failed_task_email_title_prefix: str,
+        failed_task_email_batch_wait_seconds: int,
     ) -> None:
         self._redis_url = redis_url
         self._app_state_key = app_state_key
@@ -122,6 +144,15 @@ class _StudioLifespan:
         self._task_search_index_prefix = task_search_index_prefix
         self._task_index_ttl_seconds = task_index_ttl_seconds
         self._retention_prune_interval_seconds = retention_prune_interval_seconds
+        self._failed_task_email_enabled = failed_task_email_enabled
+        self._failed_task_email_service_url = failed_task_email_service_url
+        self._failed_task_email_api_key = failed_task_email_api_key
+        self._failed_task_email_receivers = failed_task_email_receivers
+        self._failed_task_email_interval_seconds = failed_task_email_interval_seconds
+        self._failed_task_email_timeout_seconds = failed_task_email_timeout_seconds
+        self._failed_task_email_dedupe_ttl_seconds = failed_task_email_dedupe_ttl_seconds
+        self._failed_task_email_title_prefix = failed_task_email_title_prefix
+        self._failed_task_email_batch_wait_seconds = failed_task_email_batch_wait_seconds
         self._runtime: StudioRuntime | None = None
 
     @property
@@ -224,6 +255,19 @@ class _StudioLifespan:
                 if self._retention_prune_interval_seconds is not None
                 else None
             )
+            failed_task_email_settings_store = RedisFailedTaskEmailSettingsStore(
+                redis,
+                default_enabled=self._failed_task_email_enabled,
+                default_batch_wait_seconds=self._failed_task_email_batch_wait_seconds,
+            )
+            failed_task_email_configured = self._failed_task_email_configured()
+            failed_task_email_worker = self._build_failed_task_email_worker(
+                redis=redis,
+                http_client=http_client,
+                federation_service=federation_service,
+                outbound_policy=outbound_policy,
+                settings_store=failed_task_email_settings_store,
+            )
             self._runtime = StudioRuntime(
                 redis=redis,
                 registry_store=registry_store,
@@ -245,8 +289,69 @@ class _StudioLifespan:
                 pull_sync_worker=pull_sync_worker,
                 health_refresh_worker=health_refresh_worker,
                 retention_worker=retention_worker,
+                failed_task_email_settings_store=failed_task_email_settings_store,
+                failed_task_email_configured=failed_task_email_configured,
+                failed_task_email_receivers=self._failed_task_email_receivers,
+                failed_task_email_worker=failed_task_email_worker,
             )
         return self._runtime
+
+    def _failed_task_email_configured(self) -> bool:
+        return bool(
+            self._failed_task_email_service_url
+            and self._failed_task_email_api_key
+            and self._failed_task_email_receivers
+        )
+
+    def _build_failed_task_email_worker(
+        self,
+        *,
+        redis: Redis,
+        http_client: httpx.AsyncClient,
+        federation_service: StudioFederationService,
+        outbound_policy: StudioOutboundUrlPolicy,
+        settings_store: RedisFailedTaskEmailSettingsStore,
+    ) -> FailedTaskEmailNotificationWorker | None:
+        configured = self._failed_task_email_configured()
+        if self._failed_task_email_enabled and not self._failed_task_email_service_url:
+            raise RuntimeError("Failed-task email service URL must be set when notification is enabled.")
+        if self._failed_task_email_enabled and not self._failed_task_email_receivers:
+            raise RuntimeError("Failed-task email receivers must be set when notification is enabled.")
+        if self._failed_task_email_enabled and not self._failed_task_email_api_key:
+            raise RuntimeError("Failed-task email API key must be set when notification is enabled.")
+        if not configured:
+            return None
+        assert self._failed_task_email_service_url is not None
+        assert self._failed_task_email_api_key is not None
+        config = FailedTaskEmailNotificationConfig(
+            service_url=self._failed_task_email_service_url,
+            api_key=self._failed_task_email_api_key,
+            receivers=self._failed_task_email_receivers,
+            interval_seconds=self._failed_task_email_interval_seconds,
+            timeout_seconds=self._failed_task_email_timeout_seconds,
+            dedupe_ttl_seconds=self._failed_task_email_dedupe_ttl_seconds,
+            title_prefix=self._failed_task_email_title_prefix,
+            default_enabled=self._failed_task_email_enabled,
+            default_batch_wait_seconds=self._failed_task_email_batch_wait_seconds,
+        )
+        email_client = FailedTaskEmailClient(
+            http_client=http_client,
+            service_url=config.service_url,
+            api_key=config.api_key,
+            timeout_seconds=config.timeout_seconds,
+            outbound_policy=outbound_policy,
+        )
+        notification_service = FailedTaskEmailNotificationService(
+            federation_service=federation_service,
+            redis=redis,
+            email_client=email_client,
+            config=config,
+            settings_store=settings_store,
+        )
+        return FailedTaskEmailNotificationWorker(
+            notification_service=notification_service,
+            interval_seconds=config.interval_seconds,
+        )
 
     def __call__(self, app: FastAPI):
         @asynccontextmanager
@@ -270,6 +375,11 @@ class _StudioLifespan:
                         runtime.retention_worker.run_forever(),
                         name="studio-retention-prune",
                     )
+                if runtime.failed_task_email_worker is not None:
+                    runtime.failed_task_email_task = asyncio.create_task(
+                        runtime.failed_task_email_worker.run_forever(),
+                        name="studio-failed-task-email-notifications",
+                    )
                 yield
             finally:
                 if runtime.pull_sync_worker is not None:
@@ -278,6 +388,8 @@ class _StudioLifespan:
                     runtime.health_refresh_worker.stop()
                 if runtime.retention_worker is not None:
                     runtime.retention_worker.stop()
+                if runtime.failed_task_email_worker is not None:
+                    runtime.failed_task_email_worker.stop()
                 if runtime.pull_sync_task is not None:
                     try:
                         await asyncio.wait_for(asyncio.shield(runtime.pull_sync_task), timeout=5.0)
@@ -305,6 +417,15 @@ class _StudioLifespan:
                             await runtime.retention_task
                     finally:
                         runtime.retention_task = None
+                if runtime.failed_task_email_task is not None:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(runtime.failed_task_email_task), timeout=5.0)
+                    except TimeoutError:
+                        runtime.failed_task_email_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await runtime.failed_task_email_task
+                    finally:
+                        runtime.failed_task_email_task = None
                 await runtime.http_client.aclose()
                 await runtime.redis.aclose()
                 if hasattr(app.state, self._app_state_key):
@@ -337,6 +458,15 @@ def create_studio_app(
     task_search_index_prefix: str = "studio:search",
     task_index_ttl_seconds: int = 86400,
     retention_prune_interval_seconds: float | None = 60.0,
+    failed_task_email_enabled: bool = False,
+    failed_task_email_service_url: str | None = None,
+    failed_task_email_api_key: str | None = None,
+    failed_task_email_receivers: tuple[str, ...] = (),
+    failed_task_email_interval_seconds: float = 30.0,
+    failed_task_email_timeout_seconds: float = 5.0,
+    failed_task_email_dedupe_ttl_seconds: int = 604800,
+    failed_task_email_title_prefix: str = "[Relayna] Failed task",
+    failed_task_email_batch_wait_seconds: int = 0,
 ) -> FastAPI:
     resolved_capability_fetcher = capability_fetcher or HttpCapabilityFetcher(
         allowed_hosts=capability_refresh_allowed_hosts,
@@ -364,6 +494,15 @@ def create_studio_app(
         task_search_index_prefix=task_search_index_prefix,
         task_index_ttl_seconds=task_index_ttl_seconds,
         retention_prune_interval_seconds=retention_prune_interval_seconds,
+        failed_task_email_enabled=failed_task_email_enabled,
+        failed_task_email_service_url=failed_task_email_service_url,
+        failed_task_email_api_key=failed_task_email_api_key,
+        failed_task_email_receivers=failed_task_email_receivers,
+        failed_task_email_interval_seconds=failed_task_email_interval_seconds,
+        failed_task_email_timeout_seconds=failed_task_email_timeout_seconds,
+        failed_task_email_dedupe_ttl_seconds=failed_task_email_dedupe_ttl_seconds,
+        failed_task_email_title_prefix=failed_task_email_title_prefix,
+        failed_task_email_batch_wait_seconds=failed_task_email_batch_wait_seconds,
     )
     runtime = lifespan_factory.ensure_runtime()
     app = FastAPI(title=title, lifespan=lifespan_factory)
@@ -383,6 +522,14 @@ def create_studio_app(
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     app.include_router(create_studio_metrics_router(metrics_query_service=runtime.metrics_query_service))
     app.include_router(create_studio_traces_router(trace_query_service=runtime.trace_query_service))
+    if runtime.failed_task_email_settings_store is not None:
+        app.include_router(
+            create_failed_task_email_settings_router(
+                configured=runtime.failed_task_email_configured,
+                receivers=runtime.failed_task_email_receivers,
+                settings_store=runtime.failed_task_email_settings_store,
+            )
+        )
     app.include_router(create_metrics_router(runtime.metrics))
     return app
 

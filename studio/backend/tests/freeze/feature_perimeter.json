@@ -8,6 +8,7 @@
     "health": ["studio/backend/tests/test_studio_health.py"],
     "logs": ["studio/backend/tests/test_studio_logs.py"],
     "metrics": ["studio/backend/tests/test_studio_metrics.py"],
+    "failed task notifications": ["studio/backend/tests/test_failed_task_notifications.py"],
     "package surface": ["studio/backend/tests/test_package_surface.py"],
     "registry": ["studio/backend/tests/test_studio_registry.py"],
     "search": ["studio/backend/tests/test_studio_search.py"],

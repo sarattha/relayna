@@ -3,6 +3,7 @@ import type {
   DlqMessageListResponse,
   DlqQueryState,
   FailedTaskDetail,
+  FailedTaskEmailSettings,
   FailedTaskListResponse,
   FailedTaskQueryState,
   FailedTaskRetryResponse,
@@ -519,6 +520,21 @@ export async function fetchFailedTasks(state: FailedTaskQueryState) {
     }
   }
   return requestJson<FailedTaskListResponse>(`/studio/failed-tasks?${params.toString()}`);
+}
+
+export async function fetchFailedTaskEmailSettings() {
+  return requestJson<FailedTaskEmailSettings>("/studio/failed-task-email-settings");
+}
+
+export async function updateFailedTaskEmailSettings(payload: {
+  enabled?: boolean;
+  batch_wait_seconds?: number;
+}) {
+  return requestJson<FailedTaskEmailSettings>("/studio/failed-task-email-settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchFailedTaskDetail(serviceId: string, failureId: string) {
