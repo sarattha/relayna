@@ -305,6 +305,23 @@ function taskTracePathResponse(taskId = "task-123") {
     },
     nodes: [
       {
+        id: "dlq",
+        kind: "dlq_record",
+        label: "gateway_timeout",
+        task_id: taskId,
+        state: "dead_lettered",
+        queue_name: "payments.dlq",
+        stage: null,
+        attempt: 3,
+        trace_id: null,
+        span_id: null,
+        parent_span_id: null,
+        started_at: "2026-04-08T09:59:58Z",
+        ended_at: null,
+        duration_ms: null,
+        evidence: [{ source: "dlq", source_id: "dlq", label: "gateway_timeout", timestamp: "2026-04-08T09:59:58Z", payload: {} }],
+      },
+      {
         id: "task",
         kind: "task",
         label: taskId,
@@ -342,7 +359,10 @@ function taskTracePathResponse(taskId = "task-123") {
         ],
       },
     ],
-    edges: [{ id: "task->attempt:1", source: "task", target: "attempt", kind: "stage_transitioned_to", evidence: [] }],
+    edges: [
+      { id: "task->attempt:1", source: "task", target: "attempt", kind: "stage_transitioned_to", evidence: [] },
+      { id: "attempt->dlq:2", source: "attempt", target: "dlq", kind: "dead_lettered_to", evidence: [] },
+    ],
     spans: [
       {
         trace_id: "trace-abc",
@@ -1740,6 +1760,7 @@ describe("App", () => {
     expect(screen.getAllByText("null").length).toBeGreaterThan(0);
     expect(await screen.findByText("payments.process_payment")).toBeInTheDocument();
     expect(screen.getByText("Path Duration")).toBeInTheDocument();
+    expect(document.body.textContent?.indexOf("attempt-1")).toBeLessThan(document.body.textContent?.indexOf("gateway_timeout") ?? 0);
     expect(screen.queryByRole("link", { name: "Open Span" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View Span" }));
     const spanDialog = await screen.findByRole("dialog", { name: "Span Details" });

@@ -350,6 +350,81 @@ function traceNodeWidth(node: StudioTracePathNode, path: StudioTracePathResponse
   return Math.max(8, Math.min(100, (nodeDuration / duration) * 100));
 }
 
+function traceNodeKindRank(kind: StudioTracePathNode["kind"]) {
+  if (kind === "task") {
+    return 0;
+  }
+  if (kind === "task_attempt") {
+    return 1;
+  }
+  if (kind === "stage") {
+    return 2;
+  }
+  if (kind === "span") {
+    return 3;
+  }
+  if (kind === "event") {
+    return 4;
+  }
+  if (kind === "dlq_record") {
+    return 5;
+  }
+  return 6;
+}
+
+function orderTracePathNodes(nodes: StudioTracePathNode[], edges: StudioTracePathResponse["edges"]) {
+  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+  const outgoing = new Map<string, string[]>();
+  const incomingCount = new Map(nodes.map((node) => [node.id, 0]));
+
+  edges.forEach((edge) => {
+    if (!indexById.has(edge.source) || !indexById.has(edge.target)) {
+      return;
+    }
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) || []), edge.target]);
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) || 0) + 1);
+  });
+
+  const queue = nodes
+    .filter((node) => (incomingCount.get(node.id) || 0) === 0)
+    .sort((left, right) => traceNodeKindRank(left.kind) - traceNodeKindRank(right.kind) || indexById.get(left.id)! - indexById.get(right.id)!);
+  const ordered: StudioTracePathNode[] = [];
+  const seen = new Set<string>();
+
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (seen.has(current.id)) {
+      continue;
+    }
+    seen.add(current.id);
+    ordered.push(current);
+    (outgoing.get(current.id) || []).forEach((targetId) => {
+      const nextCount = (incomingCount.get(targetId) || 0) - 1;
+      incomingCount.set(targetId, nextCount);
+      if (nextCount === 0) {
+        const target = nodes[indexById.get(targetId)!];
+        queue.push(target);
+        queue.sort(
+          (left, right) =>
+            traceNodeKindRank(left.kind) - traceNodeKindRank(right.kind) || indexById.get(left.id)! - indexById.get(right.id)!,
+        );
+      }
+    });
+  }
+
+  nodes.forEach((node) => {
+    if (!seen.has(node.id)) {
+      ordered.push(node);
+    }
+  });
+  return ordered;
+}
+
+function preferredTracePathNodeId(path: StudioTracePathResponse) {
+  const orderedNodes = orderTracePathNodes(path.nodes, path.edges);
+  return orderedNodes.find((node) => node.span_id || node.trace_id)?.id || orderedNodes[0]?.id || null;
+}
+
 function TracePathExplorer({
   tracePath,
   selectedNode,
@@ -363,7 +438,8 @@ function TracePathExplorer({
   onSelectSpan: (span: StudioTraceSpan) => void;
   onFilterLogs: (traceId: string) => void;
 }) {
-  const activeNode = selectedNode || tracePath.nodes[0] || null;
+  const displayNodes = orderTracePathNodes(tracePath.nodes, tracePath.edges);
+  const activeNode = selectedNode || displayNodes[0] || null;
   const relatedSpans = activeNode
     ? tracePath.spans.filter((span) => span.span_id === activeNode.span_id || span.trace_id === activeNode.trace_id)
     : [];
@@ -378,7 +454,7 @@ function TracePathExplorer({
       </div>
 
       <div className="studio-stack-sm">
-        {tracePath.nodes.map((node) => {
+        {displayNodes.map((node) => {
           const palette = traceNodePalette(node.state);
           const selected = activeNode?.id === node.id;
           return (
@@ -774,9 +850,7 @@ export function TaskDetailPage() {
     try {
       const payload = await fetchTaskTracePath(targetServiceId, targetTaskId);
       setTaskTracePath(payload);
-      setSelectedTracePathNodeId(
-        (current) => current || payload.nodes.find((node) => node.span_id || node.trace_id)?.id || payload.nodes[0]?.id || null,
-      );
+      setSelectedTracePathNodeId((current) => current || preferredTracePathNodeId(payload));
     } catch (fetchError) {
       setTaskTracePath(null);
       setTaskTracePathError(fetchError instanceof Error ? fetchError.message : "Unable to load task trace path.");
