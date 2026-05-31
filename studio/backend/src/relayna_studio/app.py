@@ -217,18 +217,19 @@ class _StudioLifespan:
                 },
                 federation_service=federation_service,
             )
-            trace_query_service = StudioTraceQueryService(
-                registry_service=registry_service,
-                providers={"tempo": TempoTraceProvider(http_client=http_client, outbound_policy=outbound_policy)},
-                federation_service=federation_service,
-                log_query_service=log_query_service,
-            )
             event_ingest_service = StudioEventIngestService(
                 registry_service=registry_service,
                 event_store=event_store,
                 http_client=http_client,
                 search_indexer=search_service,
                 outbound_policy=outbound_policy,
+            )
+            trace_query_service = StudioTraceQueryService(
+                registry_service=registry_service,
+                providers={"tempo": TempoTraceProvider(http_client=http_client, outbound_policy=outbound_policy)},
+                federation_service=federation_service,
+                log_query_service=log_query_service,
+                event_ingest_service=event_ingest_service,
             )
             event_stream = StudioEventStream(event_store=event_store)
             pull_sync_worker = (

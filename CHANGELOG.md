@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.17 - 2026-05-31
+
+### Added
+
+- Added the Studio task trace path endpoint and frontend Task Trace explorer so
+  operators can inspect a task path from queued state through completion,
+  failure, retry, DLQ evidence, Studio events, Tempo spans, and log-filter
+  metadata from the Task Detail page.
+- Added Tempo-backed local mock trace data and configuration for exercising
+  span duration rendering against a live Studio backend/frontend stack.
+
+### Fixed
+
+- Reused already-fetched task detail payloads while enriching trace paths,
+  preventing duplicate federated status, history, DLQ, and execution-graph
+  fetches during one `/trace-path` request.
+- Created DLQ trace nodes before attaching Studio events, keeping dead-letter
+  event evidence on the DLQ node when partial execution graphs lack a native
+  DLQ record.
+- Ordered task trace rows by graph path and showed timestamps for point-in-time
+  evidence nodes instead of rendering every non-span row as `n/a`.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.17`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.17`.
+- Updated release-install, Studio operation, and observability documentation
+  for the `1.4.17` tracing dashboard workflow.
+
 ## 1.4.16 - 2026-05-27
 
 ### Added

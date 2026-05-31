@@ -26,6 +26,9 @@ DEFAULT_PUBLIC_HOST = "host.docker.internal"
 DEFAULT_PORT = 9100
 DEFAULT_STUDIO_URL = "http://localhost:8000"
 MOCK_BASE_TIME = datetime.now(UTC).replace(microsecond=0)
+PAYMENT_FAILURE_TRACE_ID = "11111111111111111111111111111111"
+PAYMENT_FAILURE_INGRESS_SPAN_ID = "2222222222222222"
+PAYMENT_FAILURE_WORKER_SPAN_ID = "3333333333333333"
 TIMESTAMP_OFFSETS = {
     "07:50:00": timedelta(minutes=4, seconds=30),
     "07:55:00": timedelta(minutes=4),
@@ -60,12 +63,20 @@ def timestamp_for(value: str) -> str:
     return (MOCK_BASE_TIME - offset).isoformat().replace("+00:00", "Z")
 
 
-def task_graph(*, task_id: str, status: str, correlation_id: str | None, parent_task_id: str | None) -> dict[str, Any]:
+def task_graph(
+    *,
+    task_id: str,
+    status: str,
+    correlation_id: str | None,
+    parent_task_id: str | None,
+    trace_id: str | None = None,
+) -> dict[str, Any]:
     annotations = {
         key: value
         for key, value in {
             "correlation_id": correlation_id,
             "parent_task_id": parent_task_id,
+            "trace_id": trace_id,
         }.items()
         if value is not None
     }
@@ -93,14 +104,14 @@ def task_graph(*, task_id: str, status: str, correlation_id: str | None, parent_
                 "kind": "stage",
                 "label": "ingress",
                 "timestamp": timestamp_for("08:00:05"),
-                "annotations": {},
+                "annotations": {"stage": "ingress", **({"trace_id": trace_id} if trace_id is not None else {})},
             },
             {
                 "id": f"stage:{task_id}:worker",
                 "kind": "stage",
                 "label": "worker",
                 "timestamp": timestamp_for("08:01:15"),
-                "annotations": {},
+                "annotations": {"stage": "worker", **({"trace_id": trace_id} if trace_id is not None else {})},
             },
         ],
         "edges": [
@@ -363,6 +374,8 @@ MOCK_SERVICES = (
                     "stage": "payment-authorizer",
                     "timestamp": timestamp_for("07:55:00"),
                     "correlation_id": "checkout-0999",
+                    "trace_id": PAYMENT_FAILURE_TRACE_ID,
+                    "span_id": PAYMENT_FAILURE_WORKER_SPAN_ID,
                     "meta": {"parent_task_id": "order-0999"},
                 },
                 history=[
@@ -372,6 +385,8 @@ MOCK_SERVICES = (
                         "stage": "payment-intake",
                         "timestamp": timestamp_for("07:50:00"),
                         "correlation_id": "checkout-0999",
+                        "trace_id": PAYMENT_FAILURE_TRACE_ID,
+                        "span_id": PAYMENT_FAILURE_INGRESS_SPAN_ID,
                         "meta": {"parent_task_id": "order-0999"},
                     },
                     {
@@ -380,6 +395,8 @@ MOCK_SERVICES = (
                         "stage": "payment-authorizer",
                         "timestamp": timestamp_for("07:55:00"),
                         "correlation_id": "checkout-0999",
+                        "trace_id": PAYMENT_FAILURE_TRACE_ID,
+                        "span_id": PAYMENT_FAILURE_WORKER_SPAN_ID,
                         "meta": {"parent_task_id": "order-0999"},
                     },
                 ],
@@ -388,6 +405,7 @@ MOCK_SERVICES = (
                     status="failed",
                     correlation_id="checkout-0999",
                     parent_task_id="order-0999",
+                    trace_id=PAYMENT_FAILURE_TRACE_ID,
                 ),
             ),
         ),

@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics, fetchTaskTraces } from "../api";
+import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics, fetchTaskTracePath } from "../api";
 import {
   GraphSurface,
   InlineCodeBox,
@@ -33,7 +33,8 @@ import type {
   StudioLogListResponse,
   StudioMetricsResponse,
   StudioTaskDetail,
-  StudioTraceResponse,
+  StudioTracePathNode,
+  StudioTracePathResponse,
   StudioTraceSpan,
 } from "../types";
 
@@ -55,6 +56,16 @@ const TASK_TERMINAL_STATUSES = new Set([
 
 type TaskLogWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
 type TaskLogWindow = { from: string; to: string };
+
+const traceStatePalette: Record<string, { background: string; border: string; color: string }> = {
+  dead_lettered: { background: "#fff2f0", border: "#c65f55", color: "#7a2621" },
+  failed: { background: "#fff2f0", border: "#c65f55", color: "#7a2621" },
+  retrying: { background: "#fff7e6", border: "#c1832f", color: "#6a4312" },
+  running: { background: "#eef7ff", border: "#5e8fc4", color: "#204765" },
+  succeeded: { background: "#effaf1", border: "#5f9e6b", color: "#24552e" },
+  queued: { background: "#f3f1ff", border: "#8271ba", color: "#40346f" },
+  unknown: { background: "#f7f7f4", border: "#b8b0a2", color: "#4b453d" },
+};
 
 function isoToLocalDateTime(value: string) {
   if (!value.trim()) {
@@ -308,6 +319,279 @@ function deriveTaskLogWindow(taskDetail: StudioTaskDetail, taskTimeline: StudioE
   };
 }
 
+function traceNodePalette(state: string | null | undefined) {
+  return traceStatePalette[state || "unknown"] || traceStatePalette.unknown;
+}
+
+function timestampMs(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function traceNodeOffset(node: StudioTracePathNode, path: StudioTracePathResponse) {
+  const start = timestampMs(path.summary.started_at);
+  const current = timestampMs(node.started_at);
+  const duration = path.summary.duration_ms || 0;
+  if (start === null || current === null || duration <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.min(92, ((current - start) / duration) * 100));
+}
+
+function traceNodeWidth(node: StudioTracePathNode, path: StudioTracePathResponse) {
+  const duration = path.summary.duration_ms || 0;
+  const nodeDuration = node.duration_ms || 0;
+  if (duration <= 0 || nodeDuration <= 0) {
+    return 8;
+  }
+  return Math.max(8, Math.min(100, (nodeDuration / duration) * 100));
+}
+
+function traceNodeTimingLabel(node: StudioTracePathNode) {
+  if (node.duration_ms !== null && node.duration_ms !== undefined) {
+    return formatDuration(node.duration_ms);
+  }
+  return formatTimestamp(node.started_at || null);
+}
+
+function traceNodeKindRank(kind: StudioTracePathNode["kind"]) {
+  if (kind === "task") {
+    return 0;
+  }
+  if (kind === "task_attempt") {
+    return 1;
+  }
+  if (kind === "stage") {
+    return 2;
+  }
+  if (kind === "span") {
+    return 3;
+  }
+  if (kind === "event") {
+    return 4;
+  }
+  if (kind === "dlq_record") {
+    return 5;
+  }
+  return 6;
+}
+
+function orderTracePathNodes(nodes: StudioTracePathNode[], edges: StudioTracePathResponse["edges"]) {
+  const indexById = new Map(nodes.map((node, index) => [node.id, index]));
+  const outgoing = new Map<string, string[]>();
+  const incomingCount = new Map(nodes.map((node) => [node.id, 0]));
+
+  edges.forEach((edge) => {
+    if (!indexById.has(edge.source) || !indexById.has(edge.target)) {
+      return;
+    }
+    outgoing.set(edge.source, [...(outgoing.get(edge.source) || []), edge.target]);
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) || 0) + 1);
+  });
+
+  const queue = nodes
+    .filter((node) => (incomingCount.get(node.id) || 0) === 0)
+    .sort((left, right) => traceNodeKindRank(left.kind) - traceNodeKindRank(right.kind) || indexById.get(left.id)! - indexById.get(right.id)!);
+  const ordered: StudioTracePathNode[] = [];
+  const seen = new Set<string>();
+
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (seen.has(current.id)) {
+      continue;
+    }
+    seen.add(current.id);
+    ordered.push(current);
+    (outgoing.get(current.id) || []).forEach((targetId) => {
+      const nextCount = (incomingCount.get(targetId) || 0) - 1;
+      incomingCount.set(targetId, nextCount);
+      if (nextCount === 0) {
+        const target = nodes[indexById.get(targetId)!];
+        queue.push(target);
+        queue.sort(
+          (left, right) =>
+            traceNodeKindRank(left.kind) - traceNodeKindRank(right.kind) || indexById.get(left.id)! - indexById.get(right.id)!,
+        );
+      }
+    });
+  }
+
+  nodes.forEach((node) => {
+    if (!seen.has(node.id)) {
+      ordered.push(node);
+    }
+  });
+  return ordered;
+}
+
+function preferredTracePathNodeId(path: StudioTracePathResponse) {
+  const orderedNodes = orderTracePathNodes(path.nodes, path.edges);
+  return orderedNodes.find((node) => node.span_id || node.trace_id)?.id || orderedNodes[0]?.id || null;
+}
+
+function TracePathExplorer({
+  tracePath,
+  selectedNode,
+  onSelectNode,
+  onSelectSpan,
+  onFilterLogs,
+}: {
+  tracePath: StudioTracePathResponse;
+  selectedNode: StudioTracePathNode | null;
+  onSelectNode: (node: StudioTracePathNode) => void;
+  onSelectSpan: (span: StudioTraceSpan) => void;
+  onFilterLogs: (traceId: string) => void;
+}) {
+  const displayNodes = orderTracePathNodes(tracePath.nodes, tracePath.edges);
+  const activeNode = selectedNode || displayNodes[0] || null;
+  const relatedSpans = activeNode
+    ? tracePath.spans.filter((span) => span.span_id === activeNode.span_id || span.trace_id === activeNode.trace_id)
+    : [];
+
+  return (
+    <div className="studio-stack-md">
+      <div className="studio-metrics-grid studio-metrics-grid--4">
+        <MetricCard label="Trace Status" value={tracePath.summary.status || "unknown"} />
+        <MetricCard label="Path Duration" value={formatDuration(tracePath.summary.duration_ms ?? null)} />
+        <MetricCard label="Spans" value={String(tracePath.summary.span_count)} />
+        <MetricCard label="DLQ Evidence" value={String(tracePath.summary.dlq_count)} />
+      </div>
+
+      <div className="studio-stack-sm">
+        {displayNodes.map((node) => {
+          const palette = traceNodePalette(node.state);
+          const selected = activeNode?.id === node.id;
+          return (
+            <button
+              type="button"
+              key={node.id}
+              onClick={() => onSelectNode(node)}
+              className="studio-subcard"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(150px, 0.7fr) minmax(180px, 1fr) auto",
+                alignItems: "center",
+                gap: 12,
+                padding: 12,
+                borderRadius: 8,
+                textAlign: "left",
+                border: `1px solid ${selected ? palette.border : "var(--studio-border)"}`,
+                background: selected ? palette.background : "var(--studio-surface)",
+                color: "var(--studio-text)",
+                cursor: "pointer",
+              }}
+            >
+              <span style={{ display: "grid", gap: 4, minWidth: 0 }}>
+                <strong style={{ fontSize: 13, overflowWrap: "anywhere" }}>{node.label}</strong>
+                <span className="studio-inline-meta">
+                  {node.kind}
+                  {node.queue_name ? ` · ${node.queue_name}` : ""}
+                </span>
+              </span>
+              <span
+                aria-hidden="true"
+                style={{
+                  position: "relative",
+                  height: 12,
+                  borderRadius: 999,
+                  background: "rgba(34, 43, 50, 0.08)",
+                  overflow: "hidden",
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    left: `${traceNodeOffset(node, tracePath)}%`,
+                    width: `${traceNodeWidth(node, tracePath)}%`,
+                    top: 0,
+                    bottom: 0,
+                    borderRadius: 999,
+                    background: palette.border,
+                  }}
+                />
+              </span>
+              <span className="studio-inline-meta" style={{ justifySelf: "end" }}>
+                {traceNodeTimingLabel(node)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {activeNode ? (
+        <div className="studio-subcard" style={{ borderRadius: 8, padding: 14, display: "grid", gap: 12 }}>
+          <div className="studio-list-card__top">
+            <strong>{activeNode.label}</strong>
+            <span className="studio-inline-meta">{activeNode.state || "unknown"}</span>
+          </div>
+          <dl style={{ margin: 0, display: "grid", gap: 8, fontSize: 13 }}>
+            <MetadataRow label="Queue" value={activeNode.queue_name || "none"} />
+            <MetadataRow label="Stage" value={activeNode.stage || "none"} />
+            <MetadataRow label="Trace id" value={activeNode.trace_id || "none"} />
+            <MetadataRow label="Span id" value={activeNode.span_id || "none"} />
+            <MetadataRow label="Started" value={formatTimestamp(activeNode.started_at || null)} />
+            <MetadataRow label="Duration" value={formatDuration(activeNode.duration_ms ?? null)} />
+          </dl>
+          {activeNode.trace_id ? (
+            <div className="studio-action-row">
+              <button type="button" onClick={() => onFilterLogs(activeNode.trace_id || "")} style={secondaryButtonStyle}>
+                Filter Logs
+              </button>
+            </div>
+          ) : null}
+          {relatedSpans.length ? (
+            <div className="studio-stack-sm">
+              <strong style={{ fontSize: 13 }}>Related Spans</strong>
+              {relatedSpans.map((span) => (
+                <div
+                  key={`${span.trace_id}-${span.span_id}`}
+                  className="studio-subcard"
+                  style={{ borderRadius: 8, padding: 10, display: "flex", justifyContent: "space-between", gap: 12 }}
+                >
+                  <span style={{ display: "grid", gap: 4 }}>
+                    <strong style={{ fontSize: 13 }}>{span.name}</strong>
+                    <span style={mutedTextStyle}>
+                      {span.service || span.source || "unknown"} · {formatDuration(span.duration_ms ?? null)}
+                    </span>
+                  </span>
+                  <button type="button" onClick={() => onSelectSpan(span)} style={secondaryButtonStyle}>
+                    View Span
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <div className="studio-stack-sm">
+            <strong style={{ fontSize: 13 }}>Evidence</strong>
+            {activeNode.evidence.map((item, index) => (
+              <div key={`${item.source}-${item.source_id}-${index}`} style={{ display: "grid", gap: 2 }}>
+                <span className="studio-inline-meta">
+                  {item.source} · {item.label}
+                  {item.timestamp ? ` · ${formatTimestamp(item.timestamp)}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="studio-action-row">
+        {tracePath.summary.trace_ids.map((traceId) => (
+          <span key={traceId} className="studio-inline-meta">
+            trace_id={traceId}
+          </span>
+        ))}
+        {tracePath.log_metadata.configured ? (
+          <span className="studio-inline-meta">logs={tracePath.log_metadata.provider || "configured"}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function TaskDetailPage() {
   const { serviceId = "", taskId = "" } = useParams();
   const [taskDetail, setTaskDetail] = useState<StudioTaskDetail | null>(null);
@@ -323,9 +607,10 @@ export function TaskDetailPage() {
   const [taskMetrics, setTaskMetrics] = useState<StudioMetricsResponse | null>(null);
   const [taskMetricsLoading, setTaskMetricsLoading] = useState(false);
   const [taskMetricsError, setTaskMetricsError] = useState<string | null>(null);
-  const [taskTraces, setTaskTraces] = useState<StudioTraceResponse | null>(null);
-  const [taskTracesLoading, setTaskTracesLoading] = useState(false);
-  const [taskTracesError, setTaskTracesError] = useState<string | null>(null);
+  const [taskTracePath, setTaskTracePath] = useState<StudioTracePathResponse | null>(null);
+  const [taskTracePathLoading, setTaskTracePathLoading] = useState(false);
+  const [taskTracePathError, setTaskTracePathError] = useState<string | null>(null);
+  const [selectedTracePathNodeId, setSelectedTracePathNodeId] = useState<string | null>(null);
   const [selectedTraceSpan, setSelectedTraceSpan] = useState<StudioTraceSpan | null>(null);
   const [taskLogQuery, setTaskLogQuery] = useState("");
   const [taskLogLevel, setTaskLogLevel] = useState("");
@@ -362,8 +647,9 @@ export function TaskDetailPage() {
       setTaskLogsError(null);
       setTaskMetrics(null);
       setTaskMetricsError(null);
-      setTaskTraces(null);
-      setTaskTracesError(null);
+      setTaskTracePath(null);
+      setTaskTracePathError(null);
+      setSelectedTracePathNodeId(null);
       return;
     }
     setTaskTimeline(null);
@@ -403,7 +689,7 @@ export function TaskDetailPage() {
       setTaskMetrics(null);
       setTaskMetricsError("No metrics provider configured for this service.");
     }
-    void loadTaskTraces(taskDetail.service_id, taskDetail.task_id);
+    void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id);
   }, [
     taskDetail,
     taskTimelineLoading,
@@ -565,17 +851,18 @@ export function TaskDetailPage() {
     }
   }
 
-  async function loadTaskTraces(targetServiceId: string, targetTaskId: string) {
-    setTaskTracesLoading(true);
-    setTaskTracesError(null);
+  async function loadTaskTracePath(targetServiceId: string, targetTaskId: string) {
+    setTaskTracePathLoading(true);
+    setTaskTracePathError(null);
     try {
-      const payload = await fetchTaskTraces(targetServiceId, targetTaskId);
-      setTaskTraces(payload);
+      const payload = await fetchTaskTracePath(targetServiceId, targetTaskId);
+      setTaskTracePath(payload);
+      setSelectedTracePathNodeId((current) => current || preferredTracePathNodeId(payload));
     } catch (fetchError) {
-      setTaskTraces(null);
-      setTaskTracesError(fetchError instanceof Error ? fetchError.message : "Unable to load task traces.");
+      setTaskTracePath(null);
+      setTaskTracePathError(fetchError instanceof Error ? fetchError.message : "Unable to load task trace path.");
     } finally {
-      setTaskTracesLoading(false);
+      setTaskTracePathLoading(false);
     }
   }
 
@@ -641,6 +928,8 @@ export function TaskDetailPage() {
     isInTimeWindow(item.timestamp, { from: activeTaskLogFrom, to: activeTaskLogTo }),
   );
   const taskLogSourceOptions = Array.from(new Set((taskLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
+  const selectedTracePathNode =
+    taskTracePath?.nodes.find((node) => node.id === selectedTracePathNodeId) || taskTracePath?.nodes[0] || null;
 
   return (
     <>
@@ -724,73 +1013,32 @@ export function TaskDetailPage() {
                 </SectionCard>
 
                 <SectionCard
-                  title="Trace Correlation"
+                  title="Task Trace"
                   action={
                     <button
                       type="button"
-                      onClick={() => void loadTaskTraces(taskDetail.service_id, taskDetail.task_id)}
+                      onClick={() => void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id)}
                       style={secondaryButtonStyle}
                     >
                       <StudioIcon name="refresh" />
-                      Reload Traces
+                      Reload Trace
                     </button>
                   }
                 >
-                  {taskTracesLoading ? <p style={mutedTextStyle}>Loading task traces...</p> : null}
-                  {taskTracesError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTracesError}</p> : null}
-                  {taskTraces?.warnings.length ? <p style={mutedTextStyle}>{taskTraces.warnings.join(" ")}</p> : null}
-                  {!taskTracesLoading && !taskTracesError && taskTraces && !taskTraces.trace_ids.length ? (
-                    <p style={mutedTextStyle}>No trace identifiers were found for this task.</p>
+                  {taskTracePathLoading ? <p style={mutedTextStyle}>Loading task trace...</p> : null}
+                  {taskTracePathError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTracePathError}</p> : null}
+                  {taskTracePath?.warnings.length ? <p style={mutedTextStyle}>{taskTracePath.warnings.join(" ")}</p> : null}
+                  {!taskTracePathLoading && !taskTracePathError && taskTracePath && !taskTracePath.nodes.length ? (
+                    <p style={mutedTextStyle}>No task trace path evidence was found for this task.</p>
                   ) : null}
-                  {taskTraces?.trace_ids.length ? (
-                    <div className="studio-action-row">
-                      {taskTraces.trace_ids.map((traceId) => (
-                        <span key={traceId} className="studio-inline-meta">
-                          trace_id={traceId}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {taskTraces?.spans.length ? (
-                    <div className="studio-stack-sm studio-surface-scroll" style={{ marginTop: 12 }}>
-                      {taskTraces.spans.map((span) => (
-                        <article
-                          key={`${span.trace_id}-${span.span_id}`}
-                          className="studio-subcard"
-                          style={{ borderRadius: 14, padding: 14 }}
-                        >
-                          <div
-                            className="studio-list-card__top"
-                            style={{ alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}
-                          >
-                            <div>
-                              <strong style={{ fontSize: 13 }}>{span.name}</strong>
-                              <p style={{ ...mutedTextStyle, marginTop: 8, marginBottom: 0 }}>
-                                {span.service || span.source || "unknown"} · span={span.span_id}
-                                {span.parent_span_id ? ` · parent=${span.parent_span_id}` : ""}
-                                {span.start_time ? ` · ${formatTimestamp(span.start_time)}` : ""}
-                              </p>
-                            </div>
-                            <div
-                              className="studio-action-row"
-                              style={{ justifyContent: "flex-end", marginLeft: "auto", gap: 8 }}
-                            >
-                              <span className="studio-inline-meta">{formatDuration(span.duration_ms ?? null)}</span>
-                              <button type="button" onClick={() => setSelectedTraceSpan(span)} style={secondaryButtonStyle}>
-                                View Span
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => applyTraceLogFilter(span.trace_id)}
-                                style={secondaryButtonStyle}
-                              >
-                                Filter Logs
-                              </button>
-                            </div>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
+                  {taskTracePath?.nodes.length ? (
+                    <TracePathExplorer
+                      tracePath={taskTracePath}
+                      selectedNode={selectedTracePathNode}
+                      onSelectNode={(node) => setSelectedTracePathNodeId(node.id)}
+                      onSelectSpan={setSelectedTraceSpan}
+                      onFilterLogs={applyTraceLogFilter}
+                    />
                   ) : null}
                 </SectionCard>
               </div>

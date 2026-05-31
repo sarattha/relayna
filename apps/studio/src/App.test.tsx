@@ -285,6 +285,118 @@ function taskDetailResponse(options?: { taskId?: string; dlqItems?: Array<Record
   };
 }
 
+function taskTracePathResponse(taskId = "task-123") {
+  return {
+    service_id: "payments-api",
+    task_id: taskId,
+    summary: {
+      status: "running",
+      started_at: "2026-04-08T10:00:00Z",
+      ended_at: "2026-04-08T10:00:03Z",
+      duration_ms: 3000,
+      graph_completeness: "complete",
+      trace_ids: ["trace-abc"],
+      node_count: 2,
+      edge_count: 1,
+      span_count: 1,
+      event_count: 2,
+      dlq_count: 1,
+      live_state_counts: { running: 1, dead_lettered: 1 },
+    },
+    nodes: [
+      {
+        id: "dlq",
+        kind: "dlq_record",
+        label: "gateway_timeout",
+        task_id: taskId,
+        state: "dead_lettered",
+        queue_name: "payments.dlq",
+        stage: null,
+        attempt: 3,
+        trace_id: null,
+        span_id: null,
+        parent_span_id: null,
+        started_at: "2026-04-08T09:59:58Z",
+        ended_at: null,
+        duration_ms: null,
+        evidence: [{ source: "dlq", source_id: "dlq", label: "gateway_timeout", timestamp: "2026-04-08T09:59:58Z", payload: {} }],
+      },
+      {
+        id: "task",
+        kind: "task",
+        label: taskId,
+        task_id: taskId,
+        state: "running",
+        queue_name: null,
+        stage: null,
+        attempt: null,
+        trace_id: null,
+        span_id: null,
+        parent_span_id: null,
+        started_at: "2026-04-08T10:00:00Z",
+        ended_at: null,
+        duration_ms: null,
+        evidence: [{ source: "graph_node", source_id: "task", label: "task", timestamp: null, payload: {} }],
+      },
+      {
+        id: "attempt",
+        kind: "task_attempt",
+        label: "attempt-1",
+        task_id: taskId,
+        state: "running",
+        queue_name: "payments.stage",
+        stage: null,
+        attempt: 1,
+        trace_id: "trace-abc",
+        span_id: "span-123",
+        parent_span_id: "parent-456",
+        started_at: "2026-04-08T10:00:00Z",
+        ended_at: "2026-04-08T10:00:01Z",
+        duration_ms: 1000,
+        evidence: [
+          { source: "graph_node", source_id: "attempt", label: "task_attempt", timestamp: "2026-04-08T10:00:00Z", payload: {} },
+          { source: "span", source_id: "span-123", label: "payments.process_payment", timestamp: "2026-04-08T10:00:00Z", payload: {} },
+        ],
+      },
+    ],
+    edges: [
+      { id: "task->attempt:1", source: "task", target: "attempt", kind: "stage_transitioned_to", evidence: [] },
+      { id: "attempt->dlq:2", source: "attempt", target: "dlq", kind: "dead_lettered_to", evidence: [] },
+    ],
+    spans: [
+      {
+        trace_id: "trace-abc",
+        span_id: "span-123",
+        parent_span_id: "parent-456",
+        name: "payments.process_payment",
+        kind: "consumer",
+        service: "payments-api",
+        source: "tempo",
+        start_time: "2026-04-08T10:00:00Z",
+        end_time: "2026-04-08T10:00:01Z",
+        duration_ms: 1000,
+        attributes: { "messaging.system": "rabbitmq", task_id: taskId },
+        backend_url: "https://tempo-public.example.test/api/traces/trace-abc",
+      },
+    ],
+    events: [],
+    dlq_messages: [],
+    log_metadata: {
+      configured: true,
+      provider: "loki",
+      source_label: "component",
+      task_id_label: "task_id",
+      correlation_id_label: "correlation_id",
+      task_id: taskId,
+      correlation_id: "corr-123",
+      query: `${taskId} OR corr-123`,
+      from_time: "2026-04-08T10:00:00Z",
+      to_time: "2026-04-08T10:00:03Z",
+    },
+    warnings: [],
+  };
+}
+
 function metricsResponse(taskId?: string | null) {
   return {
     service_id: "payments-api",
@@ -741,6 +853,12 @@ describe("App", () => {
             },
           ],
         });
+      }
+      if (url === "/studio/tasks/payments-api/task-123/trace-path" && method === "GET") {
+        return jsonResponse(taskTracePathResponse());
+      }
+      if (url === "/studio/tasks/payments-api/task-empty-dlq/trace-path" && method === "GET") {
+        return jsonResponse(taskTracePathResponse("task-empty-dlq"));
       }
       if (url.startsWith("/studio/tasks/payments-api/task-empty-dlq/logs?") && method === "GET") {
         return jsonResponse({ count: 0, items: [], next_cursor: null });
@@ -1629,7 +1747,7 @@ describe("App", () => {
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(screen.getByText("Task Timeline")).toBeInTheDocument();
     expect(screen.getByText("Task Logs")).toBeInTheDocument();
-    expect(await screen.findByText("Trace Correlation")).toBeInTheDocument();
+    expect(await screen.findByText("Task Trace")).toBeInTheDocument();
     expect(screen.getByText("Joined Refs")).toBeInTheDocument();
     expect(screen.getByText("Join Warnings")).toBeInTheDocument();
     expect(screen.getByText("Section Errors")).toBeInTheDocument();
@@ -1641,6 +1759,8 @@ describe("App", () => {
     expect(screen.getByText("{\"oops\":")).toBeInTheDocument();
     expect(screen.getAllByText("null").length).toBeGreaterThan(0);
     expect(await screen.findByText("payments.process_payment")).toBeInTheDocument();
+    expect(screen.getByText("Path Duration")).toBeInTheDocument();
+    expect(document.body.textContent?.indexOf("attempt-1")).toBeLessThan(document.body.textContent?.indexOf("gateway_timeout") ?? 0);
     expect(screen.queryByRole("link", { name: "Open Span" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View Span" }));
     const spanDialog = await screen.findByRole("dialog", { name: "Span Details" });
