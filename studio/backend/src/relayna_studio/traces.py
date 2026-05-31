@@ -244,7 +244,20 @@ class StudioTraceQueryService:
 
     async def query_task_traces(self, service_id: str, task_id: str) -> StudioTraceResponse:
         service = await self._registry_service.get_service(service_id)
-        trace_ids, warnings = await self._discover_task_trace_ids(service, task_id)
+        return await self._query_task_traces_for_service(service=service, task_id=task_id)
+
+    async def _query_task_traces_for_service(
+        self,
+        *,
+        service: ServiceRecord,
+        task_id: str,
+        detail_payload: Mapping[str, Any] | None = None,
+    ) -> StudioTraceResponse:
+        trace_ids, warnings = await self._discover_task_trace_ids(
+            service,
+            task_id,
+            detail_payload=detail_payload,
+        )
         config = service.trace_config
         if config is None:
             warnings.append("No trace provider configured for this service.")
@@ -288,7 +301,11 @@ class StudioTraceQueryService:
                 warnings.append(f"Studio could not inspect task detail for trace path evidence: {exc.detail}")
 
         try:
-            trace_response = await self.query_task_traces(service.service_id, normalized_task_id)
+            trace_response = await self._query_task_traces_for_service(
+                service=service,
+                task_id=normalized_task_id,
+                detail_payload=detail_payload,
+            )
             warnings.extend(trace_response.warnings)
         except (StudioTraceConfigError, StudioTraceProviderError) as exc:
             fallback_trace_ids: set[str] = set()
@@ -323,10 +340,18 @@ class StudioTraceQueryService:
             warnings=warnings,
         )
 
-    async def _discover_task_trace_ids(self, service: ServiceRecord, task_id: str) -> tuple[list[str], list[str]]:
+    async def _discover_task_trace_ids(
+        self,
+        service: ServiceRecord,
+        task_id: str,
+        *,
+        detail_payload: Mapping[str, Any] | None = None,
+    ) -> tuple[list[str], list[str]]:
         warnings: list[str] = []
         trace_ids: set[str] = set()
-        if self._federation_service is not None:
+        if detail_payload is not None:
+            _collect_trace_ids(detail_payload, trace_ids)
+        elif self._federation_service is not None:
             try:
                 detail = await self._federation_service.get_task_detail(service.service_id, task_id)
                 _collect_trace_ids(detail.model_dump(mode="json"), trace_ids)
@@ -385,8 +410,8 @@ def _build_trace_path_response(
             history=_mapping_or_empty(detail_payload.get("history")),
         )
 
-    _attach_events(nodes=nodes, event_items=event_items, fallback_task_id=task_id)
     _attach_dlq_messages(nodes=nodes, edges=edges, nodes_by_id=nodes_by_id, dlq_messages=dlq_messages, task_id=task_id)
+    _attach_events(nodes=nodes, event_items=event_items, fallback_task_id=task_id)
     _attach_spans(nodes=nodes, edges=edges, nodes_by_id=nodes_by_id, spans=trace_response.spans, task_id=task_id)
 
     nodes = sorted(nodes, key=lambda item: (_timestamp_sort_key(item.started_at), item.id))

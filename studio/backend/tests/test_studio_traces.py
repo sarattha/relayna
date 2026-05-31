@@ -421,6 +421,67 @@ def test_trace_path_builder_covers_workflow_stage_span() -> None:
     assert any(item.source == "span" for item in stage_node.evidence)
 
 
+def test_trace_path_builder_attaches_dead_letter_event_to_created_dlq_node() -> None:
+    response = _build_trace_path_response(
+        service=make_record(trace_config=None),
+        task_id="task-123",
+        detail_payload={
+            "execution_graph": {
+                "summary": {
+                    "status": "failed",
+                    "started_at": "2026-04-08T10:00:00Z",
+                    "ended_at": "2026-04-08T10:00:03Z",
+                    "duration_ms": 3000,
+                    "graph_completeness": "partial",
+                },
+                "nodes": [
+                    {"id": "task:task-123", "kind": "task", "task_id": "task-123", "label": "task-123"},
+                    {
+                        "id": "attempt:task-123:1",
+                        "kind": "task_attempt",
+                        "task_id": "task-123",
+                        "label": "attempt 1",
+                        "timestamp": "2026-04-08T10:00:01Z",
+                        "state": "failed",
+                        "annotations": {"queue_name": "payments.queue"},
+                    },
+                ],
+                "edges": [{"source": "task:task-123", "target": "attempt:task-123:1", "kind": "received_by"}],
+            },
+            "dlq_messages": {
+                "items": [
+                    {
+                        "dlq_id": "dlq-1",
+                        "queue_name": "payments.queue.dlq",
+                        "source_queue_name": "payments.queue",
+                        "task_id": "task-123",
+                        "reason": "handler_failed",
+                        "dead_lettered_at": "2026-04-08T10:00:03Z",
+                        "state": "dead_lettered",
+                    }
+                ]
+            },
+        },
+        trace_response=StudioTraceResponse(service_id="payments-api", task_id="task-123"),
+        event_items=[
+            {
+                "dedupe_key": "evt-dlq",
+                "task_id": "task-123",
+                "event_type": "TaskDeadLettered",
+                "source_kind": "observation",
+                "timestamp": "2026-04-08T10:00:03Z",
+                "payload": {"queue_name": "payments.queue.dlq", "reason": "handler_failed"},
+            }
+        ],
+        warnings=[],
+    )
+
+    dlq_node = next(item for item in response.nodes if item.kind == "dlq_record")
+    assert [item.source for item in dlq_node.evidence] == ["dlq", "studio_event"]
+    attempt_node = next(item for item in response.nodes if item.id == "attempt:task-123:1")
+    assert not any(item.source == "studio_event" and item.label == "TaskDeadLettered" for item in attempt_node.evidence)
+
+
 def test_task_trace_route_queries_tempo_from_task_detail_trace_id(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 
@@ -470,6 +531,88 @@ def test_task_trace_route_queries_tempo_from_task_detail_trace_id(monkeypatch) -
     payload = response.json()
     assert payload["trace_ids"] == ["11111111111111111111111111111111"]
     assert payload["spans"][0]["span_id"] == "2222222222222222"
+
+
+def test_task_trace_path_route_reuses_task_detail_for_trace_ids(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    path_counts: dict[str, int] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path_counts[request.url.path] = path_counts.get(request.url.path, 0) + 1
+        if request.url.path == "/status/task-123":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "task-123",
+                    "event": {
+                        "task_id": "task-123",
+                        "status": "completed",
+                        "trace_id": "11111111111111111111111111111111",
+                    },
+                },
+            )
+        if request.url.path == "/history":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "task-123",
+                    "count": 1,
+                    "events": [
+                        {
+                            "task_id": "task-123",
+                            "status": "completed",
+                            "timestamp": "2024-04-10T21:00:02Z",
+                            "trace_id": "11111111111111111111111111111111",
+                        }
+                    ],
+                },
+            )
+        if request.url.path == "/dlq/messages":
+            return httpx.Response(200, json={"items": []})
+        if request.url.path == "/executions/task-123/graph":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "task-123",
+                    "topology_kind": "shared_tasks",
+                    "summary": {"status": "completed"},
+                    "nodes": [
+                        {
+                            "id": "task:task-123",
+                            "kind": "task",
+                            "task_id": "task-123",
+                            "label": "task-123",
+                            "annotations": {"trace_id": "11111111111111111111111111111111"},
+                        }
+                    ],
+                    "edges": [],
+                },
+            )
+        if request.url.path == "/api/traces/11111111111111111111111111111111":
+            return httpx.Response(200, json=tempo_task_path_response())
+        return httpx.Response(404, json={"detail": "missing"})
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(app, make_record(trace_config=tempo_trace_config()))
+        response = client.get("/studio/tasks/payments-api/task-123/trace-path")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["trace_ids"] == ["11111111111111111111111111111111"]
+    assert payload["summary"]["span_count"] == 1
+    assert path_counts["/status/task-123"] == 1
+    assert path_counts["/history"] == 1
+    assert path_counts["/dlq/messages"] == 1
+    assert path_counts["/executions/task-123/graph"] == 1
 
 
 def test_task_trace_path_route_merges_graph_spans_logs_and_dlq_evidence(monkeypatch) -> None:
