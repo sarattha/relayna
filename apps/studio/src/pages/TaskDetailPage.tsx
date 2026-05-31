@@ -350,6 +350,13 @@ function traceNodeWidth(node: StudioTracePathNode, path: StudioTracePathResponse
   return Math.max(8, Math.min(100, (nodeDuration / duration) * 100));
 }
 
+function traceNodeTimingLabel(node: StudioTracePathNode) {
+  if (node.duration_ms !== null && node.duration_ms !== undefined) {
+    return formatDuration(node.duration_ms);
+  }
+  return formatTimestamp(node.started_at || null);
+}
+
 function traceNodeKindRank(kind: StudioTracePathNode["kind"]) {
   if (kind === "task") {
     return 0;
@@ -507,7 +514,7 @@ function TracePathExplorer({
                 />
               </span>
               <span className="studio-inline-meta" style={{ justifySelf: "end" }}>
-                {formatDuration(node.duration_ms ?? null)}
+                {traceNodeTimingLabel(node)}
               </span>
             </button>
           );
