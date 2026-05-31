@@ -19,6 +19,7 @@ import type {
   StudioLogListResponse,
   StudioMetricGroup,
   StudioMetricsResponse,
+  StudioTracePathResponse,
   StudioTraceResponse,
   StudioTaskDetail,
   StudioTaskSearchQuery,
@@ -403,6 +404,12 @@ export async function fetchTaskMetrics(
 export async function fetchTaskTraces(serviceId: string, taskId: string) {
   return requestJson<StudioTraceResponse>(
     `/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/traces`,
+  );
+}
+
+export async function fetchTaskTracePath(serviceId: string, taskId: string) {
+  return requestJson<StudioTracePathResponse>(
+    `/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/trace-path`,
   );
 }
 

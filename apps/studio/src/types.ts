@@ -634,6 +634,83 @@ export type StudioTraceResponse = {
   warnings: string[];
 };
 
+export type StudioTracePathEvidence = {
+  source: "graph_node" | "graph_edge" | "status_history" | "studio_event" | "span" | "dlq" | "latest_status";
+  source_id: string;
+  label: string;
+  timestamp?: string | null;
+  payload: Record<string, unknown>;
+};
+
+export type StudioTracePathNode = {
+  id: string;
+  kind: string;
+  label: string;
+  task_id?: string | null;
+  state?: string | null;
+  queue_name?: string | null;
+  stage?: string | null;
+  attempt?: number | null;
+  trace_id?: string | null;
+  span_id?: string | null;
+  parent_span_id?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_ms?: number | null;
+  evidence: StudioTracePathEvidence[];
+};
+
+export type StudioTracePathEdge = {
+  id: string;
+  source: string;
+  target: string;
+  kind: string;
+  timestamp?: string | null;
+  state?: string | null;
+  evidence: StudioTracePathEvidence[];
+};
+
+export type StudioTracePathLogMetadata = {
+  configured: boolean;
+  provider?: string | null;
+  source_label?: string | null;
+  task_id_label?: string | null;
+  correlation_id_label?: string | null;
+  task_id: string;
+  correlation_id?: string | null;
+  query?: string | null;
+  from_time?: string | null;
+  to_time?: string | null;
+};
+
+export type StudioTracePathSummary = {
+  status?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_ms?: number | null;
+  graph_completeness?: string | null;
+  trace_ids: string[];
+  node_count: number;
+  edge_count: number;
+  span_count: number;
+  event_count: number;
+  dlq_count: number;
+  live_state_counts: Record<string, number>;
+};
+
+export type StudioTracePathResponse = {
+  service_id: string;
+  task_id: string;
+  summary: StudioTracePathSummary;
+  nodes: StudioTracePathNode[];
+  edges: StudioTracePathEdge[];
+  spans: StudioTraceSpan[];
+  events: Array<Record<string, unknown>>;
+  dlq_messages: Array<Record<string, unknown>>;
+  log_metadata: StudioTracePathLogMetadata;
+  warnings: string[];
+};
+
 export type DlqMode = "indexed" | "broker";
 
 export type DlqQueryState = {

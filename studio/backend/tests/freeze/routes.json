@@ -37,6 +37,7 @@
     {"file": "studio/backend/src/relayna_studio/registry.py", "method": "post", "path_expression": "f'{prefix}' + '/{service_id}/refresh'"},
     {"file": "studio/backend/src/relayna_studio/search.py", "method": "get", "path_expression": "f'{prefix}/tasks/search'"},
     {"file": "studio/backend/src/relayna_studio/search.py", "method": "get", "path_expression": "f'{prefix}/services/search'"},
-    {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/traces'"}
+    {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/traces'"},
+    {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/trace-path'"}
   ]
 }
