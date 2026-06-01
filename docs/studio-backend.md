@@ -246,6 +246,8 @@ the intended mapping is:
 - one stable `service` label for the logical Relayna service
 - one `app` label for the concrete emitter or workload, such as API, worker,
   aggregator, or scaled-job pods
+- an optional `pod` label when operators need service-detail pod selection to
+  filter Loki logs to one current Kubernetes pod
 - task IDs embedded in log line text when they are not available as Loki labels
 
 Recommended registration shape:
@@ -301,6 +303,8 @@ How the backend turns that config into Loki queries:
   - `{service="checker-service"}`
 - service page, filtered to one app:
   - `{app="checker-service-api",service="checker-service"}`
+- service page, filtered to one selected pod:
+  - `{pod="checker-worker-abc123",service="checker-service"}`
 - task page, task ID inside line text:
   - `{service="checker-service"} |= "checker_endjdbdgsjmaksdhdsdsdd"`
 - task page, bounded to a lifecycle window:
@@ -312,6 +316,9 @@ Important operational behavior:
 - the backend merges all matching Loki streams into one time-ordered response
 - source/app suggestions in the UI are discovered from returned log entries; the
   backend does not maintain a separate app catalog
+- current service pods come from Prometheus pod discovery. If the selected pod
+  later scales down, it disappears from the current pod list, while historical
+  Loki entries remain queryable until Loki retention expires.
 - task pages now pass optional `from` and `to` values to the backend, which the
   Loki provider maps to `start` and `end`
 - when `task_match_mode` is `"contains"` or `"regex"`, Studio does not require
@@ -371,8 +378,11 @@ Field-by-field guidance:
 Studio renders two different metric classes:
 
 - Kubernetes pod/container metrics from Prometheus. These are service-level or
-  task-window approximations scoped through `kube_pod_labels` pod ownership
-  joins, and are never exact per-task CPU/memory.
+  per-pod service graphs or task-window approximations scoped through
+  `kube_pod_labels` pod ownership joins, and are never exact per-task
+  CPU/memory. The service detail page's Pod Metrics panel can show all current
+  service pods or one selected pod for CPU, memory, network receive/transmit,
+  restarts, OOMKilled, readiness, and pod phase.
 - Relayna runtime metrics from Prometheus. These are aggregate counters,
   gauges, and histograms with low-cardinality labels only.
 
@@ -646,6 +656,10 @@ The main operator surfaces are:
 - logs
   - `/studio/services/{service_id}/logs`
   - `/studio/tasks/{service_id}/{task_id}/logs`
+- pods and metrics
+  - `/studio/services/{service_id}/pods`
+  - `/studio/services/{service_id}/metrics`
+  - `/studio/tasks/{service_id}/{task_id}/metrics`
 - search
   - `/studio/services/search`
   - `/studio/tasks/search`
@@ -793,6 +807,8 @@ curl -s http://localhost:8000/studio/services/my-service/dlq/messages
 curl -s "http://localhost:8000/studio/services/my-service/broker/dlq/messages?task_id=task-123"
 curl -s "http://localhost:8000/studio/failed-tasks?investigation_status=unreviewed&limit=50"
 curl -s "http://localhost:8000/studio/services/my-service/logs?limit=20&source=runtime-worker"
+curl -s "http://localhost:8000/studio/services/my-service/pods"
+curl -s "http://localhost:8000/studio/services/my-service/metrics?group=cpu_usage&group=memory_usage&split_by_pod=true"
 curl -s "http://localhost:8000/studio/tasks/my-service/task-123/logs?limit=50&source=api&from=2026-04-22T10:00:00Z&to=2026-04-22T10:15:00Z"
 ```
 

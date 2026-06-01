@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.18 - 2026-06-01
+
+### Added
+
+- Added Studio service pod discovery from Prometheus so service detail pages can
+  show the current Kubernetes pods matched by each service's `metrics_config`.
+- Added pod-scoped service log filtering for Loki-backed logs, including a
+  Service Pods panel that lets operators select API, worker, aggregator, and
+  other related pods before inspecting logs.
+- Added a dedicated Pod Metrics panel with CPU, memory, network, restart,
+  OOM-killed, readiness, and pod phase graphs across service pods, including
+  pod selection, legends, axis labels, and quick/custom time ranges.
+- Added local mock service and observability data for exercising service API,
+  worker, and aggregator pod logs and metrics in the manual Studio stack.
+
+### Fixed
+
+- Honored custom Prometheus pod label keys such as `kubernetes_pod_name` when
+  labeling pod metric chart lines and legends.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.18`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.18`.
+- Updated release-install and observability documentation for the `1.4.18`
+  service pod log and metrics workflow.
+
 ## 1.4.17 - 2026-05-31
 
 ### Added

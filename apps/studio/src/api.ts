@@ -303,7 +303,7 @@ export async function fetchTaskEvents(serviceId: string, taskId: string, limit =
 
 export async function fetchServiceLogs(
   serviceId: string,
-  query: { query?: string; level?: string; source?: string; limit?: number; from?: string; to?: string },
+  query: { query?: string; level?: string; source?: string; pod?: string; limit?: number; from?: string; to?: string },
 ) {
   const params = new URLSearchParams({ limit: String(query.limit || 20) });
   if (query.query?.trim()) {
@@ -314,6 +314,9 @@ export async function fetchServiceLogs(
   }
   if (query.source?.trim()) {
     params.set("source", query.source.trim());
+  }
+  if (query.pod?.trim()) {
+    params.set("pod", query.pod.trim());
   }
   if (query.from?.trim()) {
     params.set("from", query.from.trim());
@@ -333,6 +336,7 @@ export async function fetchTaskLogs(
     query?: string;
     level?: string;
     source?: string;
+    pod?: string;
     limit?: number;
     correlation_id?: string | null;
     from?: string;
@@ -349,6 +353,9 @@ export async function fetchTaskLogs(
   if (query.source?.trim()) {
     params.set("source", query.source.trim());
   }
+  if (query.pod?.trim()) {
+    params.set("pod", query.pod.trim());
+  }
   if (query.correlation_id?.trim()) {
     params.set("correlation_id", query.correlation_id.trim());
   }
@@ -363,7 +370,10 @@ export async function fetchTaskLogs(
   );
 }
 
-function appendMetricsQuery(params: URLSearchParams, query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[] }) {
+function appendMetricsQuery(
+  params: URLSearchParams,
+  query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[]; pod?: string; split_by_pod?: boolean },
+) {
   if (query.from?.trim()) {
     params.set("from", query.from.trim());
   }
@@ -373,6 +383,12 @@ function appendMetricsQuery(params: URLSearchParams, query: { from?: string; to?
   if (query.step) {
     params.set("step", String(query.step));
   }
+  if (query.pod?.trim()) {
+    params.set("pod", query.pod.trim());
+  }
+  if (query.split_by_pod) {
+    params.set("split_by_pod", "true");
+  }
   for (const group of query.groups || []) {
     params.append("group", group);
   }
@@ -380,7 +396,7 @@ function appendMetricsQuery(params: URLSearchParams, query: { from?: string; to?
 
 export async function fetchServiceMetrics(
   serviceId: string,
-  query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[] } = {},
+  query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[]; pod?: string; split_by_pod?: boolean } = {},
 ) {
   const params = new URLSearchParams();
   appendMetricsQuery(params, query);
@@ -391,7 +407,7 @@ export async function fetchServiceMetrics(
 export async function fetchTaskMetrics(
   serviceId: string,
   taskId: string,
-  query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[] } = {},
+  query: { from?: string; to?: string; step?: number; groups?: StudioMetricGroup[]; pod?: string; split_by_pod?: boolean } = {},
 ) {
   const params = new URLSearchParams();
   appendMetricsQuery(params, query);

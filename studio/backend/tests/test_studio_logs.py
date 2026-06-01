@@ -393,6 +393,27 @@ def test_loki_provider_applies_source_filter_from_configured_source_label() -> N
     assert observed_query["query"] == '{app="payments-api",component="api",namespace="prod"}'
 
 
+def test_loki_provider_applies_pod_filter() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config(source_label="component")),
+            config=make_log_config(source_label="component"),
+            query=StudioLogQuery(pod="payments-worker-abc", source="runtime-worker", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == (
+        '{app="payments-api",component="runtime-worker",namespace="prod",pod="payments-worker-abc"}'
+    )
+
+
 def test_loki_provider_raises_for_source_filter_without_source_label() -> None:
     provider = LokiLogProvider(
         http_client=TrackingAsyncClient(
@@ -535,6 +556,7 @@ def test_task_log_route_scopes_task_id_and_correlation_id(monkeypatch) -> None:
             params={
                 "correlation_id": "corr-123",
                 "source": "runtime-worker",
+                "pod": "payments-worker-abc",
                 "before": "2026-04-11T10:00:00Z",
                 "from": "2026-04-11T09:00:00Z",
                 "to": "2026-04-11T09:30:00Z",
@@ -545,6 +567,7 @@ def test_task_log_route_scopes_task_id_and_correlation_id(monkeypatch) -> None:
     assert 'task_id="task-123"' in observed_params["query"]
     assert 'correlation_id="corr-123"' in observed_params["query"]
     assert 'component="runtime-worker"' in observed_params["query"]
+    assert 'pod="payments-worker-abc"' in observed_params["query"]
     assert observed_params["start"].isdigit()
     assert observed_params["end"].isdigit()
 

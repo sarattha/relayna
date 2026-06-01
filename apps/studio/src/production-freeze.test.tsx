@@ -23,21 +23,21 @@ function exportedSymbols(source: string) {
 const pageModules = import.meta.glob("./pages/*.tsx", { eager: true, query: "?raw", import: "default" });
 
 describe("production freeze perimeter", () => {
-  it("keeps Studio frontend API exports inside the v1.4.11 strict freeze manifest", () => {
+  it("keeps Studio frontend API exports inside the v1.4.18 strict freeze manifest", () => {
     const actual = exportedSymbols(apiSource);
 
-    expect(manifest.freeze_version).toBe("v1.4.11");
+    expect(manifest.freeze_version).toBe("v1.4.18");
     expect(manifest.strict).toBe(true);
     expect(actual).toEqual(manifest.api_symbols);
   });
 
-  it("keeps Studio frontend type exports inside the v1.4.11 strict freeze manifest", () => {
+  it("keeps Studio frontend type exports inside the v1.4.18 strict freeze manifest", () => {
     const actual = exportedNames(typesSource, /export\s+type\s+([A-Za-z0-9_]+)/g);
 
     expect(actual).toEqual(manifest.type_exports);
   });
 
-  it("keeps Studio frontend route pages inside the v1.4.11 strict freeze manifest", () => {
+  it("keeps Studio frontend route pages inside the v1.4.18 strict freeze manifest", () => {
     const actual = Object.keys(pageModules)
       .map((modulePath) => {
         const parts = modulePath.split("/");

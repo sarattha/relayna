@@ -75,6 +75,33 @@ def prometheus_success_response() -> dict[str, object]:
     }
 
 
+def prometheus_pods_response() -> dict[str, object]:
+    return {
+        "status": "success",
+        "data": {
+            "resultType": "vector",
+            "result": [
+                {
+                    "metric": {
+                        "namespace": "prod",
+                        "pod": "payments-worker-abc",
+                        "phase": "Running",
+                    },
+                    "value": [1712797230, "1"],
+                },
+                {
+                    "metric": {
+                        "namespace": "prod",
+                        "pod": "payments-api-def",
+                        "phase": "Pending",
+                    },
+                    "value": [1712797230, "1"],
+                },
+            ],
+        },
+    }
+
+
 def test_metrics_config_rejects_empty_and_high_cardinality_selectors() -> None:
     with pytest.raises(ValidationError):
         PrometheusMetricsConfig(
@@ -245,6 +272,65 @@ def test_prometheus_provider_translates_service_selectors_to_kube_pod_labels() -
     assert 'kube_pod_labels{label_team_service_conflict9="payments-platform",namespace="prod"}' in query
 
 
+def test_prometheus_provider_queries_current_service_pods() -> None:
+    observed: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["path"] = request.url.path
+        observed["query"] = request.url.params["query"]
+        return httpx.Response(200, json=prometheus_pods_response())
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        response = await provider.query_service_pods(
+            service=make_record(metrics_config=make_metrics_config()),
+            config=make_metrics_config(),
+        )
+        assert response.service_id == "payments-api"
+        assert [pod.name for pod in response.pods] == ["payments-api-def", "payments-worker-abc"]
+        assert response.pods[1].phase == "Running"
+
+    asyncio.run(scenario())
+    assert observed["path"] == "/api/v1/query"
+    assert observed["query"].startswith(
+        '(kube_pod_status_phase{namespace="prod",phase=~"Pending|Running|Succeeded|Failed|Unknown",pod=~".+"} == 1)'
+        " * on(namespace, pod) group_left(label_app"
+    )
+    assert 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in observed["query"]
+
+
+def test_prometheus_provider_builds_pod_split_and_filter_queries() -> None:
+    observed_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=make_metrics_config()),
+            config=make_metrics_config(),
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=[StudioMetricGroup.CPU_USAGE, StudioMetricGroup.POD_PHASE],
+                pod="payments-worker-abc",
+                split_by_pod=True,
+            ),
+        )
+
+    asyncio.run(scenario())
+    assert 'pod="payments-worker-abc"' in observed_queries[0]
+    assert observed_queries[0].startswith("sum by (pod) (")
+    assert 'pod="payments-worker-abc"' in observed_queries[1]
+    assert observed_queries[1].startswith("sum by (pod, phase) (")
+
+
 def test_prometheus_provider_builds_relayna_runtime_queries() -> None:
     observed_queries: list[str] = []
 
@@ -301,6 +387,38 @@ def test_service_metrics_route_returns_series(monkeypatch) -> None:
     assert payload["service_id"] == "payments-api"
     assert payload["approximate"] is False
     assert payload["series"][0]["metric"] == "cpu_usage"
+
+
+def test_service_pods_route_returns_current_pods(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["path"] = request.url.path
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=prometheus_pods_response())
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(app, make_record(metrics_config=make_metrics_config()))
+        response = client.get("/studio/services/payments-api/pods")
+
+    assert response.status_code == 200
+    assert observed_query["path"] == "/api/v1/query"
+    assert 'kube_pod_status_phase{namespace="prod"' in observed_query["query"]
+    payload = response.json()
+    assert payload["service_id"] == "payments-api"
+    assert payload["count"] == 2
+    assert payload["pods"][0]["name"] == "payments-api-def"
+    assert payload["pods"][1]["phase"] == "Running"
 
 
 def test_task_metrics_route_derives_window_and_marks_approximate(monkeypatch) -> None:

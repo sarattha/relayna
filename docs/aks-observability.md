@@ -241,6 +241,14 @@ Keep these as normal Loki labels:
 - `container`
 - `level`
 
+If operators need Studio's service-detail pod log panel to filter logs for an
+individual Kubernetes pod, also keep a `pod` label in Loki. That label is more
+cardinal than service or app labels, so enable it intentionally for clusters
+where per-pod log inspection is worth the retention and index cost.
+The Service Pods panel uses the current Prometheus pod list; a KEDA-scaled pod
+that terminates disappears from that current selector, while its historical
+Loki entries remain available until Loki retention expires.
+
 Keep these in the JSON log body by default:
 
 - `task_id`
@@ -258,6 +266,13 @@ Prometheus needs four scrape paths for full Studio metrics:
    readiness.
 3. Relayna API and worker `/metrics` endpoints for aggregate runtime metrics.
 4. Studio backend `/metrics` for Studio’s own runtime metrics.
+
+Studio's service detail page uses Prometheus for both current pod discovery and
+the Pod Metrics panel. The panel can graph all current service pods or one
+selected pod over quick ranges such as 15 minutes, 1 hour, 12 hours, 24 hours,
+1 week, and 1 month, plus custom time ranges. It depends on
+`kube_pod_labels`, cAdvisor, and kube-state-metrics sharing the configured
+`namespace_label` and `pod_label` values.
 
 Minimal Prometheus scrape config:
 
@@ -433,7 +448,7 @@ Install application-owned tracing dependencies in the service image:
 ```toml
 [project]
 dependencies = [
-  "relayna>=1.4.17",
+  "relayna>=1.4.18",
   "opentelemetry-sdk>=1.28.0",
   "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
   "structlog>=24.0.0",
@@ -631,7 +646,10 @@ curl -X POST http://studio-backend.studio.svc.cluster.local:8000/studio/services
 After a task runs, Studio should be able to show:
 
 - service logs and task logs from Loki
+- current service pods and pod-filtered service logs
 - service and task-window metrics from Prometheus
+- pod-level CPU, memory, network, restart, OOMKilled, readiness, and phase
+  graphs from Prometheus
 - Relayna runtime charts and exact task CPU/RSS samples
 - execution graph and task timeline from Redis-backed Relayna status and
   observation data

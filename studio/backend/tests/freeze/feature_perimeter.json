@@ -1,5 +1,5 @@
 {
-  "freeze_version": "v1.4.11",
+  "freeze_version": "v1.4.18",
   "features": {
     "asgi app": ["studio/backend/tests/test_asgi.py"],
     "deployment assets": ["studio/backend/tests/test_deployment_assets.py"],
