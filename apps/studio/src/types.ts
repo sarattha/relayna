@@ -560,6 +560,8 @@ export type WorkflowTopologyResponse = WorkflowTopologyGraph & {
 export type StudioLogQuery = {
   query?: string;
   level?: string;
+  source?: string;
+  pod?: string;
   limit?: number;
   correlation_id?: string | null;
 };

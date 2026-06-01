@@ -303,7 +303,7 @@ export async function fetchTaskEvents(serviceId: string, taskId: string, limit =
 
 export async function fetchServiceLogs(
   serviceId: string,
-  query: { query?: string; level?: string; source?: string; limit?: number; from?: string; to?: string },
+  query: { query?: string; level?: string; source?: string; pod?: string; limit?: number; from?: string; to?: string },
 ) {
   const params = new URLSearchParams({ limit: String(query.limit || 20) });
   if (query.query?.trim()) {
@@ -314,6 +314,9 @@ export async function fetchServiceLogs(
   }
   if (query.source?.trim()) {
     params.set("source", query.source.trim());
+  }
+  if (query.pod?.trim()) {
+    params.set("pod", query.pod.trim());
   }
   if (query.from?.trim()) {
     params.set("from", query.from.trim());
@@ -333,6 +336,7 @@ export async function fetchTaskLogs(
     query?: string;
     level?: string;
     source?: string;
+    pod?: string;
     limit?: number;
     correlation_id?: string | null;
     from?: string;
@@ -348,6 +352,9 @@ export async function fetchTaskLogs(
   }
   if (query.source?.trim()) {
     params.set("source", query.source.trim());
+  }
+  if (query.pod?.trim()) {
+    params.set("pod", query.pod.trim());
   }
   if (query.correlation_id?.trim()) {
     params.set("correlation_id", query.correlation_id.trim());

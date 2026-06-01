@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { fetchServiceEvents, fetchServiceLogs, fetchServiceMetrics } from "../api";
+import { fetchServiceEvents, fetchServiceLogs, fetchServiceMetrics, requestJson } from "../api";
 import { useStudioServices } from "../services-context";
 import {
   ConfirmationDialog,
@@ -35,6 +35,17 @@ import type {
 
 type TimeWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
 type TimeWindow = { from: string; to: string };
+type ServicePod = {
+  name: string;
+  namespace: string;
+  phase?: string | null;
+  labels?: Record<string, string>;
+};
+type ServicePodListResponse = {
+  service_id: string;
+  count: number;
+  pods: ServicePod[];
+};
 type ConfirmationRequest = {
   title: string;
   body: string;
@@ -191,6 +202,21 @@ function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string
   return formatMetricValue(hasValue ? total : null, unit);
 }
 
+function servicePodSource(pod: ServicePod) {
+  const labels = pod.labels || {};
+  return (
+    labels.app ||
+    labels.component ||
+    labels.container ||
+    Object.entries(labels).find(([key, value]) => key.startsWith("label_") && Boolean(value))?.[1] ||
+    "unknown"
+  );
+}
+
+async function fetchServicePods(serviceId: string) {
+  return requestJson<ServicePodListResponse>(`/studio/services/${encodeURIComponent(serviceId)}/pods`);
+}
+
 export function ServiceDetailPage() {
   const navigate = useNavigate();
   const { serviceId = "" } = useParams();
@@ -217,6 +243,10 @@ export function ServiceDetailPage() {
   const [serviceLogWindowMode, setServiceLogWindowMode] = useState<TimeWindowMode>("auto");
   const [serviceLogManualFrom, setServiceLogManualFrom] = useState("");
   const [serviceLogManualTo, setServiceLogManualTo] = useState("");
+  const [servicePods, setServicePods] = useState<ServicePodListResponse | null>(null);
+  const [servicePodsLoading, setServicePodsLoading] = useState(false);
+  const [servicePodsError, setServicePodsError] = useState<string | null>(null);
+  const [selectedServicePod, setSelectedServicePod] = useState("");
   const [serviceMetrics, setServiceMetrics] = useState<StudioMetricsResponse | null>(null);
   const [serviceMetricsLoading, setServiceMetricsLoading] = useState(false);
   const [serviceMetricsError, setServiceMetricsError] = useState<string | null>(null);
@@ -241,6 +271,7 @@ export function ServiceDetailPage() {
 
   useEffect(() => {
     setServiceLogSource("");
+    setSelectedServicePod("");
     setServiceLogWindowMode("auto");
     setServiceLogManualFrom("");
     setServiceLogManualTo("");
@@ -255,6 +286,19 @@ export function ServiceDetailPage() {
       window: emptyWindow,
     });
   }, [service?.service_id, service?.log_config]);
+
+  useEffect(() => {
+    if (!service?.metrics_config) {
+      setServicePods(null);
+      setServicePodsError(service ? "No metrics provider configured for this service." : null);
+      return;
+    }
+    void loadServicePods(service);
+    const interval = window.setInterval(() => {
+      void loadServicePods(service, { quiet: true });
+    }, 10000);
+    return () => window.clearInterval(interval);
+  }, [service?.service_id, service?.metrics_config]);
 
   const activeServiceLogWindow = resolveWindow(serviceLogWindowMode, serviceLogManualFrom, serviceLogManualTo);
   const activeServiceMetricWindow = resolveWindow(
@@ -316,10 +360,12 @@ export function ServiceDetailPage() {
   async function loadServiceLogs({
     targetService = service,
     source = serviceLogSource,
+    pod = selectedServicePod,
     window = activeServiceLogWindow,
   }: {
     targetService?: ServiceRecord | null;
     source?: string;
+    pod?: string;
     window?: TimeWindow;
   } = {}) {
     if (!targetService) {
@@ -332,6 +378,7 @@ export function ServiceDetailPage() {
         query: serviceLogQuery,
         level: serviceLogLevel,
         source,
+        pod,
         limit: parseLimit(serviceLogLimit, 20),
         from: window.from,
         to: window.to,
@@ -341,6 +388,31 @@ export function ServiceDetailPage() {
       setServiceLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load service logs.");
     } finally {
       setServiceLogsLoading(false);
+    }
+  }
+
+  async function loadServicePods(targetService = service, options: { quiet?: boolean } = {}) {
+    if (!targetService?.metrics_config) {
+      setServicePods(null);
+      setServicePodsError("No metrics provider configured for this service.");
+      return;
+    }
+    if (!options.quiet) {
+      setServicePodsLoading(true);
+    }
+    setServicePodsError(null);
+    try {
+      const payload = await fetchServicePods(targetService.service_id);
+      setServicePods(payload);
+      setSelectedServicePod((current) =>
+        current && !payload.pods.some((pod) => pod.name === current) ? "" : current,
+      );
+    } catch (fetchError) {
+      setServicePodsError(fetchError instanceof Error ? fetchError.message : "Unable to load service pods.");
+    } finally {
+      if (!options.quiet) {
+        setServicePodsLoading(false);
+      }
     }
   }
 
@@ -722,6 +794,75 @@ export function ServiceDetailPage() {
         ) : null}
       </SectionCard>
 
+      <SectionCard
+        title="Service Pods"
+        subtitle="Current Kubernetes pods matched by this service's metrics selector; select a pod to scope the service log panel."
+        action={
+          <button type="button" onClick={() => void loadServicePods()} style={secondaryButtonStyle}>
+            <StudioIcon name="refresh" />
+            Reload Pods
+          </button>
+        }
+      >
+        {servicePodsLoading ? <p style={mutedTextStyle}>Loading service pods...</p> : null}
+        {servicePodsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{servicePodsError}</p> : null}
+        {!service.metrics_config ? (
+          <p style={mutedTextStyle}>Pod discovery is unavailable until this service sets `metrics_config`.</p>
+        ) : null}
+        {service.metrics_config && !servicePodsLoading && !servicePodsError && !servicePods?.pods.length ? (
+          <p style={mutedTextStyle}>No current pods matched this service selector.</p>
+        ) : null}
+        {selectedServicePod ? (
+          <div className="studio-action-row" style={{ marginBottom: 12 }}>
+            <span className="studio-inline-meta">Selected pod: {selectedServicePod}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedServicePod("");
+                void loadServiceLogs({ pod: "" });
+              }}
+              style={secondaryButtonStyle}
+            >
+              <StudioIcon name="clear" />
+              Clear Pod Filter
+            </button>
+          </div>
+        ) : null}
+        {servicePods?.pods.length ? (
+          <div className="studio-metrics-grid studio-metrics-grid--4">
+            {servicePods.pods.map((pod) => {
+              const selected = selectedServicePod === pod.name;
+              return (
+                <button
+                  key={`${pod.namespace}-${pod.name}`}
+                  type="button"
+                  onClick={() => {
+                    setSelectedServicePod(pod.name);
+                    void loadServiceLogs({ pod: pod.name });
+                  }}
+                  style={{
+                    ...secondaryButtonStyle,
+                    alignItems: "flex-start",
+                    borderColor: selected ? "var(--studio-accent)" : undefined,
+                    display: "grid",
+                    gap: 6,
+                    justifyItems: "start",
+                    padding: 14,
+                    textAlign: "left",
+                  }}
+                  aria-pressed={selected}
+                >
+                  <strong>{pod.name}</strong>
+                  <span className="studio-inline-meta">
+                    {pod.namespace} · {pod.phase || "unknown"} · {servicePodSource(pod)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+      </SectionCard>
+
       <div className="studio-two-column">
         <SectionCard
           title="Recent Activity"
@@ -869,7 +1010,11 @@ export function ServiceDetailPage() {
 
         <SectionCard
           title="Service Logs"
-          subtitle="Service-scoped log queries remain separate from Relayna status and observations."
+          subtitle={
+            selectedServicePod
+              ? `Service-scoped logs filtered to pod ${selectedServicePod}.`
+              : "Service-scoped log queries remain separate from Relayna status and observations."
+          }
           action={
             <button type="button" onClick={() => void loadServiceLogs()} style={secondaryButtonStyle}>
               <StudioIcon name="refresh" />

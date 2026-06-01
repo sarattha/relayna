@@ -241,6 +241,11 @@ Keep these as normal Loki labels:
 - `container`
 - `level`
 
+If operators need Studio's service-detail pod log panel to filter logs for an
+individual Kubernetes pod, also keep a `pod` label in Loki. That label is more
+cardinal than service or app labels, so enable it intentionally for clusters
+where per-pod log inspection is worth the retention and index cost.
+
 Keep these in the JSON log body by default:
 
 - `task_id`

@@ -27,6 +27,7 @@
     {"file": "studio/backend/src/relayna_studio/logs.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/logs'"},
     {"file": "studio/backend/src/relayna_studio/logs.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/logs'"},
     {"file": "studio/backend/src/relayna_studio/metrics.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/metrics'"},
+    {"file": "studio/backend/src/relayna_studio/metrics.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/pods'"},
     {"file": "studio/backend/src/relayna_studio/metrics.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/metrics'"},
     {"file": "studio/backend/src/relayna_studio/registry.py", "method": "post", "path_expression": "prefix"},
     {"file": "studio/backend/src/relayna_studio/registry.py", "method": "get", "path_expression": "prefix"},

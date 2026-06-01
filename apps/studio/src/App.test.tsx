@@ -1113,6 +1113,70 @@ describe("App", () => {
     );
   });
 
+  it("renders current service pods and filters service logs by selected pod", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "pod",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          count: 2,
+          pods: [
+            {
+              name: "payments-api-abc",
+              namespace: "prod",
+              phase: "Running",
+              labels: { app: "service-api" },
+            },
+            {
+              name: "payments-worker-def",
+              namespace: "prod",
+              phase: "Running",
+              labels: { app: "worker" },
+            },
+          ],
+        });
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Service Pods")).toBeInTheDocument();
+    expect(await screen.findByText("payments-worker-def")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/logs" &&
+          parsed.searchParams.get("pod") === "payments-worker-def"
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+    expect(await screen.findByText("Selected pod: payments-worker-def")).toBeInTheDocument();
+  });
+
   it("uses the manual service log window override when provided", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
 
@@ -1256,6 +1320,9 @@ describe("App", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        return jsonResponse({ service_id: "payments-api", count: 0, pods: [] });
+      }
       if (url.startsWith("/studio/services/payments-api/metrics") && method === "GET") {
         return jsonResponse(metricsResponse(null));
       }

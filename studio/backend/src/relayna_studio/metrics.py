@@ -110,6 +110,19 @@ class StudioMetricsResponse(BaseModel):
     series: list[StudioMetricSeries] = Field(default_factory=list)
 
 
+class StudioServicePod(BaseModel):
+    name: str
+    namespace: str
+    phase: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
+
+
+class StudioServicePodListResponse(BaseModel):
+    service_id: str
+    count: int
+    pods: list[StudioServicePod] = Field(default_factory=list)
+
+
 class StudioMetricsQuery(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -160,6 +173,13 @@ class StudioMetricsProvider(Protocol):
         warnings: list[str] | None = None,
     ) -> StudioMetricsResponse: ...
 
+    async def query_service_pods(
+        self,
+        *,
+        service: ServiceRecord,
+        config: PrometheusMetricsConfig,
+    ) -> StudioServicePodListResponse: ...
+
 
 class PrometheusMetricsProvider:
     provider_name = "prometheus"
@@ -169,13 +189,18 @@ class PrometheusMetricsProvider:
         *,
         http_client: httpx.AsyncClient,
         query_path: str = "/api/v1/query_range",
+        instant_query_path: str = "/api/v1/query",
         outbound_policy: StudioOutboundUrlPolicy | None = None,
     ) -> None:
         normalized_path = query_path.strip() or "/api/v1/query_range"
         if not normalized_path.startswith("/"):
             normalized_path = f"/{normalized_path}"
+        normalized_instant_path = instant_query_path.strip() or "/api/v1/query"
+        if not normalized_instant_path.startswith("/"):
+            normalized_instant_path = f"/{normalized_instant_path}"
         self._http_client = http_client
         self._query_path = normalized_path
+        self._instant_query_path = normalized_instant_path
         self._outbound_policy = outbound_policy or StudioOutboundUrlPolicy()
 
     async def query_metrics(
@@ -217,6 +242,38 @@ class PrometheusMetricsProvider:
                 "series": series,
             }
         )
+
+    async def query_service_pods(
+        self,
+        *,
+        service: ServiceRecord,
+        config: PrometheusMetricsConfig,
+    ) -> StudioServicePodListResponse:
+        promql = self._build_pod_list_query(config)
+        params = {"query": promql}
+        url = f"{config.base_url.rstrip('/')}{self._instant_query_path}"
+        try:
+            self._outbound_policy.validate_url(config.base_url, label="Prometheus metrics_config.base_url")
+            response = await self._http_client.get(url, params=params, headers={"Accept": "application/json"})
+        except OutboundUrlPolicyError as exc:
+            raise StudioMetricsProviderError(str(exc)) from exc
+        except httpx.HTTPError as exc:
+            raise StudioMetricsProviderError(
+                f"Prometheus pod query failed for service '{service.service_id}'."
+            ) from exc
+
+        if response.status_code != 200:
+            raise StudioMetricsProviderError(
+                f"Prometheus pod query for service '{service.service_id}' returned unexpected status "
+                f"{response.status_code}."
+            )
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise StudioMetricsProviderError(
+                f"Prometheus pod query for service '{service.service_id}' returned invalid JSON."
+            ) from exc
+        return self._normalize_pod_response(service=service, config=config, payload=payload)
 
     async def _query_group(
         self,
@@ -354,6 +411,28 @@ class PrometheusMetricsProvider:
             return f"sum(rate(relayna_observation_events_total{{{runtime_selector}}}[5m]))"
         raise StudioMetricsConfigError(f"Unsupported metric group '{group}'.")
 
+    def _build_pod_list_query(self, config: PrometheusMetricsConfig) -> str:
+        selector = self._metric_selector(
+            config,
+            extra={
+                "phase": ("=~", "Pending|Running|Succeeded|Failed|Unknown"),
+                config.pod_label: ("=~", ".+"),
+            },
+        )
+        ownership = self._pod_ownership_selector(config)
+        group_labels = sorted(
+            {
+                candidate
+                for key in config.service_selector_labels
+                for candidate in _kube_pod_label_metric_name_candidates(key)
+            }
+        )
+        group_left = f"group_left({', '.join(group_labels)})" if group_labels else "group_left()"
+        return (
+            f"(kube_pod_status_phase{{{selector}}} == 1) "
+            f"* on({config.namespace_label}, {config.pod_label}) {group_left} {ownership}"
+        )
+
     def _metric_selector(
         self,
         config: PrometheusMetricsConfig,
@@ -407,6 +486,47 @@ class PrometheusMetricsProvider:
             raise StudioMetricsProviderError("Prometheus query returned an invalid result set.")
         return [self._normalize_series(group=group, item=item) for item in result if isinstance(item, Mapping)]
 
+    def _normalize_pod_response(
+        self,
+        *,
+        service: ServiceRecord,
+        config: PrometheusMetricsConfig,
+        payload: Mapping[str, Any],
+    ) -> StudioServicePodListResponse:
+        if payload.get("status") != "success":
+            raise StudioMetricsProviderError("Prometheus pod query returned an unsuccessful response.")
+        data = payload.get("data")
+        if not isinstance(data, Mapping):
+            raise StudioMetricsProviderError("Prometheus pod query returned an invalid payload.")
+        if data.get("resultType") != "vector":
+            raise StudioMetricsProviderError("Prometheus pod query returned an invalid result type.")
+        result = data.get("result")
+        if not isinstance(result, list):
+            raise StudioMetricsProviderError("Prometheus pod query returned an invalid result set.")
+
+        pods_by_key: dict[tuple[str, str], StudioServicePod] = {}
+        for item in result:
+            if not isinstance(item, Mapping):
+                continue
+            metric = item.get("metric")
+            if not isinstance(metric, Mapping):
+                continue
+            labels = {str(key): str(value) for key, value in metric.items()}
+            pod_name = labels.get(config.pod_label)
+            namespace = labels.get(config.namespace_label, config.namespace)
+            if not pod_name:
+                continue
+            key = (namespace, pod_name)
+            pods_by_key[key] = StudioServicePod(
+                name=pod_name,
+                namespace=namespace,
+                phase=labels.get("phase"),
+                labels=labels,
+            )
+
+        pods = sorted(pods_by_key.values(), key=lambda pod: (pod.namespace, pod.name))
+        return StudioServicePodListResponse(service_id=service.service_id, count=len(pods), pods=pods)
+
     def _normalize_series(self, *, group: StudioMetricGroup, item: Mapping[str, Any]) -> StudioMetricSeries:
         metric = item.get("metric")
         values = item.get("values")
@@ -442,6 +562,20 @@ class StudioMetricsQueryService:
     async def query_service_metrics(self, service_id: str, query: StudioMetricsQuery) -> StudioMetricsResponse:
         service = await self._registry_service.get_service(service_id)
         return await self._query_metrics(service=service, query=query)
+
+    async def query_service_pods(self, service_id: str) -> StudioServicePodListResponse:
+        service = await self._registry_service.get_service(service_id)
+        config = service.metrics_config
+        if config is None:
+            raise StudioMetricsProviderNotConfiguredError(
+                f"Service '{service.service_id}' does not have metrics_config."
+            )
+        provider = self._providers.get(config.provider)
+        if provider is None:
+            raise StudioMetricsConfigError(
+                f"Unsupported metrics provider '{config.provider}' for service '{service.service_id}'."
+            )
+        return await provider.query_service_pods(service=service, config=config)
 
     async def query_task_metrics(
         self,
@@ -638,6 +772,19 @@ def create_studio_metrics_router(
         request_query = _build_query(from_time=from_time, to_time=to_time, step=step, group=group)
         try:
             return await metrics_query_service.query_service_metrics(service_id, request_query)
+        except ServiceNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except StudioMetricsProviderNotConfiguredError as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from exc
+        except StudioMetricsConfigError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except StudioMetricsProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @router.get(f"{prefix}/services/{{service_id}}/pods", response_model=StudioServicePodListResponse)
+    async def service_pods(service_id: str) -> StudioServicePodListResponse:
+        try:
+            return await metrics_query_service.query_service_pods(service_id)
         except ServiceNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except StudioMetricsProviderNotConfiguredError as exc:

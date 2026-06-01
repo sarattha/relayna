@@ -97,13 +97,14 @@ class StudioLogQuery(BaseModel):
     correlation_id: str | None = None
     level: str | None = None
     source: str | None = None
+    pod: str | None = None
     query: str | None = None
     before: str | None = None
     from_time: str | None = Field(default=None, alias="from")
     to_time: str | None = Field(default=None, alias="to")
     limit: int = Field(default=100, ge=1, le=200)
 
-    @field_validator("task_id", "correlation_id", "level", "source", "query", mode="before")
+    @field_validator("task_id", "correlation_id", "level", "source", "pod", "query", mode="before")
     @classmethod
     def _normalize_optional_strings(cls, value: Any) -> str | None:
         return _normalize_optional_string(value)
@@ -250,6 +251,8 @@ class LokiLogProvider:
             if not config.source_label:
                 raise StudioLogConfigError("Log source filtering requires log_config.source_label for this service.")
             label_filters[config.source_label] = query.source
+        if query.pod:
+            label_filters["pod"] = query.pod
         if config.task_match_mode == "label" and config.task_id_label and query.task_id:
             label_filters[config.task_id_label] = query.task_id
         if config.correlation_id_label and query.correlation_id:
@@ -407,6 +410,7 @@ def create_studio_logs_router(
         correlation_id: str | None,
         level: str | None,
         source: str | None,
+        pod: str | None,
         query: str | None,
         before: str | None,
         from_time: str | None,
@@ -419,6 +423,7 @@ def create_studio_logs_router(
                 correlation_id=correlation_id,
                 level=level,
                 source=source,
+                pod=pod,
                 query=query,
                 before=before,
                 from_time=from_time,
@@ -442,6 +447,7 @@ def create_studio_logs_router(
         correlation_id: str | None = None,
         level: str | None = None,
         source: str | None = None,
+        pod: str | None = None,
         query: str | None = None,
         before: str | None = None,
         from_time: str | None = Query(default=None, alias="from"),
@@ -453,6 +459,7 @@ def create_studio_logs_router(
             correlation_id=correlation_id,
             level=level,
             source=source,
+            pod=pod,
             query=query,
             before=before,
             from_time=from_time,
@@ -477,6 +484,7 @@ def create_studio_logs_router(
         correlation_id: str | None = None,
         level: str | None = None,
         source: str | None = None,
+        pod: str | None = None,
         query: str | None = None,
         before: str | None = None,
         from_time: str | None = Query(default=None, alias="from"),
@@ -488,6 +496,7 @@ def create_studio_logs_router(
             correlation_id=correlation_id,
             level=level,
             source=source,
+            pod=pod,
             query=query,
             before=before,
             from_time=from_time,
