@@ -33,6 +33,8 @@ aggregator, and other related pods without relying on task ids.
 - [x] (2026-06-01 08:23Z) Run required verification for touched Studio backend and frontend areas.
   `$code-change-verification`, `make -C apps/studio test`, and
   `make -C apps/studio build` all passed.
+- [x] (2026-06-01 09:35Z) Addressed review feedback by recording explicit user approval
+  for the narrow Studio route freeze perimeter expansion.
 
 ## Surprises & Discoveries
 
@@ -64,7 +66,9 @@ aggregator, and other related pods without relying on task ids.
 - Decision: Add a narrow additive route under the existing metrics router for
   current service pods instead of deriving pods from recent logs.
   Rationale: Recent logs cannot reliably show quiet-but-running pods; Prometheus
-  plus kube-state-metrics is the existing current-pod source.
+  plus kube-state-metrics is the existing current-pod source. The user
+  explicitly approved expanding the frozen Studio backend route perimeter for
+  this read-only endpoint on 2026-06-01.
   Date/Author: 2026-06-01 / Codex.
 - Decision: Add an optional `pod` query parameter to service/task log queries
   that filters the Loki `pod` label when configured in Alloy.
@@ -103,8 +107,10 @@ metric panels.
 Compatibility boundary: latest release tag `v1.4.17`; additive Studio backend
 route and additive log query parameter only. Existing service log and metrics
 routes keep their paths, request parameters, and response fields. The backend
-route freeze manifest will be updated intentionally because the requested UI
-needs a new current-pod read surface.
+route freeze manifest is updated intentionally with user approval because the
+requested UI needs a new current-pod read surface. This expands the frozen
+Studio route perimeter by one read-only route:
+`GET /studio/services/{service_id}/pods`.
 
 ## Plan of Work
 

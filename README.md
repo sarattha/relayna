@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.17/relayna-1.4.17-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.18/relayna-1.4.18-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.17/relayna-1.4.17.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.18/relayna-1.4.18.tar.gz
 ```
 
 For local development in this repository:
@@ -232,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.17`, and the backend requires `relayna>=1.4.17`.
+release version is `1.4.18`, and the backend requires `relayna>=1.4.18`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -527,6 +527,8 @@ For AKS deployments, the common pattern is:
   service
 - one `app` label that distinguishes emitters such as API, worker, and
   aggregation pods
+- an optional `pod` label when operators need the Service Pods panel to filter
+  Loki logs down to one Kubernetes pod
 - task identifiers embedded in the log line text instead of a Loki label
 
 Example registration payload for a checker service:
@@ -561,6 +563,8 @@ That configuration means:
 - service page log queries start from `{service="checker-service"}`
 - source/app filtering adds `app="checker-service-api"` or another discovered
   app value
+- pod filtering adds `pod="<pod-name>"` when the operator selects a current pod
+  in the Service Pods panel
 - task page log queries match the task id inside the line text, for example
   `{service="checker-service"} |= "task-123"`
 - Studio can still layer `correlation_id`, `level`, `from`, and `to` filters on
@@ -613,9 +617,11 @@ Studio can also query Prometheus and Tempo when a registered service includes
 Prometheus integration covers two metric classes:
 
 - Kubernetes pod/container metrics from cAdvisor and kube-state-metrics, shown
-  at service scope and over a task lifecycle window. Studio resolves
-  `service_selector_labels` through `kube_pod_labels` and joins platform
-  metrics by namespace and pod.
+  at service scope, per-pod scope, and over a task lifecycle window. Studio
+  resolves `service_selector_labels` through `kube_pod_labels` and joins
+  platform metrics by namespace and pod. The service detail page includes a
+  dedicated Pod Metrics panel with CPU, memory, network, restart, OOMKilled,
+  readiness, and phase graphs across all current service pods.
 - Relayna runtime metrics from API and worker `/metrics` endpoints, shown as
   aggregate throughput, failure, retry, DLQ, queue, status, and observation
   charts

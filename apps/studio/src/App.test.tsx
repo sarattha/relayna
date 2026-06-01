@@ -437,6 +437,20 @@ function metricsResponse(taskId?: string | null) {
   };
 }
 
+function customPodLabelMetricsResponse() {
+  return {
+    ...metricsResponse(null),
+    series: [
+      {
+        metric: "cpu_usage",
+        unit: "cores",
+        labels: { kubernetes_pod_name: "payments-worker-prometheus", container: "worker" },
+        points: [{ timestamp: "2026-04-08T10:05:00Z", value: 0.5 }],
+      },
+    ],
+  };
+}
+
 describe("App", () => {
   beforeEach(() => {
     fetchMock.mockReset();
@@ -1123,7 +1137,7 @@ describe("App", () => {
         namespace: "prod",
         service_selector_labels: { app: "payments-api" },
         namespace_label: "namespace",
-        pod_label: "pod",
+        pod_label: "kubernetes_pod_name",
         container_label: "container",
         step_seconds: 30,
         task_window_padding_seconds: 120,
@@ -1362,7 +1376,7 @@ describe("App", () => {
         namespace: "prod",
         service_selector_labels: { app: "payments-api" },
         namespace_label: "namespace",
-        pod_label: "pod",
+        pod_label: "kubernetes_pod_name",
         container_label: "container",
         step_seconds: 30,
         task_window_padding_seconds: 120,
@@ -1384,7 +1398,7 @@ describe("App", () => {
         });
       }
       if (url.startsWith("/studio/services/payments-api/metrics") && method === "GET") {
-        return jsonResponse(metricsResponse(null));
+        return jsonResponse(customPodLabelMetricsResponse());
       }
       return baseImpl?.(input, init) ?? jsonResponse({});
     });
@@ -1409,6 +1423,7 @@ describe("App", () => {
       expect(matchingCall).toBeTruthy();
     });
     expect(screen.getAllByLabelText("Pod metric graph").length).toBeGreaterThan(0);
+    expect(await screen.findByText("payments-worker-prometheus")).toBeInTheDocument();
   });
 
   it("uses the manual service activity window override when provided", async () => {

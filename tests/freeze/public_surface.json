@@ -1,5 +1,5 @@
 {
-  "freeze_version": "v1.4.11",
+  "freeze_version": "v1.4.18",
   "strict": true,
   "modules": {
     "relayna": [

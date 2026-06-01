@@ -276,12 +276,21 @@ const podMetricGroups: StudioMetricGroup[] = [
 
 const podMetricLineColors = ["#2f6fed", "#14966b", "#b7791f", "#9f4acb", "#d64545", "#506070"];
 
-function seriesPodLabel(series: StudioMetricSeries) {
-  return series.labels.pod || series.labels.pod_name || "service";
+function seriesPodLabel(series: StudioMetricSeries, podLabel?: string | null) {
+  const candidateLabels = [podLabel, "pod", "pod_name", "kubernetes_pod_name"].filter(
+    (label): label is string => Boolean(label?.trim()),
+  );
+  for (const label of candidateLabels) {
+    const value = series.labels[label];
+    if (value?.trim()) {
+      return value;
+    }
+  }
+  return "service";
 }
 
-function seriesLabel(series: StudioMetricSeries) {
-  const pod = seriesPodLabel(series);
+function seriesLabel(series: StudioMetricSeries, podLabel?: string | null) {
+  const pod = seriesPodLabel(series, podLabel);
   const phase = series.labels.phase ? ` · ${series.labels.phase}` : "";
   return `${pod}${phase}`;
 }
@@ -319,7 +328,7 @@ function formatChartOffset(milliseconds: number) {
   return `+${days}d`;
 }
 
-function MetricLineChart({ series }: { series: StudioMetricSeries[] }) {
+function MetricLineChart({ series, podLabel }: { series: StudioMetricSeries[]; podLabel?: string | null }) {
   const width = 640;
   const height = 220;
   const paddingTop = 28;
@@ -416,7 +425,15 @@ function MetricLineChart({ series }: { series: StudioMetricSeries[] }) {
             return `${command}${x(new Date(point.timestamp).getTime()).toFixed(1)},${y(point.value).toFixed(1)}`;
           })
           .join(" ");
-        return <path key={`${item.metric}-${seriesLabel(item)}`} d={path} fill="none" stroke={podMetricLineColor(index)} strokeWidth="2" />;
+        return (
+          <path
+            key={`${item.metric}-${seriesLabel(item, podLabel)}`}
+            d={path}
+            fill="none"
+            stroke={podMetricLineColor(index)}
+            strokeWidth="2"
+          />
+        );
       })}
     </svg>
   );
@@ -1175,17 +1192,17 @@ export function ServiceDetailPage() {
                     <strong>{metricLabel(metric)}</strong>
                     <span className="studio-inline-meta">{series.length} series</span>
                   </div>
-                  <MetricLineChart series={series} />
+                  <MetricLineChart series={series} podLabel={service.metrics_config?.pod_label} />
                   {series.length ? (
                     <div className="studio-chart-legend" aria-label={`${metricLabel(metric)} legend`}>
                       {series.slice(0, 6).map((item, index) => (
-                        <span key={`${item.metric}-${seriesLabel(item)}`} className="studio-chart-legend__item">
+                        <span key={`${item.metric}-${seriesLabel(item, service.metrics_config?.pod_label)}`} className="studio-chart-legend__item">
                           <span
                             className="studio-chart-legend__swatch"
                             style={{ backgroundColor: podMetricLineColor(index) }}
                             aria-hidden="true"
                           />
-                          {seriesLabel(item)}
+                          {seriesLabel(item, service.metrics_config?.pod_label)}
                         </span>
                       ))}
                     </div>
