@@ -30,10 +30,12 @@ import type {
   StudioControlPlaneEvent,
   StudioEventListResponse,
   StudioLogListResponse,
+  StudioMetricGroup,
+  StudioMetricSeries,
   StudioMetricsResponse,
 } from "../types";
 
-type TimeWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
+type TimeWindowMode = "auto" | "15m" | "1h" | "12h" | "24h" | "1w" | "1mo" | "manual";
 type TimeWindow = { from: string; to: string };
 type ServicePod = {
   name: string;
@@ -98,7 +100,18 @@ function resolveWindow(mode: TimeWindowMode, manualFrom: string, manualTo: strin
   }
 
   const now = Date.now();
-  const durationMs = mode === "15m" ? 15 * 60 * 1000 : mode === "1h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const durationMs =
+    mode === "15m"
+      ? 15 * 60 * 1000
+      : mode === "1h"
+        ? 60 * 60 * 1000
+        : mode === "12h"
+          ? 12 * 60 * 60 * 1000
+          : mode === "24h"
+            ? 24 * 60 * 60 * 1000
+            : mode === "1w"
+              ? 7 * 24 * 60 * 60 * 1000
+              : 30 * 24 * 60 * 60 * 1000;
   return {
     from: new Date(now - durationMs).toISOString(),
     to: new Date(now).toISOString(),
@@ -114,7 +127,18 @@ function describeWindow(mode: TimeWindowMode, from: string, to: string) {
   if (mode === "manual") {
     return "Manual window is active. Use the local date and time fields; empty bounds stay unbounded.";
   }
-  const label = mode === "15m" ? "15 minutes" : mode === "1h" ? "1 hour" : "24 hours";
+  const label =
+    mode === "15m"
+      ? "15 minutes"
+      : mode === "1h"
+        ? "1 hour"
+        : mode === "12h"
+          ? "12 hours"
+          : mode === "24h"
+            ? "24 hours"
+            : mode === "1w"
+              ? "1 week"
+              : "1 month";
   return `Quick window: last ${label} (${from ? new Date(from).toLocaleString() : "unbounded"} to ${
     to ? new Date(to).toLocaleString() : "unbounded"
   }).`;
@@ -202,6 +226,28 @@ function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string
   return formatMetricValue(hasValue ? total : null, unit);
 }
 
+function metricStepSeconds(mode: TimeWindowMode) {
+  if (mode === "15m") {
+    return 30;
+  }
+  if (mode === "1h") {
+    return 60;
+  }
+  if (mode === "12h") {
+    return 300;
+  }
+  if (mode === "24h") {
+    return 600;
+  }
+  if (mode === "1w") {
+    return 3600;
+  }
+  if (mode === "1mo") {
+    return 3600;
+  }
+  return undefined;
+}
+
 function servicePodSource(pod: ServicePod) {
   const labels = pod.labels || {};
   return (
@@ -215,6 +261,165 @@ function servicePodSource(pod: ServicePod) {
 
 async function fetchServicePods(serviceId: string) {
   return requestJson<ServicePodListResponse>(`/studio/services/${encodeURIComponent(serviceId)}/pods`);
+}
+
+const podMetricGroups: StudioMetricGroup[] = [
+  "cpu_usage",
+  "memory_usage",
+  "network_receive",
+  "network_transmit",
+  "restarts",
+  "oom_killed",
+  "readiness",
+  "pod_phase",
+];
+
+const podMetricLineColors = ["#2f6fed", "#14966b", "#b7791f", "#9f4acb", "#d64545", "#506070"];
+
+function seriesPodLabel(series: StudioMetricSeries) {
+  return series.labels.pod || series.labels.pod_name || "service";
+}
+
+function seriesLabel(series: StudioMetricSeries) {
+  const pod = seriesPodLabel(series);
+  const phase = series.labels.phase ? ` · ${series.labels.phase}` : "";
+  return `${pod}${phase}`;
+}
+
+function metricSeriesFor(metrics: StudioMetricsResponse | null, metric: StudioMetricGroup) {
+  return (metrics?.series || []).filter((series) => series.metric === metric && series.points.length);
+}
+
+function podMetricLineColor(index: number) {
+  return podMetricLineColors[index % podMetricLineColors.length];
+}
+
+function formatChartStartTime(timestamp: number) {
+  return `Start ${new Date(timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })}`;
+}
+
+function formatChartOffset(milliseconds: number) {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) {
+    return `+${seconds}s`;
+  }
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `+${minutes}m`;
+  }
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) {
+    return `+${hours}h`;
+  }
+  const days = Math.round(hours / 24);
+  return `+${days}d`;
+}
+
+function MetricLineChart({ series }: { series: StudioMetricSeries[] }) {
+  const width = 640;
+  const height = 220;
+  const paddingTop = 28;
+  const paddingRight = 24;
+  const paddingBottom = 62;
+  const paddingLeft = 46;
+  const unit = series[0]?.unit || "value";
+  const yAxisLabel = unit === "boolean" ? "state" : unit || "value";
+  const points = series.flatMap((item) =>
+    item.points
+      .map((point) => ({ timestamp: new Date(point.timestamp).getTime(), value: point.value }))
+      .filter((point): point is { timestamp: number; value: number } => !Number.isNaN(point.timestamp) && point.value !== null),
+  );
+  if (!points.length) {
+    return <p style={mutedTextStyle}>No graph points in this range.</p>;
+  }
+  const minTime = Math.min(...points.map((point) => point.timestamp));
+  const maxTime = Math.max(...points.map((point) => point.timestamp));
+  const minValue = Math.min(0, ...points.map((point) => point.value));
+  const maxValue = Math.max(...points.map((point) => point.value));
+  const valueSpan = maxValue - minValue || 1;
+  const timeSpan = maxTime - minTime || 1;
+  const xTicks = [0, 0.33, 0.66, 1].map((ratio) => {
+    const timestamp = minTime + timeSpan * ratio;
+    return {
+      label: ratio === 0 ? formatChartStartTime(minTime) : formatChartOffset(timestamp - minTime),
+      timestamp,
+    };
+  });
+
+  function x(timestamp: number) {
+    return paddingLeft + ((timestamp - minTime) / timeSpan) * (width - paddingLeft - paddingRight);
+  }
+
+  function y(value: number) {
+    return height - paddingBottom - ((value - minValue) / valueSpan) * (height - paddingTop - paddingBottom);
+  }
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Pod metric graph" style={{ width: "100%", height: 220 }}>
+      <line
+        x1={paddingLeft}
+        y1={height - paddingBottom}
+        x2={width - paddingRight}
+        y2={height - paddingBottom}
+        stroke="var(--studio-border)"
+      />
+      <line x1={paddingLeft} y1={paddingTop} x2={paddingLeft} y2={height - paddingBottom} stroke="var(--studio-border)" />
+      <text x={paddingLeft} y={18} fill="var(--studio-muted)" fontSize="11">
+        {formatMetricValue(maxValue, unit)}
+      </text>
+      <text x={paddingLeft} y={height - paddingBottom + 16} fill="var(--studio-muted)" fontSize="11">
+        {formatMetricValue(minValue, unit)}
+      </text>
+      {xTicks.map((tick, index) => (
+        <g key={`${tick.timestamp}-${tick.label}`}>
+          <line
+            x1={x(tick.timestamp)}
+            y1={height - paddingBottom}
+            x2={x(tick.timestamp)}
+            y2={height - paddingBottom + 5}
+            stroke="var(--studio-border)"
+          />
+          <text
+            x={index === 0 ? x(tick.timestamp) - 12 : x(tick.timestamp)}
+            y={index === 0 ? height - 8 : height - paddingBottom + 20}
+            textAnchor={index === 0 ? "start" : index === xTicks.length - 1 ? "end" : "middle"}
+            fill="var(--studio-muted)"
+            fontSize="10"
+            transform={index === 0 ? `rotate(-90 ${x(tick.timestamp) - 12} ${height - 8})` : undefined}
+          >
+            {tick.label}
+          </text>
+        </g>
+      ))}
+      <text x={width / 2} y={height - 8} textAnchor="middle" fill="var(--studio-muted)" fontSize="11">
+        Time
+      </text>
+      <text
+        x={13}
+        y={height / 2}
+        textAnchor="middle"
+        fill="var(--studio-muted)"
+        fontSize="11"
+        transform={`rotate(-90 13 ${height / 2})`}
+      >
+        {yAxisLabel}
+      </text>
+      {series.map((item, index) => {
+        const path = item.points
+          .filter((point): point is { timestamp: string; value: number } => point.value !== null)
+          .map((point, pointIndex) => {
+            const command = pointIndex === 0 ? "M" : "L";
+            return `${command}${x(new Date(point.timestamp).getTime()).toFixed(1)},${y(point.value).toFixed(1)}`;
+          })
+          .join(" ");
+        return <path key={`${item.metric}-${seriesLabel(item)}`} d={path} fill="none" stroke={podMetricLineColor(index)} strokeWidth="2" />;
+      })}
+    </svg>
+  );
 }
 
 export function ServiceDetailPage() {
@@ -253,6 +458,13 @@ export function ServiceDetailPage() {
   const [serviceMetricWindowMode, setServiceMetricWindowMode] = useState<TimeWindowMode>("1h");
   const [serviceMetricManualFrom, setServiceMetricManualFrom] = useState("");
   const [serviceMetricManualTo, setServiceMetricManualTo] = useState("");
+  const [podMetrics, setPodMetrics] = useState<StudioMetricsResponse | null>(null);
+  const [podMetricsLoading, setPodMetricsLoading] = useState(false);
+  const [podMetricsError, setPodMetricsError] = useState<string | null>(null);
+  const [selectedMetricPod, setSelectedMetricPod] = useState("");
+  const [podMetricWindowMode, setPodMetricWindowMode] = useState<TimeWindowMode>("1h");
+  const [podMetricManualFrom, setPodMetricManualFrom] = useState("");
+  const [podMetricManualTo, setPodMetricManualTo] = useState("");
   const [refreshingService, setRefreshingService] = useState(false);
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
@@ -306,17 +518,25 @@ export function ServiceDetailPage() {
     serviceMetricManualFrom,
     serviceMetricManualTo,
   );
+  const activePodMetricWindow = resolveWindow(podMetricWindowMode, podMetricManualFrom, podMetricManualTo);
 
   useEffect(() => {
     setServiceMetricWindowMode("1h");
     setServiceMetricManualFrom("");
     setServiceMetricManualTo("");
+    setSelectedMetricPod("");
+    setPodMetricWindowMode("1h");
+    setPodMetricManualFrom("");
+    setPodMetricManualTo("");
     if (!service?.metrics_config) {
       setServiceMetrics(null);
       setServiceMetricsError(service ? "No metrics provider configured for this service." : null);
+      setPodMetrics(null);
+      setPodMetricsError(service ? "No metrics provider configured for this service." : null);
       return;
     }
     void loadServiceMetrics({ targetService: service, window: resolveWindow("1h", "", "") });
+    void loadPodMetrics({ targetService: service, window: resolveWindow("1h", "", ""), pod: "" });
   }, [service?.service_id, service?.metrics_config]);
 
   useEffect(() => {
@@ -407,6 +627,9 @@ export function ServiceDetailPage() {
       setSelectedServicePod((current) =>
         current && !payload.pods.some((pod) => pod.name === current) ? "" : current,
       );
+      setSelectedMetricPod((current) =>
+        current && !payload.pods.some((pod) => pod.name === current) ? "" : current,
+      );
     } catch (fetchError) {
       setServicePodsError(fetchError instanceof Error ? fetchError.message : "Unable to load service pods.");
     } finally {
@@ -441,6 +664,42 @@ export function ServiceDetailPage() {
       setServiceMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load service metrics.");
     } finally {
       setServiceMetricsLoading(false);
+    }
+  }
+
+  async function loadPodMetrics({
+    targetService = service,
+    window = activePodMetricWindow,
+    pod = selectedMetricPod,
+    mode = podMetricWindowMode,
+  }: {
+    targetService?: ServiceRecord | null;
+    window?: TimeWindow;
+    pod?: string;
+    mode?: TimeWindowMode;
+  } = {}) {
+    if (!targetService?.metrics_config) {
+      setPodMetrics(null);
+      setPodMetricsError("No metrics provider configured for this service.");
+      return;
+    }
+    setPodMetricsLoading(true);
+    setPodMetricsError(null);
+    try {
+      const payload = await fetchServiceMetrics(targetService.service_id, {
+        from: window.from,
+        to: window.to,
+        step: metricStepSeconds(mode),
+        groups: podMetricGroups,
+        pod,
+        split_by_pod: true,
+      });
+      setPodMetrics(payload);
+    } catch (fetchError) {
+      setPodMetrics(null);
+      setPodMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load pod metrics.");
+    } finally {
+      setPodMetricsLoading(false);
     }
   }
 
@@ -790,6 +1049,150 @@ export function ServiceDetailPage() {
                 <strong style={{ display: "block", marginTop: 6 }}>{metricLatestValue(serviceMetrics, metric)}</strong>
               </div>
             ))}
+          </div>
+        ) : null}
+      </SectionCard>
+
+      <SectionCard
+        title="Pod Metrics"
+        subtitle={
+          selectedMetricPod
+            ? `Prometheus-backed pod graphs filtered to ${selectedMetricPod}.`
+            : "Prometheus-backed pod graphs for every current pod matched by this service."
+        }
+        action={
+          <button type="button" onClick={() => void loadPodMetrics()} style={secondaryButtonStyle}>
+            <StudioIcon name="refresh" />
+            Reload Pod Metrics
+          </button>
+        }
+      >
+        <div className="studio-log-filter-grid studio-log-window-grid">
+          <label className="studio-filter-field">
+            <span>Pod</span>
+            <select
+              aria-label="Pod metrics pod filter"
+              value={selectedMetricPod}
+              onChange={(event) => {
+                const nextPod = event.target.value;
+                setSelectedMetricPod(nextPod);
+                void loadPodMetrics({ pod: nextPod });
+              }}
+              style={inputStyle}
+            >
+              <option value="">All pods</option>
+              {(servicePods?.pods || []).map((pod) => (
+                <option key={`${pod.namespace}-${pod.name}`} value={pod.name}>
+                  {pod.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="studio-filter-field">
+            <span>Metrics Window</span>
+            <select
+              aria-label="Pod metrics window mode"
+              value={podMetricWindowMode}
+              onChange={(event) => {
+                const nextMode = event.target.value as TimeWindowMode;
+                let nextManualFrom = podMetricManualFrom;
+                let nextManualTo = podMetricManualTo;
+                if (nextMode === "manual") {
+                  nextManualFrom = isoToLocalDateTime(activePodMetricWindow.from);
+                  nextManualTo = isoToLocalDateTime(activePodMetricWindow.to);
+                  setPodMetricManualFrom(nextManualFrom);
+                  setPodMetricManualTo(nextManualTo);
+                }
+                setPodMetricWindowMode(nextMode);
+                void loadPodMetrics({
+                  window: resolveWindow(nextMode, nextManualFrom, nextManualTo),
+                  mode: nextMode,
+                });
+              }}
+              style={inputStyle}
+            >
+              <option value="15m">Last 15 minutes</option>
+              <option value="1h">Last hour</option>
+              <option value="12h">Last 12 hours</option>
+              <option value="24h">Last 24 hours</option>
+              <option value="1w">Last week</option>
+              <option value="1mo">Last month</option>
+              <option value="manual">Custom range</option>
+            </select>
+          </label>
+          <label className="studio-filter-field">
+            <span>From</span>
+            <input
+              aria-label="Pod metrics from"
+              type="datetime-local"
+              value={podMetricWindowMode === "manual" ? podMetricManualFrom : isoToLocalDateTime(activePodMetricWindow.from)}
+              onChange={(event) => {
+                const nextFrom = event.target.value;
+                setPodMetricManualFrom(nextFrom);
+                void loadPodMetrics({
+                  window: resolveWindow("manual", nextFrom, podMetricManualTo),
+                  mode: "manual",
+                });
+              }}
+              disabled={podMetricWindowMode !== "manual"}
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>To</span>
+            <input
+              aria-label="Pod metrics to"
+              type="datetime-local"
+              value={podMetricWindowMode === "manual" ? podMetricManualTo : isoToLocalDateTime(activePodMetricWindow.to)}
+              onChange={(event) => {
+                const nextTo = event.target.value;
+                setPodMetricManualTo(nextTo);
+                void loadPodMetrics({
+                  window: resolveWindow("manual", podMetricManualFrom, nextTo),
+                  mode: "manual",
+                });
+              }}
+              disabled={podMetricWindowMode !== "manual"}
+              style={inputStyle}
+            />
+          </label>
+        </div>
+        <p style={mutedTextStyle}>
+          {describeWindow(podMetricWindowMode, activePodMetricWindow.from, activePodMetricWindow.to)}
+        </p>
+        {podMetricsLoading ? <p style={mutedTextStyle}>Loading pod metrics...</p> : null}
+        {podMetricsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{podMetricsError}</p> : null}
+        {!podMetricsLoading && !podMetricsError && podMetrics && !podMetrics.series.length ? (
+          <p style={mutedTextStyle}>No pod metrics matched the current filters.</p>
+        ) : null}
+        {podMetrics ? (
+          <div className="studio-metrics-grid studio-metrics-grid--2">
+            {podMetricGroups.map((metric) => {
+              const series = metricSeriesFor(podMetrics, metric);
+              return (
+                <div key={metric} className="studio-subcard" style={{ borderRadius: 8, padding: 14 }}>
+                  <div className="studio-list-card__top">
+                    <strong>{metricLabel(metric)}</strong>
+                    <span className="studio-inline-meta">{series.length} series</span>
+                  </div>
+                  <MetricLineChart series={series} />
+                  {series.length ? (
+                    <div className="studio-chart-legend" aria-label={`${metricLabel(metric)} legend`}>
+                      {series.slice(0, 6).map((item, index) => (
+                        <span key={`${item.metric}-${seriesLabel(item)}`} className="studio-chart-legend__item">
+                          <span
+                            className="studio-chart-legend__swatch"
+                            style={{ backgroundColor: podMetricLineColor(index) }}
+                            aria-hidden="true"
+                          />
+                          {seriesLabel(item)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         ) : null}
       </SectionCard>

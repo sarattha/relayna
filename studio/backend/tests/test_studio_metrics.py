@@ -301,6 +301,36 @@ def test_prometheus_provider_queries_current_service_pods() -> None:
     assert 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in observed["query"]
 
 
+def test_prometheus_provider_builds_pod_split_and_filter_queries() -> None:
+    observed_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_queries.append(request.url.params["query"])
+        return httpx.Response(200, json=prometheus_success_response())
+
+    async def scenario() -> None:
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        await provider.query_metrics(
+            service=make_record(metrics_config=make_metrics_config()),
+            config=make_metrics_config(),
+            query=StudioMetricsQuery(
+                from_time="2024-04-10T21:00:00Z",
+                to_time="2024-04-10T21:01:00Z",
+                groups=[StudioMetricGroup.CPU_USAGE, StudioMetricGroup.POD_PHASE],
+                pod="payments-worker-abc",
+                split_by_pod=True,
+            ),
+        )
+
+    asyncio.run(scenario())
+    assert 'pod="payments-worker-abc"' in observed_queries[0]
+    assert observed_queries[0].startswith("sum by (pod) (")
+    assert 'pod="payments-worker-abc"' in observed_queries[1]
+    assert observed_queries[1].startswith("sum by (pod, phase) (")
+
+
 def test_prometheus_provider_builds_relayna_runtime_queries() -> None:
     observed_queries: list[str] = []
 

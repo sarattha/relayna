@@ -1160,7 +1160,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("Service Pods")).toBeInTheDocument();
-    expect(await screen.findByText("payments-worker-def")).toBeInTheDocument();
+    expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
 
@@ -1350,6 +1350,65 @@ describe("App", () => {
       });
       expect(matchingCall).toBeTruthy();
     });
+  });
+
+  it("renders pod metrics graphs and applies pod and long-range filters", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "pod",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          count: 2,
+          pods: [
+            { name: "payments-api-abc", namespace: "prod", phase: "Running", labels: { label_component: "service-api" } },
+            { name: "payments-worker-def", namespace: "prod", phase: "Running", labels: { label_component: "worker" } },
+          ],
+        });
+      }
+      if (url.startsWith("/studio/services/payments-api/metrics") && method === "GET") {
+        return jsonResponse(metricsResponse(null));
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Pod Metrics")).toBeInTheDocument();
+    expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText("Pod metrics pod filter"), { target: { value: "payments-worker-def" } });
+    fireEvent.change(screen.getByLabelText("Pod metrics window mode"), { target: { value: "1w" } });
+
+    await waitFor(() => {
+      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("pod") === "payments-worker-def" &&
+          parsed.searchParams.get("split_by_pod") === "true" &&
+          parsed.searchParams.get("step") === "3600"
+        );
+      });
+      expect(matchingCall).toBeTruthy();
+    });
+    expect(screen.getAllByLabelText("Pod metric graph").length).toBeGreaterThan(0);
   });
 
   it("uses the manual service activity window override when provided", async () => {

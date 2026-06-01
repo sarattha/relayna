@@ -130,6 +130,8 @@ class StudioMetricsQuery(BaseModel):
     to_time: str | None = Field(default=None, alias="to")
     step_seconds: int | None = Field(default=None, alias="step", ge=5, le=3600)
     groups: list[StudioMetricGroup] = Field(default_factory=list)
+    pod: str | None = None
+    split_by_pod: bool = False
 
     @field_validator("from_time", "to_time", mode="before")
     @classmethod
@@ -138,6 +140,11 @@ class StudioMetricsQuery(BaseModel):
         if normalized is None:
             return None
         return _iso(_parse_iso_timestamp(normalized))
+
+    @field_validator("pod", mode="before")
+    @classmethod
+    def _normalize_pod(cls, value: Any) -> str | None:
+        return _normalize_optional_string(value)
 
     @model_validator(mode="after")
     def _validate_time_bounds(self) -> StudioMetricsQuery:
@@ -224,6 +231,7 @@ class PrometheusMetricsProvider:
                 await self._query_group(
                     service=service,
                     config=config,
+                    query=query,
                     group=group,
                     start=start,
                     end=end,
@@ -280,12 +288,13 @@ class PrometheusMetricsProvider:
         *,
         service: ServiceRecord,
         config: PrometheusMetricsConfig,
+        query: StudioMetricsQuery,
         group: StudioMetricGroup,
         start: datetime,
         end: datetime,
         step_seconds: int,
     ) -> list[StudioMetricSeries]:
-        promql = self._build_query(service=service, config=config, group=group)
+        promql = self._build_query(service=service, config=config, query=query, group=group)
         params = {
             "query": promql,
             "start": str(start.timestamp()),
@@ -314,14 +323,23 @@ class PrometheusMetricsProvider:
             ) from exc
         return self._normalize_response(group=group, payload=payload)
 
-    def _build_query(self, *, service: ServiceRecord, config: PrometheusMetricsConfig, group: StudioMetricGroup) -> str:
-        selector = self._metric_selector(config)
+    def _build_query(
+        self,
+        *,
+        service: ServiceRecord,
+        config: PrometheusMetricsConfig,
+        query: StudioMetricsQuery,
+        group: StudioMetricGroup,
+    ) -> str:
+        pod_extra = self._pod_selector_extra(config, query)
+        selector = self._metric_selector(config, extra=pod_extra)
         cadvisor_container_selector = self._metric_selector(
             config,
             extra={
                 config.container_label: ("!=", ""),
                 "image": ("!=", ""),
                 config.pod_label: ("=~", ".+"),
+                **pod_extra,
             },
         )
         container_selector = self._metric_selector(
@@ -329,6 +347,7 @@ class PrometheusMetricsProvider:
             extra={
                 config.container_label: ("!=", ""),
                 config.pod_label: ("=~", ".+"),
+                **pod_extra,
             },
         )
         runtime_service_label_value = (
@@ -339,33 +358,43 @@ class PrometheusMetricsProvider:
             return self._owned_pod_sum(
                 config,
                 f"rate(container_cpu_usage_seconds_total{{{cadvisor_container_selector}}}[5m])",
+                query=query,
             )
         if group == StudioMetricGroup.MEMORY_USAGE:
-            return self._owned_pod_sum(config, f"container_memory_working_set_bytes{{{cadvisor_container_selector}}}")
+            return self._owned_pod_sum(
+                config,
+                f"container_memory_working_set_bytes{{{cadvisor_container_selector}}}",
+                query=query,
+            )
         if group == StudioMetricGroup.CPU_REQUESTS:
             return self._owned_pod_sum(
                 config,
                 f'kube_pod_container_resource_requests{{{container_selector},resource="cpu"}}',
+                query=query,
             )
         if group == StudioMetricGroup.CPU_LIMITS:
             return self._owned_pod_sum(
                 config,
                 f'kube_pod_container_resource_limits{{{container_selector},resource="cpu"}}',
+                query=query,
             )
         if group == StudioMetricGroup.MEMORY_REQUESTS:
             return self._owned_pod_sum(
                 config,
                 f'kube_pod_container_resource_requests{{{container_selector},resource="memory"}}',
+                query=query,
             )
         if group == StudioMetricGroup.MEMORY_LIMITS:
             return self._owned_pod_sum(
                 config,
                 f'kube_pod_container_resource_limits{{{container_selector},resource="memory"}}',
+                query=query,
             )
         if group == StudioMetricGroup.RESTARTS:
             return self._owned_pod_sum(
                 config,
                 f"increase(kube_pod_container_status_restarts_total{{{container_selector}}}[5m])",
+                query=query,
             )
         if group == StudioMetricGroup.OOM_KILLED:
             return self._owned_pod_sum(
@@ -374,18 +403,29 @@ class PrometheusMetricsProvider:
                     "max_over_time("
                     f'kube_pod_container_status_last_terminated_reason{{{container_selector},reason="OOMKilled"}}[5m])'
                 ),
+                query=query,
             )
         if group == StudioMetricGroup.POD_PHASE:
-            return self._owned_pod_sum_by(config, "phase", f"kube_pod_status_phase{{{selector}}}")
+            group_labels = [config.pod_label, "phase"] if self._pod_series_requested(query) else ["phase"]
+            return self._owned_pod_sum_by(config, group_labels, f"kube_pod_status_phase{{{selector}}}", query=query)
         if group == StudioMetricGroup.READINESS:
             return self._owned_pod_sum(
                 config,
                 f'kube_pod_container_status_ready{{{container_selector},condition="true"}}',
+                query=query,
             )
         if group == StudioMetricGroup.NETWORK_RECEIVE:
-            return self._owned_pod_sum(config, f"rate(container_network_receive_bytes_total{{{selector}}}[5m])")
+            return self._owned_pod_sum(
+                config,
+                f"rate(container_network_receive_bytes_total{{{selector}}}[5m])",
+                query=query,
+            )
         if group == StudioMetricGroup.NETWORK_TRANSMIT:
-            return self._owned_pod_sum(config, f"rate(container_network_transmit_bytes_total{{{selector}}}[5m])")
+            return self._owned_pod_sum(
+                config,
+                f"rate(container_network_transmit_bytes_total{{{selector}}}[5m])",
+                query=query,
+            )
         if group == StudioMetricGroup.TASKS_STARTED_RATE:
             return f"sum(rate(relayna_tasks_started_total{{{runtime_selector}}}[5m]))"
         if group == StudioMetricGroup.TASKS_FAILED_RATE:
@@ -446,6 +486,16 @@ class PrometheusMetricsProvider:
             f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())
         )
 
+    def _pod_selector_extra(
+        self, config: PrometheusMetricsConfig, query: StudioMetricsQuery
+    ) -> dict[str, tuple[str, str]]:
+        if query.pod is None:
+            return {}
+        return {config.pod_label: ("=", query.pod)}
+
+    def _pod_series_requested(self, query: StudioMetricsQuery) -> bool:
+        return query.split_by_pod or query.pod is not None
+
     def _pod_ownership_selector(self, config: PrometheusMetricsConfig) -> str:
         namespace_selector = self._format_selector({config.namespace_label: ("=", config.namespace)})
         ownership = f"kube_pod_labels{{{namespace_selector}}}"
@@ -463,14 +513,23 @@ class PrometheusMetricsProvider:
             f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())
         )
 
-    def _owned_pod_sum(self, config: PrometheusMetricsConfig, expression: str) -> str:
-        return self._owned_pod_sum_by(config, None, expression)
+    def _owned_pod_sum(self, config: PrometheusMetricsConfig, expression: str, *, query: StudioMetricsQuery) -> str:
+        group_labels = [config.pod_label] if self._pod_series_requested(query) else []
+        return self._owned_pod_sum_by(config, group_labels, expression, query=query)
 
-    def _owned_pod_sum_by(self, config: PrometheusMetricsConfig, group_label: str | None, expression: str) -> str:
+    def _owned_pod_sum_by(
+        self,
+        config: PrometheusMetricsConfig,
+        group_labels: list[str],
+        expression: str,
+        *,
+        query: StudioMetricsQuery,
+    ) -> str:
         ownership = self._pod_ownership_selector(config)
         join = f"{expression} * on({config.namespace_label}, {config.pod_label}) group_left() {ownership}"
-        if group_label is not None:
-            return f"sum by ({group_label}) ({join})"
+        if group_labels:
+            formatted_labels = ", ".join(dict.fromkeys(group_labels))
+            return f"sum by ({formatted_labels}) ({join})"
         return f"sum({join})"
 
     def _normalize_response(self, *, group: StudioMetricGroup, payload: Mapping[str, Any]) -> list[StudioMetricSeries]:
@@ -748,9 +807,20 @@ def create_studio_metrics_router(
         to_time: str | None,
         step: int | None,
         group: list[StudioMetricGroup],
+        pod: str | None,
+        split_by_pod: bool,
     ) -> StudioMetricsQuery:
         try:
-            return StudioMetricsQuery.model_validate({"from": from_time, "to": to_time, "step": step, "groups": group})
+            return StudioMetricsQuery.model_validate(
+                {
+                    "from": from_time,
+                    "to": to_time,
+                    "step": step,
+                    "groups": group,
+                    "pod": pod,
+                    "split_by_pod": split_by_pod,
+                }
+            )
         except ValidationError as exc:
             sanitized_errors: list[dict[str, Any]] = []
             for item in exc.errors(include_url=False):
@@ -768,8 +838,17 @@ def create_studio_metrics_router(
         to_time: str | None = Query(default=None, alias="to"),
         step: int | None = Query(default=None, ge=5, le=3600),
         group: list[StudioMetricGroup] = Query(default_factory=list),  # noqa: B008
+        pod: str | None = None,
+        split_by_pod: bool = False,
     ) -> StudioMetricsResponse:
-        request_query = _build_query(from_time=from_time, to_time=to_time, step=step, group=group)
+        request_query = _build_query(
+            from_time=from_time,
+            to_time=to_time,
+            step=step,
+            group=group,
+            pod=pod,
+            split_by_pod=split_by_pod,
+        )
         try:
             return await metrics_query_service.query_service_metrics(service_id, request_query)
         except ServiceNotFoundError as exc:
@@ -802,8 +881,17 @@ def create_studio_metrics_router(
         to_time: str | None = Query(default=None, alias="to"),
         step: int | None = Query(default=None, ge=5, le=3600),
         group: list[StudioMetricGroup] = Query(default_factory=list),  # noqa: B008
+        pod: str | None = None,
+        split_by_pod: bool = False,
     ) -> StudioMetricsResponse:
-        request_query = _build_query(from_time=from_time, to_time=to_time, step=step, group=group)
+        request_query = _build_query(
+            from_time=from_time,
+            to_time=to_time,
+            step=step,
+            group=group,
+            pod=pod,
+            split_by_pod=split_by_pod,
+        )
         try:
             return await metrics_query_service.query_task_metrics(service_id, task_id, request_query)
         except ServiceNotFoundError as exc:
