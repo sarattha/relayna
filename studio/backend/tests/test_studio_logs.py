@@ -87,6 +87,9 @@ def make_log_config(
     base_url: str = "https://loki.example.test",
     tenant_id: str | None = None,
     source_label: str | None = "component",
+    pod_label: str = "pod",
+    pod_match_mode: str = "exact",
+    pod_value_template: str = "{pod}",
     task_id_label: str | None = "task_id",
     correlation_id_label: str | None = "correlation_id",
     level_label: str | None = "level",
@@ -99,6 +102,9 @@ def make_log_config(
         tenant_id=tenant_id,
         service_selector_labels={"app": "payments-api", "namespace": "prod"},
         source_label=source_label,
+        pod_label=pod_label,
+        pod_match_mode=pod_match_mode,
+        pod_value_template=pod_value_template,
         task_id_label=task_id_label,
         correlation_id_label=correlation_id_label,
         level_label=level_label,
@@ -414,6 +420,77 @@ def test_loki_provider_applies_pod_filter() -> None:
     )
 
 
+def test_loki_provider_applies_configured_pod_label_filter() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config(pod_label="pod_name")),
+            config=make_log_config(pod_label="pod_name"),
+            query=StudioLogQuery(pod="payments-worker-abc", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == '{app="payments-api",namespace="prod",pod_name="payments-worker-abc"}'
+
+
+def test_loki_provider_applies_regex_pod_value_template() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    config = make_log_config(
+        pod_label="instance",
+        pod_match_mode="regex",
+        pod_value_template="{namespace}/{pod}:.*",
+    )
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=config),
+            config=config,
+            query=StudioLogQuery(pod="ocr-service-aggregator-965875895-jk2k2", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == (
+        '{app="payments-api",instance=~"prod/ocr-service-aggregator-965875895-jk2k2:.*",namespace="prod"}'
+    )
+
+
+def test_loki_provider_raises_for_missing_pod_template_variable() -> None:
+    provider = LokiLogProvider(
+        http_client=TrackingAsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json=loki_success_response())),
+            timeout=5.0,
+        )
+    )
+    config = LokiLogConfig(
+        provider="loki",
+        base_url="https://loki.example.test",
+        service_selector_labels={"app": "payments-api"},
+        pod_label="instance",
+        pod_match_mode="regex",
+        pod_value_template="{namespace}/{pod}:.*",
+    )
+
+    with pytest.raises(StudioLogConfigError, match="namespace"):
+        asyncio.run(
+            provider.query_logs(
+                service=make_record(log_config=config),
+                config=config,
+                query=StudioLogQuery(pod="payments-worker-abc", limit=10),
+            )
+        )
+
+
 def test_loki_provider_raises_for_source_filter_without_source_label() -> None:
     provider = LokiLogProvider(
         http_client=TrackingAsyncClient(
@@ -570,6 +647,44 @@ def test_task_log_route_scopes_task_id_and_correlation_id(monkeypatch) -> None:
     assert 'pod="payments-worker-abc"' in observed_params["query"]
     assert observed_params["start"].isdigit()
     assert observed_params["end"].isdigit()
+
+
+def test_service_log_route_uses_configured_pod_selector(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    observed_params: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_params["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        pull_sync_interval_seconds=None,
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler),
+            timeout=timeout,
+        ),
+    )
+
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                log_config=make_log_config(
+                    pod_label="instance",
+                    pod_match_mode="regex",
+                    pod_value_template="{namespace}/{pod}:.*",
+                )
+            ),
+        )
+        response = client.get(
+            "/studio/services/payments-api/logs",
+            params={"pod": "payments-worker-abc"},
+        )
+
+    assert response.status_code == 200
+    assert 'instance=~"prod/payments-worker-abc:.*"' in observed_params["query"]
+    assert 'pod="payments-worker-abc"' not in observed_params["query"]
 
 
 def test_task_log_route_uses_contains_matching_when_configured(monkeypatch) -> None:

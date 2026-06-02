@@ -102,6 +102,9 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     log_app_label_key: service.log_config?.source_label || "",
     log_service_selector_labels: selectorLabels.additionalSelectorLabels,
     log_source_label: service.log_config?.source_label || "",
+    log_pod_label: service.log_config?.pod_label || "pod",
+    log_pod_match_mode: service.log_config?.pod_match_mode || "exact",
+    log_pod_value_template: service.log_config?.pod_value_template || "{pod}",
     log_task_id_label: service.log_config?.task_id_label || "",
     log_correlation_id_label: service.log_config?.correlation_id_label || "",
     log_level_label: service.log_config?.level_label || "",
@@ -139,6 +142,9 @@ export function buildServicePayload(draft: ServiceDraft) {
       draft.log_service_label_value.trim() ||
       draft.log_app_label_key.trim() ||
       draft.log_service_selector_labels.trim() ||
+      draft.log_pod_label.trim() !== "pod" ||
+      draft.log_pod_match_mode !== "exact" ||
+      draft.log_pod_value_template.trim() !== "{pod}" ||
       draft.log_task_id_label.trim() ||
       draft.log_correlation_id_label.trim() ||
       draft.log_level_label.trim() ||
@@ -184,6 +190,9 @@ export function buildServicePayload(draft: ServiceDraft) {
           tenant_id: draft.log_tenant_id.trim() || null,
           service_selector_labels: mergedSelectorLabels,
           source_label: draft.log_app_label_key.trim() || null,
+          pod_label: draft.log_pod_label.trim() || "pod",
+          pod_match_mode: draft.log_pod_match_mode || "exact",
+          pod_value_template: draft.log_pod_value_template.trim() || "{pod}",
           task_id_label: draft.log_task_id_label.trim() || null,
           correlation_id_label: draft.log_correlation_id_label.trim() || null,
           level_label: draft.log_level_label.trim() || null,

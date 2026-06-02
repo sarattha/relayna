@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from string import Formatter
 from typing import Any, Protocol, cast
 
 import httpx
@@ -54,6 +55,14 @@ def _loki_ns_to_iso(value: str) -> str:
 
 def _escape_logql_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _logql_matcher_operator(match_mode: str) -> str:
+    if match_mode == "exact":
+        return "="
+    if match_mode == "regex":
+        return "=~"
+    raise StudioLogConfigError(f"Unsupported pod_match_mode '{match_mode}'.")
 
 
 def _parse_page_cursor(value: str) -> tuple[str, int]:
@@ -186,7 +195,7 @@ class LokiLogProvider:
         skip_boundary_count = 0
         if query.before is not None:
             before_cursor, skip_boundary_count = _parse_page_cursor(query.before)
-        request_query = self._build_query(config=config, query=query)
+        request_query = self._build_query(service=service, config=config, query=query)
         params = {
             "query": request_query,
             "limit": str(query.limit + skip_boundary_count + 1),
@@ -245,21 +254,29 @@ class LokiLogProvider:
 
         return StudioLogListResponse(count=len(entries), items=entries, next_cursor=next_cursor)
 
-    def _build_query(self, *, config: LokiLogConfig, query: StudioLogQuery) -> str:
-        label_filters = dict(config.service_selector_labels)
+    def _build_query(self, *, service: ServiceRecord, config: LokiLogConfig, query: StudioLogQuery) -> str:
+        label_filters: dict[str, tuple[str, str]] = {
+            key: ("=", value) for key, value in config.service_selector_labels.items()
+        }
         if query.source:
             if not config.source_label:
                 raise StudioLogConfigError("Log source filtering requires log_config.source_label for this service.")
-            label_filters[config.source_label] = query.source
+            label_filters[config.source_label] = ("=", query.source)
         if query.pod:
-            label_filters["pod"] = query.pod
+            label_filters[config.pod_label] = (
+                _logql_matcher_operator(config.pod_match_mode),
+                self._render_pod_value_template(service=service, config=config, pod=query.pod),
+            )
         if config.task_match_mode == "label" and config.task_id_label and query.task_id:
-            label_filters[config.task_id_label] = query.task_id
+            label_filters[config.task_id_label] = ("=", query.task_id)
         if config.correlation_id_label and query.correlation_id:
-            label_filters[config.correlation_id_label] = query.correlation_id
+            label_filters[config.correlation_id_label] = ("=", query.correlation_id)
         if config.level_label and query.level:
-            label_filters[config.level_label] = query.level
-        selector = ",".join(f'{key}="{_escape_logql_string(value)}"' for key, value in sorted(label_filters.items()))
+            label_filters[config.level_label] = ("=", query.level)
+        selector = ",".join(
+            f'{key}{operator}"{_escape_logql_string(value)}"'
+            for key, (operator, value) in sorted(label_filters.items())
+        )
         expression = f"{{{selector}}}"
         task_filter = self._build_task_filter(config=config, query=query)
         if task_filter is not None:
@@ -268,6 +285,27 @@ class LokiLogProvider:
         if query.query:
             expression = f'{expression} |= "{_escape_logql_string(query.query)}"'
         return expression
+
+    def _render_pod_value_template(self, *, service: ServiceRecord, config: LokiLogConfig, pod: str) -> str:
+        namespace = config.service_selector_labels.get("namespace")
+        if namespace is None and service.metrics_config is not None:
+            namespace = service.metrics_config.namespace
+        variables = {
+            "pod": pod,
+            "namespace": namespace,
+            "service_id": service.service_id,
+        }
+        required_variables = {
+            field_name for _, field_name, _, _ in Formatter().parse(config.pod_value_template) if field_name
+        }
+        missing_variables = sorted(name for name in required_variables if variables.get(name) is None)
+        if missing_variables:
+            missing = ", ".join(missing_variables)
+            raise StudioLogConfigError(f"log_config.pod_value_template references unavailable variable(s): {missing}.")
+        try:
+            return config.pod_value_template.format(**variables)
+        except (KeyError, ValueError) as exc:
+            raise StudioLogConfigError("log_config.pod_value_template is invalid.") from exc
 
     def _build_task_filter(
         self,

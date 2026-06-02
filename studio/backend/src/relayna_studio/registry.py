@@ -44,6 +44,9 @@ class LokiLogConfig(BaseModel):
     tenant_id: str | None = None
     service_selector_labels: dict[str, str] = Field(default_factory=dict)
     source_label: str | None = None
+    pod_label: str = "pod"
+    pod_match_mode: Literal["exact", "regex"] = "exact"
+    pod_value_template: str = "{pod}"
     task_id_label: str | None = None
     correlation_id_label: str | None = None
     level_label: str | None = None
@@ -54,6 +57,16 @@ class LokiLogConfig(BaseModel):
     @classmethod
     def _normalize_base_url(cls, value: Any) -> str:
         return normalize_base_url(value)
+
+    @field_validator("pod_label", "pod_value_template", mode="before")
+    @classmethod
+    def _normalize_required_strings(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError("value must be a string")
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("value must not be empty")
+        return normalized
 
     @field_validator(
         "tenant_id",
