@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.19 - 2026-06-02
+
+### Added
+
+- Added configurable Studio Loki pod log selectors with `pod_label`,
+  `pod_match_mode`, and `pod_value_template`, allowing selected pod log filters
+  to target labels such as `instance` instead of assuming Loki exposes a `pod`
+  label.
+
+### Fixed
+
+- Fixed Studio Service Logs selected-pod filtering for AKS/Alloy Loki setups
+  where pod identity is encoded in labels such as
+  `instance="{namespace}/{pod}:{container}"`.
+- Updated Studio frontend test dependencies to remove npm audit findings from
+  the security hardening workflow.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.19`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.19`.
+- Updated release-install, Studio log configuration, and AKS observability
+  documentation for the `1.4.19` configurable Loki pod selector workflow.
+- Moved SDK, Studio backend, and Studio frontend production freeze manifests to
+  the `v1.4.19` perimeter.
+
 ## 1.4.18 - 2026-06-01
 
 ### Added

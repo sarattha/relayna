@@ -15,7 +15,7 @@ def test_studio_backend_public_exports_match_production_freeze_manifest() -> Non
     manifest = _load_manifest("public_surface.json")
     module = importlib.import_module(str(manifest["module"]))
 
-    assert manifest["freeze_version"] == "v1.4.18"
+    assert manifest["freeze_version"] == "v1.4.19"
     assert manifest["strict"] is True
     assert list(getattr(module, "__all__", [])) == manifest["exports"]
 

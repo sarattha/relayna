@@ -221,6 +221,9 @@ addition to the raw generic contract:
 - `service label key`
 - `service label value`
 - `app label key`
+- `log pod label`
+- `log pod match`
+- `log pod value template`
 - `task match mode`
 - `task match template`
 
@@ -230,6 +233,11 @@ The UI maps those inputs back into the backend `log_config`:
   - become one entry in `service_selector_labels`
 - `app label key`
   - becomes `source_label`
+- `log pod label`, `log pod match`, and `log pod value template`
+  - become `pod_label`, `pod_match_mode`, and `pod_value_template`
+  - default to exact `pod="{pod}"` filtering
+  - can target AKS/Alloy `instance` labels with a regex template such as
+    `{namespace}/{pod}:.*`
 - `task match mode`
   - controls whether task detail logs use a Loki label, plain-text contains
     query, or regex query
@@ -240,6 +248,9 @@ Recommended AKS example:
 
 - `service label key`: `service`
 - `service label value`: `checker-service`
+- `log pod label`: `instance`
+- `log pod match`: `regex`
+- `log pod value template`: `{namespace}/{pod}:.*`
 - `app label key`: `app`
 - `task match mode`: `contains`
 - `task match template`: `{task_id}`
