@@ -246,8 +246,9 @@ the intended mapping is:
 - one stable `service` label for the logical Relayna service
 - one `app` label for the concrete emitter or workload, such as API, worker,
   aggregator, or scaled-job pods
-- an optional `pod` label when operators need service-detail pod selection to
-  filter Loki logs to one current Kubernetes pod
+- a configurable pod selector when operators need service-detail pod selection
+  to filter Loki logs to one current Kubernetes pod; the default is a `pod`
+  label, but AKS/Alloy setups can target labels such as `instance`
 - task IDs embedded in log line text when they are not available as Loki labels
 
 Recommended registration shape:
@@ -265,9 +266,13 @@ Recommended registration shape:
     "base_url": "http://loki.default.svc.cluster.local:3100",
     "tenant_id": null,
     "service_selector_labels": {
+      "namespace": "default",
       "service": "checker-service"
     },
     "source_label": "app",
+    "pod_label": "instance",
+    "pod_match_mode": "regex",
+    "pod_value_template": "{namespace}/{pod}:.*",
     "task_match_mode": "contains",
     "task_match_template": "{task_id}",
     "task_id_label": null,
@@ -281,10 +286,16 @@ Field-by-field guidance:
 
 - `service_selector_labels`
   - the base Loki selector for service-scoped reads
-  - for AKS, this is usually `{ "service": "<logical-service-name>" }`
+  - for AKS, this is usually `{ "namespace": "<namespace>", "service": "<logical-service-name>" }`
 - `source_label`
   - the Loki label used to distinguish emitters inside one service scope
   - for AKS, this is usually `"app"`
+- `pod_label`, `pod_match_mode`, and `pod_value_template`
+  - control how the Service Pods selection maps to a Loki selector
+  - default behavior is `pod_label="pod"`, `pod_match_mode="exact"`, and
+    `pod_value_template="{pod}"`
+  - for AKS/Alloy `instance` labels, use `pod_label="instance"`,
+    `pod_match_mode="regex"`, and `pod_value_template="{namespace}/{pod}:.*"`
 - `task_match_mode`
   - `"label"` when `task_id` exists as a Loki label
   - `"contains"` when the task ID appears as plain text in the log line
@@ -300,13 +311,13 @@ Field-by-field guidance:
 How the backend turns that config into Loki queries:
 
 - service page, all logs for the service:
-  - `{service="checker-service"}`
+  - `{namespace="default",service="checker-service"}`
 - service page, filtered to one app:
-  - `{app="checker-service-api",service="checker-service"}`
+  - `{app="checker-service-api",namespace="default",service="checker-service"}`
 - service page, filtered to one selected pod:
-  - `{pod="checker-worker-abc123",service="checker-service"}`
+  - `{instance=~"default/checker-worker-abc123:.*",namespace="default",service="checker-service"}`
 - task page, task ID inside line text:
-  - `{service="checker-service"} |= "checker_endjdbdgsjmaksdhdsdsdd"`
+  - `{namespace="default",service="checker-service"} |= "checker_endjdbdgsjmaksdhdsdsdd"`
 - task page, bounded to a lifecycle window:
   - same query plus Loki `start` and `end` derived from the task timeline or
     manual operator overrides

@@ -461,6 +461,44 @@ export function ServicesPage() {
                     style={inputStyle}
                   />
                 </label>
+                <div className="studio-form-grid studio-form-grid--triple">
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Log pod label
+                    <input
+                      value={draft.log_pod_label}
+                      onChange={(event) => setDraft((current) => ({ ...current, log_pod_label: event.target.value }))}
+                      placeholder="pod"
+                      style={inputStyle}
+                    />
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Log pod match
+                    <select
+                      value={draft.log_pod_match_mode}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          log_pod_match_mode: event.target.value as "exact" | "regex",
+                        }))
+                      }
+                      style={inputStyle}
+                    >
+                      <option value="exact">Exact</option>
+                      <option value="regex">Regex</option>
+                    </select>
+                  </label>
+                  <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                    Log pod value template
+                    <input
+                      value={draft.log_pod_value_template}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, log_pod_value_template: event.target.value }))
+                      }
+                      placeholder="{pod}"
+                      style={inputStyle}
+                    />
+                  </label>
+                </div>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Task id label
                   <input

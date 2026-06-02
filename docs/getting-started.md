@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.18/relayna-1.4.18-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.19/relayna-1.4.19-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.18/relayna-1.4.18.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.19/relayna-1.4.19.tar.gz
 ```
 
 For local development in this repository:
@@ -2312,9 +2312,13 @@ For AKS-style Loki setups, a practical `log_config` looks like:
   "provider": "loki",
   "base_url": "http://loki.default.svc.cluster.local:3100",
   "service_selector_labels": {
+    "namespace": "default",
     "service": "checker-service"
   },
   "source_label": "app",
+  "pod_label": "instance",
+  "pod_match_mode": "regex",
+  "pod_value_template": "{namespace}/{pod}:.*",
   "task_match_mode": "contains",
   "task_match_template": "{task_id}",
   "correlation_id_label": "correlation_id",
@@ -2327,6 +2331,9 @@ That means:
 - Studio service pages query all logs matching the shared `service` label
 - Studio source filtering uses the `app` label to distinguish API, worker, and
   aggregation emitters
+- Studio selected-pod filtering maps the chosen Kubernetes pod name to the Loki
+  `instance` label; omit the pod selector fields to use the default
+  `pod="<pod-name>"` selector
 - Studio task pages search for the current task id inside the log line text
   instead of requiring a Loki `task_id` label
 - if your service emits JSON logs, Studio pretty-prints parseable objects and

@@ -147,6 +147,9 @@ function buildMockService(): MockServiceRecord {
       base_url: "https://loki.example.test",
       service_selector_labels: { app: "payments-api" },
       source_label: "component",
+      pod_label: "pod",
+      pod_match_mode: "exact",
+      pod_value_template: "{pod}",
       task_id_label: "task_id",
       correlation_id_label: "correlation_id",
       level_label: "level",
@@ -998,6 +1001,9 @@ describe("App", () => {
     let observedPayload:
       | {
           log_config?: {
+            pod_label?: string | null;
+            pod_match_mode?: string;
+            pod_value_template?: string | null;
             source_label?: string | null;
             service_selector_labels?: Record<string, string>;
           } | null;
@@ -1030,6 +1036,9 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Service label key"), { target: { value: "service" } });
     fireEvent.change(screen.getByLabelText("Service label value"), { target: { value: "orders-service" } });
     fireEvent.change(screen.getByLabelText("App label key"), { target: { value: "app" } });
+    fireEvent.change(screen.getByLabelText("Log pod label"), { target: { value: "instance" } });
+    fireEvent.change(screen.getByLabelText("Log pod match"), { target: { value: "regex" } });
+    fireEvent.change(screen.getByLabelText("Log pod value template"), { target: { value: "{namespace}/{pod}:.*" } });
     fireEvent.click(screen.getByRole("button", { name: "Register Service" }));
 
     await screen.findByText("Registered service 'orders-api'.");
@@ -1038,9 +1047,18 @@ describe("App", () => {
       throw new Error("Expected the service create payload to be captured.");
     }
     const capturedPayload = observedPayload as {
-      log_config?: { source_label?: string | null; service_selector_labels?: Record<string, string> } | null;
+      log_config?: {
+        pod_label?: string | null;
+        pod_match_mode?: string;
+        pod_value_template?: string | null;
+        source_label?: string | null;
+        service_selector_labels?: Record<string, string>;
+      } | null;
     };
     expect(capturedPayload.log_config?.source_label).toBe("app");
+    expect(capturedPayload.log_config?.pod_label).toBe("instance");
+    expect(capturedPayload.log_config?.pod_match_mode).toBe("regex");
+    expect(capturedPayload.log_config?.pod_value_template).toBe("{namespace}/{pod}:.*");
     expect(capturedPayload.log_config?.service_selector_labels).toEqual({ service: "orders-service" });
   });
 

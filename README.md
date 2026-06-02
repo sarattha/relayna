@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.18/relayna-1.4.18-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.19/relayna-1.4.19-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.18/relayna-1.4.18.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.19/relayna-1.4.19.tar.gz
 ```
 
 For local development in this repository:
@@ -232,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.18`, and the backend requires `relayna>=1.4.18`.
+release version is `1.4.19`, and the backend requires `relayna>=1.4.19`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -527,8 +527,9 @@ For AKS deployments, the common pattern is:
   service
 - one `app` label that distinguishes emitters such as API, worker, and
   aggregation pods
-- an optional `pod` label when operators need the Service Pods panel to filter
-  Loki logs down to one Kubernetes pod
+- a configurable pod selector when operators need the Service Pods panel to
+  filter Loki logs down to one Kubernetes pod; the default is a `pod` label, but
+  AKS/Alloy deployments can target labels such as `instance`
 - task identifiers embedded in the log line text instead of a Loki label
 
 Example registration payload for a checker service:
@@ -546,9 +547,13 @@ Example registration payload for a checker service:
     "base_url": "http://loki.default.svc.cluster.local:3100",
     "tenant_id": null,
     "service_selector_labels": {
+      "namespace": "default",
       "service": "checker-service"
     },
     "source_label": "app",
+    "pod_label": "instance",
+    "pod_match_mode": "regex",
+    "pod_value_template": "{namespace}/{pod}:.*",
     "task_match_mode": "contains",
     "task_match_template": "{task_id}",
     "task_id_label": null,
@@ -560,13 +565,15 @@ Example registration payload for a checker service:
 
 That configuration means:
 
-- service page log queries start from `{service="checker-service"}`
+- service page log queries start from
+  `{namespace="default",service="checker-service"}`
 - source/app filtering adds `app="checker-service-api"` or another discovered
   app value
-- pod filtering adds `pod="<pod-name>"` when the operator selects a current pod
-  in the Service Pods panel
+- pod filtering adds `instance=~"default/<pod-name>:.*"` when the operator
+  selects a current pod in the Service Pods panel; omit these pod fields to keep
+  the default `pod="<pod-name>"` selector
 - task page log queries match the task id inside the line text, for example
-  `{service="checker-service"} |= "task-123"`
+  `{namespace="default",service="checker-service"} |= "task-123"`
 - Studio can still layer `correlation_id`, `level`, `from`, and `to` filters on
   top when those fields are available
 
@@ -605,6 +612,9 @@ The Studio registration UI exposes AKS-friendly fields for:
 - service label key
 - service label value
 - app label key
+- log pod label
+- log pod match mode
+- log pod value template
 
 Under the hood those map back into the generic `log_config` fields shown above,
 so non-AKS deployments can still use the same backend contract.

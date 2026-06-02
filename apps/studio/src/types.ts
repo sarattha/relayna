@@ -56,6 +56,9 @@ export type ServiceLogConfig = {
   tenant_id?: string | null;
   service_selector_labels: Record<string, string>;
   source_label?: string | null;
+  pod_label?: string | null;
+  pod_match_mode?: "exact" | "regex";
+  pod_value_template?: string | null;
   task_id_label?: string | null;
   correlation_id_label?: string | null;
   level_label?: string | null;
@@ -138,6 +141,9 @@ export type ServiceDraft = {
   log_app_label_key: string;
   log_service_selector_labels: string;
   log_source_label: string;
+  log_pod_label: string;
+  log_pod_match_mode: "exact" | "regex";
+  log_pod_value_template: string;
   log_task_id_label: string;
   log_correlation_id_label: string;
   log_level_label: string;

@@ -394,9 +394,13 @@ Register each Relayna service with `log_config`, `metrics_config`, and
     "base_url": "http://loki.observability.svc.cluster.local:3100",
     "tenant_id": null,
     "service_selector_labels": {
+      "namespace": "default",
       "service": "checker-service"
     },
     "source_label": "app",
+    "pod_label": "instance",
+    "pod_match_mode": "regex",
+    "pod_value_template": "{namespace}/{pod}:.*",
     "task_match_mode": "contains",
     "task_match_template": "{task_id}",
     "task_id_label": null,
@@ -448,7 +452,7 @@ Install application-owned tracing dependencies in the service image:
 ```toml
 [project]
 dependencies = [
-  "relayna>=1.4.18",
+  "relayna>=1.4.19",
   "opentelemetry-sdk>=1.28.0",
   "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
   "structlog>=24.0.0",
@@ -614,8 +618,11 @@ curl -X POST http://studio-backend.studio.svc.cluster.local:8000/studio/services
     "log_config": {
       "provider": "loki",
       "base_url": "http://loki.observability.svc.cluster.local:3100",
-      "service_selector_labels": {"service": "orders-api"},
+      "service_selector_labels": {"namespace": "default", "service": "orders-api"},
       "source_label": "app",
+      "pod_label": "instance",
+      "pod_match_mode": "regex",
+      "pod_value_template": "{namespace}/{pod}:.*",
       "task_match_mode": "contains",
       "task_match_template": "{task_id}",
       "correlation_id_label": null,
