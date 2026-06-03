@@ -1335,44 +1335,43 @@ export function ServiceDetailPage() {
                   }}
                   style={{
                     ...secondaryButtonStyle,
-                    alignItems: "flex-start",
+                    alignItems: "center",
                     background: selected
-                      ? "linear-gradient(135deg, rgba(15, 124, 123, 0.24), rgba(218, 107, 43, 0.14))"
+                      ? "linear-gradient(135deg, rgba(15, 124, 123, 0.22), rgba(218, 107, 43, 0.12))"
                       : "var(--studio-surface-muted)",
                     borderColor: selected ? "var(--studio-secondary-strong)" : "var(--studio-border)",
                     borderWidth: selected ? 2 : 1,
                     boxShadow: selected
-                      ? "0 0 0 3px rgba(15, 124, 123, 0.16), 0 14px 32px rgba(15, 85, 84, 0.18)"
+                      ? "0 0 0 2px rgba(15, 124, 123, 0.14), 0 8px 20px rgba(15, 85, 84, 0.14)"
                       : undefined,
                     color: selected ? "var(--studio-text)" : undefined,
-                    display: "grid",
-                    gap: 8,
-                    justifyItems: "start",
-                    minHeight: 96,
-                    padding: 14,
+                    display: "flex",
+                    gap: 10,
+                    justifyContent: "flex-start",
+                    minHeight: 56,
+                    padding: "9px 11px",
                     position: "relative",
                     textAlign: "left",
                   }}
                   aria-pressed={selected}
                 >
-                  {selected ? (
-                    <span
-                      className="studio-inline-meta"
-                      style={{
-                        background: "var(--studio-secondary-strong)",
-                        borderRadius: 999,
-                        color: "var(--studio-primary-contrast)",
-                        fontSize: 11,
-                        fontWeight: 700,
-                        padding: "3px 8px",
-                      }}
-                    >
-                      Selected
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      background: selected ? "var(--studio-secondary-strong)" : "transparent",
+                      border: `1px solid ${selected ? "var(--studio-secondary-strong)" : "var(--studio-border-strong)"}`,
+                      borderRadius: 999,
+                      boxShadow: selected ? "inset 0 0 0 3px var(--studio-primary-contrast)" : undefined,
+                      flex: "0 0 auto",
+                      height: 14,
+                      width: 14,
+                    }}
+                  />
+                  <span style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                    <strong style={{ lineHeight: 1.2 }}>{pod.name}</strong>
+                    <span className="studio-inline-meta" style={{ fontSize: 12, lineHeight: 1.25 }}>
+                      {pod.namespace} · {pod.phase || "unknown"} · {servicePodSource(pod)}
                     </span>
-                  ) : null}
-                  <strong>{pod.name}</strong>
-                  <span className="studio-inline-meta">
-                    {pod.namespace} · {pod.phase || "unknown"} · {servicePodSource(pod)}
                   </span>
                 </button>
               );
