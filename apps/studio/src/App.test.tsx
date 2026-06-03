@@ -447,7 +447,7 @@ function customPodLabelMetricsResponse() {
       {
         metric: "cpu_usage",
         unit: "cores",
-        labels: { kubernetes_pod_name: "payments-worker-prometheus", container: "worker" },
+        labels: { kubernetes_pod_name: "payments-worker-prometheus", container: "worker", phase: "Running" },
         points: [{ timestamp: "2026-04-08T10:05:00Z", value: 0.5 }],
       },
     ],
@@ -1502,6 +1502,9 @@ describe("App", () => {
     });
     expect(screen.getAllByLabelText("Pod metric graph").length).toBeGreaterThan(0);
     expect(await screen.findByText("payments-worker-prometheus")).toBeInTheDocument();
+    const cpuLegend = screen.getByLabelText("Cpu Usage legend");
+    expect(within(cpuLegend).getByText("payments-worker-prometheus")).toBeInTheDocument();
+    expect(within(cpuLegend).queryByText("payments-worker-prometheus · Running")).not.toBeInTheDocument();
   });
 
   it("uses the manual service activity window override when provided", async () => {

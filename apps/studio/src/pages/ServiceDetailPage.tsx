@@ -304,7 +304,7 @@ function seriesPodLabel(series: StudioMetricSeries, podLabel?: string | null) {
 
 function seriesLabel(series: StudioMetricSeries, podLabel?: string | null) {
   const pod = seriesPodLabel(series, podLabel);
-  const phase = series.labels.phase ? ` · ${series.labels.phase}` : "";
+  const phase = series.metric === "pod_phase" && series.labels.phase ? ` · ${series.labels.phase}` : "";
   return `${pod}${phase}`;
 }
 
