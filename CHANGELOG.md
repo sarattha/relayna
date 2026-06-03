@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.20 - 2026-06-03
+
+### Added
+
+- Added multi-select Service Pods filtering for Studio pod metric charts so
+  operators can scope logs and Kubernetes pod/container metric graphs from the
+  same pod cards.
+
+### Changed
+
+- Defaulted the Service Pods panel to all discovered pods selected, including
+  newly discovered pods during refresh when the page is still in the default
+  all-pods state.
+- Clarified Kubernetes metric scope subtitles and removed aggregate-only
+  Kubernetes summary cards from the scoped pod metric chart area.
+- Made selected Service Pods cards higher-contrast and more compact for larger
+  pod sets.
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.20`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.20`.
+- Moved SDK, Studio backend, and Studio frontend production freeze manifests to
+  the `v1.4.20` perimeter.
+
 ## 1.4.19 - 2026-06-02
 
 ### Added
