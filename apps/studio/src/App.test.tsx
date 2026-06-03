@@ -1145,7 +1145,7 @@ describe("App", () => {
     );
   });
 
-  it("renders current service pods and filters service logs by selected pod", async () => {
+  it("renders current service pods and filters service logs and metric charts by selected pod", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
     services[0] = {
       ...services[0],
@@ -1197,14 +1197,23 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
 
     await waitFor(() => {
-      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+      const matchingLogCall = fetchMock.mock.calls.find(([input]) => {
         const parsed = new URL(String(input), "http://studio.test");
         return (
           parsed.pathname === "/studio/services/payments-api/logs" &&
           parsed.searchParams.get("pod") === "payments-worker-def"
         );
       });
-      expect(matchingCall).toBeTruthy();
+      const matchingMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("pod") === "payments-worker-def" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      expect(matchingLogCall).toBeTruthy();
+      expect(matchingMetricCall).toBeTruthy();
     });
     expect(await screen.findByText("Selected pod: payments-worker-def")).toBeInTheDocument();
   });
@@ -1384,7 +1393,7 @@ describe("App", () => {
     });
   });
 
-  it("renders pod metrics graphs and applies pod and long-range filters", async () => {
+  it("renders pod metric charts and applies Service Pods and long-range filters", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
     services[0] = {
       ...services[0],
@@ -1423,9 +1432,21 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Pod Metrics")).toBeInTheDocument();
+    expect(await screen.findByText("Pod Metric Charts")).toBeInTheDocument();
+    await waitFor(() => {
+      const matchingDefaultCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("split_by_pod") === "true" &&
+          !parsed.searchParams.has("pod")
+        );
+      });
+      expect(matchingDefaultCall).toBeTruthy();
+    });
+    expect(screen.queryByLabelText("Pod metrics pod filter")).not.toBeInTheDocument();
     expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
-    fireEvent.change(screen.getByLabelText("Pod metrics pod filter"), { target: { value: "payments-worker-def" } });
+    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
     fireEvent.change(screen.getByLabelText("Pod metrics window mode"), { target: { value: "1w" } });
 
     await waitFor(() => {
