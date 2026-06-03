@@ -1365,15 +1365,30 @@ describe("App", () => {
         return jsonResponse({ service_id: "payments-api", count: 0, pods: [] });
       }
       if (url.startsWith("/studio/services/payments-api/metrics") && method === "GET") {
-        return jsonResponse(metricsResponse(null));
+        const parsed = new URL(url, "http://studio.test");
+        if (parsed.searchParams.get("split_by_pod") === "true") {
+          return jsonResponse(metricsResponse(null));
+        }
+        return jsonResponse({
+          ...metricsResponse(null),
+          series: [
+            {
+              metric: "tasks_started_rate",
+              unit: "per_second",
+              labels: { service: "payments-api" },
+              points: [{ timestamp: "2026-04-08T10:05:00Z", value: 1.25 }],
+            },
+          ],
+        });
       }
       return baseImpl?.(input, init) ?? jsonResponse({});
     });
 
     render(<App />);
 
-    expect(await screen.findByText("Kubernetes Metrics")).toBeInTheDocument();
-    expect(await screen.findByText("0.750 cores")).toBeInTheDocument();
+    expect(await screen.findByText("Service Metrics")).toBeInTheDocument();
+    expect(await screen.findByText("Service Metrics Summary")).toBeInTheDocument();
+    expect(await screen.findByText("1.250/s")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service metrics window mode"), { target: { value: "manual" } });
     const from = isoToLocalDateTime("2026-04-08T09:45:00Z");
     const to = isoToLocalDateTime("2026-04-08T10:15:00Z");
@@ -1386,7 +1401,9 @@ describe("App", () => {
         return (
           parsed.pathname === "/studio/services/payments-api/metrics" &&
           parsed.searchParams.get("from") === new Date("2026-04-08T09:45:00Z").toISOString() &&
-          parsed.searchParams.get("to") === new Date("2026-04-08T10:15:00Z").toISOString()
+          parsed.searchParams.get("to") === new Date("2026-04-08T10:15:00Z").toISOString() &&
+          parsed.searchParams.getAll("group").includes("tasks_started_rate") &&
+          !parsed.searchParams.getAll("group").includes("cpu_usage")
         );
       });
       expect(matchingCall).toBeTruthy();

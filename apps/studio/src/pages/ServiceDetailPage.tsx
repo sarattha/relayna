@@ -274,6 +274,19 @@ const podMetricGroups: StudioMetricGroup[] = [
   "pod_phase",
 ];
 
+const serviceMetricSummaryGroups: StudioMetricGroup[] = [
+  "tasks_started_rate",
+  "tasks_failed_rate",
+  "tasks_retried_rate",
+  "tasks_dlq_rate",
+  "task_duration_p95",
+  "active_tasks",
+  "worker_heartbeat",
+  "queue_publish_rate",
+  "status_events_rate",
+  "observation_events_rate",
+];
+
 const podMetricLineColors = ["#2f6fed", "#14966b", "#b7791f", "#9f4acb", "#d64545", "#506070"];
 
 function seriesPodLabel(series: StudioMetricSeries, podLabel?: string | null) {
@@ -671,6 +684,7 @@ export function ServiceDetailPage() {
       const payload = await fetchServiceMetrics(targetService.service_id, {
         from: window.from,
         to: window.to,
+        groups: serviceMetricSummaryGroups,
       });
       setServiceMetrics(payload);
     } catch (fetchError) {
@@ -953,8 +967,8 @@ export function ServiceDetailPage() {
       </SectionCard>
 
       <SectionCard
-        title="Kubernetes Metrics"
-        subtitle="Prometheus-backed pod and container metrics for this registered service."
+        title="Service Metrics"
+        subtitle="Service-wide Relayna runtime metrics and pod-level Kubernetes charts for this registered service."
         action={
           <button
             type="button"
@@ -1035,6 +1049,12 @@ export function ServiceDetailPage() {
             />
           </label>
         </div>
+        <div style={{ marginBottom: 12 }}>
+          <strong>Service Metrics Summary</strong>
+          <p style={{ ...mutedTextStyle, margin: "4px 0 0" }}>
+            Aggregated across the logical service runtime; Kubernetes pod and container metrics are shown in the charts below.
+          </p>
+        </div>
         <p style={mutedTextStyle}>
           {describeWindow(serviceMetricWindowMode, activeServiceMetricWindow.from, activeServiceMetricWindow.to)}
         </p>
@@ -1045,26 +1065,7 @@ export function ServiceDetailPage() {
         ) : null}
         {serviceMetrics ? (
           <div className="studio-metrics-grid studio-metrics-grid--4">
-            {[
-              "cpu_usage",
-              "memory_usage",
-              "restarts",
-              "oom_killed",
-              "pod_phase",
-              "readiness",
-              "network_receive",
-              "network_transmit",
-              "tasks_started_rate",
-              "tasks_failed_rate",
-              "tasks_retried_rate",
-              "tasks_dlq_rate",
-              "task_duration_p95",
-              "active_tasks",
-              "worker_heartbeat",
-              "queue_publish_rate",
-              "status_events_rate",
-              "observation_events_rate",
-            ].map((metric) => (
+            {serviceMetricSummaryGroups.map((metric) => (
               <div key={metric} className="studio-subcard" style={{ borderRadius: 14, padding: 14 }}>
                 <span className="studio-inline-meta">{metricLabel(metric)}</span>
                 <strong style={{ display: "block", marginTop: 6 }}>{metricLatestValue(serviceMetrics, metric)}</strong>
@@ -1079,8 +1080,8 @@ export function ServiceDetailPage() {
             <strong>Pod Metric Charts</strong>
             <p style={{ ...mutedTextStyle, margin: "4px 0 0" }}>
               {selectedServicePod
-                ? `Prometheus-backed pod graphs filtered to ${selectedServicePod}.`
-                : "Prometheus-backed pod graphs for every current pod matched by this service."}
+                ? `Filtered to ${selectedServicePod}.`
+                : "Showing every current pod matched by this service."}
             </p>
           </div>
           <button type="button" onClick={() => void loadPodMetrics()} style={secondaryButtonStyle}>
