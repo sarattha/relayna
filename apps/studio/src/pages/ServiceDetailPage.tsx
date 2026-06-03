@@ -352,6 +352,16 @@ function selectedPodLabel(pods: string[]) {
   return `${pods.length} pods`;
 }
 
+function normalizeSelectedPods(pods: string[], availablePods: ServicePod[]) {
+  const availableNames = availablePods.map((pod) => pod.name);
+  if (!availableNames.length) {
+    return [];
+  }
+  const availableSet = new Set(availableNames);
+  const filtered = pods.filter((pod) => availableSet.has(pod));
+  return filtered.length ? filtered : availableNames;
+}
+
 function podMetricLineColor(index: number) {
   return podMetricLineColors[index % podMetricLineColors.length];
 }
@@ -710,9 +720,8 @@ export function ServiceDetailPage() {
     try {
       const payload = await fetchServicePods(targetService.service_id);
       setServicePods(payload);
-      const availablePodNames = new Set(payload.pods.map((pod) => pod.name));
-      if (selectedServicePods.some((pod) => !availablePodNames.has(pod))) {
-        const nextPods = selectedServicePods.filter((pod) => availablePodNames.has(pod));
+      const nextPods = normalizeSelectedPods(selectedServicePods, payload.pods);
+      if (nextPods.join("\u0000") !== selectedServicePods.join("\u0000")) {
         setSelectedServicePods(nextPods);
         void loadServiceLogs({ targetService, pods: nextPods });
         void loadPodMetrics({ targetService, pods: nextPods });
@@ -1273,7 +1282,7 @@ export function ServiceDetailPage() {
 
       <SectionCard
         title="Service Pods"
-        subtitle="Current Kubernetes pods matched by this service's metrics selector; select one or more pods to scope service logs and metric charts, and click a selected pod again to remove it."
+        subtitle="Current Kubernetes pods matched by this service's metrics selector; all pods are selected by default, and clicking a pod toggles it in the log and metric chart filter."
         action={
           <button type="button" onClick={() => void loadServicePods()} style={secondaryButtonStyle}>
             <StudioIcon name="refresh" />
@@ -1289,20 +1298,21 @@ export function ServiceDetailPage() {
         {service.metrics_config && !servicePodsLoading && !servicePodsError && !servicePods?.pods.length ? (
           <p style={mutedTextStyle}>No current pods matched this service selector.</p>
         ) : null}
-        {selectedServicePods.length ? (
+        {servicePods?.pods.length ? (
           <div className="studio-action-row" style={{ marginBottom: 12 }}>
             <span className="studio-inline-meta">Selected pods: {selectedServicePods.join(", ")}</span>
             <button
               type="button"
               onClick={() => {
-                setSelectedServicePods([]);
-                void loadServiceLogs({ pods: [] });
-                void loadPodMetrics({ pods: [] });
+                const allPods = servicePods.pods.map((pod) => pod.name);
+                setSelectedServicePods(allPods);
+                void loadServiceLogs({ pods: allPods });
+                void loadPodMetrics({ pods: allPods });
               }}
               style={secondaryButtonStyle}
             >
               <StudioIcon name="clear" />
-              Clear Pod Filters
+              Select All Pods
             </button>
           </div>
         ) : null}
@@ -1315,9 +1325,10 @@ export function ServiceDetailPage() {
                   key={`${pod.namespace}-${pod.name}`}
                   type="button"
                   onClick={() => {
-                    const nextPods = selected
+                    const rawNextPods = selected
                       ? selectedServicePods.filter((selectedPod) => selectedPod !== pod.name)
                       : [...selectedServicePods, pod.name];
+                    const nextPods = normalizeSelectedPods(rawNextPods, servicePods.pods);
                     setSelectedServicePods(nextPods);
                     void loadServiceLogs({ pods: nextPods });
                     void loadPodMetrics({ pods: nextPods });

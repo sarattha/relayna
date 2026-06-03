@@ -1193,9 +1193,7 @@ describe("App", () => {
 
     expect(await screen.findByText("Service Pods")).toBeInTheDocument();
     expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
-    fireEvent.click(screen.getByRole("button", { name: /payments-api-abc/ }));
+    expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
 
     await waitFor(() => {
       const matchingWorkerLogCall = fetchMock.mock.calls.find(([input]) => {
@@ -1230,14 +1228,15 @@ describe("App", () => {
       expect(matchingWorkerMetricCall).toBeTruthy();
       expect(matchingApiMetricCall).toBeTruthy();
     });
-    expect(await screen.findByText("Selected pods: payments-worker-def, payments-api-abc")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
 
     await waitFor(() => {
-      expect(screen.queryByText("Selected pods: payments-worker-def, payments-api-abc")).not.toBeInTheDocument();
       expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
     });
+
+    fireEvent.click(screen.getByRole("button", { name: /payments-api-abc/ }));
+    expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
   });
 
   it("uses the manual service log window override when provided", async () => {
@@ -1485,7 +1484,7 @@ describe("App", () => {
     });
     expect(screen.queryByLabelText("Pod metrics pod filter")).not.toBeInTheDocument();
     expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+    fireEvent.click(screen.getByRole("button", { name: /payments-api-abc/ }));
     fireEvent.change(screen.getByLabelText("Pod metrics window mode"), { target: { value: "1w" } });
 
     await waitFor(() => {
