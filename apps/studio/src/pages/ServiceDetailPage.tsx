@@ -352,10 +352,17 @@ function selectedPodLabel(pods: string[]) {
   return `${pods.length} pods`;
 }
 
-function normalizeSelectedPods(pods: string[], availablePods: ServicePod[]) {
+function normalizeSelectedPods(pods: string[], availablePods: ServicePod[], previousAvailablePods = availablePods) {
   const availableNames = availablePods.map((pod) => pod.name);
   if (!availableNames.length) {
     return [];
+  }
+  const previousAvailableNames = previousAvailablePods.map((pod) => pod.name);
+  const selectedSet = new Set(pods);
+  const wasAllPodsSelected =
+    !previousAvailableNames.length || previousAvailableNames.every((pod) => selectedSet.has(pod));
+  if (wasAllPodsSelected) {
+    return availableNames;
   }
   const availableSet = new Set(availableNames);
   const filtered = pods.filter((pod) => availableSet.has(pod));
@@ -720,7 +727,7 @@ export function ServiceDetailPage() {
     try {
       const payload = await fetchServicePods(targetService.service_id);
       setServicePods(payload);
-      const nextPods = normalizeSelectedPods(selectedServicePods, payload.pods);
+      const nextPods = normalizeSelectedPods(selectedServicePods, payload.pods, servicePods?.pods ?? []);
       if (nextPods.join("\u0000") !== selectedServicePods.join("\u0000")) {
         setSelectedServicePods(nextPods);
         void loadServiceLogs({ targetService, pods: nextPods });

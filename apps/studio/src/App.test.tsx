@@ -1239,6 +1239,68 @@ describe("App", () => {
     expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
   });
 
+  it("keeps default all-pods selection when pod refresh discovers a new pod", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "kubernetes_pod_name",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let podRequestCount = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        podRequestCount += 1;
+        const pods = [
+          { name: "payments-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+          { name: "payments-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+        ];
+        if (podRequestCount > 1) {
+          pods.push({ name: "payments-worker-ghi", namespace: "prod", phase: "Running", labels: { app: "worker" } });
+        }
+        return jsonResponse({ service_id: "payments-api", count: pods.length, pods });
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Selected pods: payments-api-abc, payments-worker-def, payments-worker-ghi"),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      const matchingNewPodLogCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/logs" &&
+          parsed.searchParams.get("pod") === "payments-worker-ghi"
+        );
+      });
+      const matchingNewPodMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("pod") === "payments-worker-ghi" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      expect(matchingNewPodLogCall).toBeTruthy();
+      expect(matchingNewPodMetricCall).toBeTruthy();
+    });
+  });
+
   it("uses the manual service log window override when provided", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
 
