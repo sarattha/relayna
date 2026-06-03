@@ -1325,15 +1325,40 @@ export function ServiceDetailPage() {
                   style={{
                     ...secondaryButtonStyle,
                     alignItems: "flex-start",
-                    borderColor: selected ? "var(--studio-accent)" : undefined,
+                    background: selected
+                      ? "linear-gradient(135deg, rgba(15, 124, 123, 0.24), rgba(218, 107, 43, 0.14))"
+                      : "var(--studio-surface-muted)",
+                    borderColor: selected ? "var(--studio-secondary-strong)" : "var(--studio-border)",
+                    borderWidth: selected ? 2 : 1,
+                    boxShadow: selected
+                      ? "0 0 0 3px rgba(15, 124, 123, 0.16), 0 14px 32px rgba(15, 85, 84, 0.18)"
+                      : undefined,
+                    color: selected ? "var(--studio-text)" : undefined,
                     display: "grid",
-                    gap: 6,
+                    gap: 8,
                     justifyItems: "start",
+                    minHeight: 96,
                     padding: 14,
+                    position: "relative",
                     textAlign: "left",
                   }}
                   aria-pressed={selected}
                 >
+                  {selected ? (
+                    <span
+                      className="studio-inline-meta"
+                      style={{
+                        background: "var(--studio-secondary-strong)",
+                        borderRadius: 999,
+                        color: "var(--studio-primary-contrast)",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "3px 8px",
+                      }}
+                    >
+                      Selected
+                    </span>
+                  ) : null}
                   <strong>{pod.name}</strong>
                   <span className="studio-inline-meta">
                     {pod.namespace} · {pod.phase || "unknown"} · {servicePodSource(pod)}
