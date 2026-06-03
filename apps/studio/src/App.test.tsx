@@ -1145,7 +1145,7 @@ describe("App", () => {
     );
   });
 
-  it("renders current service pods and filters service logs and metric charts by selected pod", async () => {
+  it("renders current service pods and filters logs and metric charts by selected pods", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
     services[0] = {
       ...services[0],
@@ -1195,16 +1195,21 @@ describe("App", () => {
     expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+    fireEvent.click(screen.getByRole("button", { name: /payments-api-abc/ }));
 
     await waitFor(() => {
-      const matchingLogCall = fetchMock.mock.calls.find(([input]) => {
+      const matchingWorkerLogCall = fetchMock.mock.calls.find(([input]) => {
         const parsed = new URL(String(input), "http://studio.test");
         return (
           parsed.pathname === "/studio/services/payments-api/logs" &&
           parsed.searchParams.get("pod") === "payments-worker-def"
         );
       });
-      const matchingMetricCall = fetchMock.mock.calls.find(([input]) => {
+      const matchingApiLogCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return parsed.pathname === "/studio/services/payments-api/logs" && parsed.searchParams.get("pod") === "payments-api-abc";
+      });
+      const matchingWorkerMetricCall = fetchMock.mock.calls.find(([input]) => {
         const parsed = new URL(String(input), "http://studio.test");
         return (
           parsed.pathname === "/studio/services/payments-api/metrics" &&
@@ -1212,10 +1217,27 @@ describe("App", () => {
           parsed.searchParams.get("split_by_pod") === "true"
         );
       });
-      expect(matchingLogCall).toBeTruthy();
-      expect(matchingMetricCall).toBeTruthy();
+      const matchingApiMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("pod") === "payments-api-abc" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      expect(matchingWorkerLogCall).toBeTruthy();
+      expect(matchingApiLogCall).toBeTruthy();
+      expect(matchingWorkerMetricCall).toBeTruthy();
+      expect(matchingApiMetricCall).toBeTruthy();
     });
-    expect(await screen.findByText("Selected pod: payments-worker-def")).toBeInTheDocument();
+    expect(await screen.findByText("Selected pods: payments-worker-def, payments-api-abc")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Selected pods: payments-worker-def, payments-api-abc")).not.toBeInTheDocument();
+      expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+    });
   });
 
   it("uses the manual service log window override when provided", async () => {

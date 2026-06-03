@@ -312,6 +312,46 @@ function metricSeriesFor(metrics: StudioMetricsResponse | null, metric: StudioMe
   return (metrics?.series || []).filter((series) => series.metric === metric && series.points.length);
 }
 
+function mergeLogResponses(responses: StudioLogListResponse[], limit: number): StudioLogListResponse {
+  const items = responses
+    .flatMap((response) => response.items)
+    .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
+    .slice(0, limit);
+  return { count: items.length, items, next_cursor: null };
+}
+
+function mergeMetricResponses(responses: StudioMetricsResponse[]): StudioMetricsResponse {
+  const first = responses[0];
+  if (!first) {
+    return {
+      service_id: "",
+      task_id: null,
+      from: "",
+      to: "",
+      step_seconds: 0,
+      approximate: false,
+      warnings: [],
+      series: [],
+    };
+  }
+  return {
+    ...first,
+    approximate: responses.some((response) => response.approximate),
+    warnings: Array.from(new Set(responses.flatMap((response) => response.warnings))),
+    series: responses.flatMap((response) => response.series),
+  };
+}
+
+function selectedPodLabel(pods: string[]) {
+  if (!pods.length) {
+    return "";
+  }
+  if (pods.length === 1) {
+    return pods[0];
+  }
+  return `${pods.length} pods`;
+}
+
 function podMetricLineColor(index: number) {
   return podMetricLineColors[index % podMetricLineColors.length];
 }
@@ -481,7 +521,7 @@ export function ServiceDetailPage() {
   const [servicePods, setServicePods] = useState<ServicePodListResponse | null>(null);
   const [servicePodsLoading, setServicePodsLoading] = useState(false);
   const [servicePodsError, setServicePodsError] = useState<string | null>(null);
-  const [selectedServicePod, setSelectedServicePod] = useState("");
+  const [selectedServicePods, setSelectedServicePods] = useState<string[]>([]);
   const [serviceMetrics, setServiceMetrics] = useState<StudioMetricsResponse | null>(null);
   const [serviceMetricsLoading, setServiceMetricsLoading] = useState(false);
   const [serviceMetricsError, setServiceMetricsError] = useState<string | null>(null);
@@ -512,7 +552,7 @@ export function ServiceDetailPage() {
 
   useEffect(() => {
     setServiceLogSource("");
-    setSelectedServicePod("");
+    setSelectedServicePods([]);
     setServiceLogWindowMode("auto");
     setServiceLogManualFrom("");
     setServiceLogManualTo("");
@@ -539,7 +579,7 @@ export function ServiceDetailPage() {
       void loadServicePods(service, { quiet: true });
     }, 10000);
     return () => window.clearInterval(interval);
-  }, [service?.service_id, service?.metrics_config, selectedServicePod]);
+  }, [service?.service_id, service?.metrics_config, selectedServicePods]);
 
   const activeServiceLogWindow = resolveWindow(serviceLogWindowMode, serviceLogManualFrom, serviceLogManualTo);
   const activeServiceMetricWindow = resolveWindow(
@@ -564,7 +604,7 @@ export function ServiceDetailPage() {
       return;
     }
     void loadServiceMetrics({ targetService: service, window: resolveWindow("1h", "", "") });
-    void loadPodMetrics({ targetService: service, window: resolveWindow("1h", "", ""), pod: "" });
+    void loadPodMetrics({ targetService: service, window: resolveWindow("1h", "", ""), pods: [] });
   }, [service?.service_id, service?.metrics_config]);
 
   useEffect(() => {
@@ -608,12 +648,12 @@ export function ServiceDetailPage() {
   async function loadServiceLogs({
     targetService = service,
     source = serviceLogSource,
-    pod = selectedServicePod,
+    pods = selectedServicePods,
     window = activeServiceLogWindow,
   }: {
     targetService?: ServiceRecord | null;
     source?: string;
-    pod?: string;
+    pods?: string[];
     window?: TimeWindow;
   } = {}) {
     if (!targetService) {
@@ -622,15 +662,33 @@ export function ServiceDetailPage() {
     setServiceLogsLoading(true);
     setServiceLogsError(null);
     try {
-      const payload = await fetchServiceLogs(targetService.service_id, {
-        query: serviceLogQuery,
-        level: serviceLogLevel,
-        source,
-        pod,
-        limit: parseLimit(serviceLogLimit, 20),
-        from: window.from,
-        to: window.to,
-      });
+      const limit = parseLimit(serviceLogLimit, 20);
+      const podFilters = pods.filter((pod) => pod.trim());
+      const payload = podFilters.length
+        ? mergeLogResponses(
+            await Promise.all(
+              podFilters.map((pod) =>
+                fetchServiceLogs(targetService.service_id, {
+                  query: serviceLogQuery,
+                  level: serviceLogLevel,
+                  source,
+                  pod,
+                  limit,
+                  from: window.from,
+                  to: window.to,
+                }),
+              ),
+            ),
+            limit,
+          )
+        : await fetchServiceLogs(targetService.service_id, {
+            query: serviceLogQuery,
+            level: serviceLogLevel,
+            source,
+            limit,
+            from: window.from,
+            to: window.to,
+          });
       setServiceLogs(payload);
     } catch (fetchError) {
       setServiceLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load service logs.");
@@ -652,10 +710,12 @@ export function ServiceDetailPage() {
     try {
       const payload = await fetchServicePods(targetService.service_id);
       setServicePods(payload);
-      if (selectedServicePod && !payload.pods.some((pod) => pod.name === selectedServicePod)) {
-        setSelectedServicePod("");
-        void loadServiceLogs({ targetService, pod: "" });
-        void loadPodMetrics({ targetService, pod: "" });
+      const availablePodNames = new Set(payload.pods.map((pod) => pod.name));
+      if (selectedServicePods.some((pod) => !availablePodNames.has(pod))) {
+        const nextPods = selectedServicePods.filter((pod) => availablePodNames.has(pod));
+        setSelectedServicePods(nextPods);
+        void loadServiceLogs({ targetService, pods: nextPods });
+        void loadPodMetrics({ targetService, pods: nextPods });
       }
     } catch (fetchError) {
       setServicePodsError(fetchError instanceof Error ? fetchError.message : "Unable to load service pods.");
@@ -698,12 +758,12 @@ export function ServiceDetailPage() {
   async function loadPodMetrics({
     targetService = service,
     window = activePodMetricWindow,
-    pod = selectedServicePod,
+    pods = selectedServicePods,
     mode = podMetricWindowMode,
   }: {
     targetService?: ServiceRecord | null;
     window?: TimeWindow;
-    pod?: string;
+    pods?: string[];
     mode?: TimeWindowMode;
   } = {}) {
     if (!targetService?.metrics_config) {
@@ -714,14 +774,26 @@ export function ServiceDetailPage() {
     setPodMetricsLoading(true);
     setPodMetricsError(null);
     try {
-      const payload = await fetchServiceMetrics(targetService.service_id, {
+      const podFilters = pods.filter((pod) => pod.trim());
+      const baseQuery = {
         from: window.from,
         to: window.to,
         step: metricStepSeconds(mode),
         groups: podMetricGroups,
-        pod,
         split_by_pod: true,
-      });
+      };
+      const payload = podFilters.length
+        ? mergeMetricResponses(
+            await Promise.all(
+              podFilters.map((pod) =>
+                fetchServiceMetrics(targetService.service_id, {
+                  ...baseQuery,
+                  pod,
+                }),
+              ),
+            ),
+          )
+        : await fetchServiceMetrics(targetService.service_id, baseQuery);
       setPodMetrics(payload);
     } catch (fetchError) {
       setPodMetrics(null);
@@ -1079,8 +1151,8 @@ export function ServiceDetailPage() {
           <div>
             <strong>Pod Metric Charts</strong>
             <p style={{ ...mutedTextStyle, margin: "4px 0 0" }}>
-              {selectedServicePod
-                ? `Filtered to ${selectedServicePod}.`
+              {selectedServicePods.length
+                ? `Filtered to ${selectedPodLabel(selectedServicePods)}.`
                 : "Showing every current pod matched by this service."}
             </p>
           </div>
@@ -1201,7 +1273,7 @@ export function ServiceDetailPage() {
 
       <SectionCard
         title="Service Pods"
-        subtitle="Current Kubernetes pods matched by this service's metrics selector; select a pod to scope service logs and metric charts."
+        subtitle="Current Kubernetes pods matched by this service's metrics selector; select one or more pods to scope service logs and metric charts, and click a selected pod again to remove it."
         action={
           <button type="button" onClick={() => void loadServicePods()} style={secondaryButtonStyle}>
             <StudioIcon name="refresh" />
@@ -1217,35 +1289,38 @@ export function ServiceDetailPage() {
         {service.metrics_config && !servicePodsLoading && !servicePodsError && !servicePods?.pods.length ? (
           <p style={mutedTextStyle}>No current pods matched this service selector.</p>
         ) : null}
-        {selectedServicePod ? (
+        {selectedServicePods.length ? (
           <div className="studio-action-row" style={{ marginBottom: 12 }}>
-            <span className="studio-inline-meta">Selected pod: {selectedServicePod}</span>
+            <span className="studio-inline-meta">Selected pods: {selectedServicePods.join(", ")}</span>
             <button
               type="button"
               onClick={() => {
-                setSelectedServicePod("");
-                void loadServiceLogs({ pod: "" });
-                void loadPodMetrics({ pod: "" });
+                setSelectedServicePods([]);
+                void loadServiceLogs({ pods: [] });
+                void loadPodMetrics({ pods: [] });
               }}
               style={secondaryButtonStyle}
             >
               <StudioIcon name="clear" />
-              Clear Pod Filter
+              Clear Pod Filters
             </button>
           </div>
         ) : null}
         {servicePods?.pods.length ? (
           <div className="studio-metrics-grid studio-metrics-grid--4">
             {servicePods.pods.map((pod) => {
-              const selected = selectedServicePod === pod.name;
+              const selected = selectedServicePods.includes(pod.name);
               return (
                 <button
                   key={`${pod.namespace}-${pod.name}`}
                   type="button"
                   onClick={() => {
-                    setSelectedServicePod(pod.name);
-                    void loadServiceLogs({ pod: pod.name });
-                    void loadPodMetrics({ pod: pod.name });
+                    const nextPods = selected
+                      ? selectedServicePods.filter((selectedPod) => selectedPod !== pod.name)
+                      : [...selectedServicePods, pod.name];
+                    setSelectedServicePods(nextPods);
+                    void loadServiceLogs({ pods: nextPods });
+                    void loadPodMetrics({ pods: nextPods });
                   }}
                   style={{
                     ...secondaryButtonStyle,
@@ -1418,8 +1493,8 @@ export function ServiceDetailPage() {
         <SectionCard
           title="Service Logs"
           subtitle={
-            selectedServicePod
-              ? `Service-scoped logs filtered to pod ${selectedServicePod}.`
+            selectedServicePods.length
+              ? `Service-scoped logs filtered to ${selectedPodLabel(selectedServicePods)}.`
               : "Service-scoped log queries remain separate from Relayna status and observations."
           }
           action={
