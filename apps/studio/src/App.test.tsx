@@ -447,7 +447,7 @@ function customPodLabelMetricsResponse() {
       {
         metric: "cpu_usage",
         unit: "cores",
-        labels: { kubernetes_pod_name: "payments-worker-prometheus", container: "worker" },
+        labels: { kubernetes_pod_name: "payments-worker-prometheus", container: "worker", phase: "Running" },
         points: [{ timestamp: "2026-04-08T10:05:00Z", value: 0.5 }],
       },
     ],
@@ -1145,7 +1145,7 @@ describe("App", () => {
     );
   });
 
-  it("renders current service pods and filters service logs by selected pod", async () => {
+  it("renders current service pods and filters logs and metric charts by selected pods", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
     services[0] = {
       ...services[0],
@@ -1193,20 +1193,112 @@ describe("App", () => {
 
     expect(await screen.findByText("Service Pods")).toBeInTheDocument();
     expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
-
-    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+    expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
 
     await waitFor(() => {
-      const matchingCall = fetchMock.mock.calls.find(([input]) => {
+      const matchingWorkerLogCall = fetchMock.mock.calls.find(([input]) => {
         const parsed = new URL(String(input), "http://studio.test");
         return (
           parsed.pathname === "/studio/services/payments-api/logs" &&
           parsed.searchParams.get("pod") === "payments-worker-def"
         );
       });
-      expect(matchingCall).toBeTruthy();
+      const matchingApiLogCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return parsed.pathname === "/studio/services/payments-api/logs" && parsed.searchParams.get("pod") === "payments-api-abc";
+      });
+      const matchingWorkerMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("pod") === "payments-worker-def" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      const matchingApiMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("pod") === "payments-api-abc" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      expect(matchingWorkerLogCall).toBeTruthy();
+      expect(matchingApiLogCall).toBeTruthy();
+      expect(matchingWorkerMetricCall).toBeTruthy();
+      expect(matchingApiMetricCall).toBeTruthy();
     });
-    expect(await screen.findByText("Selected pod: payments-worker-def")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /payments-api-abc/ }));
+    expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
+  });
+
+  it("keeps default all-pods selection when pod refresh discovers a new pod", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "kubernetes_pod_name",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let podRequestCount = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        podRequestCount += 1;
+        const pods = [
+          { name: "payments-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+          { name: "payments-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+        ];
+        if (podRequestCount > 1) {
+          pods.push({ name: "payments-worker-ghi", namespace: "prod", phase: "Running", labels: { app: "worker" } });
+        }
+        return jsonResponse({ service_id: "payments-api", count: pods.length, pods });
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Selected pods: payments-api-abc, payments-worker-def, payments-worker-ghi"),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      const matchingNewPodLogCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/logs" &&
+          parsed.searchParams.get("pod") === "payments-worker-ghi"
+        );
+      });
+      const matchingNewPodMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("pod") === "payments-worker-ghi" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      expect(matchingNewPodLogCall).toBeTruthy();
+      expect(matchingNewPodMetricCall).toBeTruthy();
+    });
   });
 
   it("uses the manual service log window override when provided", async () => {
@@ -1356,15 +1448,30 @@ describe("App", () => {
         return jsonResponse({ service_id: "payments-api", count: 0, pods: [] });
       }
       if (url.startsWith("/studio/services/payments-api/metrics") && method === "GET") {
-        return jsonResponse(metricsResponse(null));
+        const parsed = new URL(url, "http://studio.test");
+        if (parsed.searchParams.get("split_by_pod") === "true") {
+          return jsonResponse(metricsResponse(null));
+        }
+        return jsonResponse({
+          ...metricsResponse(null),
+          series: [
+            {
+              metric: "tasks_started_rate",
+              unit: "per_second",
+              labels: { service: "payments-api" },
+              points: [{ timestamp: "2026-04-08T10:05:00Z", value: 1.25 }],
+            },
+          ],
+        });
       }
       return baseImpl?.(input, init) ?? jsonResponse({});
     });
 
     render(<App />);
 
-    expect(await screen.findByText("Kubernetes Metrics")).toBeInTheDocument();
-    expect(await screen.findByText("0.750 cores")).toBeInTheDocument();
+    expect(await screen.findByText("Service Metrics")).toBeInTheDocument();
+    expect(await screen.findByText("Service Metrics Summary")).toBeInTheDocument();
+    expect(await screen.findByText("1.250/s")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service metrics window mode"), { target: { value: "manual" } });
     const from = isoToLocalDateTime("2026-04-08T09:45:00Z");
     const to = isoToLocalDateTime("2026-04-08T10:15:00Z");
@@ -1377,14 +1484,16 @@ describe("App", () => {
         return (
           parsed.pathname === "/studio/services/payments-api/metrics" &&
           parsed.searchParams.get("from") === new Date("2026-04-08T09:45:00Z").toISOString() &&
-          parsed.searchParams.get("to") === new Date("2026-04-08T10:15:00Z").toISOString()
+          parsed.searchParams.get("to") === new Date("2026-04-08T10:15:00Z").toISOString() &&
+          parsed.searchParams.getAll("group").includes("tasks_started_rate") &&
+          !parsed.searchParams.getAll("group").includes("cpu_usage")
         );
       });
       expect(matchingCall).toBeTruthy();
     });
   });
 
-  it("renders pod metrics graphs and applies pod and long-range filters", async () => {
+  it("renders pod metric charts and applies Service Pods and long-range filters", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
     services[0] = {
       ...services[0],
@@ -1423,9 +1532,21 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Pod Metrics")).toBeInTheDocument();
+    expect(await screen.findByText("Pod Metric Charts")).toBeInTheDocument();
+    await waitFor(() => {
+      const matchingDefaultCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("split_by_pod") === "true" &&
+          !parsed.searchParams.has("pod")
+        );
+      });
+      expect(matchingDefaultCall).toBeTruthy();
+    });
+    expect(screen.queryByLabelText("Pod metrics pod filter")).not.toBeInTheDocument();
     expect((await screen.findAllByText("payments-worker-def")).length).toBeGreaterThan(0);
-    fireEvent.change(screen.getByLabelText("Pod metrics pod filter"), { target: { value: "payments-worker-def" } });
+    fireEvent.click(screen.getByRole("button", { name: /payments-api-abc/ }));
     fireEvent.change(screen.getByLabelText("Pod metrics window mode"), { target: { value: "1w" } });
 
     await waitFor(() => {
@@ -1442,6 +1563,9 @@ describe("App", () => {
     });
     expect(screen.getAllByLabelText("Pod metric graph").length).toBeGreaterThan(0);
     expect(await screen.findByText("payments-worker-prometheus")).toBeInTheDocument();
+    const cpuLegend = screen.getByLabelText("Cpu Usage legend");
+    expect(within(cpuLegend).getByText("payments-worker-prometheus")).toBeInTheDocument();
+    expect(within(cpuLegend).queryByText("payments-worker-prometheus · Running")).not.toBeInTheDocument();
   });
 
   it("uses the manual service activity window override when provided", async () => {

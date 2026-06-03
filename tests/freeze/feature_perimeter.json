@@ -1,5 +1,5 @@
 {
-  "freeze_version": "v1.4.19",
+  "freeze_version": "v1.4.20",
   "features": {
     "api routes": ["tests/test_backpressure.py", "tests/test_capabilities_routes.py", "tests/test_fastapi_lifespan.py", "tests/test_metrics.py", "tests/test_service_event_feed.py", "tests/test_sse.py"],
     "consumer runtime": ["tests/test_consumer.py"],
