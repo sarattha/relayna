@@ -8,11 +8,18 @@ import re
 from collections.abc import Awaitable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from .logs import (
+    StudioLogConfigError,
+    StudioLogListResponse,
+    StudioLogProviderError,
+    StudioLogProviderNotConfiguredError,
+    StudioLogQuery,
+)
 from .registry import ServiceRecord, ServiceRegistryService
 
 if TYPE_CHECKING:
@@ -127,6 +134,7 @@ class StudioTaskSearchDocument(BaseModel):
     latest_ingested_at: str | None = None
     detail_path: str
     expires_at: str | None = None
+    source: Literal["loki_fallback"] | None = None
 
     @property
     def document_id(self) -> str:
@@ -219,6 +227,10 @@ class StudioSearchStore(Protocol):
     async def list_service_document_ids_for_filter(self, field: str, value: str) -> set[str]: ...
 
     async def list_service_document_ids_for_token(self, token: str) -> set[str]: ...
+
+
+class StudioTaskSearchLogQuery(Protocol):
+    async def query_service_logs(self, service_id: str, query: StudioLogQuery) -> StudioLogListResponse: ...
 
 
 class RedisStudioSearchStore:
@@ -359,6 +371,7 @@ class StudioSearchService(StudioSearchIndexer):
     store: StudioSearchStore
     task_index_ttl_seconds: int = 86400
     backfill_event_limit: int = 5000
+    log_query_service: StudioTaskSearchLogQuery | None = None
 
     async def initialize(self) -> None:
         if not await self.store.task_index_is_empty():
@@ -500,6 +513,10 @@ class StudioSearchService(StudioSearchIndexer):
             reverse=True,
         )
         page, next_cursor = _paginate_task_documents(filtered, limit=query.limit, cursor=query.cursor)
+        if not page:
+            fallback_items = await self._search_task_logs(query)
+            if fallback_items:
+                page, next_cursor = _paginate_task_documents(fallback_items, limit=query.limit, cursor=query.cursor)
         return StudioTaskSearchResponse(count=len(page), items=page, next_cursor=next_cursor)
 
     async def search_services(self, query: StudioServiceSearchQuery) -> StudioServiceSearchResponse:
@@ -565,6 +582,91 @@ class StudioSearchService(StudioSearchIndexer):
         for document_id in expired_ids:
             await self.store.delete_task_document(document_id)
         return items
+
+    async def _search_task_logs(self, query: StudioTaskSearchQuery) -> list[StudioTaskSearchDocument]:
+        if self.log_query_service is None or not _eligible_for_loki_fallback(query):
+            return []
+
+        services = await self.registry_service.list_services()
+        service_filter = _normalize_optional_string(query.service_id)
+        if service_filter is not None:
+            services = [service for service in services if service.service_id == service_filter]
+
+        documents_by_id: dict[str, StudioTaskSearchDocument] = {}
+        for service in services:
+            if service.log_config is None:
+                continue
+            logs = await self._query_loki_fallback_logs(service, query)
+            if logs is None:
+                continue
+            for entry in logs.items:
+                task_id = _normalize_optional_string(query.task_id) or _normalize_optional_string(entry.task_id)
+                if task_id is None:
+                    continue
+                document_id = _task_document_id(service.service_id, task_id)
+                timestamp = entry.timestamp
+                existing = documents_by_id.get(document_id)
+                correlation_id = (
+                    _normalize_optional_string(query.correlation_id)
+                    or _normalize_optional_string(entry.correlation_id)
+                    or (existing.correlation_id if existing is not None else None)
+                )
+                if existing is None:
+                    documents_by_id[document_id] = StudioTaskSearchDocument(
+                        service_id=service.service_id,
+                        service_name=service.name,
+                        environment=service.environment,
+                        task_id=task_id,
+                        correlation_id=correlation_id,
+                        first_seen_at=timestamp,
+                        last_seen_at=timestamp,
+                        latest_event_type="loki.log",
+                        latest_event_at=timestamp,
+                        detail_path=f"/studio/tasks/{service.service_id}/{task_id}",
+                        source="loki_fallback",
+                    )
+                    continue
+                documents_by_id[document_id] = existing.model_copy(
+                    update={
+                        "correlation_id": correlation_id,
+                        "first_seen_at": _earlier_iso(existing.first_seen_at, timestamp),
+                        "last_seen_at": _later_iso(existing.last_seen_at, timestamp),
+                        "latest_event_at": _later_iso(existing.latest_event_at, timestamp),
+                    }
+                )
+
+        items = list(documents_by_id.values())
+        items.sort(
+            key=lambda item: (
+                _parse_datetime(item.last_seen_at) or datetime.min.replace(tzinfo=UTC),
+                item.service_id,
+                item.task_id,
+            ),
+            reverse=True,
+        )
+        return items
+
+    async def _query_loki_fallback_logs(
+        self, service: ServiceRecord, query: StudioTaskSearchQuery
+    ) -> StudioLogListResponse | None:
+        if self.log_query_service is None:
+            return None
+        try:
+            log_query = StudioLogQuery(
+                task_id=query.task_id,
+                correlation_id=query.correlation_id,
+                from_time=query.from_timestamp,
+                to_time=query.to_timestamp,
+                limit=min(max(1, query.limit), 200),
+            )
+            return await self.log_query_service.query_service_logs(service.service_id, log_query)
+        except (
+            StudioLogConfigError,
+            StudioLogProviderError,
+            StudioLogProviderNotConfiguredError,
+            ValueError,
+        ):
+            return None
 
     async def _refresh_task_service_metadata(self, service: ServiceRecord) -> None:
         for document_id in await self.store.list_task_document_ids_for_service(service.service_id):
@@ -760,6 +862,18 @@ def _within_range(value: datetime | None, *, from_dt: datetime | None, to_dt: da
     if to_dt is not None and value > to_dt:
         return False
     return True
+
+
+def _eligible_for_loki_fallback(query: StudioTaskSearchQuery) -> bool:
+    has_task_id = _normalize_optional_string(query.task_id) is not None
+    has_correlation_id = _normalize_optional_string(query.correlation_id) is not None
+    if has_task_id == has_correlation_id:
+        return False
+    return (
+        _normalize_optional_string(query.status) is None
+        and _normalize_optional_string(query.stage) is None
+        and _normalize_optional_string(query.cursor) is None
+    )
 
 
 def _service_tokens(document: StudioServiceSearchDocument) -> set[str]:

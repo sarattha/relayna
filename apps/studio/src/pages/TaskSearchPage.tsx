@@ -159,6 +159,11 @@ export function TaskSearchPage() {
                 <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                   last seen: {item.last_seen_at ? new Date(item.last_seen_at).toLocaleString() : "unknown"}
                 </span>
+                {item.source === "loki_fallback" ? (
+                  <p style={{ ...mutedTextStyle, margin: 0 }}>
+                    Task not found in the recent index — result sourced from Loki log metadata.
+                  </p>
+                ) : null}
                 <Link to={`/tasks/${encodeURIComponent(item.service_id)}/${encodeURIComponent(item.task_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none", width: "fit-content" }}>
                   <StudioIcon name="open" />
                   Open Task Detail

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { fetchServiceEvents, fetchServiceLogs, fetchServiceMetrics, requestJson } from "../api";
@@ -364,6 +364,9 @@ function normalizeSelectedPods(pods: string[], availablePods: ServicePod[], prev
   if (wasAllPodsSelected) {
     return availableNames;
   }
+  if (!pods.length) {
+    return [];
+  }
   const availableSet = new Set(availableNames);
   const filtered = pods.filter((pod) => availableSet.has(pod));
   return filtered.length ? filtered : availableNames;
@@ -539,6 +542,8 @@ export function ServiceDetailPage() {
   const [servicePodsLoading, setServicePodsLoading] = useState(false);
   const [servicePodsError, setServicePodsError] = useState<string | null>(null);
   const [selectedServicePods, setSelectedServicePods] = useState<string[]>([]);
+  const servicePodsRef = useRef<ServicePodListResponse | null>(null);
+  const selectedServicePodsRef = useRef<string[]>([]);
   const [serviceMetrics, setServiceMetrics] = useState<StudioMetricsResponse | null>(null);
   const [serviceMetricsLoading, setServiceMetricsLoading] = useState(false);
   const [serviceMetricsError, setServiceMetricsError] = useState<string | null>(null);
@@ -555,6 +560,16 @@ export function ServiceDetailPage() {
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
   const [confirmationPending, setConfirmationPending] = useState(false);
 
+  function updateServicePods(nextPods: ServicePodListResponse | null) {
+    servicePodsRef.current = nextPods;
+    setServicePods(nextPods);
+  }
+
+  function updateSelectedServicePods(nextPods: string[]) {
+    selectedServicePodsRef.current = nextPods;
+    setSelectedServicePods(nextPods);
+  }
+
   useEffect(() => {
     if (!serviceId) {
       return;
@@ -569,7 +584,7 @@ export function ServiceDetailPage() {
 
   useEffect(() => {
     setServiceLogSource("");
-    setSelectedServicePods([]);
+    updateSelectedServicePods([]);
     setServiceLogWindowMode("auto");
     setServiceLogManualFrom("");
     setServiceLogManualTo("");
@@ -587,7 +602,7 @@ export function ServiceDetailPage() {
 
   useEffect(() => {
     if (!service?.metrics_config) {
-      setServicePods(null);
+      updateServicePods(null);
       setServicePodsError(service ? "No metrics provider configured for this service." : null);
       return;
     }
@@ -596,7 +611,7 @@ export function ServiceDetailPage() {
       void loadServicePods(service, { quiet: true });
     }, 10000);
     return () => window.clearInterval(interval);
-  }, [service?.service_id, service?.metrics_config, selectedServicePods]);
+  }, [service?.service_id, service?.metrics_config]);
 
   const activeServiceLogWindow = resolveWindow(serviceLogWindowMode, serviceLogManualFrom, serviceLogManualTo);
   const activeServiceMetricWindow = resolveWindow(
@@ -716,7 +731,7 @@ export function ServiceDetailPage() {
 
   async function loadServicePods(targetService = service, options: { quiet?: boolean } = {}) {
     if (!targetService?.metrics_config) {
-      setServicePods(null);
+      updateServicePods(null);
       setServicePodsError("No metrics provider configured for this service.");
       return;
     }
@@ -726,10 +741,12 @@ export function ServiceDetailPage() {
     setServicePodsError(null);
     try {
       const payload = await fetchServicePods(targetService.service_id);
-      setServicePods(payload);
-      const nextPods = normalizeSelectedPods(selectedServicePods, payload.pods, servicePods?.pods ?? []);
-      if (nextPods.join("\u0000") !== selectedServicePods.join("\u0000")) {
-        setSelectedServicePods(nextPods);
+      const currentSelectedPods = selectedServicePodsRef.current;
+      const previousServicePods = servicePodsRef.current;
+      updateServicePods(payload);
+      const nextPods = normalizeSelectedPods(currentSelectedPods, payload.pods, previousServicePods?.pods ?? []);
+      if (nextPods.join("\u0000") !== currentSelectedPods.join("\u0000")) {
+        updateSelectedServicePods(nextPods);
         void loadServiceLogs({ targetService, pods: nextPods });
         void loadPodMetrics({ targetService, pods: nextPods });
       }
@@ -1307,12 +1324,14 @@ export function ServiceDetailPage() {
         ) : null}
         {servicePods?.pods.length ? (
           <div className="studio-action-row" style={{ marginBottom: 12 }}>
-            <span className="studio-inline-meta">Selected pods: {selectedServicePods.join(", ")}</span>
+            <span className="studio-inline-meta">
+              Selected pods: {selectedServicePods.length ? selectedServicePods.join(", ") : "none"}
+            </span>
             <button
               type="button"
               onClick={() => {
                 const allPods = servicePods.pods.map((pod) => pod.name);
-                setSelectedServicePods(allPods);
+                updateSelectedServicePods(allPods);
                 void loadServiceLogs({ pods: allPods });
                 void loadPodMetrics({ pods: allPods });
               }}
@@ -1320,6 +1339,19 @@ export function ServiceDetailPage() {
             >
               <StudioIcon name="clear" />
               Select All Pods
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                updateSelectedServicePods([]);
+                void loadServiceLogs({ pods: [] });
+                void loadPodMetrics({ pods: [] });
+              }}
+              style={secondaryButtonStyle}
+              disabled={!selectedServicePods.length}
+            >
+              <StudioIcon name="clear" />
+              Deselect All Pods
             </button>
           </div>
         ) : null}
@@ -1336,7 +1368,7 @@ export function ServiceDetailPage() {
                       ? selectedServicePods.filter((selectedPod) => selectedPod !== pod.name)
                       : [...selectedServicePods, pod.name];
                     const nextPods = normalizeSelectedPods(rawNextPods, servicePods.pods);
-                    setSelectedServicePods(nextPods);
+                    updateSelectedServicePods(nextPods);
                     void loadServiceLogs({ pods: nextPods });
                     void loadPodMetrics({ pods: nextPods });
                   }}

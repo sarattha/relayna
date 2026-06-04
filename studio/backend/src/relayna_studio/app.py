@@ -210,6 +210,7 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 providers={"loki": LokiLogProvider(http_client=http_client, outbound_policy=outbound_policy)},
             )
+            search_service.log_query_service = log_query_service
             metrics_query_service = StudioMetricsQueryService(
                 registry_service=registry_service,
                 providers={

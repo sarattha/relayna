@@ -50,7 +50,7 @@ class LokiLogConfig(BaseModel):
     task_id_label: str | None = None
     correlation_id_label: str | None = None
     level_label: str | None = None
-    task_match_mode: Literal["label", "contains", "regex"] = "label"
+    task_match_mode: Literal["label", "contains", "regex", "structured_metadata"] = "label"
     task_match_template: str | None = None
 
     @field_validator("base_url", mode="before")

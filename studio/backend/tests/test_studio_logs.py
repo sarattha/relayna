@@ -361,6 +361,44 @@ def test_loki_provider_uses_regex_task_matching() -> None:
     assert observed_query["query"] == '{app="payments-api",namespace="prod"} |~ "checker_(?:task-123)"'
 
 
+def test_loki_provider_uses_structured_metadata_task_matching() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config(task_match_mode="structured_metadata")),
+            config=make_log_config(task_match_mode="structured_metadata"),
+            query=StudioLogQuery(task_id="task-123", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == '{app="payments-api",namespace="prod"} | task_id="task-123"'
+
+
+def test_loki_provider_uses_default_structured_metadata_task_key_without_task_label() -> None:
+    observed_query: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed_query["query"] = request.url.params["query"]
+        return httpx.Response(200, json=loki_success_response())
+
+    provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+    asyncio.run(
+        provider.query_logs(
+            service=make_record(log_config=make_log_config(task_id_label=None, task_match_mode="structured_metadata")),
+            config=make_log_config(task_id_label=None, task_match_mode="structured_metadata"),
+            query=StudioLogQuery(task_id="task-123", limit=10),
+        )
+    )
+
+    assert observed_query["query"] == '{app="payments-api",namespace="prod"} | task_id="task-123"'
+
+
 def test_loki_provider_omits_missing_task_and_correlation_label_filters() -> None:
     observed_query: dict[str, str] = {}
 

@@ -280,8 +280,11 @@ class LokiLogProvider:
         expression = f"{{{selector}}}"
         task_filter = self._build_task_filter(config=config, query=query)
         if task_filter is not None:
-            operator, rendered_filter = task_filter
-            expression = f'{expression} {operator} "{_escape_logql_string(rendered_filter)}"'
+            operator, rendered_filter, filter_key = task_filter
+            if filter_key is None:
+                expression = f'{expression} {operator} "{_escape_logql_string(rendered_filter)}"'
+            else:
+                expression = f'{expression} {operator} {filter_key}="{_escape_logql_string(rendered_filter)}"'
         if query.query:
             expression = f'{expression} |= "{_escape_logql_string(query.query)}"'
         return expression
@@ -312,19 +315,21 @@ class LokiLogProvider:
         *,
         config: LokiLogConfig,
         query: StudioLogQuery,
-    ) -> tuple[str, str] | None:
+    ) -> tuple[str, str, str | None] | None:
         if not query.task_id:
             return None
         if config.task_match_mode == "label":
             if config.task_id_label:
                 return None
             return None
+        if config.task_match_mode == "structured_metadata":
+            return ("|", query.task_id, config.task_id_label or "task_id")
         template = config.task_match_template or "{task_id}"
         rendered_filter = template.replace("{task_id}", query.task_id)
         if config.task_match_mode == "contains":
-            return ("|=", rendered_filter)
+            return ("|=", rendered_filter, None)
         if config.task_match_mode == "regex":
-            return ("|~", rendered_filter)
+            return ("|~", rendered_filter, None)
         raise StudioLogConfigError(f"Unsupported task_match_mode '{config.task_match_mode}'.")
 
     def _normalize_response(
