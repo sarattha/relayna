@@ -27,7 +27,6 @@ from relayna_studio.search import (
     StudioSearchService,
     StudioServiceSearchQuery,
     StudioTaskSearchQuery,
-    _encode_cursor,
     _later_iso,
 )
 
@@ -465,6 +464,66 @@ def test_task_search_falls_back_to_loki_metadata_for_correlation_id_when_task_la
     asyncio.run(scenario())
 
 
+def test_task_search_loki_fallback_paginates_with_next_cursor() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        registry = ServiceRegistryService(store=RedisServiceRegistryStore(redis))
+        log_query_service = FakeTaskLogQueryService(
+            responses={
+                "billing-api": StudioLogListResponse(
+                    count=1,
+                    items=[
+                        StudioLogEntry(
+                            service_id="billing-api",
+                            task_id="task-456",
+                            correlation_id="corr-123",
+                            timestamp="2026-04-09T12:00:00Z",
+                            level="info",
+                            source="worker",
+                            message="task completed",
+                        )
+                    ],
+                ),
+                "payments-api": StudioLogListResponse(
+                    count=1,
+                    items=[
+                        StudioLogEntry(
+                            service_id="payments-api",
+                            task_id="task-123",
+                            correlation_id="corr-123",
+                            timestamp="2026-04-09T11:00:00Z",
+                            level="info",
+                            source="worker",
+                            message="task running",
+                        )
+                    ],
+                ),
+            }
+        )
+        search_service = StudioSearchService(
+            registry_service=registry,
+            event_store=RedisStudioEventStore(redis, prefix="studio:events", ttl_seconds=60, history_maxlen=20),
+            store=RedisStudioSearchStore(redis, prefix="studio:search"),
+            task_index_ttl_seconds=600,
+            log_query_service=log_query_service,
+        )
+        await _create_service(registry, "billing-api", name="Billing API", log_config=_make_log_config())
+        await _create_service(registry, "payments-api", log_config=_make_log_config())
+
+        first_page = await search_service.search_tasks(StudioTaskSearchQuery(correlation_id="corr-123", limit=1))
+        second_page = await search_service.search_tasks(
+            StudioTaskSearchQuery(correlation_id="corr-123", limit=1, cursor=first_page.next_cursor)
+        )
+
+        assert [item.service_id for item in first_page.items] == ["billing-api"]
+        assert first_page.next_cursor is not None
+        assert [item.service_id for item in second_page.items] == ["payments-api"]
+        assert second_page.next_cursor is None
+        assert len(log_query_service.calls) == 4
+
+    asyncio.run(scenario())
+
+
 def test_task_search_skips_loki_fallback_when_redis_returns_a_match() -> None:
     async def scenario() -> None:
         redis = FakeRedis()
@@ -530,12 +589,6 @@ def test_task_search_skips_loki_fallback_when_redis_returns_a_match() -> None:
         StudioTaskSearchQuery(task_id="task-123", correlation_id="corr-123"),
         StudioTaskSearchQuery(task_id="task-123", status="completed"),
         StudioTaskSearchQuery(task_id="task-123", stage="authorize"),
-        StudioTaskSearchQuery(
-            task_id="task-123",
-            cursor=_encode_cursor(
-                {"last_seen_at": "2026-04-09T11:00:00Z", "service_id": "payments-api", "task_id": "task-123"}
-            ),
-        ),
     ],
 )
 def test_task_search_only_uses_loki_fallback_for_single_identifier_searches(query: StudioTaskSearchQuery) -> None:

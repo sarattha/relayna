@@ -869,11 +869,7 @@ def _eligible_for_loki_fallback(query: StudioTaskSearchQuery) -> bool:
     has_correlation_id = _normalize_optional_string(query.correlation_id) is not None
     if has_task_id == has_correlation_id:
         return False
-    return (
-        _normalize_optional_string(query.status) is None
-        and _normalize_optional_string(query.stage) is None
-        and _normalize_optional_string(query.cursor) is None
-    )
+    return _normalize_optional_string(query.status) is None and _normalize_optional_string(query.stage) is None
 
 
 def _service_tokens(document: StudioServiceSearchDocument) -> set[str]:
