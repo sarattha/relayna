@@ -1,13 +1,13 @@
 ---
 name: production-freeze-guard
-description: Use before adding features or changing public SDK, Studio backend, Studio frontend API/type, route, schema, configuration, persisted data, or wire behavior after the Relayna production freeze. Enforces the strict v1.4.11 freeze perimeter and manifest update rules.
+description: Use before adding features or changing public SDK, Studio backend, Studio frontend API/type, route, schema, configuration, persisted data, or wire behavior after the Relayna production freeze. Enforces the strict v1.4.21 freeze perimeter and manifest update rules.
 ---
 
 # Production Freeze Guard
 
 ## Purpose
 
-Relayna `v1.4.11` is the production freeze boundary. Use this skill before
+Relayna `v1.4.21` is the production freeze boundary. Use this skill before
 feature work, public behavior changes, route/schema changes, exported API
 changes, configuration changes, persisted data changes, or wire protocol
 changes.
@@ -30,7 +30,7 @@ perimeter change.
 
 2. If the change touches runtime behavior or a public contract, use
    `$implementation-strategy` before editing code. Record the compatibility
-   boundary as `v1.4.11`.
+   boundary as `v1.4.21`.
 
 3. Check the freeze manifests and tests:
    - SDK: `tests/freeze/` and `tests/test_production_freeze_*.py`.

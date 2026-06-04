@@ -535,7 +535,11 @@ export function ServicesPage() {
                     onChange={(event) =>
                       setDraft((current) => ({
                         ...current,
-                        log_task_match_mode: event.target.value as "label" | "contains" | "regex",
+                        log_task_match_mode: event.target.value as
+                          | "label"
+                          | "contains"
+                          | "regex"
+                          | "structured_metadata",
                       }))
                     }
                     style={inputStyle}
@@ -543,6 +547,7 @@ export function ServicesPage() {
                     <option value="label">label</option>
                     <option value="contains">contains</option>
                     <option value="regex">regex</option>
+                    <option value="structured_metadata">structured_metadata</option>
                   </select>
                 </label>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>

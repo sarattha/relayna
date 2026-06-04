@@ -62,7 +62,7 @@ export type ServiceLogConfig = {
   task_id_label?: string | null;
   correlation_id_label?: string | null;
   level_label?: string | null;
-  task_match_mode?: "label" | "contains" | "regex";
+  task_match_mode?: "label" | "contains" | "regex" | "structured_metadata";
   task_match_template?: string | null;
 };
 
@@ -147,7 +147,7 @@ export type ServiceDraft = {
   log_task_id_label: string;
   log_correlation_id_label: string;
   log_level_label: string;
-  log_task_match_mode: "label" | "contains" | "regex";
+  log_task_match_mode: "label" | "contains" | "regex" | "structured_metadata";
   log_task_match_template: string;
   metrics_provider: "" | "prometheus";
   metrics_base_url: string;
@@ -456,6 +456,7 @@ export type StudioTaskSearchItem = {
   latest_event_at?: string | null;
   latest_ingested_at?: string | null;
   detail_path: string;
+  source?: "loki_fallback" | null;
 };
 
 export type StudioTaskSearchResponse = {

@@ -43,7 +43,7 @@ external state boundary, or the user explicitly asks for a migration path.
 
 #### `$production-freeze-guard`
 
-Relayna `v1.4.11` is the strict production freeze boundary. Before adding new
+Relayna `v1.4.21` is the strict production freeze boundary. Before adding new
 features or changing SDK public exports, exported function/class signatures,
 external configuration, persisted schemas, wire protocols, task/status/workflow
 contracts, route response shapes, Studio backend behavior, or Studio frontend
@@ -158,7 +158,7 @@ compatibility or add migration coverage when a change crosses a released SDK,
 Studio API, persisted data, or wire-protocol boundary.
 
 Use `$production-freeze-guard` first for feature work or public-surface changes.
-The current frozen production boundary is `v1.4.11`, and the default answer to
+The current frozen production boundary is `v1.4.21`, and the default answer to
 new public API or exported function additions is no unless explicitly approved.
 
 ## Project Structure Guide

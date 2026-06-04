@@ -440,6 +440,15 @@ function metricsResponse(taskId?: string | null) {
   };
 }
 
+async function flushRenderPromises() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 function customPodLabelMetricsResponse() {
   return {
     ...metricsResponse(null),
@@ -760,6 +769,28 @@ describe("App", () => {
               latest_event_at: "2026-04-08T10:05:00Z",
               latest_ingested_at: "2026-04-08T10:05:01Z",
               detail_path: "/studio/tasks/payments-api/task-123",
+            },
+          ],
+          next_cursor: null,
+        });
+      }
+      if (url === "/studio/tasks/search?task_id=task-loki&limit=50" && method === "GET") {
+        return jsonResponse({
+          count: 1,
+          items: [
+            {
+              service_id: "payments-api",
+              service_name: "Payments API",
+              environment: "prod",
+              task_id: "task-loki",
+              correlation_id: "corr-loki",
+              first_seen_at: "2026-04-08T10:00:00Z",
+              last_seen_at: "2026-04-08T10:05:00Z",
+              latest_event_type: "loki.log",
+              latest_event_at: "2026-04-08T10:05:00Z",
+              latest_ingested_at: null,
+              detail_path: "/studio/tasks/payments-api/task-loki",
+              source: "loki_fallback",
             },
           ],
           next_cursor: null,
@@ -1235,11 +1266,37 @@ describe("App", () => {
       expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /payments-api-abc/ }));
+    const callsBeforeDeselectAll = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Deselect All Pods" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Selected pods: none")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Deselect All Pods" })).toBeDisabled();
+    await waitFor(() => {
+      const callsAfterDeselectAll = fetchMock.mock.calls.slice(callsBeforeDeselectAll);
+      const matchingUnfilteredLogCall = callsAfterDeselectAll.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return parsed.pathname === "/studio/services/payments-api/logs" && !parsed.searchParams.has("pod");
+      });
+      const matchingUnfilteredMetricCall = callsAfterDeselectAll.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/payments-api/metrics" &&
+          parsed.searchParams.get("split_by_pod") === "true" &&
+          !parsed.searchParams.has("pod")
+        );
+      });
+      expect(matchingUnfilteredLogCall).toBeTruthy();
+      expect(matchingUnfilteredMetricCall).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Select All Pods" }));
     expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
   });
 
   it("keeps default all-pods selection when pod refresh discovers a new pod", async () => {
+    vi.useFakeTimers();
     window.history.replaceState({}, "", "/services/payments-api");
     services[0] = {
       ...services[0],
@@ -1277,28 +1334,85 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(
-      await screen.findByText("Selected pods: payments-api-abc, payments-worker-def, payments-worker-ghi"),
-    ).toBeInTheDocument();
-    await waitFor(() => {
-      const matchingNewPodLogCall = fetchMock.mock.calls.find(([input]) => {
-        const parsed = new URL(String(input), "http://studio.test");
-        return (
-          parsed.pathname === "/studio/services/payments-api/logs" &&
-          parsed.searchParams.get("pod") === "payments-worker-ghi"
-        );
-      });
-      const matchingNewPodMetricCall = fetchMock.mock.calls.find(([input]) => {
-        const parsed = new URL(String(input), "http://studio.test");
-        return (
-          parsed.pathname === "/studio/services/payments-api/metrics" &&
-          parsed.searchParams.get("pod") === "payments-worker-ghi" &&
-          parsed.searchParams.get("split_by_pod") === "true"
-        );
-      });
-      expect(matchingNewPodLogCall).toBeTruthy();
-      expect(matchingNewPodMetricCall).toBeTruthy();
+    await flushRenderPromises();
+    expect(screen.getByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
     });
+
+    await flushRenderPromises();
+    expect(screen.getByText("Selected pods: payments-api-abc, payments-worker-def, payments-worker-ghi")).toBeInTheDocument();
+    const matchingNewPodLogCall = fetchMock.mock.calls.find(([input]) => {
+      const parsed = new URL(String(input), "http://studio.test");
+      return (
+        parsed.pathname === "/studio/services/payments-api/logs" &&
+        parsed.searchParams.get("pod") === "payments-worker-ghi"
+      );
+    });
+    const matchingNewPodMetricCall = fetchMock.mock.calls.find(([input]) => {
+      const parsed = new URL(String(input), "http://studio.test");
+      return (
+        parsed.pathname === "/studio/services/payments-api/metrics" &&
+        parsed.searchParams.get("pod") === "payments-worker-ghi" &&
+        parsed.searchParams.get("split_by_pod") === "true"
+      );
+    });
+    expect(matchingNewPodLogCall).toBeTruthy();
+    expect(matchingNewPodMetricCall).toBeTruthy();
+  });
+
+  it("preserves manual pod selection across background pod refreshes", async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "kubernetes_pod_name",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let podRequestCount = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        podRequestCount += 1;
+        const pods = [
+          { name: "payments-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+          { name: "payments-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+        ];
+        if (podRequestCount > 1) {
+          pods.push({ name: "payments-worker-ghi", namespace: "prod", phase: "Running", labels: { app: "worker" } });
+        }
+        return jsonResponse({ service_id: "payments-api", count: pods.length, pods });
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    await flushRenderPromises();
+    expect(screen.getByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+    expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    await flushRenderPromises();
+    expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+    expect(screen.queryByText("Selected pods: payments-api-abc, payments-worker-def, payments-worker-ghi")).not.toBeInTheDocument();
   });
 
   it("uses the manual service log window override when provided", async () => {
@@ -2020,6 +2134,23 @@ describe("App", () => {
     expect(await screen.findByText(/Matches:/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Task Detail" })).toBeInTheDocument();
     expect(screen.getByText(/correlation=corr-123/)).toBeInTheDocument();
+  });
+
+  it("renders the Loki fallback notice for task search results", async () => {
+    window.history.replaceState({}, "", "/tasks/search");
+
+    render(<App />);
+
+    fireEvent.change(await screen.findByPlaceholderText("task_id"), { target: { value: "task-loki" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+
+    expect(
+      await screen.findByText("Task not found in the recent index — result sourced from Loki log metadata."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Task Detail" })).toHaveAttribute(
+      "href",
+      "/tasks/payments-api/task-loki",
+    );
   });
 
   it("renders the direct task detail route with graph, timeline, logs, joins, and SSE cleanup", async () => {

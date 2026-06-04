@@ -300,6 +300,8 @@ Field-by-field guidance:
   - `"label"` when `task_id` exists as a Loki label
   - `"contains"` when the task ID appears as plain text in the log line
   - `"regex"` when task matching requires a structured log pattern
+  - `"structured_metadata"` when `task_id` is Loki 3.x structured metadata and
+    should be matched with a LogQL post-filter
 - `task_match_template`
   - optional template rendered with `{task_id}`
   - default behavior is effectively the raw task id when omitted
@@ -318,6 +320,8 @@ How the backend turns that config into Loki queries:
   - `{instance=~"default/checker-worker-abc123:.*",namespace="default",service="checker-service"}`
 - task page, task ID inside line text:
   - `{namespace="default",service="checker-service"} |= "checker_endjdbdgsjmaksdhdsdsdd"`
+- task page, task ID in Loki structured metadata:
+  - `{namespace="default",service="checker-service"} | task_id="checker_endjdbdgsjmaksdhdsdsdd"`
 - task page, bounded to a lifecycle window:
   - same query plus Loki `start` and `end` derived from the task timeline or
     manual operator overrides
@@ -332,8 +336,10 @@ Important operational behavior:
   Loki entries remain queryable until Loki retention expires.
 - task pages now pass optional `from` and `to` values to the backend, which the
   Loki provider maps to `start` and `end`
-- when `task_match_mode` is `"contains"` or `"regex"`, Studio does not require
-  `task_id_label`
+- when `task_match_mode` is `"contains"`, `"regex"`, or
+  `"structured_metadata"`, Studio does not require `task_id_label`; structured
+  metadata matching uses `task_id_label` as the metadata key when set and
+  otherwise defaults to `task_id`
 
 ### Prometheus `metrics_config` for AKS service/task views
 
