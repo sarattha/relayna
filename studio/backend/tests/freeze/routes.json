@@ -1,5 +1,5 @@
 {
-  "freeze_version": "v1.4.20",
+  "freeze_version": "v1.4.21",
   "route_declarations": [
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "post", "path_expression": "f'{prefix}/ingest/events'"},
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/events'"},

@@ -452,7 +452,7 @@ Install application-owned tracing dependencies in the service image:
 ```toml
 [project]
 dependencies = [
-  "relayna>=1.4.20",
+  "relayna>=1.4.21",
   "opentelemetry-sdk>=1.28.0",
   "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
   "structlog>=24.0.0",

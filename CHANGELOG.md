@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.21 - 2026-06-04
+
+### Added
+
+- Added `task_match_mode: "structured_metadata"` for Studio Loki log
+  configuration so task-scoped log queries can match Loki 3.x structured
+  metadata with a post-filter instead of requiring `task_id` as an indexed
+  stream label.
+- Added a Studio Task Search Loki fallback for single `task_id` or
+  `correlation_id` lookups when the Redis task search index has no retained
+  match, returning non-persistent `source: "loki_fallback"` task search
+  results that still route into Task Detail.
+- Added a Deselect All Pods action to the Studio Service Pods panel.
+
+### Fixed
+
+- Preserved user-selected Service Pods subsets across the background pod
+  refresh interval by removing stale interval closures from the selection
+  normalization path.
+- Updated the Studio frontend React Router lockfile entries to patched
+  `7.16.0` releases so the security hardening npm audit check passes.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.21`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.21`.
+- Moved SDK, Studio backend, and Studio frontend production freeze manifests to
+  the `v1.4.21` perimeter.
+
 ## 1.4.20 - 2026-06-03
 
 ### Added
