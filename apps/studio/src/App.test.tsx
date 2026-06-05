@@ -1521,7 +1521,7 @@ describe("App", () => {
     expect(screen.queryByText("Selected pods: none")).not.toBeInTheDocument();
   });
 
-  it("preserves manual pod selection when a pod refresh temporarily returns no pods", async () => {
+  it("preserves manual pod selection when repeated pod refreshes temporarily return no pods", async () => {
     vi.useFakeTimers();
     window.history.replaceState({}, "", "/services/payments-api");
     services[0] = {
@@ -1546,7 +1546,7 @@ describe("App", () => {
       const method = init?.method || "GET";
       if (url === "/studio/services/payments-api/pods" && method === "GET") {
         podRequestCount += 1;
-        if (podRequestCount === 2) {
+        if (podRequestCount === 2 || podRequestCount === 3) {
           return jsonResponse({ service_id: "payments-api", count: 0, pods: [] });
         }
         return jsonResponse({
@@ -1567,6 +1567,14 @@ describe("App", () => {
     expect(screen.getByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
     expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    await flushRenderPromises();
+    expect(screen.getByText("No current pods matched this service selector.")).toBeInTheDocument();
+    expect(screen.queryByText("Selected pods: none")).not.toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);

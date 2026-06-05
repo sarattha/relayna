@@ -572,6 +572,7 @@ export function ServiceDetailPage() {
   const [servicePodsError, setServicePodsError] = useState<string | null>(null);
   const [selectedServicePods, setSelectedServicePods] = useState<string[]>([]);
   const servicePodsRef = useRef<ServicePodListResponse | null>(null);
+  const lastNonEmptyServicePodsRef = useRef<ServicePodListResponse | null>(null);
   const selectedServicePodsRef = useRef<string[]>([]);
   const [serviceMetrics, setServiceMetrics] = useState<StudioMetricsResponse | null>(null);
   const [serviceMetricsLoading, setServiceMetricsLoading] = useState(false);
@@ -591,6 +592,11 @@ export function ServiceDetailPage() {
 
   function updateServicePods(nextPods: ServicePodListResponse | null) {
     servicePodsRef.current = nextPods;
+    if (nextPods === null) {
+      lastNonEmptyServicePodsRef.current = null;
+    } else if (nextPods.pods.length) {
+      lastNonEmptyServicePodsRef.current = nextPods;
+    }
     setServicePods(nextPods);
   }
 
@@ -776,8 +782,14 @@ export function ServiceDetailPage() {
       const payload = await fetchServicePods(targetService.service_id);
       const currentSelectedPods = selectedServicePodsRef.current;
       const previousServicePods = servicePodsRef.current;
-      const previousAvailablePods =
+      const lastNonEmptyServicePods = lastNonEmptyServicePodsRef.current;
+      const previousVisiblePods =
         previousServicePods?.service_id === targetService.service_id ? previousServicePods.pods : [];
+      const previousAvailablePods = previousVisiblePods.length
+        ? previousVisiblePods
+        : lastNonEmptyServicePods?.service_id === targetService.service_id
+          ? lastNonEmptyServicePods.pods
+          : [];
       updateServicePods(payload);
       if (!payload.pods.length && previousAvailablePods.length) {
         setPodMetrics(emptyMetricsResponse(targetService, activePodMetricWindow));
@@ -785,7 +797,7 @@ export function ServiceDetailPage() {
       }
       const nextPods = normalizeSelectedPods(currentSelectedPods, payload.pods, previousAvailablePods);
       const selectionChanged = nextPods.join("\u0000") !== currentSelectedPods.join("\u0000");
-      const podsRestored = !previousAvailablePods.length && payload.pods.length > 0 && nextPods.length > 0;
+      const podsRestored = !previousVisiblePods.length && payload.pods.length > 0 && nextPods.length > 0;
       if (selectionChanged || podsRestored) {
         updateSelectedServicePods(nextPods);
         void loadServiceLogs({ targetService, pods: nextPods });
