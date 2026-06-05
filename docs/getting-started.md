@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.22/relayna-1.4.22-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.23/relayna-1.4.23-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.22/relayna-1.4.22.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.23/relayna-1.4.23.tar.gz
 ```
 
 For local development in this repository:
@@ -2338,6 +2338,10 @@ That means:
   instead of requiring a Loki `task_id` label
 - if your service emits JSON logs, Studio pretty-prints parseable objects and
   arrays in both log panels and falls back to plain-text rendering for the rest
+- Task Search can also fall back to Loki for a single task or correlation
+  lookup. When Loki returns JSON log lines, Studio can derive the fallback
+  result's `task_id` and `correlation_id` from the log body without requiring
+  those fields as Loki labels.
 
 For metric panels, Studio reads `metrics_config` from the same registered
 service record and queries Prometheus through the Studio backend:

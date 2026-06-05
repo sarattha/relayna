@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.22/relayna-1.4.22-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.23/relayna-1.4.23-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.22/relayna-1.4.22.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.23/relayna-1.4.23.tar.gz
 ```
 
 For local development in this repository:
@@ -232,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.22`, and the backend requires `relayna>=1.4.22`.
+release version is `1.4.23`, and the backend requires `relayna>=1.4.23`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -604,6 +604,10 @@ Operator guidance:
 - for Loki-backed services, prefer JSON log output such as `structlog` with a
   JSON renderer so Studio can pretty-print structured log objects and arrays
   while still falling back to plain text for legacy log lines
+- Task Search also uses the Loki fallback for single `task_id` or
+  `correlation_id` lookups when the retained Redis index has no match. With
+  JSON log lines, fallback results can derive `task_id` and `correlation_id`
+  from the log body even when those fields are not Loki labels.
 - Studio pull-sync is the default event ingestion path; direct push ingestion
   requires `RELAYNA_STUDIO_PUSH_INGEST_ENABLED=true`
 

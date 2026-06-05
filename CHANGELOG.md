@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.4.22 - 2026-06-05
+## 1.4.23 - 2026-06-05
 
 ### Fixed
 
@@ -15,12 +15,14 @@ All notable changes to this project will be documented in this file.
   responses from the metrics provider.
 - Prevented empty Service Pods selections and stale pod lists from carrying
   across service navigation before the next service's pods finish loading.
+- Fixed Studio Task Search Loki fallback so JSON log lines can supply
+  `task_id` and `correlation_id` when those values are not Loki labels.
 
 ### Changed
 
 - Bumped the SDK, Studio backend, and Studio frontend package versions to
-  `1.4.22`, and updated the Studio backend dependency floor to
-  `relayna>=1.4.22`.
+  `1.4.23`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.23`.
 
 ## 1.4.21 - 2026-06-04
 

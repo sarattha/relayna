@@ -600,15 +600,29 @@ class StudioSearchService(StudioSearchIndexer):
             if logs is None:
                 continue
             for entry in logs.items:
-                task_id = _normalize_optional_string(query.task_id) or _normalize_optional_string(entry.task_id)
+                message_fields = _json_log_fields(entry.message)
+                requested_correlation_id = _normalize_optional_string(query.correlation_id)
+                entry_correlation_id = _normalize_optional_string(entry.correlation_id)
+                message_correlation_id = _message_field(message_fields, "correlation_id")
+                if requested_correlation_id is not None and requested_correlation_id not in {
+                    entry_correlation_id,
+                    message_correlation_id,
+                }:
+                    continue
+                task_id = (
+                    _normalize_optional_string(query.task_id)
+                    or _normalize_optional_string(entry.task_id)
+                    or _message_field(message_fields, "task_id")
+                )
                 if task_id is None:
                     continue
                 document_id = _task_document_id(service.service_id, task_id)
                 timestamp = entry.timestamp
                 existing = documents_by_id.get(document_id)
                 correlation_id = (
-                    _normalize_optional_string(query.correlation_id)
-                    or _normalize_optional_string(entry.correlation_id)
+                    requested_correlation_id
+                    or entry_correlation_id
+                    or message_correlation_id
                     or (existing.correlation_id if existing is not None else None)
                 )
                 if existing is None:
@@ -862,6 +876,21 @@ def _within_range(value: datetime | None, *, from_dt: datetime | None, to_dt: da
     if to_dt is not None and value > to_dt:
         return False
     return True
+
+
+def _json_log_fields(message: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(message)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _message_field(fields: dict[str, Any], key: str) -> str | None:
+    value = fields.get(key)
+    if value is None:
+        return None
+    return _normalize_optional_string(str(value))
 
 
 def _eligible_for_loki_fallback(query: StudioTaskSearchQuery) -> bool:
