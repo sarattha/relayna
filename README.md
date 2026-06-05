@@ -607,7 +607,9 @@ Operator guidance:
 - Task Search also uses the Loki fallback for single `task_id` or
   `correlation_id` lookups when the retained Redis index has no match. With
   JSON log lines, fallback results can derive `task_id` and `correlation_id`
-  from the log body even when those fields are not Loki labels.
+  from the log body even when those fields are not Loki labels. For single
+  `task_id` searches without `log_config.task_id_label`, fallback queries add a
+  Loki text filter for the requested task id.
 - Studio pull-sync is the default event ingestion path; direct push ingestion
   requires `RELAYNA_STUDIO_PUSH_INGEST_ENABLED=true`
 

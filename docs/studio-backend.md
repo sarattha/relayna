@@ -343,7 +343,9 @@ Important operational behavior:
 - Task Search uses Loki as a fallback for single `task_id` or `correlation_id`
   lookups when the retained Redis task index has no match. For JSON log lines,
   fallback results can read `task_id` and `correlation_id` from the log body, so
-  AKS deployments do not need to promote task IDs to Loki stream labels.
+  AKS deployments do not need to promote task IDs to Loki stream labels. When a
+  single task-id fallback search has no `log_config.task_id_label`, Studio adds
+  a Loki text filter for the requested task id before reading JSON log bodies.
 
 ### Prometheus `metrics_config` for AKS service/task views
 

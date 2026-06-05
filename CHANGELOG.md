@@ -17,6 +17,8 @@ All notable changes to this project will be documented in this file.
   across service navigation before the next service's pods finish loading.
 - Fixed Studio Task Search Loki fallback so JSON log lines can supply
   `task_id` and `correlation_id` when those values are not Loki labels.
+- Added a Task Search Loki text-filter fallback for single `task_id` searches
+  when a service has no configured Loki `task_id` label.
 
 ### Changed
 

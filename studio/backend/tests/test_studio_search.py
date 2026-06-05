@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from relayna_studio import (
     CreateServiceRequest,
     LokiLogConfig,
+    LokiLogProvider,
     RedisServiceRegistryStore,
     RedisStudioEventStore,
     ServiceRegistryService,
@@ -49,6 +50,10 @@ class FakeTaskLogQueryService:
         if error is not None:
             raise error
         return self.responses.get(service_id, StudioLogListResponse(count=0, items=[]))
+
+
+class TrackingAsyncClient(httpx.AsyncClient):
+    pass
 
 
 class FakePipeline:
@@ -185,6 +190,18 @@ def _make_body_only_task_log_config() -> LokiLogConfig:
     )
 
 
+def _make_unlabeled_default_task_log_config() -> LokiLogConfig:
+    return LokiLogConfig(
+        provider="loki",
+        base_url="https://loki.example.test",
+        service_selector_labels={"service": "payments-api", "namespace": "prod"},
+        source_label="app",
+        task_id_label=None,
+        correlation_id_label=None,
+        level_label="level",
+    )
+
+
 async def _create_service(
     registry: ServiceRegistryService,
     service_id: str,
@@ -208,6 +225,51 @@ async def _create_service(
 def _install_service(app, service_id: str, *, name: str = "Payments API") -> None:
     runtime = get_studio_runtime(app)
     asyncio.run(_create_service(runtime.registry_service, service_id, name=name))
+
+
+def test_loki_fallback_text_filter_matches_task_id_without_task_label() -> None:
+    async def scenario() -> None:
+        observed_query: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed_query["query"] = request.url.params["query"]
+            return httpx.Response(
+                200,
+                json={
+                    "status": "success",
+                    "data": {
+                        "resultType": "streams",
+                        "result": [
+                            {
+                                "stream": {"namespace": "prod", "service": "payments-api", "app": "worker"},
+                                "values": [
+                                    [
+                                        "1712797201000000000",
+                                        '{"event":"task running","task_id":"task-123","correlation_id":"corr-123"}',
+                                    ]
+                                ],
+                            }
+                        ],
+                    },
+                },
+            )
+
+        redis = FakeRedis()
+        registry = ServiceRegistryService(store=RedisServiceRegistryStore(redis))
+        await _create_service(registry, "payments-api", log_config=_make_unlabeled_default_task_log_config())
+        service = await registry.get_service("payments-api")
+        assert service.log_config is not None
+        provider = LokiLogProvider(http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0))
+
+        await provider.query_logs(
+            service=service,
+            config=service.log_config,
+            query=StudioLogQuery(task_id="task-123", query="task-123", limit=10),
+        )
+
+        assert observed_query["query"] == '{namespace="prod",service="payments-api"} |= "task-123"'
+
+    asyncio.run(scenario())
 
 
 def test_search_service_indexes_events_and_filters_tasks() -> None:
@@ -528,6 +590,47 @@ def test_task_search_falls_back_to_loki_json_body_for_task_id_when_task_label_is
         assert results.items[0].correlation_id == "corr-123"
         assert results.items[0].source == "loki_fallback"
         assert log_query_service.calls[0][1].task_id == "task-123"
+
+    asyncio.run(scenario())
+
+
+def test_task_search_adds_text_filter_when_task_label_is_absent_and_match_mode_is_default() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        registry = ServiceRegistryService(store=RedisServiceRegistryStore(redis))
+        log_query_service = FakeTaskLogQueryService(
+            responses={
+                "payments-api": StudioLogListResponse(
+                    count=1,
+                    items=[
+                        StudioLogEntry(
+                            service_id="payments-api",
+                            timestamp="2026-04-09T11:00:00Z",
+                            level="info",
+                            source="worker",
+                            message='{"event":"task running","task_id":"task-123","correlation_id":"corr-123"}',
+                        )
+                    ],
+                )
+            }
+        )
+        search_service = StudioSearchService(
+            registry_service=registry,
+            event_store=RedisStudioEventStore(redis, prefix="studio:events", ttl_seconds=60, history_maxlen=20),
+            store=RedisStudioSearchStore(redis, prefix="studio:search"),
+            task_index_ttl_seconds=600,
+            log_query_service=log_query_service,
+        )
+        await _create_service(registry, "payments-api", log_config=_make_unlabeled_default_task_log_config())
+
+        results = await search_service.search_tasks(StudioTaskSearchQuery(task_id="task-123"))
+
+        assert results.count == 1
+        assert results.items[0].task_id == "task-123"
+        assert results.items[0].correlation_id == "corr-123"
+        assert results.items[0].source == "loki_fallback"
+        assert log_query_service.calls[0][1].task_id == "task-123"
+        assert log_query_service.calls[0][1].query == "task-123"
 
     asyncio.run(scenario())
 
