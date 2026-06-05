@@ -601,6 +601,14 @@ class StudioSearchService(StudioSearchIndexer):
                 continue
             for entry in logs.items:
                 message_fields = _json_log_fields(entry.message)
+                requested_correlation_id = _normalize_optional_string(query.correlation_id)
+                entry_correlation_id = _normalize_optional_string(entry.correlation_id)
+                message_correlation_id = _message_field(message_fields, "correlation_id")
+                if requested_correlation_id is not None and requested_correlation_id not in {
+                    entry_correlation_id,
+                    message_correlation_id,
+                }:
+                    continue
                 task_id = (
                     _normalize_optional_string(query.task_id)
                     or _normalize_optional_string(entry.task_id)
@@ -612,9 +620,9 @@ class StudioSearchService(StudioSearchIndexer):
                 timestamp = entry.timestamp
                 existing = documents_by_id.get(document_id)
                 correlation_id = (
-                    _normalize_optional_string(query.correlation_id)
-                    or _normalize_optional_string(entry.correlation_id)
-                    or _message_field(message_fields, "correlation_id")
+                    requested_correlation_id
+                    or entry_correlation_id
+                    or message_correlation_id
                     or (existing.correlation_id if existing is not None else None)
                 )
                 if existing is None:

@@ -171,6 +171,20 @@ def _make_body_task_log_config() -> LokiLogConfig:
     )
 
 
+def _make_body_only_task_log_config() -> LokiLogConfig:
+    return LokiLogConfig(
+        provider="loki",
+        base_url="https://loki.example.test",
+        service_selector_labels={"service": "payments-api", "namespace": "prod"},
+        source_label="app",
+        task_id_label=None,
+        correlation_id_label=None,
+        level_label="level",
+        task_match_mode="contains",
+        task_match_template="{task_id}",
+    )
+
+
 async def _create_service(
     registry: ServiceRegistryService,
     service_id: str,
@@ -555,6 +569,43 @@ def test_task_search_falls_back_to_loki_json_body_for_correlation_id_when_task_l
         assert results.items[0].correlation_id == "corr-123"
         assert results.items[0].source == "loki_fallback"
         assert log_query_service.calls[0][1].task_id is None
+        assert log_query_service.calls[0][1].correlation_id == "corr-123"
+
+    asyncio.run(scenario())
+
+
+def test_task_search_loki_json_body_rejects_correlation_mismatch_when_label_is_absent() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        registry = ServiceRegistryService(store=RedisServiceRegistryStore(redis))
+        log_query_service = FakeTaskLogQueryService(
+            responses={
+                "payments-api": StudioLogListResponse(
+                    count=1,
+                    items=[
+                        StudioLogEntry(
+                            service_id="payments-api",
+                            timestamp="2026-04-09T11:00:00Z",
+                            level="info",
+                            source="worker",
+                            message='{"event":"task running","task_id":"task-123","correlation_id":"other-corr"}',
+                        )
+                    ],
+                )
+            }
+        )
+        search_service = StudioSearchService(
+            registry_service=registry,
+            event_store=RedisStudioEventStore(redis, prefix="studio:events", ttl_seconds=60, history_maxlen=20),
+            store=RedisStudioSearchStore(redis, prefix="studio:search"),
+            task_index_ttl_seconds=600,
+            log_query_service=log_query_service,
+        )
+        await _create_service(registry, "payments-api", log_config=_make_body_only_task_log_config())
+
+        results = await search_service.search_tasks(StudioTaskSearchQuery(correlation_id="corr-123"))
+
+        assert results.count == 0
         assert log_query_service.calls[0][1].correlation_id == "corr-123"
 
     asyncio.run(scenario())
