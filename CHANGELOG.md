@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.4.22 - 2026-06-05
+## 1.4.23 - 2026-06-05
 
 ### Fixed
 
@@ -19,8 +19,8 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Bumped the SDK, Studio backend, and Studio frontend package versions to
-  `1.4.22`, and updated the Studio backend dependency floor to
-  `relayna>=1.4.22`.
+  `1.4.23`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.23`.
 
 ## 1.4.21 - 2026-06-04
 

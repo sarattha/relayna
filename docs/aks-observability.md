@@ -156,7 +156,10 @@ If your runtime metrics use the SDK default service label value `relayna`, set
 Alloy should collect container stdout, parse Kubernetes metadata, keep
 low-cardinality labels, and push to Loki. Relayna task identifiers should remain
 inside JSON log bodies unless you intentionally accept the Loki cardinality
-cost.
+cost. Studio task pages and Task Search can still find those tasks through Loki
+when `log_config.task_match_mode` is set to `"contains"` or `"regex"`; fallback
+Task Search results can derive `task_id` and `correlation_id` from JSON log
+bodies when the retained Redis task index has no match.
 
 Minimal Alloy River example:
 
@@ -452,7 +455,7 @@ Install application-owned tracing dependencies in the service image:
 ```toml
 [project]
 dependencies = [
-  "relayna>=1.4.22",
+  "relayna>=1.4.23",
   "opentelemetry-sdk>=1.28.0",
   "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
   "structlog>=24.0.0",
@@ -653,6 +656,8 @@ curl -X POST http://studio-backend.studio.svc.cluster.local:8000/studio/services
 After a task runs, Studio should be able to show:
 
 - service logs and task logs from Loki
+- Task Search fallback matches from Loki when the Redis task index no longer has
+  a retained task summary
 - current service pods and pod-filtered service logs
 - service and task-window metrics from Prometheus
 - pod-level CPU, memory, network, restart, OOMKilled, readiness, and phase

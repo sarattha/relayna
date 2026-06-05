@@ -340,6 +340,10 @@ Important operational behavior:
   `"structured_metadata"`, Studio does not require `task_id_label`; structured
   metadata matching uses `task_id_label` as the metadata key when set and
   otherwise defaults to `task_id`
+- Task Search uses Loki as a fallback for single `task_id` or `correlation_id`
+  lookups when the retained Redis task index has no match. For JSON log lines,
+  fallback results can read `task_id` and `correlation_id` from the log body, so
+  AKS deployments do not need to promote task IDs to Loki stream labels.
 
 ### Prometheus `metrics_config` for AKS service/task views
 
