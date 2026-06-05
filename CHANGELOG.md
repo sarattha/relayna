@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
   refresh interval and the broader service-list refresh loop.
 - Prevented empty Service Pods selections and stale pod lists from carrying
   across service navigation before the next service's pods finish loading.
+- Fixed Studio Task Search Loki fallback so JSON log lines can supply
+  `task_id` and `correlation_id` when those values are not Loki labels.
 
 ### Changed
 
