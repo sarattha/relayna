@@ -666,9 +666,19 @@ class StudioSearchService(StudioSearchIndexer):
         if self.log_query_service is None:
             return None
         try:
+            task_id = _normalize_optional_string(query.task_id)
+            text_query = (
+                task_id
+                if task_id is not None
+                and service.log_config is not None
+                and service.log_config.task_match_mode == "label"
+                and service.log_config.task_id_label is None
+                else None
+            )
             log_query = StudioLogQuery(
-                task_id=query.task_id,
+                task_id=task_id,
                 correlation_id=query.correlation_id,
+                query=text_query,
                 from_time=query.from_timestamp,
                 to_time=query.to_timestamp,
                 limit=min(max(1, query.limit), 200),

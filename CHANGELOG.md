@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 1.4.23 - 2026-06-05
+## 1.4.24 - 2026-06-05
 
 ### Fixed
 
@@ -17,12 +17,14 @@ All notable changes to this project will be documented in this file.
   across service navigation before the next service's pods finish loading.
 - Fixed Studio Task Search Loki fallback so JSON log lines can supply
   `task_id` and `correlation_id` when those values are not Loki labels.
+- Added a Task Search Loki text-filter fallback for single `task_id` searches
+  when a service has no configured Loki `task_id` label.
 
 ### Changed
 
 - Bumped the SDK, Studio backend, and Studio frontend package versions to
-  `1.4.23`, and updated the Studio backend dependency floor to
-  `relayna>=1.4.23`.
+  `1.4.24`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.24`.
 
 ## 1.4.21 - 2026-06-04
 
