@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.22 - 2026-06-05
+
+### Fixed
+
+- Treated Deselect All Pods in Studio Service Pods as an explicit empty
+  selection, keeping Service Logs and Pod Metric Charts empty instead of
+  falling back to unfiltered all-pod queries.
+- Preserved explicit Service Pods selections across both the background pod
+  refresh interval and the broader service-list refresh loop.
+- Prevented empty Service Pods selections and stale pod lists from carrying
+  across service navigation before the next service's pods finish loading.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.22`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.22`.
+
 ## 1.4.21 - 2026-06-04
 
 ### Added
