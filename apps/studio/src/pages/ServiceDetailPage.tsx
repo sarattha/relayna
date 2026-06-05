@@ -342,6 +342,27 @@ function mergeMetricResponses(responses: StudioMetricsResponse[]): StudioMetrics
   };
 }
 
+function emptyLogResponse(): StudioLogListResponse {
+  return {
+    count: 0,
+    items: [],
+    next_cursor: null,
+  };
+}
+
+function emptyMetricsResponse(targetService: ServiceRecord, window: TimeWindow): StudioMetricsResponse {
+  return {
+    service_id: targetService.service_id,
+    task_id: null,
+    from: window.from,
+    to: window.to,
+    step_seconds: 0,
+    approximate: false,
+    warnings: [],
+    series: [],
+  };
+}
+
 function selectedPodLabel(pods: string[]) {
   if (!pods.length) {
     return "";
@@ -370,6 +391,10 @@ function normalizeSelectedPods(pods: string[], availablePods: ServicePod[], prev
   const availableSet = new Set(availableNames);
   const filtered = pods.filter((pod) => availableSet.has(pod));
   return filtered.length ? filtered : availableNames;
+}
+
+function hasLoadedPodsForService(servicePods: ServicePodListResponse | null, targetService: ServiceRecord) {
+  return servicePods?.service_id === targetService.service_id && servicePods.pods.length > 0;
 }
 
 function podMetricLineColor(index: number) {
@@ -517,6 +542,8 @@ export function ServiceDetailPage() {
   const { serviceId = "" } = useParams();
   const servicesState = useStudioServices();
   const service = servicesState.servicesById.get(serviceId) || null;
+  const serviceLogConfigKey = `${service?.service_id || ""}:${service?.log_config ? "configured" : "unconfigured"}`;
+  const serviceMetricsConfigKey = `${service?.service_id || ""}:${service?.metrics_config ? "configured" : "unconfigured"}`;
 
   const [serviceEvents, setServiceEvents] = useState<StudioEventListResponse | null>(null);
   const [serviceEventsLoading, setServiceEventsLoading] = useState(false);
@@ -598,7 +625,7 @@ export function ServiceDetailPage() {
       source: "",
       window: emptyWindow,
     });
-  }, [service?.service_id, service?.log_config]);
+  }, [serviceLogConfigKey]);
 
   useEffect(() => {
     if (!service?.metrics_config) {
@@ -611,7 +638,7 @@ export function ServiceDetailPage() {
       void loadServicePods(service, { quiet: true });
     }, 10000);
     return () => window.clearInterval(interval);
-  }, [service?.service_id, service?.metrics_config]);
+  }, [serviceMetricsConfigKey]);
 
   const activeServiceLogWindow = resolveWindow(serviceLogWindowMode, serviceLogManualFrom, serviceLogManualTo);
   const activeServiceMetricWindow = resolveWindow(
@@ -637,7 +664,7 @@ export function ServiceDetailPage() {
     }
     void loadServiceMetrics({ targetService: service, window: resolveWindow("1h", "", "") });
     void loadPodMetrics({ targetService: service, window: resolveWindow("1h", "", ""), pods: [] });
-  }, [service?.service_id, service?.metrics_config]);
+  }, [serviceMetricsConfigKey]);
 
   useEffect(() => {
     if (typeof EventSource === "undefined" || !serviceId) {
@@ -696,6 +723,10 @@ export function ServiceDetailPage() {
     try {
       const limit = parseLimit(serviceLogLimit, 20);
       const podFilters = pods.filter((pod) => pod.trim());
+      if (!podFilters.length && hasLoadedPodsForService(servicePodsRef.current, targetService)) {
+        setServiceLogs(emptyLogResponse());
+        return;
+      }
       const payload = podFilters.length
         ? mergeLogResponses(
             await Promise.all(
@@ -743,8 +774,10 @@ export function ServiceDetailPage() {
       const payload = await fetchServicePods(targetService.service_id);
       const currentSelectedPods = selectedServicePodsRef.current;
       const previousServicePods = servicePodsRef.current;
+      const previousAvailablePods =
+        previousServicePods?.service_id === targetService.service_id ? previousServicePods.pods : [];
       updateServicePods(payload);
-      const nextPods = normalizeSelectedPods(currentSelectedPods, payload.pods, previousServicePods?.pods ?? []);
+      const nextPods = normalizeSelectedPods(currentSelectedPods, payload.pods, previousAvailablePods);
       if (nextPods.join("\u0000") !== currentSelectedPods.join("\u0000")) {
         updateSelectedServicePods(nextPods);
         void loadServiceLogs({ targetService, pods: nextPods });
@@ -808,6 +841,10 @@ export function ServiceDetailPage() {
     setPodMetricsError(null);
     try {
       const podFilters = pods.filter((pod) => pod.trim());
+      if (!podFilters.length && hasLoadedPodsForService(servicePodsRef.current, targetService)) {
+        setPodMetrics(emptyMetricsResponse(targetService, window));
+        return;
+      }
       const baseQuery = {
         from: window.from,
         to: window.to,
@@ -1186,7 +1223,9 @@ export function ServiceDetailPage() {
             <p style={{ ...mutedTextStyle, margin: "4px 0 0" }}>
               {selectedServicePods.length
                 ? `Filtered to ${selectedPodLabel(selectedServicePods)}.`
-                : "Showing every current pod matched by this service."}
+                : servicePods?.pods.length
+                  ? "No pods selected."
+                  : "Showing every current pod matched by this service."}
             </p>
           </div>
           <button type="button" onClick={() => void loadPodMetrics()} style={secondaryButtonStyle}>

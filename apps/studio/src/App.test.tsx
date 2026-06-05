@@ -1274,25 +1274,123 @@ describe("App", () => {
     });
     expect(screen.getByRole("button", { name: "Deselect All Pods" })).toBeDisabled();
     await waitFor(() => {
-      const callsAfterDeselectAll = fetchMock.mock.calls.slice(callsBeforeDeselectAll);
-      const matchingUnfilteredLogCall = callsAfterDeselectAll.find(([input]) => {
-        const parsed = new URL(String(input), "http://studio.test");
-        return parsed.pathname === "/studio/services/payments-api/logs" && !parsed.searchParams.has("pod");
-      });
-      const matchingUnfilteredMetricCall = callsAfterDeselectAll.find(([input]) => {
-        const parsed = new URL(String(input), "http://studio.test");
-        return (
-          parsed.pathname === "/studio/services/payments-api/metrics" &&
-          parsed.searchParams.get("split_by_pod") === "true" &&
-          !parsed.searchParams.has("pod")
-        );
-      });
-      expect(matchingUnfilteredLogCall).toBeTruthy();
-      expect(matchingUnfilteredMetricCall).toBeTruthy();
+      expect(screen.getByText("No service logs matched the current filters.")).toBeInTheDocument();
+      expect(screen.getByText("No pod metrics matched the selected pod and window.")).toBeInTheDocument();
+      expect(screen.getByText("No pods selected.")).toBeInTheDocument();
     });
+    const callsAfterDeselectAll = fetchMock.mock.calls.slice(callsBeforeDeselectAll);
+    const matchingUnfilteredLogCall = callsAfterDeselectAll.find(([input]) => {
+      const parsed = new URL(String(input), "http://studio.test");
+      return parsed.pathname === "/studio/services/payments-api/logs" && !parsed.searchParams.has("pod");
+    });
+    const matchingUnfilteredMetricCall = callsAfterDeselectAll.find(([input]) => {
+      const parsed = new URL(String(input), "http://studio.test");
+      return (
+        parsed.pathname === "/studio/services/payments-api/metrics" &&
+        parsed.searchParams.get("split_by_pod") === "true" &&
+        !parsed.searchParams.has("pod")
+      );
+    });
+    expect(matchingUnfilteredLogCall).toBeFalsy();
+    expect(matchingUnfilteredMetricCall).toBeFalsy();
 
     fireEvent.click(screen.getByRole("button", { name: "Select All Pods" }));
     expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
+  });
+
+  it("does not carry explicit empty pod selection across service navigation", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    const metricsConfig = {
+      provider: "prometheus",
+      base_url: "https://prometheus.example.test",
+      namespace: "prod",
+      service_selector_labels: { app: "payments-api" },
+      namespace_label: "namespace",
+      pod_label: "kubernetes_pod_name",
+      container_label: "container",
+      step_seconds: 30,
+      task_window_padding_seconds: 120,
+    };
+    services[0] = {
+      ...services[0],
+      metrics_config: metricsConfig,
+    };
+    services.push({
+      ...buildMockService(),
+      service_id: "orders-api",
+      name: "Orders API",
+      base_url: "https://orders.example.test",
+      metrics_config: {
+        ...metricsConfig,
+        service_selector_labels: { app: "orders-api" },
+      },
+    });
+
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        return jsonResponse({
+          service_id: "payments-api",
+          count: 2,
+          pods: [
+            { name: "payments-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+            { name: "payments-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+          ],
+        });
+      }
+      if (url === "/studio/services/orders-api/pods" && method === "GET") {
+        return jsonResponse({
+          service_id: "orders-api",
+          count: 2,
+          pods: [
+            { name: "orders-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+            { name: "orders-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+          ],
+        });
+      }
+      if (url.startsWith("/studio/services/orders-api/events?") && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url.startsWith("/studio/services/orders-api/logs?") && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url.startsWith("/studio/services/orders-api/metrics") && method === "GET") {
+        return jsonResponse(metricsResponse(null));
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Deselect All Pods" }));
+    expect(await screen.findByText("Selected pods: none")).toBeInTheDocument();
+
+    act(() => {
+      window.history.pushState({}, "", "/services/orders-api");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(await screen.findByText("Orders API")).toBeInTheDocument();
+    expect(await screen.findByText("Selected pods: orders-api-abc, orders-worker-def")).toBeInTheDocument();
+    await waitFor(() => {
+      const matchingOrdersLogCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return parsed.pathname === "/studio/services/orders-api/logs" && parsed.searchParams.get("pod") === "orders-api-abc";
+      });
+      const matchingOrdersMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/orders-api/metrics" &&
+          parsed.searchParams.get("pod") === "orders-worker-def" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      expect(matchingOrdersLogCall).toBeTruthy();
+      expect(matchingOrdersMetricCall).toBeTruthy();
+    });
   });
 
   it("keeps default all-pods selection when pod refresh discovers a new pod", async () => {
@@ -1413,6 +1511,14 @@ describe("App", () => {
     await flushRenderPromises();
     expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
     expect(screen.queryByText("Selected pods: payments-api-abc, payments-worker-def, payments-worker-ghi")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50_000);
+    });
+
+    await flushRenderPromises();
+    expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+    expect(screen.queryByText("Selected pods: none")).not.toBeInTheDocument();
   });
 
   it("uses the manual service log window override when provided", async () => {
