@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
   falling back to unfiltered all-pod queries.
 - Preserved explicit Service Pods selections across both the background pod
   refresh interval and the broader service-list refresh loop.
+- Preserved manual Service Pods selections through transient empty pod discovery
+  responses from the metrics provider.
 - Prevented empty Service Pods selections and stale pod lists from carrying
   across service navigation before the next service's pods finish loading.
 

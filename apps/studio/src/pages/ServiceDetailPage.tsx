@@ -380,16 +380,18 @@ function normalizeSelectedPods(pods: string[], availablePods: ServicePod[], prev
   }
   const previousAvailableNames = previousAvailablePods.map((pod) => pod.name);
   const selectedSet = new Set(pods);
-  const wasAllPodsSelected =
-    !previousAvailableNames.length || previousAvailableNames.every((pod) => selectedSet.has(pod));
-  if (wasAllPodsSelected) {
-    return availableNames;
+  const availableSet = new Set(availableNames);
+  const filtered = pods.filter((pod) => availableSet.has(pod));
+  if (!previousAvailableNames.length) {
+    return filtered.length ? filtered : availableNames;
   }
   if (!pods.length) {
     return [];
   }
-  const availableSet = new Set(availableNames);
-  const filtered = pods.filter((pod) => availableSet.has(pod));
+  const wasAllPodsSelected = previousAvailableNames.every((pod) => selectedSet.has(pod));
+  if (wasAllPodsSelected) {
+    return availableNames;
+  }
   return filtered.length ? filtered : availableNames;
 }
 
@@ -777,8 +779,14 @@ export function ServiceDetailPage() {
       const previousAvailablePods =
         previousServicePods?.service_id === targetService.service_id ? previousServicePods.pods : [];
       updateServicePods(payload);
+      if (!payload.pods.length && previousAvailablePods.length) {
+        setPodMetrics(emptyMetricsResponse(targetService, activePodMetricWindow));
+        return;
+      }
       const nextPods = normalizeSelectedPods(currentSelectedPods, payload.pods, previousAvailablePods);
-      if (nextPods.join("\u0000") !== currentSelectedPods.join("\u0000")) {
+      const selectionChanged = nextPods.join("\u0000") !== currentSelectedPods.join("\u0000");
+      const podsRestored = !previousAvailablePods.length && payload.pods.length > 0 && nextPods.length > 0;
+      if (selectionChanged || podsRestored) {
         updateSelectedServicePods(nextPods);
         void loadServiceLogs({ targetService, pods: nextPods });
         void loadPodMetrics({ targetService, pods: nextPods });

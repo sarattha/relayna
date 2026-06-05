@@ -1521,6 +1521,70 @@ describe("App", () => {
     expect(screen.queryByText("Selected pods: none")).not.toBeInTheDocument();
   });
 
+  it("preserves manual pod selection when a pod refresh temporarily returns no pods", async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+        namespace_label: "namespace",
+        pod_label: "kubernetes_pod_name",
+        container_label: "container",
+        step_seconds: 30,
+        task_window_padding_seconds: 120,
+      },
+    };
+
+    const baseImpl = fetchMock.getMockImplementation();
+    let podRequestCount = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        podRequestCount += 1;
+        if (podRequestCount === 2) {
+          return jsonResponse({ service_id: "payments-api", count: 0, pods: [] });
+        }
+        return jsonResponse({
+          service_id: "payments-api",
+          count: 2,
+          pods: [
+            { name: "payments-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+            { name: "payments-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+          ],
+        });
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    await flushRenderPromises();
+    expect(screen.getByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /payments-worker-def/ }));
+    expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    await flushRenderPromises();
+    expect(screen.getByText("No current pods matched this service selector.")).toBeInTheDocument();
+    expect(screen.queryByText("Selected pods: none")).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    await flushRenderPromises();
+    expect(screen.getByText("Selected pods: payments-api-abc")).toBeInTheDocument();
+    expect(screen.queryByText("Selected pods: payments-api-abc, payments-worker-def")).not.toBeInTheDocument();
+  });
+
   it("uses the manual service log window override when provided", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
 
