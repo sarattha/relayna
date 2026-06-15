@@ -1501,6 +1501,28 @@ async def test_task_consumer_concurrent_dispatch_is_bounded_by_prefetch() -> Non
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_concurrent_iterator_exhaustion_is_not_loop_error() -> None:
+    class ExhaustedIterator:
+        async def __anext__(self) -> FakeMessage:
+            raise StopAsyncIteration
+
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+        raise AssertionError("handler should not run for an exhausted iterator")
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, prefetch=2)
+
+    await consumer._run_concurrent_iterator(
+        ExhaustedIterator(),
+        source_queue_name="tasks.queue",
+        retry_infrastructure=None,
+        concurrency=2,
+    )
+
+
+@pytest.mark.asyncio
 async def test_task_consumer_stop_drains_inflight_messages_before_channel_close() -> None:
     message = FakeMessage(json.dumps({"task_id": "task-1"}).encode("utf-8"))
     queue = FakeQueue([message])

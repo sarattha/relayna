@@ -244,6 +244,9 @@ class TaskConsumer:
                     break
                 try:
                     message = await anext(iterator)
+                except StopAsyncIteration:
+                    semaphore.release()
+                    break
                 except TimeoutError:
                     semaphore.release()
                     if in_flight:
