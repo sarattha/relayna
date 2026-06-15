@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.24/relayna-1.4.24-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.24/relayna-1.4.24.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25.tar.gz
 ```
 
 For local development in this repository:
@@ -531,6 +531,13 @@ asyncio.run(main())
 
 Keep the topology names, queue settings, and Redis prefixes aligned between
 service code, workers, and deployment manifests.
+
+`TaskConsumer` uses the effective `prefetch` count as the local handler
+concurrency limit. The default `prefetch_count=1` processes messages
+sequentially. Set a larger topology `prefetch_count` or consumer `prefetch`
+override for I/O-bound handlers that can safely run in parallel inside one
+process. Keep `prefetch=1` when a worker depends on strict per-consumer message
+ordering.
 
 ## FastAPI Route Surface
 

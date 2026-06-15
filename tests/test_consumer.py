@@ -122,6 +122,7 @@ class FakeChannel:
         self.queue = queue
         self.declare_queue_calls: list[dict[str, Any]] = []
         self.close_calls = 0
+        self.closed = asyncio.Event()
 
     async def declare_queue(self, name: str, *, durable: bool, arguments: dict[str, Any] | None = None) -> FakeQueue:
         self.declare_queue_calls.append({"name": name, "durable": durable, "arguments": arguments})
@@ -129,6 +130,7 @@ class FakeChannel:
 
     async def close(self) -> None:
         self.close_calls += 1
+        self.closed.set()
 
 
 class FakeRabbitClient:
@@ -1358,6 +1360,183 @@ async def test_task_consumer_allows_indefinite_consume_timeout() -> None:
     await run_consumer_until_message_done(consumer, message)
 
     assert queue.iterator_calls == [{"arguments": None, "timeout": None}]
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_prefetch_one_remains_sequential() -> None:
+    first = FakeMessage(json.dumps({"task_id": "task-1"}).encode("utf-8"))
+    second = FakeMessage(json.dumps({"task_id": "task-2"}).encode("utf-8"))
+    queue = FakeQueue([first, second])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    started: list[str] = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del context
+        started.append(task.task_id)
+        if task.task_id == "task-1":
+            first_started.set()
+            await release_first.wait()
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, prefetch=1)
+    run_task = asyncio.create_task(consumer.run_forever())
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+
+        assert started == ["task-1"]
+        assert second.acked is False
+
+        release_first.set()
+        await asyncio.wait_for(second.done.wait(), timeout=1)
+        consumer.stop()
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        consumer.stop()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert first.acked is True
+    assert second.acked is True
+    assert started == ["task-1", "task-2"]
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_prefetch_greater_than_one_dispatches_concurrently() -> None:
+    first = FakeMessage(json.dumps({"task_id": "task-1"}).encode("utf-8"))
+    second = FakeMessage(json.dumps({"task_id": "task-2"}).encode("utf-8"))
+    queue = FakeQueue([first, second])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    first_started = asyncio.Event()
+    second_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del context
+        if task.task_id == "task-1":
+            first_started.set()
+            await release_first.wait()
+        elif task.task_id == "task-2":
+            second_started.set()
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, prefetch=2)
+    run_task = asyncio.create_task(consumer.run_forever())
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        await asyncio.wait_for(second_started.wait(), timeout=1)
+
+        assert first.acked is False
+        assert second.acked is True
+
+        consumer.stop()
+        release_first.set()
+        await asyncio.wait_for(first.done.wait(), timeout=1)
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        consumer.stop()
+        release_first.set()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert first.acked is True
+    assert second.acked is True
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_concurrent_dispatch_is_bounded_by_prefetch() -> None:
+    messages = [FakeMessage(json.dumps({"task_id": f"task-{index}"}).encode("utf-8")) for index in range(1, 4)]
+    first, second, third = messages
+    queue = FakeQueue(messages)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    started: list[str] = []
+    active = 0
+    max_active = 0
+    two_started = asyncio.Event()
+    third_started = asyncio.Event()
+    release_first_two = asyncio.Event()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        nonlocal active, max_active
+        del context
+        active += 1
+        max_active = max(max_active, active)
+        started.append(task.task_id)
+        if len(started) == 2:
+            two_started.set()
+        if task.task_id == "task-3":
+            third_started.set()
+        try:
+            if task.task_id in {"task-1", "task-2"}:
+                await release_first_two.wait()
+        finally:
+            active -= 1
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, prefetch=2)
+    run_task = asyncio.create_task(consumer.run_forever())
+    try:
+        await asyncio.wait_for(two_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+
+        assert started == ["task-1", "task-2"]
+        assert third_started.is_set() is False
+        assert max_active == 2
+
+        release_first_two.set()
+        await asyncio.wait_for(third_started.wait(), timeout=1)
+        await asyncio.wait_for(third.done.wait(), timeout=1)
+        consumer.stop()
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        consumer.stop()
+        release_first_two.set()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert [first.acked, second.acked, third.acked] == [True, True, True]
+    assert max_active == 2
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_stop_drains_inflight_messages_before_channel_close() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-1"}).encode("utf-8"))
+    queue = FakeQueue([message])
+    channel = FakeChannel(queue)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[channel])
+    handler_started = asyncio.Event()
+    release_handler = asyncio.Event()
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+        handler_started.set()
+        await release_handler.wait()
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, prefetch=2)
+    run_task = asyncio.create_task(consumer.run_forever())
+    try:
+        await asyncio.wait_for(handler_started.wait(), timeout=1)
+        consumer.stop()
+        await asyncio.sleep(0)
+
+        assert message.acked is False
+        assert channel.close_calls == 0
+
+        release_handler.set()
+        await asyncio.wait_for(message.done.wait(), timeout=1)
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        consumer.stop()
+        release_handler.set()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert message.acked is True
+    assert channel.close_calls == 1
+    assert channel.closed.is_set() is True
 
 
 def test_fake_queue_helper_signature_supports_consumer_timeout() -> None:

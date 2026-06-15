@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.24/relayna-1.4.24-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.24/relayna-1.4.24.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25.tar.gz
 ```
 
 For local development in this repository:
@@ -232,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.24`, and the backend requires `relayna>=1.4.24`.
+release version is `1.4.25`, and the backend requires `relayna>=1.4.25`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -780,6 +780,14 @@ Those topology timeout fields configure RabbitMQ queue arguments. They are
 distinct from the runtime option `consume_timeout_seconds`, which controls how
 long `TaskConsumer` and `AggregationConsumer` wait locally for the next message
 before the consumer loop iterates again.
+
+`TaskConsumer` also uses the effective `prefetch` count as its local concurrency
+limit. The default `prefetch_count=1` keeps task handling sequential. When
+`prefetch` is greater than one, one consumer instance can process up to that
+many task messages concurrently; already-dispatched messages finish their
+per-message ack, reject, retry, DLQ, lifecycle status, observation, metrics, and
+lease handling before the channel closes during shutdown. Keep `prefetch=1` for
+workloads that require strict per-consumer ordering.
 
 Generic queue-argument mappings are:
 
