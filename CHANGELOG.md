@@ -16,6 +16,8 @@ All notable changes to this project will be documented in this file.
 
 - Kept `prefetch=1` as the sequential compatibility path for ordering-sensitive
   task consumers.
+- Updated the Studio frontend Vite toolchain to patched audit-clean versions so
+  the security hardening job passes under the latest `npm audit` advisory data.
 - Bumped the SDK, Studio backend, and Studio frontend package versions to
   `1.4.25`, and updated the Studio backend dependency floor to
   `relayna>=1.4.25`.
