@@ -143,14 +143,19 @@ class TaskConsumer:
                 async with queue.iterator(
                     arguments=self._consume_arguments or None, timeout=self._consume_timeout_seconds
                 ) as iterator:
-                    async for message in iterator:
-                        await self._handle_message(
-                            message,
+                    if prefetch <= 1:
+                        await self._run_sequential_iterator(
+                            iterator,
                             source_queue_name=queue_name,
                             retry_infrastructure=retry_infrastructure,
                         )
-                        if self._stop.is_set():
-                            break
+                    else:
+                        await self._run_concurrent_iterator(
+                            iterator,
+                            source_queue_name=queue_name,
+                            retry_infrastructure=retry_infrastructure,
+                            concurrency=prefetch,
+                        )
             except asyncio.CancelledError:
                 raise
             except TimeoutError:
@@ -177,6 +182,94 @@ class TaskConsumer:
                         await channel.close()
                     except Exception:
                         pass
+
+    async def _run_sequential_iterator(
+        self,
+        iterator: Any,
+        *,
+        source_queue_name: str,
+        retry_infrastructure: RetryInfrastructure | None,
+    ) -> None:
+        async for message in iterator:
+            await self._handle_message(
+                message,
+                source_queue_name=source_queue_name,
+                retry_infrastructure=retry_infrastructure,
+            )
+            if self._stop.is_set():
+                break
+
+    async def _run_concurrent_iterator(
+        self,
+        iterator: Any,
+        *,
+        source_queue_name: str,
+        retry_infrastructure: RetryInfrastructure | None,
+        concurrency: int,
+    ) -> None:
+        semaphore = asyncio.Semaphore(concurrency)
+        in_flight: set[asyncio.Task[None]] = set()
+        first_error: BaseException | None = None
+
+        async def run_message(message: Any) -> None:
+            try:
+                await self._handle_message(
+                    message,
+                    source_queue_name=source_queue_name,
+                    retry_infrastructure=retry_infrastructure,
+                )
+            finally:
+                semaphore.release()
+
+        def record_completion(task: asyncio.Task[None]) -> None:
+            nonlocal first_error
+            in_flight.discard(task)
+            if task.cancelled():
+                return
+            try:
+                exc = task.exception()
+            except asyncio.CancelledError:
+                return
+            if exc is not None and first_error is None:
+                first_error = exc
+
+        try:
+            while not self._stop.is_set():
+                await semaphore.acquire()
+                if first_error is not None:
+                    semaphore.release()
+                    raise first_error
+                if self._stop.is_set():
+                    semaphore.release()
+                    break
+                try:
+                    message = await anext(iterator)
+                except StopAsyncIteration:
+                    semaphore.release()
+                    break
+                except TimeoutError:
+                    semaphore.release()
+                    if in_flight:
+                        await asyncio.sleep(0)
+                        continue
+                    raise
+                except BaseException:
+                    semaphore.release()
+                    raise
+                task = asyncio.create_task(run_message(message))
+                in_flight.add(task)
+                task.add_done_callback(record_completion)
+        except asyncio.CancelledError:
+            for task in in_flight:
+                task.cancel()
+            if in_flight:
+                await asyncio.gather(*in_flight, return_exceptions=True)
+            raise
+        finally:
+            if in_flight:
+                await asyncio.gather(*in_flight, return_exceptions=True)
+            if first_error is not None:
+                raise first_error
 
     async def _handle_message(
         self, message: Any, *, source_queue_name: str, retry_infrastructure: RetryInfrastructure | None

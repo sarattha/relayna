@@ -19,7 +19,7 @@ def _stable_signature(obj: object) -> str:
 def test_sdk_public_exports_match_production_freeze_manifest() -> None:
     manifest = _load_manifest("public_surface.json")
 
-    assert manifest["freeze_version"] == "v1.4.21"
+    assert manifest["freeze_version"] == "v1.4.25"
     assert manifest["strict"] is True
 
     for module_name, expected_exports in manifest["modules"].items():

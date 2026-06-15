@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.25 - 2026-06-15
+
+### Added
+
+- Added bounded concurrent `TaskConsumer` message dispatch when the effective
+  `prefetch` count is greater than one, allowing a single consumer instance to
+  process multiple messages in parallel while preserving per-message ack,
+  reject, retry, DLQ, lifecycle status, observation, metrics, and lease
+  handling.
+
+### Changed
+
+- Kept `prefetch=1` as the sequential compatibility path for ordering-sensitive
+  task consumers.
+- Updated the Studio frontend Vite toolchain to patched audit-clean versions so
+  the security hardening job passes under the latest `npm audit` advisory data.
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.25`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.25`.
+
 ## 1.4.24 - 2026-06-05
 
 ### Fixed
