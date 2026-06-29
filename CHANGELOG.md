@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
   for raw queue publishes that need to carry an AMQP priority property.
 - Raised SDK and Studio backend dependency floors for patched Starlette, and
   raised the SDK dev audit toolchain's `cryptography` floor.
+- Refreshed the Studio frontend lockfile to pull patched `form-data`.
 
 ### Changed
 
