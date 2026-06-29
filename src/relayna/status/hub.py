@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from aio_pika.abc import AbstractChannel, AbstractQueue
@@ -34,6 +34,7 @@ class StatusHub:
         prefetch: int = 200,
         observation_sink: ObservationSink | None = None,
         alias_config: ContractAliasConfig | None = None,
+        fail_fast_errors: Iterable[type[Exception]] | None = None,
     ) -> None:
         self._rabbitmq = rabbitmq
         self._store = store
@@ -42,6 +43,7 @@ class StatusHub:
         self._prefetch = prefetch
         self._observation_sink = observation_sink
         self._alias_config = alias_config
+        self._fail_fast_errors = tuple(fail_fast_errors or ())
         self._stop = asyncio.Event()
 
     def stop(self) -> None:
@@ -55,6 +57,7 @@ class StatusHub:
         if "x-stream-offset" not in consume_args and "x-stream-offset" in default_stream_args:
             consume_args.update(default_stream_args)
         await emit_observation(self._observation_sink, StatusHubStarted(queue_name=queue_name))
+        started_consuming = False
 
         while not self._stop.is_set():
             channel: AbstractChannel | None = None
@@ -66,6 +69,7 @@ class StatusHub:
                     arguments=topology.status_queue_arguments() or None,
                 )
                 async with queue.iterator(arguments=consume_args or None) as iterator:
+                    started_consuming = True
                     async for message in iterator:
                         try:
                             payload = json.loads(message.body.decode("utf-8", errors="replace"))
@@ -128,6 +132,8 @@ class StatusHub:
             except Exception as exc:
                 if self._stop.is_set():
                     return
+                if not started_consuming and self._fail_fast_errors and isinstance(exc, self._fail_fast_errors):
+                    raise RuntimeError(f"StatusHub failed to start consuming queue: {exc}") from exc
                 await emit_observation(
                     self._observation_sink,
                     StatusHubLoopError(

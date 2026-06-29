@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.26/relayna-1.4.26-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.26/relayna-1.4.26.tar.gz
 ```
 
 For local development in this repository:
@@ -1226,6 +1226,13 @@ retry queue and a per-source DLQ. Malformed JSON and invalid envelopes go
 straight to the DLQ; handler failures retry until `max_retries` is exhausted,
 then dead-letter.
 
+Set `RetryPolicy(retry_priority_step=...)` when repeated broker-delayed retries
+should move ahead of newer lower-priority work. Relayna publishes retry
+messages with AMQP priority `retry_attempt * retry_priority_step`, clamped to
+`255`; the default `None` leaves retry priority unset. RabbitMQ only schedules
+by that priority after the retry TTL returns the message to a queue declared
+with `x-max-priority`.
+
 ### Retry and DLQ headers
 
 Relayna keeps retry metadata in RabbitMQ message headers. The task or
@@ -2235,6 +2242,12 @@ from relayna.status import StatusHub
 hub = StatusHub(rabbitmq=client, store=store)
 await hub.run_forever()
 ```
+
+By default `StatusHub` emits `StatusHubLoopError` and retries transient
+consume-loop failures. To abort startup when the status queue cannot be opened,
+pass `fail_fast_errors={...}` with the exception types to surface. Matching
+errors before the first successful queue iterator entry are raised as
+`RuntimeError`.
 
 ## End-to-end composition
 

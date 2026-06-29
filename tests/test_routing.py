@@ -454,6 +454,52 @@ async def test_publish_task_sets_amqp_priority_from_task_priority() -> None:
 
 
 @pytest.mark.asyncio
+async def test_publish_raw_to_queue_sets_optional_amqp_priority() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    channel = FakeRobustChannel(FakeTaskQueue("tasks.queue"))
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._channel = channel
+
+    await client.publish_raw_to_queue("tasks.queue.retry", b"{}", priority=7)
+
+    message, routing_key = channel.default_exchange.publish_calls[0]
+    assert routing_key == "tasks.queue.retry"
+    assert message.priority == 7
+
+
+@pytest.mark.asyncio
+async def test_publish_raw_to_queue_leaves_amqp_priority_unset_by_default() -> None:
+    topology = SharedTasksSharedStatusTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        tasks_exchange="tasks.exchange",
+        tasks_queue="tasks.queue",
+        tasks_routing_key="task.request",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+    )
+    channel = FakeRobustChannel(FakeTaskQueue("tasks.queue"))
+    client = RelaynaRabbitClient(topology=topology)
+    client._initialized = True
+    client._lock = asyncio.Lock()
+    client._channel = channel
+
+    await client.publish_raw_to_queue("tasks.queue.retry", b"{}")
+
+    message, routing_key = channel.default_exchange.publish_calls[0]
+    assert routing_key == "tasks.queue.retry"
+    assert message.priority is None
+
+
+@pytest.mark.asyncio
 async def test_publish_task_rejects_priority_above_configured_task_max_priority() -> None:
     topology = SharedTasksSharedStatusTopology(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",

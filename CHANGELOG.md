@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.26 - 2026-06-29
+
+### Added
+
+- Added `RetryPolicy.retry_priority_step` so broker-delayed task, aggregation,
+  and workflow retries can publish retry messages with progressively elevated
+  AMQP priority, clamped to RabbitMQ's `0..255` message-priority range.
+- Added optional `StatusHub(fail_fast_errors=...)` startup handling so selected
+  status queue acquisition or iterator failures raise `RuntimeError` before the
+  hub has successfully started consuming.
+- Added `RelaynaRabbitClient.publish_raw_to_queue(..., priority=...)` support
+  for raw queue publishes that need to carry an AMQP priority property.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.26`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.26`.
+- Updated the approved production freeze perimeter to `v1.4.26` for the new
+  SDK public retry and StatusHub knobs.
+
 ## 1.4.25 - 2026-06-15
 
 ### Added

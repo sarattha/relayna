@@ -60,6 +60,11 @@ class RetryPolicy:
     delay_ms: int = 30000
     retry_queue_suffix: str = ".retry"
     dead_letter_queue_suffix: str = ".dlq"
+    retry_priority_step: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.retry_priority_step is not None and self.retry_priority_step < 0:
+            raise ValueError("retry_priority_step must be greater than or equal to 0")
 
 
 @dataclass(slots=True)
@@ -500,6 +505,12 @@ def _retry_headers(
     headers["x-relayna-failure-reason"] = reason
     headers["x-relayna-exception-type"] = exception_type
     return headers
+
+
+def _retry_priority(policy: RetryPolicy | None, *, retry_attempt: int) -> int | None:
+    if policy is None or policy.retry_priority_step is None:
+        return None
+    return min(retry_attempt * policy.retry_priority_step, 255)
 
 
 def _header_string(headers: Mapping[str, Any], key: str) -> str | None:
