@@ -58,6 +58,7 @@ from .context import (
     _persist_dlq_record,
     _retry_attempt,
     _retry_headers,
+    _retry_priority,
     _to_json_bytes,
 )
 
@@ -903,6 +904,7 @@ class TaskConsumer:
             body or message.body,
             correlation_id=correlation_id or getattr(message, "correlation_id", None),
             headers=headers,
+            priority=_retry_priority(self._retry_policy, retry_attempt=retry_attempt),
             content_type=getattr(message, "content_type", "application/json"),
         )
         await emit_observation(
@@ -1305,6 +1307,7 @@ class AggregationConsumer:
                 reason=reason,
                 exception_type=exception_type,
             ),
+            priority=_retry_priority(self._retry_policy, retry_attempt=retry_attempt),
             content_type=getattr(message, "content_type", "application/json"),
         )
         await emit_observation(

@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.26/relayna-1.4.26-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.25/relayna-1.4.25.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.26/relayna-1.4.26.tar.gz
 ```
 
 For local development in this repository:
@@ -232,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.25`, and the backend requires `relayna>=1.4.25`.
+release version is `1.4.26`, and the backend requires `relayna>=1.4.26`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -325,6 +325,13 @@ Relayna validates queue max-priority settings client-side and requires them to
 be in the range `1..255`. It also rejects task or workflow publishes whose
 top-level `priority` exceeds the configured `task_max_priority` or
 `workflow_max_priority`.
+
+Broker-delayed retries can opt into priority escalation with
+`RetryPolicy(retry_priority_step=...)`. For each retry, Relayna publishes the
+retry queue message with AMQP priority `retry_attempt * retry_priority_step`,
+clamped to `255`. Leave the field as `None` to keep retry priority unset.
+RabbitMQ applies the priority after the retry TTL dead-letters the message back
+to a queue declared with `x-max-priority`.
 
 Failed items from a batch envelope are retried individually when the worker has
 `retry_policy=...`. Relayna does not execute the whole batch under one RabbitMQ
@@ -711,6 +718,12 @@ traffic on separate lanes:
 - each consuming stage owns one durable inbox queue
 - status events still publish on the shared status exchange so existing
   `StatusHub`, history, and SSE behavior stays unchanged
+
+`StatusHub` keeps retrying transient consume-loop failures by default. For
+startup paths that should abort when the status queue cannot be opened, pass
+`fail_fast_errors={...}` with the exception types your RabbitMQ client raises;
+matching errors before the first successful iterator entry are re-raised as
+`RuntimeError`.
 
 When multiple sharded deployments share the same RabbitMQ vhost, namespace the
 aggregation queues with `aggregation_queue_template` and

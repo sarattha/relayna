@@ -332,6 +332,7 @@ class RelaynaRabbitClient:
         *,
         correlation_id: str | None = None,
         headers: Mapping[str, Any] | None = None,
+        priority: int | None = None,
         content_type: str | None = "application/json",
         delivery_mode: DeliveryMode = DeliveryMode.PERSISTENT,
     ) -> None:
@@ -349,7 +350,9 @@ class RelaynaRabbitClient:
                 delivery_mode=delivery_mode,
                 correlation_id=correlation_id,
                 headers=inject_trace_headers(headers),
+                priority=priority,
             )
+            _clear_default_priority(message, priority=priority)
             await self._channel.default_exchange.publish(message, routing_key=queue_name)
         if self._metrics is not None:
             self._metrics.record_queue_publish(queue=queue_name, status="raw", worker_type="worker")

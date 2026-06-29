@@ -296,6 +296,7 @@ class FakeRabbitClient:
         *,
         correlation_id: str | None = None,
         headers: dict[str, Any] | None = None,
+        priority: int | None = None,
         content_type: str | None = "application/json",
         delivery_mode: object | None = None,
     ) -> None:
@@ -305,6 +306,7 @@ class FakeRabbitClient:
                 "body": body,
                 "correlation_id": correlation_id,
                 "headers": dict(headers or {}),
+                "priority": priority,
                 "content_type": content_type,
                 "delivery_mode": delivery_mode,
             }
@@ -471,6 +473,11 @@ def make_workflow_topology() -> SharedStatusWorkflowTopology:
             ),
         ),
     )
+
+
+def test_retry_policy_rejects_negative_retry_priority_step() -> None:
+    with pytest.raises(ValueError, match="retry_priority_step"):
+        RetryPolicy(retry_priority_step=-1)
 
 
 async def run_consumer_until_message_done(
@@ -1758,8 +1765,55 @@ async def test_task_consumer_republishes_failed_messages_to_retry_queue() -> Non
     assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-source-queue"] == "tasks.queue"
     assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "handler_error"
     assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-exception-type"] == "RuntimeError"
+    assert rabbit.raw_queue_publishes[0]["priority"] is None
     assert [event["status"] for event in rabbit.published_statuses] == ["retrying"]
     assert any(isinstance(event, ConsumerRetryScheduled) for event in observed)
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_retry_priority_escalates_by_attempt() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123"}).encode("utf-8"),
+        headers={"x-relayna-retry-attempt": 1},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000, retry_priority_step=3),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert rabbit.raw_queue_publishes[0]["priority"] == 6
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_retry_priority_clamps_to_amqp_max() -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123"}).encode("utf-8"),
+        headers={"x-relayna-retry-attempt": 200},
+    )
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise RuntimeError("boom")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=300, delay_ms=1000, retry_priority_step=2),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert rabbit.raw_queue_publishes[0]["priority"] == 255
 
 
 @pytest.mark.asyncio
@@ -2430,7 +2484,7 @@ async def test_aggregation_consumer_retries_failed_messages_and_preserves_parent
         rabbitmq=rabbit,
         handler=handler,
         shards=[0],
-        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000, retry_priority_step=4),
         retry_statuses=RetryStatusConfig(enabled=True),
         observation_sink=sink,
     )
@@ -2439,6 +2493,7 @@ async def test_aggregation_consumer_retries_failed_messages_and_preserves_parent
 
     assert message.acked is True
     assert rabbit.raw_queue_publishes[0]["queue_name"] == "aggregation.queue.0.retry"
+    assert rabbit.raw_queue_publishes[0]["priority"] == 4
     assert rabbit.published_statuses[0]["status"] == "retrying"
     assert rabbit.published_statuses[0]["meta"]["parent_task_id"] == "parent-1"
     assert rabbit.published_status_calls[0][0] == "status"
@@ -2630,7 +2685,7 @@ async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure()
         rabbitmq=rabbit,
         handler=handler,
         stage="docsearch_planner",
-        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000),
+        retry_policy=RetryPolicy(max_retries=3, delay_ms=1000, retry_priority_step=5),
         retry_statuses=RetryStatusConfig(enabled=True),
         observation_sink=sink,
     )
@@ -2639,6 +2694,7 @@ async def test_workflow_consumer_schedules_retry_and_status_on_handler_failure()
 
     assert message.acked is True
     assert rabbit.raw_queue_publishes[0]["queue_name"] == "cq.docsearch_planner.in_queue.retry"
+    assert rabbit.raw_queue_publishes[0]["priority"] == 5
     assert rabbit.published_statuses[0]["status"] == "retrying"
     stage_failed = next(event for event in observations if isinstance(event, WorkflowStageFailed))
     assert stage_failed.exception_message == "workflow failed"

@@ -40,6 +40,7 @@ from .context import (
     _persist_dlq_record,
     _retry_attempt,
     _retry_headers,
+    _retry_priority,
 )
 
 
@@ -469,6 +470,7 @@ class WorkflowConsumer:
                     max_retries=max_retries,
                     reason=decision.reason,
                     exception_type=type(exc).__name__,
+                    retry_policy=retry_policy,
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
@@ -542,6 +544,7 @@ class WorkflowConsumer:
                     max_retries=max_retries,
                     reason=decision.reason,
                     exception_type=type(exc).__name__,
+                    retry_policy=retry_policy,
                 )
                 await self._publish_retry_status(context, next_attempt=next_attempt, max_retries=max_retries)
                 return True
@@ -673,6 +676,7 @@ class WorkflowConsumer:
         max_retries: int,
         reason: str,
         exception_type: str | None,
+        retry_policy: RetryPolicy | None,
     ) -> None:
         if retry_infrastructure is None:
             raise RuntimeError("Retry infrastructure is not initialized")
@@ -689,6 +693,7 @@ class WorkflowConsumer:
             message.body,
             correlation_id=getattr(message, "correlation_id", None),
             headers=headers,
+            priority=_retry_priority(retry_policy, retry_attempt=retry_attempt),
             content_type=getattr(message, "content_type", "application/json"),
         )
         await emit_observation(
@@ -786,6 +791,7 @@ class WorkflowConsumer:
             delay_ms=stage_config.retry_delay_ms if stage_config.retry_delay_ms is not None else base.delay_ms,
             retry_queue_suffix=base.retry_queue_suffix,
             dead_letter_queue_suffix=base.dead_letter_queue_suffix,
+            retry_priority_step=base.retry_priority_step,
         )
 
     async def _cleanup_dedup_state(

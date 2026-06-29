@@ -59,6 +59,16 @@ class FakeQueue:
         return FakeIterator(self._messages)
 
 
+class FailingIteratorQueue(FakeQueue):
+    def __init__(self, exc: Exception) -> None:
+        super().__init__([])
+        self.exc = exc
+
+    def iterator(self, arguments: dict[str, Any] | None = None) -> FakeIterator:
+        self.iterator_calls.append(arguments)
+        raise self.exc
+
+
 class FakeChannel:
     def __init__(self, queue: FakeQueue) -> None:
         self.queue = queue
@@ -263,6 +273,28 @@ async def test_status_hub_emits_loop_error_observation(monkeypatch: pytest.Monke
     assert loop_errors
     assert loop_errors[0].retry_delay_seconds == 2.0
     assert loop_errors[0].exception_message == "temporary failure"
+
+
+@pytest.mark.asyncio
+async def test_status_hub_fail_fast_errors_raise_before_iterator_starts() -> None:
+    observed: list[object] = []
+    topology = make_topology()
+    queue = FailingIteratorQueue(RuntimeError("queue unavailable"))
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
+    store = FakeStore()
+    hub = StatusHub(
+        rabbitmq=rabbit,
+        store=store,
+        observation_sink=observed.append,
+        fail_fast_errors={RuntimeError},
+    )
+
+    with pytest.raises(RuntimeError, match="StatusHub failed to start consuming queue") as exc_info:
+        await hub.run_forever()
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "queue unavailable"
+    assert not any(isinstance(event, StatusHubLoopError) for event in observed)
 
 
 @pytest.mark.asyncio
