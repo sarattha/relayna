@@ -14,6 +14,8 @@ All notable changes to this project will be documented in this file.
   hub has successfully started consuming.
 - Added `RelaynaRabbitClient.publish_raw_to_queue(..., priority=...)` support
   for raw queue publishes that need to carry an AMQP priority property.
+- Raised SDK and Studio backend dependency floors for patched Starlette, and
+  raised the SDK dev audit toolchain's `cryptography` floor.
 
 ### Changed
 
