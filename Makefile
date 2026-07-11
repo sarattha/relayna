@@ -66,9 +66,10 @@ test: ## Run the SDK test suite
 	$(PYTEST) tests
 
 .PHONY: coverage
-coverage: clean ## Run SDK tests with coverage (fail if <70 %)
-	@echo "coverage package not installed; running pytest without coverage"
-	$(PYTEST) tests
+coverage: clean ## Run SDK tests with coverage (fail if <98 %)
+	$(COVERAGE) run -m pytest tests
+	$(COVERAGE) report
+	$(COVERAGE) xml
 
 # --------------------------------------------------------------------------- #
 #  Snapshot tests

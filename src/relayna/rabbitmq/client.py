@@ -18,6 +18,7 @@ from aio_pika.abc import (
 from opentelemetry.trace import SpanKind
 from pydantic import BaseModel
 
+from .._async import map_bounded
 from ..contracts import (
     BatchTaskEnvelope,
     ContractAliasConfig,
@@ -206,11 +207,11 @@ class RelaynaRabbitClient:
         mode: Literal["individual", "batch_envelope"] = "individual",
         batch_id: str | None = None,
         meta: Mapping[str, Any] | None = None,
+        max_concurrency: int = 16,
     ) -> None:
         prepared_tasks = [self._prepare_task_payload(task) for task in tasks]
         if mode == "individual":
-            for task in prepared_tasks:
-                await self.publish_task(task)
+            await map_bounded(prepared_tasks, self.publish_task, concurrency=max_concurrency)
             return
         if mode != "batch_envelope":
             raise ValueError(f"Unsupported publish mode '{mode}'.")

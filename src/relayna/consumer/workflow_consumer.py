@@ -9,6 +9,7 @@ from typing import Any
 from opentelemetry.trace import SpanKind
 from pydantic import ValidationError
 
+from .._async import run_bounded_iterator
 from ..contracts import ContractAliasConfig, WorkflowEnvelope
 from ..dlq import DLQRecorder
 from ..metrics import RelaynaMetrics
@@ -135,18 +136,35 @@ class WorkflowConsumer:
                 async with queue.iterator(
                     arguments=self._consume_arguments or None, timeout=self._consume_timeout_seconds
                 ) as iterator:
-                    async for message in iterator:
+
+                    async def handle_message(
+                        message: Any,
+                        *,
+                        source_queue_name: str = queue_name,
+                        infrastructure: RetryInfrastructure | None = retry_infrastructure,
+                    ) -> None:
                         acked = await self._handle_message(
                             message,
                             stage=stage,
-                            source_queue_name=queue_name,
-                            retry_infrastructure=retry_infrastructure,
+                            source_queue_name=source_queue_name,
+                            retry_infrastructure=infrastructure,
                             retry_policy=effective_retry_policy,
                         )
                         if acked:
                             await message.ack()
-                        if self._stop.is_set():
-                            break
+
+                    if prefetch <= 1:
+                        async for message in iterator:
+                            await handle_message(message)
+                            if self._stop.is_set():
+                                break
+                    else:
+                        await run_bounded_iterator(
+                            iterator,
+                            concurrency=prefetch,
+                            handler=handle_message,
+                            stop_event=self._stop,
+                        )
             except asyncio.CancelledError:
                 raise
             except TimeoutError:

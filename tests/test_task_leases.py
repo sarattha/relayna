@@ -1,11 +1,46 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
-from relayna.storage import LeasePolicy, LeaseRecoveryAction, RedisTaskLeaseStore, TaskLease, TaskLeaseExpiryScanner
+from relayna.storage import (
+    LeasePolicy,
+    LeaseRecoveryAction,
+    RedisTaskLeaseStore,
+    TaskLease,
+    TaskLeaseExpiryScanner,
+    task_leases_for_health,
+)
+
+
+class FakePipeline:
+    def __init__(self, redis: FakeRedis) -> None:
+        self._redis = redis
+        self._ops: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def set(self, *args: Any, **kwargs: Any) -> None:
+        self._ops.append(("set", args, kwargs))
+
+    def delete(self, *args: Any, **kwargs: Any) -> None:
+        self._ops.append(("delete", args, kwargs))
+
+    def sadd(self, *args: Any, **kwargs: Any) -> None:
+        self._ops.append(("sadd", args, kwargs))
+
+    def srem(self, *args: Any, **kwargs: Any) -> None:
+        self._ops.append(("srem", args, kwargs))
+
+    def zadd(self, *args: Any, **kwargs: Any) -> None:
+        self._ops.append(("zadd", args, kwargs))
+
+    def zrem(self, *args: Any, **kwargs: Any) -> None:
+        self._ops.append(("zrem", args, kwargs))
+
+    async def execute(self) -> list[Any]:
+        return [await getattr(self._redis, name)(*args, **kwargs) for name, args, kwargs in self._ops]
 
 
 class FakeRedis:
@@ -29,6 +64,12 @@ class FakeRedis:
 
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
+
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        return [self.values.get(key) for key in keys]
+
+    def pipeline(self) -> FakePipeline:
+        return FakePipeline(self)
 
     async def delete(self, key: str) -> int:
         existed = key in self.values
@@ -181,6 +222,86 @@ async def test_task_lease_expiry_claim_allows_later_reacquire_of_same_lease_id()
     replacement = make_lease(owner_id="worker-b")
     assert await store.acquire(replacement) is True
     assert await store.claim_expired(now=datetime.now(UTC) + timedelta(seconds=120)) == [replacement]
+
+
+@pytest.mark.asyncio
+async def test_task_lease_store_owner_and_expiry_edge_paths() -> None:
+    redis = FakeRedis()
+    store = RedisTaskLeaseStore(redis)
+    lease = make_lease()
+    assert lease.expired is False
+    assert await store.list_by_owner("missing") == []
+    await store.acquire(lease)
+    redis.sets["relayna:lease:owner:worker-a"].add("missing")
+    assert await store.list_by_owner("worker-a") == [lease]
+    assert await store.heartbeat("missing", owner_id="worker-a", expires_at=datetime.now(UTC)) is None
+    assert await store.release("missing", owner_id="worker-a") is False
+
+    redis.sorted_sets["relayna:lease:expiries"]["missing"] = 0
+    future = make_lease(lease_id="future", task_id="future", expires_at=datetime.now(UTC) + timedelta(seconds=60))
+    redis.values["relayna:lease:task:future"] = future.model_dump_json()
+    redis.sorted_sets["relayna:lease:expiries"]["future"] = 0
+    assert await store.claim_expired(now=datetime.now(UTC)) == []
+    assert "missing" not in redis.sorted_sets["relayna:lease:expiries"]
+    assert redis.sorted_sets["relayna:lease:expiries"]["future"] == future.expires_at.timestamp()
+    assert await store.claim_expired(now=datetime(1970, 1, 1, tzinfo=UTC)) == []
+
+    await store._release_expired_claim("missing", retry=False)
+    await store._release_expired_claim("future", retry=True)
+    assert redis.sorted_sets["relayna:lease:expiries"]["future"] == future.expires_at.timestamp()
+
+
+@pytest.mark.asyncio
+async def test_task_lease_scanner_no_publisher_non_actionable_run_loop_and_health() -> None:
+    expired = make_lease(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+
+    class Store:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def claim_expired(self, *, limit: int) -> list[TaskLease]:
+            self.calls += 1
+            return [expired] if self.calls == 1 else []
+
+    store = Store()
+    scanner = TaskLeaseExpiryScanner(store=store, interval_seconds=0.001, batch_size=1)  # type: ignore[arg-type]
+    assert await scanner.scan_once() == [expired]
+
+    published: list[str] = []
+
+    async def publish(lease: TaskLease) -> None:
+        published.append(lease.lease_id)
+
+    scanner = TaskLeaseExpiryScanner(store=Store(), status_publisher=publish, interval_seconds=0.001)  # type: ignore[arg-type]
+    assert await scanner.scan_once() == [expired]
+    assert published == []
+    run_task = asyncio.create_task(scanner.run_forever())
+    await asyncio.sleep(0.005)
+    scanner.stop()
+    await asyncio.wait_for(run_task, timeout=1)
+
+    health = task_leases_for_health([expired])[0]
+    assert health["lease_id"] == expired.lease_id
+    assert health["expired"] is True
+    assert health["recovery_action"] == "observe_only"
+
+
+@pytest.mark.asyncio
+async def test_task_lease_scanner_publisher_failure_without_private_release_hook() -> None:
+    expired = make_lease(
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        recovery_action=LeaseRecoveryAction.RETRY,
+    )
+
+    class Store:
+        async def claim_expired(self, *, limit: int) -> list[TaskLease]:
+            return [expired]
+
+    async def fail(_lease: TaskLease) -> None:
+        raise RuntimeError("publisher failed")
+
+    scanner = TaskLeaseExpiryScanner(store=Store(), status_publisher=fail)  # type: ignore[arg-type]
+    assert await scanner.scan_once() == [expired]
 
 
 @pytest.mark.asyncio

@@ -3141,3 +3141,776 @@ async def test_workflow_consumer_acks_when_dedup_cleanup_fails() -> None:
     assert not rabbit.raw_queue_publishes
     assert contract_store.acquire_calls
     assert contract_store.release_calls == [{"stage": "docsearch_planner", "task_id": "task-123", "action": "collect"}]
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_prefetch_dispatches_concurrently() -> None:
+    messages = tuple(
+        FakeMessage(json.dumps({"task_id": f"task-{index}", "status": "processing"}).encode("utf-8"))
+        for index in (1, 2)
+    )
+    queue = FakeQueue(list(messages))
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    both_started = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+    max_active = 0
+
+    async def handler(event: StatusEventEnvelope, context: TaskContext) -> None:
+        nonlocal active, max_active
+        del event, context
+        active += 1
+        max_active = max(max_active, active)
+        if active == 2:
+            both_started.set()
+        try:
+            await release.wait()
+        finally:
+            active -= 1
+
+    consumer = AggregationConsumer(rabbitmq=rabbit, handler=handler, shards=[0], prefetch=2)
+    run_task = asyncio.create_task(consumer.run_forever())
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        consumer.stop()
+        release.set()
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        consumer.stop()
+        release.set()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert max_active == 2
+    assert all(message.acked for message in messages)
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_stage_max_inflight_dispatches_concurrently() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="workflow.planner",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                max_inflight=2,
+            ),
+        ),
+    )
+    messages = tuple(
+        FakeMessage(
+            json.dumps(
+                {
+                    "task_id": f"task-{index}",
+                    "message_id": f"message-{index}",
+                    "stage": "planner",
+                    "payload": {},
+                }
+            ).encode("utf-8")
+        )
+        for index in (1, 2)
+    )
+    queue = FakeQueue(list(messages))
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
+    both_started = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+    max_active = 0
+
+    async def handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        nonlocal active, max_active
+        del envelope, context
+        active += 1
+        max_active = max(max_active, active)
+        if active == 2:
+            both_started.set()
+        try:
+            await release.wait()
+        finally:
+            active -= 1
+
+    consumer = WorkflowConsumer(rabbitmq=rabbit, handler=handler, stage="planner")
+    run_task = asyncio.create_task(consumer.run_forever())
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        consumer.stop()
+        release.set()
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        consumer.stop()
+        release.set()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert max_active == 2
+    assert all(message.acked for message in messages)
+
+
+def test_workflow_consumer_requires_stage_or_queue_and_workflow_topology() -> None:
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[])
+
+    async def handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+
+    with pytest.raises(ValueError, match="requires stage"):
+        WorkflowConsumer(rabbitmq=rabbit, handler=handler)
+
+    by_queue = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        queue_name="cq.docsearch_planner.in_queue",
+    )
+    assert by_queue._resolve_stage() == "docsearch_planner"
+    missing = WorkflowConsumer(rabbitmq=rabbit, handler=handler, queue_name="missing")
+    with pytest.raises(KeyError, match="No workflow stage"):
+        missing._resolve_stage()
+
+    wrong = WorkflowConsumer(
+        rabbitmq=FakeRabbitClient(topology=make_topology(), acquire_results=[]),
+        handler=handler,
+        stage="default",
+    )
+    with pytest.raises(RuntimeError, match="SharedStatusWorkflowTopology"):
+        wrong._workflow_topology()
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_malformed_invalid_and_contract_rejections_without_retry() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                accepted_actions=(ActionSchema(action="plan"),),
+            ),
+        ),
+    )
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[])
+
+    async def handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        raise AssertionError("invalid messages must not reach the handler")
+
+    consumer = WorkflowConsumer(rabbitmq=rabbit, handler=handler, stage="planner")
+    messages = [
+        FakeMessage(b"{not-json"),
+        FakeMessage(json.dumps({"task_id": "task"}).encode()),
+        FakeMessage(
+            json.dumps(
+                {
+                    "task_id": "task",
+                    "message_id": "message",
+                    "stage": "planner",
+                    "action": "unsupported",
+                    "payload": {},
+                }
+            ).encode()
+        ),
+    ]
+    for message in messages:
+        result = await consumer._handle_message(
+            message,
+            stage="planner",
+            source_queue_name="planner.queue",
+            retry_infrastructure=None,
+            retry_policy=None,
+        )
+        assert result is False
+        assert message.rejected_with is False
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_retry_dead_letters_malformed_and_invalid_messages() -> None:
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[])
+
+    async def handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+
+    policy = RetryPolicy(max_retries=1, delay_ms=10)
+    infrastructure = RetryInfrastructure("queue", "queue.retry", "queue.dlq")
+    consumer = WorkflowConsumer(rabbitmq=rabbit, handler=handler, stage="docsearch_planner")
+    for message in (FakeMessage(b"bad"), FakeMessage(json.dumps({"task_id": "task"}).encode())):
+        assert (
+            await consumer._handle_message(
+                message,
+                stage="docsearch_planner",
+                source_queue_name="queue",
+                retry_infrastructure=infrastructure,
+                retry_policy=policy,
+            )
+            is True
+        )
+    assert len(rabbit.raw_queue_publishes) == 2
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_dedup_conflict_mark_failure_and_lease_conflict_paths() -> None:
+    topology = SharedStatusWorkflowTopology(
+        rabbitmq_url="amqp://guest:guest@localhost:5672/",
+        workflow_exchange="workflow.exchange",
+        status_exchange="status.exchange",
+        status_queue="status.queue",
+        stages=(
+            WorkflowStage(
+                name="planner",
+                queue="planner.queue",
+                binding_keys=("planner.in",),
+                publish_routing_key="planner.in",
+                dedup_key_fields=("id",),
+            ),
+        ),
+    )
+    body = json.dumps(
+        {
+            "task_id": "task",
+            "message_id": "message",
+            "stage": "planner",
+            "payload": {"id": "one"},
+        }
+    ).encode()
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[])
+
+    async def handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+
+    conflict = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="planner",
+        contract_store=FakeContractStore(acquire_result=False),
+    )
+    message = FakeMessage(body)
+    assert (
+        await conflict._handle_message(
+            message,
+            stage="planner",
+            source_queue_name="planner.queue",
+            retry_infrastructure=None,
+            retry_policy=None,
+        )
+        is False
+    )
+    assert message.rejected_with is False
+
+    failing_store = FakeContractStore(fail_mark_inflight=True)
+    failing = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="planner",
+        contract_store=failing_store,
+    )
+    with pytest.raises(RuntimeError, match="mark unavailable"):
+        await failing._handle_message(
+            FakeMessage(body),
+            stage="planner",
+            source_queue_name="planner.queue",
+            retry_infrastructure=None,
+            retry_policy=None,
+        )
+    assert failing_store.release_calls
+
+    lease_topology = make_workflow_topology()
+    metrics = RelaynaMetrics(service="lease-conflict")
+    lease_consumer = WorkflowConsumer(
+        rabbitmq=FakeRabbitClient(topology=lease_topology, acquire_results=[]),
+        handler=handler,
+        stage="docsearch_planner",
+        lease_store=FakeLeaseStore(acquire_result=False),
+        lease_policy=LeasePolicy(enabled=True),
+        metrics=metrics,
+    )
+    lease_message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task",
+                "message_id": "message",
+                "stage": "docsearch_planner",
+                "payload": {},
+            }
+        ).encode()
+    )
+    assert (
+        await lease_consumer._handle_message(
+            lease_message,
+            stage="docsearch_planner",
+            source_queue_name="queue",
+            retry_infrastructure=None,
+            retry_policy=None,
+        )
+        is False
+    )
+    assert lease_message.rejected_with is True
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_run_loop_timeout_error_cancellation_and_close_paths() -> None:
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task",
+                "message_id": "message",
+                "stage": "docsearch_planner",
+                "payload": {},
+            }
+        ).encode()
+    )
+    channel = FakeChannel(FakeQueue([message]))
+    rabbit = FakeRabbitClient(
+        topology=make_workflow_topology(),
+        acquire_results=[TimeoutError(), RuntimeError("temporary"), channel],
+    )
+
+    async def handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+
+    observed: list[object] = []
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        idle_retry_seconds=0,
+        observation_sink=observed.append,
+    )
+    await run_consumer_until_message_done(consumer, message)
+    assert any(isinstance(event, WorkflowStageFailed) and event.exception_message == "temporary" for event in observed)
+
+    class CancellingRabbit(FakeRabbitClient):
+        async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
+            raise asyncio.CancelledError
+
+    cancelled = WorkflowConsumer(
+        rabbitmq=CancellingRabbit(topology=make_workflow_topology(), acquire_results=[]),
+        handler=handler,
+        stage="docsearch_planner",
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled.run_forever()
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_handler_failure_timeout_dead_letter_and_cancel_paths() -> None:
+    def topology(*, timeout: float | None = None) -> SharedStatusWorkflowTopology:
+        return SharedStatusWorkflowTopology(
+            rabbitmq_url="amqp://guest:guest@localhost:5672/",
+            workflow_exchange="workflow.exchange",
+            status_exchange="status.exchange",
+            status_queue="status.queue",
+            stages=(
+                WorkflowStage(
+                    name="stage",
+                    queue="stage.queue",
+                    binding_keys=("stage.in",),
+                    publish_routing_key="stage.in",
+                    timeout_seconds=timeout,
+                ),
+            ),
+        )
+
+    body = json.dumps({"task_id": "task", "message_id": "message", "stage": "stage", "payload": {}}).encode()
+
+    async def fail(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+        raise RuntimeError("failed")
+
+    no_retry = WorkflowConsumer(
+        rabbitmq=FakeRabbitClient(topology=topology(), acquire_results=[]),
+        handler=fail,
+        stage="stage",
+    )
+    failed_message = FakeMessage(body)
+    assert (
+        await no_retry._handle_message(
+            failed_message,
+            stage="stage",
+            source_queue_name="stage.queue",
+            retry_infrastructure=None,
+            retry_policy=None,
+        )
+        is False
+    )
+    assert failed_message.rejected_with is False
+
+    async def timeout_handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+        await asyncio.sleep(0.05)
+
+    timeout_no_retry = WorkflowConsumer(
+        rabbitmq=FakeRabbitClient(topology=topology(timeout=0.001), acquire_results=[]),
+        handler=timeout_handler,
+        stage="stage",
+    )
+    timeout_message = FakeMessage(body)
+    assert (
+        await timeout_no_retry._handle_message(
+            timeout_message,
+            stage="stage",
+            source_queue_name="stage.queue",
+            retry_infrastructure=None,
+            retry_policy=None,
+        )
+        is False
+    )
+    assert timeout_message.rejected_with is False
+
+    policy = RetryPolicy(max_retries=0, delay_ms=10)
+    infra = RetryInfrastructure("stage.queue", "stage.queue.retry", "stage.queue.dlq")
+    for current_topology, handler in ((topology(), fail), (topology(timeout=0.001), timeout_handler)):
+        rabbit = FakeRabbitClient(topology=current_topology, acquire_results=[])
+        consumer = WorkflowConsumer(rabbitmq=rabbit, handler=handler, stage="stage")
+        assert (
+            await consumer._handle_message(
+                FakeMessage(body),
+                stage="stage",
+                source_queue_name="stage.queue",
+                retry_infrastructure=infra,
+                retry_policy=policy,
+            )
+            is True
+        )
+        assert rabbit.raw_queue_publishes[0]["queue_name"] == "stage.queue.dlq"
+
+    async def cancel(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+        raise asyncio.CancelledError
+
+    cancel_consumer = WorkflowConsumer(
+        rabbitmq=FakeRabbitClient(topology=topology(), acquire_results=[]),
+        handler=cancel,
+        stage="stage",
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await cancel_consumer._handle_message(
+            FakeMessage(body),
+            stage="stage",
+            source_queue_name="stage.queue",
+            retry_infrastructure=None,
+            retry_policy=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_workflow_consumer_status_infrastructure_and_cleanup_edge_paths() -> None:
+    rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[])
+
+    async def handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope, context
+
+    consumer = WorkflowConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        stage="docsearch_planner",
+        retry_statuses=RetryStatusConfig(enabled=True),
+    )
+    context = WorkflowContext(
+        rabbitmq=rabbit,
+        consumer_name="consumer",
+        stage="docsearch_planner",
+        raw_payload={},
+        correlation_id="corr",
+        delivery_tag=1,
+        redelivered=False,
+        _task_id="task",
+        _message_id="message",
+    )
+
+    async def fail_status(event: Any) -> None:
+        raise RuntimeError("status failed")
+
+    rabbit.publish_status = fail_status  # type: ignore[method-assign]
+    await consumer._publish_retry_status(context, next_attempt=1, max_retries=2)
+    await consumer._publish_dead_letter_status(context, RuntimeError("failed"))
+
+    async def cancel_status(event: Any) -> None:
+        raise asyncio.CancelledError
+
+    rabbit.publish_status = cancel_status  # type: ignore[method-assign]
+    with pytest.raises(asyncio.CancelledError):
+        await consumer._publish_retry_status(context, next_attempt=1, max_retries=2)
+    with pytest.raises(asyncio.CancelledError):
+        await consumer._publish_dead_letter_status(context, RuntimeError("failed"))
+
+    message = FakeMessage(b"{}")
+    with pytest.raises(RuntimeError, match="Retry infrastructure"):
+        await consumer._publish_retry(
+            message,
+            retry_infrastructure=None,
+            source_queue_name="queue",
+            task_id="task",
+            retry_attempt=1,
+            max_retries=2,
+            reason="failed",
+            exception_type="RuntimeError",
+            retry_policy=RetryPolicy(),
+        )
+    with pytest.raises(RuntimeError, match="Retry infrastructure"):
+        await consumer._publish_dead_letter(
+            message,
+            retry_infrastructure=None,
+            source_queue_name="queue",
+            task_id="task",
+            retry_attempt=1,
+            reason="failed",
+            exception_type="RuntimeError",
+            retry_policy=RetryPolicy(),
+        )
+
+    await consumer._cleanup_dedup_state(
+        stage="stage",
+        task_id="task",
+        action=None,
+        payload={},
+        dedup_key_fields=(),
+    )
+    consumer._stage = None
+    consumer._queue_name = None
+    with pytest.raises(RuntimeError, match="requires stage"):
+        consumer._resolve_stage()
+
+
+def test_task_consumer_rejects_non_positive_batch_publish_concurrency() -> None:
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    with pytest.raises(ValueError, match="batch_publish_concurrency"):
+        TaskConsumer(
+            rabbitmq=FakeRabbitClient(topology=make_topology(), acquire_results=[]),
+            handler=handler,
+            batch_publish_concurrency=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_dead_letters_invalid_batch_envelope() -> None:
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("invalid batch items must not reach the handler")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=10),
+    )
+    message = FakeMessage(json.dumps({"batch_id": "batch", "tasks": [{"payload": {}}]}).encode())
+    infrastructure = RetryInfrastructure("tasks.queue", "tasks.queue.retry", "tasks.queue.dlq")
+
+    await consumer._handle_message(
+        message,
+        source_queue_name="tasks.queue",
+        retry_infrastructure=infrastructure,
+    )
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "tasks.queue.dlq"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "invalid_envelope"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        (b"not-json", "malformed_json"),
+        (json.dumps({"status": "completed"}).encode(), "invalid_envelope"),
+    ],
+)
+async def test_aggregation_consumer_rejects_invalid_inputs_without_retry(body: bytes, reason: str) -> None:
+    del reason
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+
+    async def handler(event: Any, context: TaskContext) -> None:
+        raise AssertionError("invalid aggregation events must not reach the handler")
+
+    consumer = AggregationConsumer(rabbitmq=rabbit, handler=handler, shards=[0])
+    message = FakeMessage(body)
+
+    await consumer._handle_message(
+        message,
+        source_queue_name="aggregation.queue.0",
+        retry_infrastructure=None,
+    )
+
+    assert message.rejected_with is False
+    assert rabbit.raw_queue_publishes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "reason"),
+    [
+        (b"not-json", "malformed_json"),
+        (json.dumps({"status": "completed"}).encode(), "invalid_envelope"),
+    ],
+)
+async def test_aggregation_consumer_dead_letters_invalid_inputs_with_retry(body: bytes, reason: str) -> None:
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+
+    async def handler(event: Any, context: TaskContext) -> None:
+        raise AssertionError("invalid aggregation events must not reach the handler")
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=10),
+    )
+    message = FakeMessage(body)
+    infrastructure = RetryInfrastructure(
+        "aggregation.queue.0",
+        "aggregation.queue.0.retry",
+        "aggregation.queue.0.dlq",
+    )
+
+    await consumer._handle_message(
+        message,
+        source_queue_name="aggregation.queue.0",
+        retry_infrastructure=infrastructure,
+    )
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["queue_name"] == "aggregation.queue.0.dlq"
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == reason
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_run_loop_error_cancellation_and_close_paths() -> None:
+    message = FakeMessage(json.dumps({"task_id": "task", "status": "completed"}).encode())
+    channel = FakeChannel(FakeQueue([message]))
+    rabbit = FakeRabbitClient(
+        topology=make_topology(),
+        acquire_results=[TimeoutError(), RuntimeError("temporary"), channel],
+    )
+
+    async def handler(event: Any, context: TaskContext) -> None:
+        del event, context
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        shards=[0],
+        idle_retry_seconds=0,
+    )
+    await run_consumer_until_message_done(consumer, message)
+    assert channel.close_calls == 1
+
+    class CancellingRabbit(FakeRabbitClient):
+        async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
+            raise asyncio.CancelledError
+
+    cancelled = AggregationConsumer(
+        rabbitmq=CancellingRabbit(topology=make_topology(), acquire_results=[]),
+        handler=handler,
+        shards=[0],
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled.run_forever()
+
+
+@pytest.mark.asyncio
+async def test_aggregation_consumer_status_metrics_and_infrastructure_edge_paths() -> None:
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+    metrics = RelaynaMetrics(service="aggregation-coverage")
+
+    async def fail(event: Any, context: TaskContext) -> None:
+        del event, context
+        raise RuntimeError("failed")
+
+    consumer = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=fail,
+        shards=[0],
+        retry_policy=RetryPolicy(max_retries=1, delay_ms=10),
+        retry_statuses=RetryStatusConfig(enabled=True),
+        metrics=metrics,
+    )
+    body = json.dumps({"task_id": "task", "status": "completed"}).encode()
+    infrastructure = RetryInfrastructure(
+        "aggregation.queue.0",
+        "aggregation.queue.0.retry",
+        "aggregation.queue.0.dlq",
+    )
+    retry_message = FakeMessage(body)
+    await consumer._handle_message(
+        retry_message,
+        source_queue_name="aggregation.queue.0",
+        retry_infrastructure=infrastructure,
+    )
+    assert retry_message.acked is True
+
+    dead_letter_message = FakeMessage(body, headers={"x-relayna-retry-attempt": 1})
+    await consumer._handle_message(
+        dead_letter_message,
+        source_queue_name="aggregation.queue.0",
+        retry_infrastructure=infrastructure,
+    )
+    assert dead_letter_message.acked is True
+
+    context = TaskContext(
+        rabbitmq=rabbit,
+        consumer_name="aggregation",
+        raw_payload={},
+        correlation_id=None,
+        delivery_tag=None,
+        redelivered=False,
+        _task_id="task",
+        is_task_context=False,
+    )
+    disabled = AggregationConsumer(
+        rabbitmq=rabbit,
+        handler=fail,
+        shards=[0],
+        retry_statuses=RetryStatusConfig(enabled=False),
+    )
+    await disabled._publish_retry_status(context, next_attempt=1, max_retries=2, meta={})
+    await disabled._publish_dead_letter_status(context, RuntimeError("failed"), meta={})
+
+    async def fail_status(event: Any) -> None:
+        del event
+        raise RuntimeError("status failed")
+
+    rabbit.publish_status = fail_status  # type: ignore[method-assign]
+    await consumer._publish_retry_status(context, next_attempt=1, max_retries=2, meta={})
+    await consumer._publish_dead_letter_status(context, RuntimeError("failed"), meta={})
+
+    async def cancel_status(event: Any) -> None:
+        del event
+        raise asyncio.CancelledError
+
+    rabbit.publish_status = cancel_status  # type: ignore[method-assign]
+    with pytest.raises(asyncio.CancelledError):
+        await consumer._publish_retry_status(context, next_attempt=1, max_retries=2, meta={})
+    with pytest.raises(asyncio.CancelledError):
+        await consumer._publish_dead_letter_status(context, RuntimeError("failed"), meta={})
+
+    with pytest.raises(RuntimeError, match="Retry infrastructure"):
+        await consumer._publish_retry(
+            FakeMessage(body),
+            retry_infrastructure=None,
+            source_queue_name="aggregation.queue.0",
+            task_id="task",
+            retry_attempt=1,
+            max_retries=2,
+            reason="failed",
+            exception_type="RuntimeError",
+        )
+    with pytest.raises(RuntimeError, match="Retry infrastructure"):
+        await consumer._publish_dead_letter(
+            FakeMessage(body),
+            retry_infrastructure=None,
+            source_queue_name="aggregation.queue.0",
+            task_id="task",
+            retry_attempt=1,
+            reason="failed",
+            exception_type="RuntimeError",
+        )

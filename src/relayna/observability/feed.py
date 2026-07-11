@@ -156,19 +156,45 @@ class RedisServiceEventFeedStore:
         return await self._store(normalized)
 
     async def get_feed(self, *, after: str | None = None, limit: int = 100) -> RelaynaServiceEventFeedResponse:
-        items = await cast(
-            Awaitable[list[str | bytes]],
-            self.redis.lrange(self.feed_key(), 0, max(0, self.feed_maxlen - 1)),
-        )
-        parsed = [RelaynaServiceEvent.model_validate_json(item) for item in items]
-        start_index = 0
-        if after:
-            for index, item in enumerate(parsed):
-                if item.cursor == after:
-                    start_index = index + 1
+        page_size = max(1, limit)
+        chunk_size = max(100, page_size + 1)
+        candidates: list[RelaynaServiceEvent] = []
+        head: list[RelaynaServiceEvent] = []
+        cursor_found = after is None
+        offset = 0
+
+        while offset < self.feed_maxlen and len(candidates) <= page_size:
+            items = await cast(
+                Awaitable[list[str | bytes]],
+                self.redis.lrange(
+                    self.feed_key(),
+                    offset,
+                    min(self.feed_maxlen - 1, offset + chunk_size - 1),
+                ),
+            )
+            if not items:
+                break
+            parsed = [RelaynaServiceEvent.model_validate_json(item) for item in items]
+            if offset == 0:
+                head = parsed[: page_size + 1]
+            for item in parsed:
+                if not cursor_found:
+                    if item.cursor == after:
+                        cursor_found = True
+                    continue
+                if after is not None and item.cursor == after:
+                    continue
+                candidates.append(item)
+                if len(candidates) > page_size:
                     break
-        page = parsed[start_index : start_index + max(1, limit)]
-        next_cursor = page[-1].cursor if start_index + len(page) < len(parsed) and page else None
+            if len(candidates) > page_size or len(items) < chunk_size:
+                break
+            offset += len(items)
+
+        if after is not None and not cursor_found:
+            candidates = head
+        page = candidates[:page_size]
+        next_cursor = page[-1].cursor if len(candidates) > page_size and page else None
         return RelaynaServiceEventFeedResponse(count=len(page), items=page, next_cursor=next_cursor)
 
     async def _store(self, event: RelaynaServiceEvent) -> bool:

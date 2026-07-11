@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -167,3 +168,84 @@ class _StaticCollector:
 
     async def collect(self) -> list[RuntimePressureSignal]:
         return list(self._signals)
+
+
+def test_runtime_pressure_collectors_run_concurrently_and_preserve_order() -> None:
+    started: list[str] = []
+    both_started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingCollector:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        async def collect(self) -> list[RuntimePressureSignal]:
+            started.append(self.name)
+            if len(started) == 2:
+                both_started.set()
+            await release.wait()
+            return [
+                RuntimePressureSignal(
+                    scope="collector",
+                    scope_id=self.name,
+                    kind="ready",
+                    severity=PressureSeverity.NORMAL,
+                )
+            ]
+
+    async def scenario() -> None:
+        service = RuntimePressureService(
+            collectors=[BlockingCollector("first"), BlockingCollector("second")],
+            max_concurrency=2,
+        )
+        snapshot_task = asyncio.create_task(service.snapshot())
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        release.set()
+        snapshot = await snapshot_task
+        assert [signal.scope_id for signal in snapshot.signals] == ["first", "second"]
+
+    asyncio.run(scenario())
+
+
+def test_queue_pressure_inspection_is_bounded() -> None:
+    active = 0
+    max_active = 0
+    two_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def inspect_queue(queue_name: str) -> QueueInspection:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        if active == 2:
+            two_started.set()
+        try:
+            await release.wait()
+            return QueueInspection(queue_name=queue_name, message_count=0, consumer_count=1)
+        finally:
+            active -= 1
+
+    async def scenario() -> None:
+        collector = QueuePressureCollector(
+            queue_names=["queue-1", "queue-2", "queue-3"],
+            inspect_queue=inspect_queue,
+            max_concurrency=2,
+        )
+        collect_task = asyncio.create_task(collector.collect())
+        await asyncio.wait_for(two_started.wait(), timeout=1)
+        assert max_active == 2
+        release.set()
+        signals = list(await collect_task)
+        assert [signal.scope_id for signal in signals] == ["queue-1", "queue-2", "queue-3"]
+
+    asyncio.run(scenario())
+
+
+def test_pressure_concurrency_must_be_positive() -> None:
+    async def inspect_queue(_name: str) -> None:
+        return None
+
+    with pytest.raises(ValueError, match="max_concurrency"):
+        RuntimePressureService(max_concurrency=0)
+    with pytest.raises(ValueError, match="max_concurrency"):
+        QueuePressureCollector(queue_names=[], inspect_queue=inspect_queue, max_concurrency=0)

@@ -163,3 +163,18 @@ async def test_set_history_indexes_child_task_ids_by_parent_task_id() -> None:
 
     assert child_task_ids == ["child-1"]
     assert redis.expirations[store.child_tasks_key("parent-1")] == 60
+
+
+@pytest.mark.asyncio
+async def test_status_history_limits_child_bytes_and_parent_edge_cases() -> None:
+    redis = FakeRedis()
+    store = RedisStatusStore(redis, prefix="status", ttl_seconds=None, history_maxlen=2)
+    await store.set_history("task", {"task_id": "task", "status": "one"})
+    await store.set_history("task", {"task_id": "task", "status": "two"})
+    assert [item["status"] for item in await store.get_history("task")] == ["two", "one"]
+    assert [item["status"] for item in await store.get_history("task", limit=1)] == ["two"]
+    assert await store.get_history("task", limit=0) == [{"task_id": "task", "status": "two"}]
+    redis.sets[store.child_tasks_key("parent")] = {"child-b", "child-a"}
+    assert await store.get_child_task_ids("parent", limit=1) == ["child-a"]
+    assert await store.get_child_task_ids("parent", limit=-1) == []
+    assert store._parent_task_id({"task_id": "task", "meta": {"parent_task_id": "task"}}) is None

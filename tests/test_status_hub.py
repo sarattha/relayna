@@ -23,9 +23,18 @@ class FakeMessage:
         self.body = body
         self._on_ack = on_ack
         self.acked = False
+        self.rejected_with: bool | None = None
+        self.done = asyncio.Event()
 
     async def ack(self) -> None:
         self.acked = True
+        self.done.set()
+        if self._on_ack is not None:
+            self._on_ack()
+
+    async def reject(self, *, requeue: bool) -> None:
+        self.rejected_with = requeue
+        self.done.set()
         if self._on_ack is not None:
             self._on_ack()
 
@@ -239,6 +248,8 @@ async def test_status_hub_emits_store_write_failed_observation() -> None:
 
     write_failed = next(event for event in observed if isinstance(event, StatusHubStoreWriteFailed))
     assert write_failed.exception_message == "redis down"
+    assert message.acked is False
+    assert message.rejected_with is True
 
 
 @pytest.mark.asyncio
@@ -321,3 +332,202 @@ async def test_status_hub_sink_failures_do_not_break_storage() -> None:
     await hub.run_forever()
 
     assert store.stored == [("task-123", {"task_id": "task-123", "status": "completed"})]
+
+
+@pytest.mark.asyncio
+async def test_status_hub_prefetch_dispatches_different_tasks_concurrently() -> None:
+    topology = make_topology()
+    both_started = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingStore(FakeStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+
+        async def set_history(self, task_id: str, event: dict[str, Any]) -> None:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            if self.active == 2:
+                both_started.set()
+            try:
+                await release.wait()
+                self.stored.append((task_id, dict(event)))
+            finally:
+                self.active -= 1
+
+    messages = (
+        FakeMessage(json.dumps({"task_id": "task-1", "status": "processing"}).encode("utf-8")),
+        FakeMessage(json.dumps({"task_id": "task-2", "status": "processing"}).encode("utf-8")),
+    )
+    store = BlockingStore()
+    queue = FakeQueue(list(messages))
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
+    hub = StatusHub(rabbitmq=rabbit, store=store, prefetch=2)
+    run_task = asyncio.create_task(hub.run_forever())
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1)
+        hub.stop()
+        release.set()
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        hub.stop()
+        release.set()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert store.max_active == 2
+    assert all(message.acked for message in messages)
+    assert hub._task_locks == {}
+
+
+@pytest.mark.asyncio
+async def test_status_hub_serializes_writes_for_the_same_task() -> None:
+    topology = make_topology()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    class OrderedStore(FakeStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.max_active = 0
+
+        async def set_history(self, task_id: str, event: dict[str, Any]) -> None:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            try:
+                if event["status"] == "first":
+                    first_started.set()
+                    await release_first.wait()
+                self.stored.append((task_id, dict(event)))
+            finally:
+                self.active -= 1
+
+    messages = (
+        FakeMessage(json.dumps({"task_id": "task-1", "status": "first"}).encode("utf-8")),
+        FakeMessage(json.dumps({"task_id": "task-1", "status": "second"}).encode("utf-8")),
+    )
+    store = OrderedStore()
+    queue = FakeQueue(list(messages))
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(queue)])
+    hub = StatusHub(rabbitmq=rabbit, store=store, prefetch=2)
+    run_task = asyncio.create_task(hub.run_forever())
+    try:
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert store.max_active == 1
+        hub.stop()
+        release_first.set()
+        await asyncio.wait_for(messages[1].done.wait(), timeout=1)
+        await asyncio.wait_for(run_task, timeout=1)
+    finally:
+        hub.stop()
+        release_first.set()
+        if not run_task.done():
+            run_task.cancel()
+            await asyncio.gather(run_task, return_exceptions=True)
+
+    assert [event["status"] for _, event in store.stored] == ["first", "second"]
+    assert store.max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_status_hub_prefetch_one_uses_sequential_path_and_sanitizes_meta() -> None:
+    topology = make_topology()
+    hub: StatusHub | None = None
+
+    def stop() -> None:
+        assert hub is not None
+        hub.stop()
+
+    message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-1",
+                "status": 7,
+                "event_id": " ",
+                "meta": {"auth_token": "secret", "keep": True},
+            }
+        ).encode()
+    )
+    store = FakeStore(on_store=stop)
+    rabbit = FakeRabbitClient(topology=topology, acquire_results=[FakeChannel(FakeQueue([message]))])
+    observations: list[object] = []
+    hub = StatusHub(rabbitmq=rabbit, store=store, prefetch=1, observation_sink=observations.append)
+
+    await hub.run_forever()
+
+    assert store.stored[0][1]["meta"] == {"keep": True}
+    stored = next(event for event in observations if isinstance(event, StatusHubStoredEvent))
+    assert stored.event_id is None
+    assert stored.status == "7"
+
+
+@pytest.mark.asyncio
+async def test_status_hub_handles_missing_task_and_alias_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    hub = StatusHub(
+        rabbitmq=FakeRabbitClient(topology=make_topology(), acquire_results=[]),
+        store=FakeStore(),
+    )
+    missing = FakeMessage(json.dumps({"status": "done"}).encode())
+    await hub._handle_message(missing)
+    assert missing.acked is True
+
+    def fail_alias(*args: object, **kwargs: object) -> dict[str, Any]:
+        raise ValueError("alias failed")
+
+    monkeypatch.setattr("relayna.status.hub.normalize_contract_aliases", fail_alias)
+    alias_message = FakeMessage(json.dumps({"task_id": "task"}).encode())
+    await hub._handle_message(alias_message)
+    assert alias_message.acked is True
+
+
+@pytest.mark.asyncio
+async def test_status_hub_propagates_cancellation_returns_when_stopped_and_tolerates_close_failure() -> None:
+    class CancellingRabbit(FakeRabbitClient):
+        async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await StatusHub(
+            rabbitmq=CancellingRabbit(topology=make_topology(), acquire_results=[]),
+            store=FakeStore(),
+        ).run_forever()
+
+    stopped_hub: StatusHub | None = None
+
+    class StoppingRabbit(FakeRabbitClient):
+        async def acquire_channel(self, prefetch: int = 200) -> FakeChannel:
+            assert stopped_hub is not None
+            stopped_hub.stop()
+            raise RuntimeError("stopped")
+
+    stopped_hub = StatusHub(
+        rabbitmq=StoppingRabbit(topology=make_topology(), acquire_results=[]),
+        store=FakeStore(),
+    )
+    await stopped_hub.run_forever()
+
+    class CloseFailChannel(FakeChannel):
+        async def close(self) -> None:
+            await super().close()
+            raise RuntimeError("close failed")
+
+    close_hub: StatusHub | None = None
+
+    def stop_close_hub() -> None:
+        assert close_hub is not None
+        close_hub.stop()
+
+    message = FakeMessage(json.dumps({"task_id": "task", "status": "done"}).encode())
+    close_hub = StatusHub(
+        rabbitmq=FakeRabbitClient(
+            topology=make_topology(),
+            acquire_results=[CloseFailChannel(FakeQueue([message]))],
+        ),
+        store=FakeStore(on_store=stop_close_hub),
+    )
+    await close_hub.run_forever()

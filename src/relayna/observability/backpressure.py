@@ -7,6 +7,8 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
+from .._async import map_bounded
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -62,17 +64,20 @@ class RuntimePressureService:
         *,
         collectors: Sequence[PressureSignalCollector] = (),
         metrics_recorder: Callable[[RuntimePressureSignal], None] | None = None,
+        max_concurrency: int = 8,
     ) -> None:
         self._collectors = tuple(collectors)
         self._metrics_recorder = metrics_recorder
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
+        self._max_concurrency = max_concurrency
 
     async def snapshot(self) -> RuntimePressureSnapshot:
-        signals: list[RuntimePressureSignal] = []
-        for collector in self._collectors:
+        async def collect(collector: PressureSignalCollector) -> list[RuntimePressureSignal]:
             try:
-                signals.extend(await collector.collect())
+                return list(await collector.collect())
             except Exception as exc:
-                signals.append(
+                return [
                     RuntimePressureSignal(
                         scope="collector",
                         scope_id=type(collector).__name__,
@@ -81,7 +86,14 @@ class RuntimePressureService:
                         reason=str(exc),
                         recommended_action="Inspect the pressure signal collector configuration.",
                     )
-                )
+                ]
+
+        batches = await map_bounded(
+            self._collectors,
+            collect,
+            concurrency=self._max_concurrency,
+        )
+        signals = [signal for batch in batches for signal in batch]
         snapshot = RuntimePressureSnapshot(signals=signals)
         if self._metrics_recorder is not None:
             for signal in signals:
@@ -97,18 +109,21 @@ class QueuePressureCollector:
         inspect_queue: Callable[[str], Awaitable[Any | None]],
         warning_depth: int = 100,
         critical_depth: int = 1000,
+        max_concurrency: int = 16,
     ) -> None:
         self._queue_names = tuple(dict.fromkeys(str(name).strip() for name in queue_names if str(name).strip()))
         self._inspect_queue = inspect_queue
         self._warning_depth = warning_depth
         self._critical_depth = critical_depth
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least 1")
+        self._max_concurrency = max_concurrency
 
     async def collect(self) -> Iterable[RuntimePressureSignal]:
-        signals: list[RuntimePressureSignal] = []
-        for queue_name in self._queue_names:
+        async def inspect(queue_name: str) -> list[RuntimePressureSignal]:
             inspection = await self._inspect_queue(queue_name)
             if inspection is None:
-                signals.append(
+                return [
                     RuntimePressureSignal(
                         scope="queue",
                         scope_id=queue_name,
@@ -117,14 +132,13 @@ class QueuePressureCollector:
                         reason="Queue inspection returned no data.",
                         recommended_action="Verify RabbitMQ management inspection is configured.",
                     )
-                )
-                continue
+                ]
             severity = severity_for_thresholds(
                 inspection.message_count,
                 warning_threshold=self._warning_depth,
                 critical_threshold=self._critical_depth,
             )
-            signals.append(
+            signals = [
                 RuntimePressureSignal(
                     scope="queue",
                     scope_id=queue_name,
@@ -139,7 +153,7 @@ class QueuePressureCollector:
                     if severity != PressureSeverity.NORMAL
                     else None,
                 )
-            )
+            ]
             if inspection.consumer_count == 0:
                 signals.append(
                     RuntimePressureSignal(
@@ -153,7 +167,14 @@ class QueuePressureCollector:
                         recommended_action="Start at least one worker for this queue.",
                     )
                 )
-        return signals
+            return signals
+
+        batches = await map_bounded(
+            self._queue_names,
+            inspect,
+            concurrency=self._max_concurrency,
+        )
+        return [signal for batch in batches for signal in batch]
 
 
 class WorkerHealthPressureCollector:

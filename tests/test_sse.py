@@ -17,6 +17,7 @@ from relayna.observability import (
     SSEStreamStarted,
 )
 from relayna.status import SSEStatusStream
+from relayna.status.stream import _status_value, document_output_adapter
 
 
 class FakePubSubIterator:
@@ -355,3 +356,47 @@ async def test_sse_sink_failures_do_not_break_stream_delivery() -> None:
     chunks = await collect_chunks(stream.stream("task-123"), 2)
 
     assert chunks[1].startswith("id: evt-1\n")
+
+
+@pytest.mark.asyncio
+async def test_terminal_history_resumes_after_yield_and_stops_generator() -> None:
+    store = FakeStore(history=[{"task_id": "task", "status": "completed"}])
+    iterator = SSEStatusStream(store=store, keepalive_interval_seconds=None).stream("task")
+    assert (await anext(iterator)).startswith(b"event: ready")
+    assert b"completed" in await anext(iterator)
+    with pytest.raises(StopAsyncIteration):
+        await anext(iterator)
+
+
+@pytest.mark.asyncio
+async def test_sse_fallback_channel_skips_control_messages_and_handles_finite_listener() -> None:
+    class FinitePubSub(FakePubSub):
+        def listen(self) -> AsyncIterator[dict[str, Any]]:
+            async def iterate() -> AsyncIterator[dict[str, Any]]:
+                yield {"type": "subscribe", "data": "ignored"}
+                yield {"type": "message", "data": ""}
+
+            return iterate()
+
+    class StoreWithoutResolver:
+        prefix = "fallback"
+
+        def __init__(self) -> None:
+            self.pubsub = FinitePubSub()
+            self.redis = FakeRedis(self.pubsub)
+
+        async def get_history(self, task_id: str) -> list[dict[str, Any]]:
+            return []
+
+    store = StoreWithoutResolver()
+    iterator = SSEStatusStream(store=store, keepalive_interval_seconds=None).stream("task")  # type: ignore[arg-type]
+    assert (await anext(iterator)).startswith(b"event: ready")
+    with pytest.raises(StopAsyncIteration):
+        await anext(iterator)
+    assert store.pubsub.subscriptions == ["fallback:channel:task"]
+
+
+def test_document_adapter_and_numeric_status_value() -> None:
+    assert document_output_adapter({"task_id": "task"})["documentId"] == "task"
+    assert _status_value({"status": None}) is None
+    assert _status_value({"status": 7}) == "7"
