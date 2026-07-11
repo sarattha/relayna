@@ -49,6 +49,9 @@ using real Redis and RabbitMQ services.
   and headed-browser operator smoke tests.
 - [x] (2026-07-11 18:24Z) Updated outcomes, collected PR-draft inputs, removed
   generated artifacts and disposable containers, and prepared final handoff.
+- [x] (2026-07-12 02:00Z) Replaced the temporary letter tile with a generated,
+  transparent Relayna routing mark; aligned the sticky header with the rounded
+  card language; and verified desktop plus 390px layouts in the live Docker UI.
 
 ## Surprises & Discoveries
 
@@ -160,6 +163,13 @@ delivery, and an actual SDK task progressing through processing/completed
 history and SSE. A headed-browser walkthrough verified overview, services,
 failed-task incident context, deferred graph loading, and a 390 by 844 mobile
 layout. All smoke containers and generated coverage artifacts were removed.
+
+A visual follow-up replaced the plain `R` tile with a minimal teal/orange routed
+mark and changed the sharp full-bleed header into a floating rounded surface.
+The generated source used a flat chroma background that was removed locally;
+the checked-in 256px PNG has transparent corners and is rendered without an
+enclosing tile. The refreshed production container has no browser console
+issues, and a 390px viewport reports equal 390px client and document widths.
 
 ## Context and Orientation
 

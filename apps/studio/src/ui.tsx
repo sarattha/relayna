@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 
+import relaynaMarkUrl from "./assets/relayna-mark.png";
 import type {
   ExecutionGraph,
   HealthStatus,
@@ -949,7 +950,7 @@ export function AppHeader() {
   return (
     <header className="studio-header">
       <Link to="/" className="studio-brand" aria-label="Relayna Studio overview">
-        <span className="studio-brand__mark" aria-hidden="true">R</span>
+        <img className="studio-brand__mark" src={relaynaMarkUrl} alt="" aria-hidden="true" />
         <span>
           <strong>Relayna</strong>
           <small>Studio control plane</small>
