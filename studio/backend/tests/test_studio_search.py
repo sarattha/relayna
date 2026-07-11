@@ -104,9 +104,16 @@ class FakeRedis:
         self.values: dict[str, str] = {}
         self.sets: dict[str, set[str]] = {}
         self.lists: dict[str, list[str]] = {}
+        self.get_calls = 0
+        self.mget_calls: list[list[str]] = []
 
     async def get(self, key: str) -> str | None:
+        self.get_calls += 1
         return self.values.get(key)
+
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        self.mget_calls.append(list(keys))
+        return [self.values.get(key) for key in keys]
 
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
         if nx and key in self.values:
@@ -329,6 +336,8 @@ def test_search_service_indexes_events_and_filters_tasks() -> None:
 
         assert response.model_dump() == {"inserted": 2, "duplicate": 0, "invalid": 0}
 
+        redis.get_calls = 0
+        redis.mget_calls.clear()
         task_results = await search_service.search_tasks(
             StudioTaskSearchQuery(task_id="task-123", status="processing", stage="authorize")
         )
@@ -340,6 +349,26 @@ def test_search_service_indexes_events_and_filters_tasks() -> None:
         assert service_results.count == 1
         assert service_results.items[0].service_id == "payments-api"
         assert "name" in service_results.items[0].matched_fields
+        assert redis.get_calls == 0
+        assert len(redis.mget_calls) == 2
+        assert sorted(len(keys) for keys in redis.mget_calls) == [1, 2]
+
+        class StoreProxy:
+            def __init__(self, target: RedisStudioSearchStore) -> None:
+                self.target = target
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(self.target, name)
+
+        fallback_search = StudioSearchService(
+            registry_service=registry,
+            event_store=event_store,
+            store=StoreProxy(search_service.store),  # type: ignore[arg-type]
+        )
+        fallback_tasks = await fallback_search._load_task_documents({task_results.items[0].document_id, "missing"})
+        fallback_services = await fallback_search._load_service_documents(["payments-api", "missing"])
+        assert [document.task_id for document in fallback_tasks] == ["task-123"]
+        assert list(fallback_services) == ["payments-api"]
 
         await ingest_service.http_client.aclose()
 

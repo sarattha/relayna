@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest
 import relayna_studio.app as studio_app
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -86,6 +87,8 @@ class FakeRedis:
         self.sets: dict[str, set[str]] = {}
         self.expirations: dict[str, int] = {}
         self.close_calls = 0
+        self.get_calls = 0
+        self.mget_calls: list[list[str]] = []
         FakeRedis.instances.append(self)
 
     @classmethod
@@ -93,7 +96,12 @@ class FakeRedis:
         return cls(url)
 
     async def get(self, key: str) -> str | None:
+        self.get_calls += 1
         return self.values.get(key)
+
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        self.mget_calls.append(list(keys))
+        return [self.values.get(key) for key in keys]
 
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
         if nx and key in self.values:
@@ -722,3 +730,80 @@ def test_create_worker_health_router_serves_worker_heartbeat_payload() -> None:
 
     assert response.status_code == 200
     assert response.json()["workers"][0]["worker_name"] == "aggregation-1"
+
+
+@pytest.mark.asyncio
+async def test_health_build_batches_stored_health_and_activity_reads() -> None:
+    redis = FakeRedis()
+    registry_store = RedisServiceRegistryStore(redis)
+    registry = ServiceRegistryService(store=registry_store)
+    await registry_store.create(make_record(service_id="payments-api"))
+    await registry_store.create(make_record(service_id="billing-api"))
+    services = await registry.list_services()
+    health = StudioHealthRefreshService(
+        registry_service=registry,
+        health_store=RedisStudioHealthStore(redis),
+        activity_reader=RedisStudioEventStore(redis),
+        http_client=httpx.AsyncClient(),
+    )
+    assert await health.health_store._get_health_many([]) == []  # type: ignore[attr-defined]
+    redis.values["studio:health:corrupt-api"] = "not-json"
+    assert await health.health_store._get_health_many(["corrupt-api"]) == [None]  # type: ignore[attr-defined]
+
+    redis.get_calls = 0
+    redis.mget_calls.clear()
+    records = await health.build_service_records(services)
+
+    assert [record.service_id for record in records] == ["billing-api", "payments-api"]
+    assert all(record.health is not None for record in records)
+    assert redis.get_calls == 0
+    assert sorted(len(keys) for keys in redis.mget_calls) == [2, 6]
+
+    class StoreProxy:
+        def __init__(self, target: object) -> None:
+            self.target = target
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self.target, name)
+
+    fallback_health = StudioHealthRefreshService(
+        registry_service=registry,
+        health_store=StoreProxy(health.health_store),  # type: ignore[arg-type]
+        activity_reader=StoreProxy(health.activity_reader),  # type: ignore[arg-type]
+        http_client=health.http_client,
+    )
+    fallback_records = await fallback_health.build_service_records(services)
+    assert [record.service_id for record in fallback_records] == ["billing-api", "payments-api"]
+
+    disabled = make_record(service_id="disabled-api", status=ServiceStatus.DISABLED)
+
+    class DisabledRegistry:
+        async def list_services(self) -> list[ServiceRecord]:
+            return [disabled]
+
+    disabled_health = StudioHealthRefreshService(
+        registry_service=DisabledRegistry(),  # type: ignore[arg-type]
+        health_store=RedisStudioHealthStore(redis),
+        activity_reader=RedisStudioEventStore(redis),
+        http_client=health.http_client,
+    )
+    await disabled_health.refresh_all_services()
+    assert await disabled_health.health_store.get_health("disabled-api") is not None
+
+    class FailingHealthStore:
+        async def get_health(self, service_id: str) -> None:
+            del service_id
+            raise RuntimeError("redis unavailable")
+
+        async def set_health(self, service_id: str, document: object) -> object:
+            del service_id
+            return document
+
+    failing_health = StudioHealthRefreshService(
+        registry_service=registry,
+        health_store=FailingHealthStore(),  # type: ignore[arg-type]
+        activity_reader=RedisStudioEventStore(redis),
+        http_client=health.http_client,
+    )
+    await failing_health._refresh_service_safely(make_record(service_id="failing-api"))
+    await health.http_client.aclose()

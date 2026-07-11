@@ -527,7 +527,7 @@ function MetricLineChart({ series, podLabel }: { series: StudioMetricSeries[]; p
           .join(" ");
         return (
           <path
-            key={`${item.metric}-${seriesLabel(item, podLabel)}`}
+            key={`${item.metric}-${seriesLabel(item, podLabel)}-${index}`}
             d={path}
             fill="none"
             stroke={podMetricLineColor(index)}
@@ -1002,15 +1002,21 @@ export function ServiceDetailPage() {
       {servicesState.notice ? <NoticeBanner>{servicesState.notice}</NoticeBanner> : null}
 
       <SectionCard
-        title="Service Detail"
-        subtitle="Inspect stored registry metadata, navigate to routed control-plane screens, and run existing registry actions."
+        title={service.name}
+        subtitle={`${service.environment} · ${service.service_id} · updated ${formatTimestamp(service.last_seen_at)}`}
+        className="studio-service-workspace-header"
         action={
           <div className="studio-badge-row">
-            <StatusBadge status={service.status} />
-            <HealthBadge status={health?.overall_status || "unknown"} />
+            <span className="studio-labelled-badge"><small>Registry</small><StatusBadge status={service.status} /></span>
+            <span className="studio-labelled-badge"><small>Runtime</small><HealthBadge status={health?.overall_status || "unknown"} /></span>
           </div>
         }
       >
+        <nav className="studio-workspace-tabs" aria-label="Service workspace">
+          <a href="#service-overview">Overview</a>
+          <a href="#service-observe">Observe</a>
+          <a href="#service-configure">Configure</a>
+        </nav>
         <div className="studio-action-row">
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             <StudioIcon name="back" />
@@ -1036,29 +1042,30 @@ export function ServiceDetailPage() {
             <StudioIcon name="health" />
             Run Health Check
           </button>
-          <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "registered")} style={secondaryButtonStyle}>
-            <StudioIcon name="enable" />
-            Enable
-          </button>
-          <button type="button" onClick={() => requestStatusChange("unavailable")} style={secondaryButtonStyle}>
-            <StudioIcon name="unavailable" />
-            Mark Unavailable
-          </button>
-          <button type="button" onClick={() => requestStatusChange("disabled")} style={secondaryButtonStyle}>
-            <StudioIcon name="disable" />
-            Disable
-          </button>
-          <button
-            type="button"
-            onClick={requestDeleteService}
-            style={destructiveButtonStyle}
-          >
-            <StudioIcon name="delete" />
-            Delete
-          </button>
+          <details className="studio-action-menu">
+            <summary>Lifecycle actions</summary>
+            <div>
+              <button type="button" onClick={() => void servicesState.updateStatus(service.service_id, "registered")} style={secondaryButtonStyle}>
+                <StudioIcon name="enable" />
+                Enable
+              </button>
+              <button type="button" onClick={() => requestStatusChange("unavailable")} style={secondaryButtonStyle}>
+                <StudioIcon name="unavailable" />
+                Mark Unavailable
+              </button>
+              <button type="button" onClick={() => requestStatusChange("disabled")} style={secondaryButtonStyle}>
+                <StudioIcon name="disable" />
+                Disable
+              </button>
+              <button type="button" onClick={requestDeleteService} style={destructiveButtonStyle}>
+                <StudioIcon name="delete" />
+                Delete
+              </button>
+            </div>
+          </details>
         </div>
 
-        <div className="studio-detail-grid">
+        <div id="service-overview" className="studio-detail-grid">
           <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
             <MetadataRow label="Service id" value={service.service_id} />
             <MetadataRow label="Name" value={service.name} />
@@ -1071,7 +1078,7 @@ export function ServiceDetailPage() {
             <MetadataRow label="Metrics provider" value={service.metrics_config?.provider || "none"} />
           </dl>
 
-          <div className="studio-stack-sm">
+          <div id="service-configure" className="studio-stack-sm">
             <div>
               <h3 style={{ margin: 0, marginBottom: 8 }}>Runtime Health</h3>
               <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
@@ -1128,6 +1135,7 @@ export function ServiceDetailPage() {
         </div>
       </SectionCard>
 
+      <div id="service-observe" />
       <SectionCard
         title="Service Metrics"
         subtitle="Service-wide Relayna runtime metrics and pod-level Kubernetes charts for this registered service."
@@ -1345,7 +1353,7 @@ export function ServiceDetailPage() {
                   {series.length ? (
                     <div className="studio-chart-legend" aria-label={`${metricLabel(metric)} legend`}>
                       {series.slice(0, 6).map((item, index) => (
-                        <span key={`${item.metric}-${seriesLabel(item, service.metrics_config?.pod_label)}`} className="studio-chart-legend__item">
+                        <span key={`${item.metric}-${seriesLabel(item, service.metrics_config?.pod_label)}-${index}`} className="studio-chart-legend__item">
                           <span
                             className="studio-chart-legend__swatch"
                             style={{ backgroundColor: podMetricLineColor(index) }}

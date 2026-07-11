@@ -1,9 +1,8 @@
-import { startTransition, useEffect, useState } from "react";
+import { lazy, startTransition, Suspense, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics, fetchTaskTracePath } from "../api";
 import {
-  GraphSurface,
   InlineCodeBox,
   LogSourceBadge,
   LogMessage,
@@ -37,6 +36,10 @@ import type {
   StudioTracePathResponse,
   StudioTraceSpan,
 } from "../types";
+
+const GraphSurface = lazy(() =>
+  import("../graph-surface").then((module) => ({ default: module.GraphSurface })),
+);
 
 const TASK_QUEUED_STATUSES = new Set(["queued"]);
 const TASK_TERMINAL_STATUSES = new Set([
@@ -624,6 +627,7 @@ export function TaskDetailPage() {
   const [taskMetricManualFrom, setTaskMetricManualFrom] = useState("");
   const [taskMetricManualTo, setTaskMetricManualTo] = useState("");
   const [mermaidCopyState, setMermaidCopyState] = useState<"idle" | "copied" | "selected" | "failed">("idle");
+  const [showGraph, setShowGraph] = useState(false);
 
   useEffect(() => {
     if (!serviceId || !taskId) {
@@ -641,6 +645,7 @@ export function TaskDetailPage() {
     setTaskMetricWindowMode("auto");
     setTaskMetricManualFrom("");
     setTaskMetricManualTo("");
+    setShowGraph(false);
     if (!taskDetail) {
       setTaskTimeline(null);
       setTaskLogs(null);
@@ -930,6 +935,15 @@ export function TaskDetailPage() {
   const taskLogSourceOptions = Array.from(new Set((taskLogs?.items || []).map((item) => item.source).filter(Boolean))).sort();
   const selectedTracePathNode =
     taskTracePath?.nodes.find((node) => node.id === selectedTracePathNodeId) || taskTracePath?.nodes[0] || null;
+  const statusEvent = taskDetail?.latest_status?.event || {};
+  const failureReason = String(
+    taskDetail?.dlq_messages?.items[0]?.reason ||
+      statusEvent.error_message ||
+      statusEvent.error ||
+      statusEvent.detail ||
+      "No failure reason was reported.",
+  );
+  const failedTask = TASK_TERMINAL_STATUSES.has(latestStatusValue.toLowerCase()) || dlqCount > 0;
 
   return (
     <>
@@ -956,6 +970,22 @@ export function TaskDetailPage() {
         {!loading && !taskDetail ? <p style={mutedTextStyle}>No task detail is available for this task.</p> : null}
         {taskDetail ? (
           <div className="studio-stack-lg">
+            <section className={`studio-incident-header${failedTask ? " studio-incident-header--failure" : ""}`}>
+              <div className="studio-incident-header__status">
+                <span>Task status</span>
+                <strong>{latestStatusValue}</strong>
+              </div>
+              <div className="studio-incident-header__identity">
+                <p className="studio-page-eyebrow">{taskDetail.service.name}</p>
+                <h2>{taskDetail.task_id}</h2>
+                <p>Correlation: {identityRef?.correlation_id || "none"}</p>
+              </div>
+              <div className="studio-incident-header__reason">
+                <span>{failedTask ? "Failure summary" : "Current signal"}</span>
+                <strong>{failedTask ? failureReason : "Task has no terminal failure signal."}</strong>
+                <p>{failedTask ? "Inspect timeline and DLQ evidence before retrying." : "Follow live timeline updates for the next transition."}</p>
+              </div>
+            </section>
             <div className="studio-metrics-grid">
               <MetricCard label="Status" value={latestStatusValue} />
               <MetricCard label="History Events" value={String(historyCount)} />
@@ -967,7 +997,23 @@ export function TaskDetailPage() {
             <div className={graph ? "studio-content-split studio-content-split--graph" : "studio-stack-lg"}>
               <div className="studio-stack-md">
                 {graph ? (
-                  <GraphSurface graph={graph} />
+                  <SectionCard
+                    title="Execution Graph"
+                    subtitle="Graph code loads only when this investigation view is opened."
+                    action={
+                      <button type="button" onClick={() => setShowGraph((current) => !current)} style={secondaryButtonStyle}>
+                        {showGraph ? "Hide Graph" : "Open Graph"}
+                      </button>
+                    }
+                  >
+                    {showGraph ? (
+                      <Suspense fallback={<div className="studio-route-loading" role="status">Loading execution graph…</div>}>
+                        <GraphSurface graph={graph} />
+                      </Suspense>
+                    ) : (
+                      <p style={mutedTextStyle}>Open the graph when topology evidence is needed.</p>
+                    )}
+                  </SectionCard>
                 ) : (
                   <NoticeBanner tone="error">Studio loaded task detail, but the federated execution-graph read returned no graph for this task.</NoticeBanner>
                 )}

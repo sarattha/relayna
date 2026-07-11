@@ -608,11 +608,14 @@ class RedisServiceRegistryStore:
 
     async def list_records(self) -> list[ServiceRecord]:
         service_ids = sorted(self._decode_members(await self._redis.smembers(self._all_key())))
-        items: list[ServiceRecord] = []
-        for service_id in service_ids:
-            record = await self.get(service_id)
-            if record is not None:
-                items.append(record)
+        if not service_ids:
+            return []
+        payloads = await self._redis.mget([self._record_key(service_id) for service_id in service_ids])
+        items = [
+            ServiceRecord.model_validate_json(payload.decode() if isinstance(payload, bytes) else payload)
+            for payload in payloads
+            if payload is not None
+        ]
         items.sort(key=lambda item: (item.environment, item.name.lower(), item.service_id))
         return items
 

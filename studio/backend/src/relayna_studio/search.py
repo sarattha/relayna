@@ -247,6 +247,16 @@ class RedisStudioSearchStore:
             return None
         return StudioTaskSearchDocument.model_validate_json(payload)
 
+    async def _get_task_documents(self, document_ids: list[str]) -> dict[str, StudioTaskSearchDocument]:
+        if not document_ids:
+            return {}
+        payloads = await self._redis.mget([self._task_doc_key(document_id) for document_id in document_ids])
+        return {
+            document_id: StudioTaskSearchDocument.model_validate_json(payload)
+            for document_id, payload in zip(document_ids, payloads, strict=True)
+            if payload is not None
+        }
+
     async def set_task_document(self, document: StudioTaskSearchDocument) -> None:
         document_id = document.document_id
         previous = await self.get_task_document(document_id)
@@ -285,6 +295,16 @@ class RedisStudioSearchStore:
         if payload is None:
             return None
         return StudioServiceSearchDocument.model_validate_json(payload)
+
+    async def _get_service_documents(self, service_ids: list[str]) -> dict[str, StudioServiceSearchDocument]:
+        if not service_ids:
+            return {}
+        payloads = await self._redis.mget([self._service_doc_key(service_id) for service_id in service_ids])
+        return {
+            service_id: StudioServiceSearchDocument.model_validate_json(payload)
+            for service_id, payload in zip(service_ids, payloads, strict=True)
+            if payload is not None
+        }
 
     async def set_service_document(self, document: StudioServiceSearchDocument) -> None:
         previous = await self.get_service_document(document.service_id)
@@ -536,6 +556,7 @@ class StudioSearchService(StudioSearchIndexer):
         else:
             candidate_ids = await self.store.list_service_document_ids()
 
+        documents_by_id = await self._load_service_documents(sorted(candidate_ids))
         matched_fields_by_service: dict[str, list[str]] = {}
         query_terms = _tokenize(query.query)
         if query_terms:
@@ -543,7 +564,7 @@ class StudioSearchService(StudioSearchIndexer):
                 token_matches = await self.store.list_service_document_ids_for_token(term)
                 candidate_ids &= token_matches
             for service_id in list(candidate_ids):
-                document = await self.store.get_service_document(service_id)
+                document = documents_by_id.get(service_id)
                 if document is None:
                     candidate_ids.discard(service_id)
                     continue
@@ -555,7 +576,7 @@ class StudioSearchService(StudioSearchIndexer):
 
         items: list[StudioServiceSearchItem] = []
         for service_id in candidate_ids:
-            document = await self.store.get_service_document(service_id)
+            document = documents_by_id.get(service_id)
             if document is None:
                 continue
             items.append(
@@ -571,8 +592,17 @@ class StudioSearchService(StudioSearchIndexer):
     async def _load_task_documents(self, document_ids: Iterable[str]) -> list[StudioTaskSearchDocument]:
         items: list[StudioTaskSearchDocument] = []
         expired_ids: list[str] = []
-        for document_id in document_ids:
-            document = await self.store.get_task_document(document_id)
+        ordered_ids = sorted(document_ids)
+        if isinstance(self.store, RedisStudioSearchStore):
+            documents_by_id = await self.store._get_task_documents(ordered_ids)
+        else:
+            documents_by_id: dict[str, StudioTaskSearchDocument] = {}
+            for document_id in ordered_ids:
+                document = await self.store.get_task_document(document_id)
+                if document is not None:
+                    documents_by_id[document_id] = document
+        for document_id in ordered_ids:
+            document = documents_by_id.get(document_id)
             if document is None:
                 continue
             if _document_expired(document):
@@ -582,6 +612,16 @@ class StudioSearchService(StudioSearchIndexer):
         for document_id in expired_ids:
             await self.store.delete_task_document(document_id)
         return items
+
+    async def _load_service_documents(self, service_ids: list[str]) -> dict[str, StudioServiceSearchDocument]:
+        if isinstance(self.store, RedisStudioSearchStore):
+            return await self.store._get_service_documents(service_ids)
+        documents: dict[str, StudioServiceSearchDocument] = {}
+        for service_id in service_ids:
+            document = await self.store.get_service_document(service_id)
+            if document is not None:
+                documents[service_id] = document
+        return documents
 
     async def _search_task_logs(self, query: StudioTaskSearchQuery) -> list[StudioTaskSearchDocument]:
         if self.log_query_service is None or not _eligible_for_loki_fallback(query):

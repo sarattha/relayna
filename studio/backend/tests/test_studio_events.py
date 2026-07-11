@@ -112,6 +112,8 @@ class FakeRedis:
         self.expirations: dict[str, int] = {}
         self.pubsubs: list[FakePubSub] = []
         self.close_calls = 0
+        self.get_calls = 0
+        self.mget_calls: list[list[str]] = []
         FakeRedis.instances.append(self)
 
     @classmethod
@@ -119,7 +121,12 @@ class FakeRedis:
         return cls(url)
 
     async def get(self, key: str) -> str | None:
+        self.get_calls += 1
         return self.values.get(key)
+
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        self.mget_calls.append(list(keys))
+        return [self.values.get(key) for key in keys]
 
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
         if nx and key in self.values:
@@ -630,3 +637,37 @@ async def test_studio_event_stream_emits_live_inserted_items() -> None:
 
     assert b"status.completed" in chunk
     assert b"task-123" in chunk
+
+
+@pytest.mark.asyncio
+async def test_event_history_uses_one_batch_read_for_the_retained_window() -> None:
+    redis = FakeRedis()
+    store = RedisStudioEventStore(redis, prefix="studio-events", ttl_seconds=60, history_maxlen=10)
+    assert await store._get_service_activity_snapshots([]) == []
+    assert (await store.list_task_events("payments-api", "missing-task")).items == []
+    for index in range(3):
+        await store.insert_event(
+            StudioEventEnvelope(
+                service_id="payments-api",
+                ingest_method=StudioEventIngestMethod.PUSH,
+                event=RelaynaServiceEvent(
+                    cursor=f"evt-{index}",
+                    task_id="task-123",
+                    event_type="status.processing",
+                    source_kind=ServiceEventSourceKind.STATUS,
+                    component="status",
+                    timestamp=f"2026-04-10T01:0{index}:00Z",
+                    event_id=f"evt-{index}",
+                    payload={"status": "processing"},
+                ),
+            )
+        )
+
+    redis.get_calls = 0
+    redis.mget_calls.clear()
+    response = await store.list_task_events("payments-api", "task-123")
+
+    assert [item.event_id for item in response.items] == ["evt-2", "evt-1", "evt-0"]
+    assert redis.get_calls == 0
+    assert len(redis.mget_calls) == 1
+    assert len(redis.mget_calls[0]) == 3

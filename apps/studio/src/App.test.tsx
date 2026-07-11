@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildServicePayload, serviceToDraft } from "./api";
 import { App } from "./App";
-import type { ServiceRecord } from "./types";
+import type { ExecutionGraph, ServiceRecord } from "./types";
 
 vi.mock("@xyflow/react", async () => {
   const React = await import("react");
@@ -469,7 +469,7 @@ describe("App", () => {
     MockEventSource.instances = [];
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
-    window.history.replaceState({}, "", "/");
+    window.history.replaceState({}, "", "/services");
     services.splice(0, services.length, buildMockService());
 
     fetchMock.mockImplementation(async (input, init) => {
@@ -751,7 +751,11 @@ describe("App", () => {
           },
         });
       }
-      if (url === "/studio/tasks/search?task_id=task-123&limit=50" && method === "GET") {
+      if (
+        url.startsWith("/studio/tasks/search?") &&
+        new URL(url, "http://studio.test").searchParams.get("task_id") === "task-123" &&
+        method === "GET"
+      ) {
         return jsonResponse({
           count: 1,
           items: [
@@ -920,18 +924,30 @@ describe("App", () => {
     vi.unstubAllGlobals();
   });
 
-  it("redirects the default route to /services and renders the registry screen", async () => {
+  it("renders the incident-first overview at the default route", async () => {
+    window.history.replaceState({}, "", "/");
+    services[0] = {
+      ...services[0],
+      health: { ...(services[0].health || {}), overall_status: "degraded" },
+    };
     render(<App />);
 
-    expect(await screen.findByText("Registered Services")).toBeInTheDocument();
-    await waitFor(() => expect(window.location.pathname).toBe("/services"));
-    expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
-    expect(screen.getByText("Gateway Import")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Export" })).toHaveAttribute("href", "/studio/gateway/services");
+    expect(await screen.findByRole("heading", { name: "What needs attention now" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open service" })).toHaveAttribute("href", "/services/payments-api");
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByRole("link", { name: "Manage registry" })).toHaveAttribute("href", "/services");
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+    fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "prod" } });
+    await waitFor(() => expect(window.location.search).toBe("?environment=prod"));
+    fireEvent.change(screen.getByLabelText("Find task"), { target: { value: "task-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search tasks" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/tasks/search"));
+    expect(window.location.search).toBe("?task_id=task-123");
   });
 
   it("polls the registered services list silently and stops after unmount", async () => {
     vi.useFakeTimers();
+    await import("./pages/ServicesPage");
 
     const baseImpl = fetchMock.getMockImplementation();
     let serviceListCalls = 0;
@@ -964,8 +980,8 @@ describe("App", () => {
 
     const { unmount } = render(<App />);
 
-    expect(screen.getByText("Registered Services")).toBeInTheDocument();
     await flushServicesRender();
+    expect(screen.getByText("Registered Services")).toBeInTheDocument();
 
     expect(serviceListCalls).toBe(1);
     expect(screen.getAllByText("Payments API").length).toBeGreaterThan(0);
@@ -1145,7 +1161,7 @@ describe("App", () => {
 
     fireEvent.click(await screen.findByRole("link", { name: "View" }));
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     await waitFor(() => expect(window.location.pathname).toBe("/services/payments-api"));
     expect(screen.getByText("Recent Activity")).toBeInTheDocument();
     expect(screen.getByText("Service Logs")).toBeInTheDocument();
@@ -1167,7 +1183,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service log source"), { target: { value: "runtime-worker" } });
     fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
 
@@ -1373,7 +1389,7 @@ describe("App", () => {
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
 
-    expect(await screen.findByText("Orders API")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Orders API" })).toBeInTheDocument();
     expect(await screen.findByText("Selected pods: orders-api-abc, orders-worker-def")).toBeInTheDocument();
     await waitFor(() => {
       const matchingOrdersLogCall = fetchMock.mock.calls.find(([input]) => {
@@ -1598,7 +1614,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service log window mode"), { target: { value: "manual" } });
     await waitFor(() => expect(screen.getByLabelText("Service log from")).toBeEnabled());
     const serviceLogFrom = isoToLocalDateTime("2026-04-08T09:50:00Z");
@@ -1700,7 +1716,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     expect(await screen.findByText("Loading service logs...")).toBeInTheDocument();
 
     await act(async () => {
@@ -1865,7 +1881,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Service event window mode"), { target: { value: "manual" } });
     await waitFor(() => expect(screen.getByLabelText("Service event from")).toBeEnabled());
     const serviceEventFrom = isoToLocalDateTime("2026-04-08T09:45:00Z");
@@ -1953,7 +1969,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     const discoveredOptions = Array.from(
       document.querySelectorAll("#service-log-sources-payments-api option"),
     ).map((item) => item.getAttribute("value"));
@@ -1966,7 +1982,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -1974,6 +1990,28 @@ describe("App", () => {
     expect(await screen.findByText("Refreshed 'payments-api'.")).toBeInTheDocument();
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/refresh", { method: "POST" }));
     expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+  });
+
+  it("keeps lifecycle enablement inside the labelled service action menu", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    const baseImpl = fetchMock.getMockImplementation();
+    let requestedStatus = "";
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api" && method === "PATCH") {
+        requestedStatus = String((JSON.parse(String(init?.body || "{}")) as { status?: string }).status || "");
+        return jsonResponse({ ...services[0], status: requestedStatus });
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Lifecycle actions"));
+    fireEvent.click(screen.getByRole("button", { name: "Enable" }));
+
+    await waitFor(() => expect(requestedStatus).toBe("registered"));
   });
 
   it.each([
@@ -1997,7 +2035,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: buttonLabel }));
 
     const dialog = screen.getByRole("dialog");
@@ -2025,7 +2063,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Service Detail")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     const disableTrigger = screen.getByRole("button", { name: "Disable" });
     disableTrigger.focus();
     fireEvent.click(disableTrigger);
@@ -2088,7 +2126,7 @@ describe("App", () => {
 
     await flushRender();
 
-    expect(screen.getByText("Service Detail")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Payments API" })).toBeInTheDocument();
     expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
 
     await act(async () => {
@@ -2306,12 +2344,31 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.change(await screen.findByPlaceholderText("task_id"), { target: { value: "task-123" } });
+    fireEvent.change(await screen.findByLabelText("Service ID"), { target: { value: "payments-api" } });
+    fireEvent.change(screen.getByLabelText("Task ID"), { target: { value: "task-123" } });
+    fireEvent.change(screen.getByLabelText("Correlation ID"), { target: { value: "corr-123" } });
+    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "running" } });
+    fireEvent.change(screen.getByLabelText("Stage"), { target: { value: "authorize" } });
+    fireEvent.change(screen.getByLabelText("From (local time)"), { target: { value: "2026-04-08T09:00" } });
+    fireEvent.change(screen.getByLabelText("To (local time)"), { target: { value: "2026-04-08T11:00" } });
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
 
     expect(await screen.findByText(/Matches:/)).toBeInTheDocument();
+    expect(Object.fromEntries(new URLSearchParams(window.location.search))).toEqual({
+      service_id: "payments-api",
+      task_id: "task-123",
+      correlation_id: "corr-123",
+      status: "running",
+      stage: "authorize",
+      from: "2026-04-08T09:00",
+      to: "2026-04-08T11:00",
+    });
     expect(screen.getByRole("link", { name: "Open Task Detail" })).toBeInTheDocument();
     expect(screen.getByText(/correlation=corr-123/)).toBeInTheDocument();
+    expect(screen.getByText("running", { selector: ".studio-task-chip" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(window.location.search).toBe("");
+    expect(screen.getByLabelText("Task ID")).toHaveValue("");
   });
 
   it("renders the Loki fallback notice for task search results", async () => {
@@ -2337,6 +2394,11 @@ describe("App", () => {
     const { unmount } = render(<App />);
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    expect(screen.getByText("Failure summary")).toBeInTheDocument();
+    expect(screen.getByText("upstream_timeout")).toBeInTheDocument();
+    expect(screen.queryByTestId("rf-root")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open Graph" }));
+    expect(await screen.findByTestId("rf-root")).toBeInTheDocument();
     expect(screen.getByText("Task Timeline")).toBeInTheDocument();
     expect(screen.getByText("Task Logs")).toBeInTheDocument();
     expect(await screen.findByText("Task Trace")).toBeInTheDocument();
@@ -2384,6 +2446,29 @@ describe("App", () => {
     unmount();
 
     expect(MockEventSource.instances[0]?.closed).toBe(true);
+  });
+
+  it("lays out an execution graph with no root node in its lazy graph surface", async () => {
+    const { GraphSurface } = await import("./graph-surface");
+    const cyclicGraph: ExecutionGraph = {
+      task_id: "task-cycle",
+      topology_kind: "workflow",
+      summary: { graph_completeness: "complete" },
+      nodes: [
+        { id: "one", kind: "task" },
+        { id: "two", kind: "task_attempt" },
+      ],
+      edges: [
+        { source: "one", target: "two", kind: "spawned" },
+        { source: "two", target: "one", kind: "retried_as" },
+      ],
+      annotations: {},
+      related_task_ids: [],
+    };
+
+    render(<GraphSurface graph={cyclicGraph} />);
+    expect(screen.getByTestId("rf-root")).toBeInTheDocument();
+    expect(screen.getByText("task_attempt")).toBeInTheDocument();
   });
 
   it("applies the task log source filter through the Studio route", async () => {

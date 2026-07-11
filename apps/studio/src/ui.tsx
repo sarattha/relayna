@@ -1,14 +1,13 @@
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 import {
-  Background,
-  Controls,
-  type Edge,
-  MiniMap,
-  type Node,
-  Panel,
-  ReactFlow,
-} from "@xyflow/react";
-import { Link } from "react-router-dom";
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 
 import type {
   ExecutionGraph,
@@ -20,6 +19,7 @@ import type {
   StudioTaskRef,
   WorkflowTopologyGraph,
 } from "./types";
+import { useStudioServices } from "./services-context";
 
 export const frameStyle = {
   border: "1px solid var(--studio-border)",
@@ -466,17 +466,6 @@ export function ConfirmationDialog({
   );
 }
 
-const kindPalette: Record<string, { background: string; border: string; color: string }> = {
-  task: { background: "#fff3dd", border: "#cb7b2d", color: "#5d3110" },
-  aggregation_child: { background: "#e4f6f3", border: "#3b8f8d", color: "#184a49" },
-  task_attempt: { background: "#fff1e5", border: "#e08b48", color: "#663414" },
-  workflow_message: { background: "#e6f7f4", border: "#2d8a80", color: "#184841" },
-  stage_attempt: { background: "#eff3f2", border: "#6b8d8c", color: "#284443" },
-  status_event: { background: "#f9f8ef", border: "#b08a51", color: "#57411d" },
-  retry: { background: "#fff0eb", border: "#c46c56", color: "#6a2b1c" },
-  dlq_record: { background: "#233f45", border: "#ffb295", color: "#fff5ef" },
-};
-
 const statusPalette: Record<ServiceStatus, { background: string; border: string; color: string }> = {
   registered: { background: "#fff2df", border: "#c67a2d", color: "#5f3410" },
   healthy: { background: "#e4f7f2", border: "#27887e", color: "#154741" },
@@ -613,117 +602,6 @@ export function buildMermaid(graph: ExecutionGraph) {
     lines.push(`    ${source} -->|${edge.kind.replace(/"/g, '\\"')}| ${target}`);
   }
   return lines.join("\n");
-}
-
-function buildFlowNodes(graph: ExecutionGraph): Node[] {
-  const incoming = new Map<string, number>();
-  const outgoing = new Map<string, string[]>();
-
-  for (const node of graph.nodes) {
-    incoming.set(node.id, 0);
-    outgoing.set(node.id, []);
-  }
-
-  for (const edge of graph.edges) {
-    incoming.set(edge.target, (incoming.get(edge.target) ?? 0) + 1);
-    outgoing.set(edge.source, [...(outgoing.get(edge.source) ?? []), edge.target]);
-  }
-
-  const levels = new Map<string, number>();
-  const queue = graph.nodes.filter((node) => (incoming.get(node.id) ?? 0) === 0).map((node) => node.id);
-  if (!queue.length && graph.nodes[0]) {
-    queue.push(graph.nodes[0].id);
-  }
-  for (const rootId of queue) {
-    levels.set(rootId, 0);
-  }
-
-  let index = 0;
-  while (index < queue.length) {
-    const currentId = queue[index];
-    index += 1;
-    const currentLevel = levels.get(currentId) ?? 0;
-    for (const targetId of outgoing.get(currentId) ?? []) {
-      const nextLevel = currentLevel + 1;
-      const existingLevel = levels.get(targetId);
-      if (existingLevel === undefined || nextLevel > existingLevel) {
-        levels.set(targetId, nextLevel);
-      }
-      if (!queue.includes(targetId)) {
-        queue.push(targetId);
-      }
-    }
-  }
-
-  const columns = new Map<number, typeof graph.nodes>();
-  for (const node of graph.nodes) {
-    const level = levels.get(node.id) ?? 0;
-    columns.set(level, [...(columns.get(level) ?? []), node]);
-  }
-
-  const positionedNodes: Node[] = [];
-  const sortedLevels = [...columns.keys()].sort((left, right) => left - right);
-  for (const level of sortedLevels) {
-    const columnNodes = columns.get(level) ?? [];
-    columnNodes.sort((left, right) => left.id.localeCompare(right.id));
-    columnNodes.forEach((node, row) => {
-      const palette = kindPalette[node.kind] ?? {
-        background: "#f6f0e7",
-        border: "#8f7e65",
-        color: "#352d25",
-      };
-      const labelLines = [node.label || node.id, node.kind];
-      if (node.timestamp) {
-        labelLines.push(new Date(node.timestamp).toLocaleString());
-      }
-      positionedNodes.push({
-        id: node.id,
-        position: { x: level * 310, y: row * 168 },
-        data: {
-          label: (
-            <div className="studio-flow-node-label">
-              <strong>{labelLines[0]}</strong>
-              <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1.1, opacity: 0.76 }}>
-                {labelLines[1]}
-              </span>
-              {labelLines[2] ? <span style={{ fontSize: 11, opacity: 0.72 }}>{labelLines[2]}</span> : null}
-            </div>
-          ),
-        },
-        style: {
-          width: 210,
-          borderRadius: 18,
-          border: `1px solid ${palette.border}`,
-          background: palette.background,
-          color: palette.color,
-          padding: 12,
-          boxShadow: "0 10px 24px rgba(47, 39, 28, 0.08)",
-        },
-      });
-    });
-  }
-
-  return positionedNodes;
-}
-
-function buildFlowEdges(graph: ExecutionGraph): Edge[] {
-  return graph.edges.map((edge, index) => ({
-    id: `${edge.source}-${edge.target}-${index}`,
-    source: edge.source,
-    target: edge.target,
-    label: edge.kind,
-    type: "smoothstep",
-    animated: edge.kind === "retried_as" || edge.kind === "stage_transitioned_to",
-    labelStyle: {
-      fill: "#4a3f32",
-      fontSize: 11,
-      fontWeight: 600,
-    },
-    style: {
-      stroke: edge.kind === "dead_lettered_to" ? "#a34848" : "#6d6251",
-      strokeWidth: edge.kind === "stage_transitioned_to" ? 2.2 : 1.5,
-    },
-  }));
 }
 
 export function StatusBadge({ status }: { status: ServiceStatus }) {
@@ -1054,44 +932,71 @@ export function AppChrome({ children }: { children: ReactNode }) {
 }
 
 export function AppHeader() {
-  const navStyle: CSSProperties = {
-    ...secondaryButtonStyle,
-    textDecoration: "none",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-  };
+  const navigate = useNavigate();
+  const servicesState = useStudioServices();
+  const [globalQuery, setGlobalQuery] = useState("");
+  const environments = Array.from(new Set(servicesState.services.map((service) => service.environment))).sort();
+  const alertCount = servicesState.services.filter((service) =>
+    ["degraded", "stale", "unreachable"].includes(service.health?.overall_status || ""),
+  ).length;
+
+  function submitGlobalSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = globalQuery.trim();
+    navigate(query ? `/tasks/search?task_id=${encodeURIComponent(query)}` : "/tasks/search");
+  }
 
   return (
     <header className="studio-header">
-      <div>
-        <p className="studio-header__eyebrow">Relayna Studio</p>
-        <h1 className="studio-header__title">Control Plane</h1>
-        <p className="studio-header__body">
-          Navigate services, topology, DLQ state, federated task detail, live timelines, and logs from one routed
-          operator console.
-        </p>
+      <Link to="/" className="studio-brand" aria-label="Relayna Studio overview">
+        <span className="studio-brand__mark" aria-hidden="true">R</span>
+        <span>
+          <strong>Relayna</strong>
+          <small>Studio control plane</small>
+        </span>
+      </Link>
+      <nav className="studio-primary-nav" aria-label="Primary navigation">
+        <NavLink to="/" end>
+          Overview
+        </NavLink>
+        <NavLink to="/services">Services</NavLink>
+        <NavLink to="/tasks/search">Task Search</NavLink>
+        <NavLink to="/failed-tasks">
+          Failed Tasks
+          {alertCount ? <span className="studio-alert-count" aria-label={`${alertCount} service alerts`}>{alertCount}</span> : null}
+        </NavLink>
+      </nav>
+      <div className="studio-header__tools">
+        <label className="studio-environment-scope">
+          <span>Environment</span>
+          <select
+            defaultValue=""
+            onChange={(event) => {
+              const value = event.target.value;
+              navigate(value ? `/?environment=${encodeURIComponent(value)}` : "/");
+            }}
+          >
+            <option value="">All environments</option>
+            {environments.map((environment) => (
+              <option key={environment} value={environment}>{environment}</option>
+            ))}
+          </select>
+        </label>
+        <form className="studio-global-search" role="search" onSubmit={submitGlobalSearch}>
+          <label htmlFor="studio-global-task-search">Find task</label>
+          <div>
+            <input
+              id="studio-global-task-search"
+              value={globalQuery}
+              onChange={(event) => setGlobalQuery(event.target.value)}
+              placeholder="Task ID"
+            />
+            <button type="submit" aria-label="Search tasks">
+              <StudioIcon name="search" />
+            </button>
+          </div>
+        </form>
       </div>
-      <section className="studio-card studio-section-card studio-nav-card" style={frameStyle}>
-        <div>
-          <h2 className="studio-section-title" style={{ fontSize: 20 }}>Routes</h2>
-          <p className="studio-section-subtitle">Open the service registry or search tasks across registered services.</p>
-        </div>
-        <div className="studio-nav-links">
-          <Link to="/services" style={navStyle}>
-            <StudioIcon name="services" />
-            Services
-          </Link>
-          <Link to="/tasks/search" style={navStyle}>
-            <StudioIcon name="tasks" />
-            Task Search
-          </Link>
-          <Link to="/failed-tasks" style={navStyle}>
-            <StudioIcon name="dlq" />
-            Failed Tasks
-          </Link>
-        </div>
-      </section>
     </header>
   );
 }
@@ -1110,39 +1015,6 @@ export function TaskRefLink({
     >
       {children || formatTaskPointer(taskRef)}
     </Link>
-  );
-}
-
-export function GraphSurface({ graph }: { graph: ExecutionGraph }) {
-  const nodes = buildFlowNodes(graph);
-  const edges = buildFlowEdges(graph);
-
-  return (
-    <div className="studio-card studio-flow-surface" style={frameStyle}>
-      <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
-        <Background gap={20} color="rgba(15, 124, 123, 0.14)" />
-        <Controls />
-        <MiniMap
-          pannable
-          zoomable
-          style={{ background: "rgba(250, 253, 252, 0.96)", border: "1px solid var(--studio-border)" }}
-        />
-        <Panel
-          position="top-right"
-          style={{
-            ...frameStyle,
-            margin: 14,
-            padding: "10px 12px",
-            borderRadius: 14,
-            fontSize: 12,
-            background: "rgba(255, 248, 236, 0.92)",
-          }}
-        >
-          <strong>{graph.topology_kind}</strong>
-          <div>{graph.summary.graph_completeness} graph</div>
-        </Panel>
-      </ReactFlow>
-    </div>
   );
 }
 

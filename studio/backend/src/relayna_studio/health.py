@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from relayna.api import HEALTH_WORKERS_ROUTE_ID, CapabilityDocument, WorkerHeartbeatListResponse, WorkerHeartbeatSummary
 
-from .events import StudioServiceActivitySnapshot
+from .events import RedisStudioEventStore, StudioServiceActivitySnapshot
 from .registry import (
     CapabilityRefreshError,
     OutboundUrlPolicyError,
@@ -164,6 +164,21 @@ class RedisStudioHealthStore:
         await self._redis.set(self._key(service_id), document.model_dump_json())
         return document
 
+    async def _get_health_many(self, service_ids: list[str]) -> list[StudioServiceHealthDocument | None]:
+        if not service_ids:
+            return []
+        payloads = await self._redis.mget([self._key(service_id) for service_id in service_ids])
+        documents: list[StudioServiceHealthDocument | None] = []
+        for payload in payloads:
+            if payload is None:
+                documents.append(None)
+                continue
+            try:
+                documents.append(StudioServiceHealthDocument.model_validate_json(payload))
+            except ValidationError:
+                documents.append(None)
+        return documents
+
 
 @dataclass(slots=True)
 class StudioHealthRefreshService:
@@ -178,17 +193,49 @@ class StudioHealthRefreshService:
     worker_heartbeat_stale_after_seconds: int = 90
 
     async def get_health(self, service_id: str) -> StudioServiceHealthDocument:
-        service = await self.registry_service.get_service(service_id)
-        stored = await self.health_store.get_health(service.service_id)
-        snapshot = await self.activity_reader.get_service_activity_snapshot(service.service_id)
+        service, stored, snapshot = await asyncio.gather(
+            self.registry_service.get_service(service_id),
+            self.health_store.get_health(service_id),
+            self.activity_reader.get_service_activity_snapshot(service_id),
+        )
         return self._materialize_document(service, snapshot, stored)
 
     async def build_service_record(self, service: ServiceRecord) -> ServiceRecord:
-        health = await self.get_health(service.service_id)
+        health = await self._build_health_document(service)
         return service.model_copy(update={"health": health.model_dump(mode="json")})
 
     async def build_service_records(self, services: list[ServiceRecord]) -> list[ServiceRecord]:
-        return [await self.build_service_record(service) for service in services]
+        if not services:
+            return []
+        service_ids = [service.service_id for service in services]
+        if isinstance(self.health_store, RedisStudioHealthStore) and isinstance(
+            self.activity_reader, RedisStudioEventStore
+        ):
+            stored_documents, snapshots = await asyncio.gather(
+                self.health_store._get_health_many(service_ids),
+                self.activity_reader._get_service_activity_snapshots(service_ids),
+            )
+            return [
+                service.model_copy(
+                    update={"health": self._materialize_document(service, snapshot, stored).model_dump(mode="json")}
+                )
+                for service, stored, snapshot in zip(services, stored_documents, snapshots, strict=True)
+            ]
+
+        semaphore = asyncio.Semaphore(20)
+
+        async def build(service: ServiceRecord) -> ServiceRecord:
+            async with semaphore:
+                return await self.build_service_record(service)
+
+        return list(await asyncio.gather(*(build(service) for service in services)))
+
+    async def _build_health_document(self, service: ServiceRecord) -> StudioServiceHealthDocument:
+        stored, snapshot = await asyncio.gather(
+            self.health_store.get_health(service.service_id),
+            self.activity_reader.get_service_activity_snapshot(service.service_id),
+        )
+        return self._materialize_document(service, snapshot, stored)
 
     async def refresh_health(
         self, service_id: str, *, use_cached_capabilities: bool = False
@@ -267,15 +314,23 @@ class StudioHealthRefreshService:
 
     async def refresh_all_services(self) -> None:
         services = await self.registry_service.list_services()
-        for service in services:
+        semaphore = asyncio.Semaphore(10)
+
+        async def refresh(service: ServiceRecord) -> None:
+            async with semaphore:
+                await self._refresh_service_safely(service)
+
+        await asyncio.gather(*(refresh(service) for service in services))
+
+    async def _refresh_service_safely(self, service: ServiceRecord) -> None:
+        try:
             if service.status == ServiceStatus.DISABLED:
-                document = await self.get_health(service.service_id)
+                document = await self._build_health_document(service)
                 await self.health_store.set_health(service.service_id, document)
-                continue
-            try:
-                await self.refresh_health(service.service_id)
-            except Exception:
-                continue
+                return
+            await self.refresh_health(service.service_id)
+        except Exception:
+            return
 
     async def _fetch_worker_health(self, service: ServiceRecord) -> WorkerHeartbeatListResponse:
         self._validate_service_base_url(service)
