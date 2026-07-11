@@ -135,6 +135,8 @@ class RedisTaskLeaseStore:
             raw_lease_id.decode("utf-8") if isinstance(raw_lease_id, bytes) else str(raw_lease_id)
             for raw_lease_id in lease_ids
         ]
+        if not normalized_ids:
+            return []
         payloads = await self._redis.mget([self._lease_key(lease_id) for lease_id in normalized_ids])
         return [TaskLease.model_validate_json(payload) for payload in payloads if payload is not None]
 

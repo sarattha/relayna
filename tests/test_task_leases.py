@@ -66,6 +66,8 @@ class FakeRedis:
         return self.values.get(key)
 
     async def mget(self, keys: list[str]) -> list[str | None]:
+        if not keys:
+            raise RuntimeError("MGET requires at least one key")
         return [self.values.get(key) for key in keys]
 
     def pipeline(self) -> FakePipeline:
