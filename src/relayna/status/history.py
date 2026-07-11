@@ -84,13 +84,13 @@ class StreamHistoryReader:
 
                     if self._output_adapter is not None:
                         normalized = self._output_adapter(normalized)
+                    status = str(normalized.get("status", "")).lower()
                     normalized = public_output_aliases(normalized, self._alias_config)
                     events.append(normalized)
 
                     if max_scan is not None and len(events) >= max_scan:
                         break
 
-                    status = str(normalized.get("status", "")).lower()
                     if task_id and stop_on_terminal and status in terminal_statuses:
                         break
             return events

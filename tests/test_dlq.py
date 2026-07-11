@@ -9,9 +9,13 @@ from relayna.dlq import (
     DLQRecordState,
     DLQReplayConflict,
     DLQService,
+    FailedTaskInvestigationStatus,
     RedisDLQStore,
     build_dlq_record,
 )
+from relayna.dlq.broker import broker_message_from_management_payload
+from relayna.dlq.service import _retry_payload_bytes, _task_id_from_payload
+from relayna.dlq.store import _failed_record_matches, _timestamp
 
 
 class FakePipeline:
@@ -81,11 +85,20 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        return [self.values.get(key) for key in keys]
+
     async def lrange(self, key: str, start: int, stop: int) -> list[str]:
         values = self.lists.get(key, [])
         if stop == -1:
             return values[start:]
         return values[start : stop + 1]
+
+    async def lpos(self, key: str, value: str) -> int | None:
+        try:
+            return self.lists.get(key, []).index(value)
+        except ValueError:
+            return None
 
     async def zadd(self, key: str, mapping: dict[str, float]) -> int:
         self.sorted_sets.setdefault(key, {}).update(mapping)
@@ -100,15 +113,24 @@ class FakeRedis:
                 stored.pop(value, None)
         return removed
 
-    async def zrevrangebyscore(self, key: str, max_score: object, min_score: object) -> list[str]:
+    async def zrevrangebyscore(
+        self,
+        key: str,
+        max_score: object,
+        min_score: object,
+        *,
+        start: int = 0,
+        num: int | None = None,
+    ) -> list[str]:
         stored = self.sorted_sets.get(key, {})
         high = float("inf") if max_score == "+inf" else float(max_score)
         low = float("-inf") if min_score == "-inf" else float(min_score)
-        return [
+        values = [
             member
             for member, score in sorted(stored.items(), key=lambda item: item[1], reverse=True)
             if low <= score <= high
         ]
+        return values[start:] if num is None else values[start : start + num]
 
     async def zremrangebyscore(self, key: str, min_score: object, max_score: object) -> int:
         stored = self.sorted_sets.setdefault(key, {})
@@ -431,6 +453,117 @@ async def test_failed_task_registry_lists_detail_investigation_retry_and_delete(
 
 
 @pytest.mark.asyncio
+async def test_redis_dlq_store_pagination_filters_conflicts_and_cleanup_paths() -> None:
+    redis = FakeRedis()
+    store = RedisDLQStore(redis, prefix="coverage", ttl_seconds=60)
+    base = make_record(dead_lettered_at=datetime(2026, 1, 1, tzinfo=UTC))
+    first = base.model_copy(
+        update={
+            "dlq_id": "one",
+            "service_name": "service-a",
+            "worker_id": "worker-a",
+            "status": "failed",
+            "investigation_status": FailedTaskInvestigationStatus.UNREVIEWED,
+        }
+    )
+    second = base.model_copy(
+        update={
+            "dlq_id": "two",
+            "task_id": "task-2",
+            "queue_name": "other.dlq",
+            "source_queue_name": "other",
+            "reason": "invalid",
+            "state": DLQRecordState.REPLAYED,
+            "dead_lettered_at": datetime(2026, 1, 2, tzinfo=UTC),
+        }
+    )
+    third = base.model_copy(
+        update={
+            "dlq_id": "three",
+            "task_id": "task-3",
+            "dead_lettered_at": datetime(2026, 1, 3, tzinfo=UTC),
+        }
+    )
+    for record in (first, second, third):
+        await store.add(record)
+    assert await store._get_many([]) == []
+    redis.lists[store.records_key()].insert(0, "missing")
+
+    page, cursor = await store.list_records(limit=1)
+    assert len(page) == 1 and cursor == page[0].dlq_id
+    next_page, _ = await store.list_records(cursor=cursor, limit=5)
+    assert all(record.dlq_id != cursor for record in next_page)
+    fallback, _ = await store.list_records(cursor="unknown", limit=1)
+    assert fallback
+    assert (await store.list_records(queue_name="absent"))[0] == []
+    assert (await store.list_records(task_id="task-2"))[0] == [second]
+    assert (await store.list_records(reason="invalid"))[0] == [second]
+    assert (await store.list_records(source_queue_name="other"))[0] == [second]
+    assert (await store.list_records(state="replayed"))[0] == [second]
+
+    failed_page, failed_cursor = await store.list_failed_task_records(limit=1)
+    assert len(failed_page) == 1 and failed_cursor == failed_page[0].dlq_id
+    after, _ = await store.list_failed_task_records(cursor=failed_cursor, limit=5)
+    assert all(record.dlq_id != failed_cursor for record in after)
+    invalid_cursor, _ = await store.list_failed_task_records(cursor="unknown", limit=1)
+    assert invalid_cursor
+    filtered, _ = await store.list_failed_task_records(
+        service_name="service-a",
+        queue_name="tasks.queue",
+        dlq_name="tasks.queue.dlq",
+        error_type="RuntimeError",
+        status="failed",
+        task_id="task-123",
+        worker_id="worker-a",
+        investigation_status=FailedTaskInvestigationStatus.UNREVIEWED,
+        failed_from=datetime(2025, 1, 1, tzinfo=UTC),
+        failed_to=datetime(2027, 1, 1, tzinfo=UTC),
+    )
+    assert filtered == [first]
+
+    assert await store.claim_replay("missing-record") is None
+    redis.values[store.replay_lock_key("locked")] = "1"
+    with pytest.raises(DLQReplayConflict, match="already in progress"):
+        await store.claim_replay("locked")
+    with pytest.raises(DLQReplayConflict):
+        await store.claim_replay("two")
+    assert await store.claim_replay("two", force=True) == second
+    assert await store.mark_replayed("missing-record", replayed_at=datetime.now(UTC), target_queue_name="queue") is None
+    await store.release_replay_claim("two")
+
+    no_ttl = RedisDLQStore(redis, prefix="no-ttl", ttl_seconds=None)
+    assert await no_ttl.cleanup_failed_task_index() == 0
+    assert await store.cleanup_failed_task_index(older_than=datetime(2030, 1, 1, tzinfo=UTC)) >= 1
+    assert _timestamp(datetime(2026, 1, 1)) == _timestamp(datetime(2026, 1, 1, tzinfo=UTC))
+
+
+def test_failed_record_matcher_rejects_every_filter_dimension() -> None:
+    record = make_record().model_copy(
+        update={
+            "service_name": "service",
+            "worker_id": "worker",
+            "status": "failed",
+            "investigation_status": FailedTaskInvestigationStatus.UNREVIEWED,
+        }
+    )
+    matching = {
+        "service_name": "service",
+        "queue_name": "tasks.queue",
+        "dlq_name": "tasks.queue.dlq",
+        "error_type": "RuntimeError",
+        "status": "failed",
+        "task_id": "task-123",
+        "worker_id": "worker",
+        "investigation_status": FailedTaskInvestigationStatus.UNREVIEWED,
+    }
+    assert _failed_record_matches(record, **matching) is True
+    for key in matching:
+        changed = dict(matching)
+        changed[key] = FailedTaskInvestigationStatus.INVESTIGATED if key == "investigation_status" else "wrong"
+        assert _failed_record_matches(record, **changed) is False
+
+
+@pytest.mark.asyncio
 async def test_failed_task_retry_rejects_non_terminal_status() -> None:
     redis = FakeRedis()
     store = RedisDLQStore(redis, prefix="relayna-dlq")
@@ -440,3 +573,70 @@ async def test_failed_task_retry_rejects_non_terminal_status() -> None:
 
     with pytest.raises(Exception, match="Manual retry is only allowed"):
         await service.retry_failed_task(record.dlq_id)
+
+
+@pytest.mark.asyncio
+async def test_dlq_service_broker_replay_missing_update_retry_payload_and_summary_skip_paths() -> None:
+    redis = FakeRedis()
+    store = RedisDLQStore(redis, prefix="tail")
+    rabbit = FakeRabbit()
+    service = DLQService(rabbitmq=rabbit, dlq_store=store)
+    with pytest.raises(RuntimeError, match="not configured"):
+        await service.list_broker_messages(["queue"])
+
+    class Inspector:
+        async def list_messages(self, queue_name: str, *, limit: int = 50):
+            return [
+                broker_message_from_management_payload(
+                    queue_name,
+                    {"payload": '{"task_id":"task"}'},
+                ),
+                broker_message_from_management_payload(
+                    queue_name,
+                    {"payload": '{"task_id":"other"}'},
+                ),
+            ]
+
+    broker_service = DLQService(rabbitmq=rabbit, dlq_store=store, broker_message_inspector=Inspector())  # type: ignore[arg-type]
+    assert broker_service.supports_broker_message_reads is True
+    with pytest.raises(ValueError, match="Unsupported broker"):
+        await broker_service.list_broker_messages(["queue"], queue_name="missing")
+    broker_items = await broker_service.list_broker_messages(
+        ["", "queue", "queue"],
+        task_id="task",
+        limit=500,
+    )
+    assert len(broker_items.items) == 1
+
+    class MissingClaimStore:
+        async def claim_replay(self, dlq_id: str, *, force: bool = False):
+            return None
+
+        async def release_replay_claim(self, dlq_id: str) -> None:
+            self.released = dlq_id
+
+    missing_store = MissingClaimStore()
+    missing_service = DLQService(rabbitmq=rabbit, dlq_store=missing_store)  # type: ignore[arg-type]
+    assert await missing_service.replay_message("missing") is None
+    assert missing_store.released == "missing"
+
+    record = make_record().model_copy(update={"status": "DLQ", "payload_available": False, "raw_body_b64": ""})
+    await store.add(record)
+    with pytest.raises(Exception, match="payload is unavailable"):
+        await service.retry_failed_task(record.dlq_id)
+    assert await service.retry_failed_task("missing") is None
+    assert await service.mark_failed_task_investigated("missing") is None
+    assert await service.mark_failed_task_uninvestigated("missing") is None
+
+    valid = make_record()
+    assert _retry_payload_bytes(valid, "text") == b"text"
+    assert _retry_payload_bytes(valid, {"task_id": 7}).startswith(b"{")
+    assert _task_id_from_payload({"task_id": 7}) == "7"
+    assert _task_id_from_payload([]) is None
+
+    rabbit.queue_counts["exists.dlq"] = 0
+    summaries = await service._build_queue_summaries(
+        [("missing.dlq", 0, None), ("exists.dlq", 0, None)],
+        include_broker_only=True,
+    )
+    assert [item.queue_name for item in summaries] == ["exists.dlq"]

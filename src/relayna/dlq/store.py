@@ -109,6 +109,15 @@ class RedisDLQStore:
             return None
         return DLQRecord.model_validate_json(payload)
 
+    async def _get_many(self, dlq_ids: list[str]) -> list[DLQRecord | None]:
+        if not dlq_ids:
+            return []
+        payloads = await cast(
+            Awaitable[list[str | bytes | None]],
+            self.redis.mget([self.record_key(dlq_id) for dlq_id in dlq_ids]),
+        )
+        return [DLQRecord.model_validate_json(payload) if payload is not None else None for payload in payloads]
+
     async def list_records(
         self,
         *,
@@ -120,41 +129,31 @@ class RedisDLQStore:
         cursor: str | None = None,
         limit: int = 50,
     ) -> tuple[list[DLQRecord], str | None]:
-        raw_ids = await cast(Awaitable[list[str | bytes]], self.redis.lrange(self.records_key(), 0, -1))
-        ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
         start_index = 0
         if cursor:
-            try:
-                start_index = ids.index(cursor) + 1
-            except ValueError:
-                start_index = 0
+            position = await cast(
+                Awaitable[int | None],
+                self.redis.lpos(self.records_key(), cursor),
+            )
+            if position is not None:
+                start_index = int(position) + 1
 
         normalized_state = DLQRecordState(state) if isinstance(state, str) and state else state
         items: list[DLQRecord] = []
-        next_cursor: str | None = None
+        page_size = max(1, limit)
+        chunk_size = max(100, page_size * 2)
+        offset = start_index
 
-        for index in range(start_index, len(ids)):
-            record = await self.get(ids[index])
-            if record is None:
-                continue
-            if queue_name and record.queue_name != queue_name:
-                continue
-            if task_id and record.task_id != task_id:
-                continue
-            if reason and record.reason != reason:
-                continue
-            if source_queue_name and record.source_queue_name != source_queue_name:
-                continue
-            if normalized_state is not None and record.state != normalized_state:
-                continue
-            items.append(record)
-            if len(items) == limit:
-                next_cursor = record.dlq_id
+        while len(items) <= page_size:
+            raw_ids = await cast(
+                Awaitable[list[str | bytes]],
+                self.redis.lrange(self.records_key(), offset, offset + chunk_size - 1),
+            )
+            ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
+            if not ids:
                 break
-
-        if next_cursor is not None:
-            for index in range(ids.index(next_cursor) + 1, len(ids)):
-                record = await self.get(ids[index])
+            records = await self._get_many(ids)
+            for record in records:
                 if record is None:
                     continue
                 if queue_name and record.queue_name != queue_name:
@@ -167,11 +166,14 @@ class RedisDLQStore:
                     continue
                 if normalized_state is not None and record.state != normalized_state:
                     continue
+                items.append(record)
+                if len(items) > page_size:
+                    return items[:page_size], items[page_size - 1].dlq_id
+            if len(ids) < chunk_size:
                 break
-            else:
-                next_cursor = None
+            offset += len(ids)
 
-        return items, next_cursor
+        return items, None
 
     async def list_failed_task_records(
         self,
@@ -191,50 +193,54 @@ class RedisDLQStore:
     ) -> tuple[list[DLQRecord], str | None]:
         max_score = _timestamp(failed_to) if failed_to is not None else "+inf"
         min_score = _timestamp(failed_from) if failed_from is not None else "-inf"
-        raw_ids = await cast(
-            Awaitable[list[str | bytes]],
-            self.redis.zrevrangebyscore(self.failed_tasks_index_key(), max_score, min_score),
-        )
-        ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
-        start_index = 0
-        if cursor:
-            try:
-                start_index = ids.index(cursor) + 1
-            except ValueError:
-                start_index = 0
-
         normalized_investigation: FailedTaskInvestigationStatus | None = None
         if isinstance(investigation_status, FailedTaskInvestigationStatus):
             normalized_investigation = investigation_status
         elif isinstance(investigation_status, str) and investigation_status:
             normalized_investigation = FailedTaskInvestigationStatus(investigation_status)
         items: list[DLQRecord] = []
-        next_cursor: str | None = None
+        head: list[DLQRecord] = []
+        cursor_found = cursor is None
+        page_size = max(1, limit)
+        chunk_size = max(100, page_size * 2)
+        offset = 0
 
-        for index in range(start_index, len(ids)):
-            record = await self.get(ids[index])
-            if record is None:
-                continue
-            if not _failed_record_matches(
-                record,
-                service_name=service_name,
-                queue_name=queue_name,
-                dlq_name=dlq_name,
-                error_type=error_type,
-                status=status,
-                task_id=task_id,
-                worker_id=worker_id,
-                investigation_status=normalized_investigation,
-            ):
-                continue
-            items.append(record)
-            if len(items) == limit:
-                next_cursor = record.dlq_id
+        while len(items) <= page_size:
+            raw_ids = await cast(
+                Awaitable[list[str | bytes]],
+                self.redis.zrevrangebyscore(
+                    self.failed_tasks_index_key(),
+                    max_score,
+                    min_score,
+                    start=offset,
+                    num=chunk_size,
+                ),
+            )
+            ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
+            if not ids:
                 break
-
-        if next_cursor is not None:
-            for index in range(ids.index(next_cursor) + 1, len(ids)):
-                record = await self.get(ids[index])
+            records = await self._get_many(ids)
+            for dlq_id, record in zip(ids, records, strict=True):
+                if not cursor_found:
+                    if (
+                        record is not None
+                        and len(head) <= page_size
+                        and _failed_record_matches(
+                            record,
+                            service_name=service_name,
+                            queue_name=queue_name,
+                            dlq_name=dlq_name,
+                            error_type=error_type,
+                            status=status,
+                            task_id=task_id,
+                            worker_id=worker_id,
+                            investigation_status=normalized_investigation,
+                        )
+                    ):
+                        head.append(record)
+                    if dlq_id == cursor:
+                        cursor_found = True
+                    continue
                 if record is not None and _failed_record_matches(
                     record,
                     service_name=service_name,
@@ -246,25 +252,33 @@ class RedisDLQStore:
                     worker_id=worker_id,
                     investigation_status=normalized_investigation,
                 ):
-                    break
-            else:
-                next_cursor = None
+                    items.append(record)
+                    if len(items) > page_size:
+                        return items[:page_size], items[page_size - 1].dlq_id
+            if len(ids) < chunk_size:
+                break
+            offset += len(ids)
 
-        return items, next_cursor
+        if cursor is not None and not cursor_found:
+            items = head
+            if len(items) > page_size:
+                return items[:page_size], items[page_size - 1].dlq_id
+
+        return items, None
 
     async def summarize_queues(self) -> list[tuple[str, int, datetime | None]]:
         raw_ids = await cast(Awaitable[list[str | bytes]], self.redis.lrange(self.records_key(), 0, -1))
         ids = [value.decode("utf-8") if isinstance(value, bytes) else str(value) for value in raw_ids]
         counts: dict[str, int] = {}
         latest: dict[str, datetime] = {}
-        for dlq_id in ids:
-            record = await self.get(dlq_id)
-            if record is None:
-                continue
-            counts[record.queue_name] = counts.get(record.queue_name, 0) + 1
-            previous = latest.get(record.queue_name)
-            if previous is None or record.dead_lettered_at > previous:
-                latest[record.queue_name] = record.dead_lettered_at
+        for start in range(0, len(ids), 500):
+            for record in await self._get_many(ids[start : start + 500]):
+                if record is None:
+                    continue
+                counts[record.queue_name] = counts.get(record.queue_name, 0) + 1
+                previous = latest.get(record.queue_name)
+                if previous is None or record.dead_lettered_at > previous:
+                    latest[record.queue_name] = record.dead_lettered_at
         return [(queue_name, counts[queue_name], latest.get(queue_name)) for queue_name in sorted(counts)]
 
     async def claim_replay(self, dlq_id: str, *, force: bool = False) -> DLQRecord | None:

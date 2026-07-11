@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import FastAPI
@@ -12,6 +13,12 @@ from relayna.observability import (
     RedisServiceEventFeedStore,
     SSEKeepaliveSent,
     make_studio_observation_forwarder,
+)
+from relayna.observability.feed import (
+    StudioObservationForwarder,
+    _json_default,
+    normalize_observation_feed_event,
+    normalize_status_feed_event,
 )
 from relayna.status import RedisStatusStore
 
@@ -172,6 +179,73 @@ def test_studio_observation_forwarder_retries_pending_batch_after_http_error() -
         assert len(request_payloads[0]["events"]) == 1
         assert len(request_payloads[1]["events"]) == 2
         assert [item["event"]["task_id"] for item in request_payloads[1]["events"]] == ["task-1", "task-2"]
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_service_event_feed_edge_paths_and_automatic_forwarder_flush() -> None:
+    async def scenario() -> None:
+        assert _json_default(datetime(2026, 1, 1, tzinfo=UTC)).startswith("2026-01-01")
+        try:
+            _json_default(object())
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("non-datetime values must fail JSON normalization")
+
+        assert normalize_status_feed_event({}) is None
+        status = normalize_status_feed_event(
+            {
+                "task_id": 7,
+                "status": None,
+                "meta": {"parent_task_id": " parent "},
+                "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
+            }
+        )
+        assert status is not None
+        assert status.event_type == "status.unknown"
+        assert status.parent_task_id == "parent"
+        assert len(status.cursor) == 64
+        assert normalize_observation_feed_event(object()) is None
+        assert normalize_observation_feed_event(type("NoTask", (), {})()) is None
+
+        redis = FakeRedis()
+        store = RedisServiceEventFeedStore(redis, prefix="edge", ttl_seconds=None, feed_maxlen=250)
+        assert await store.add_status_event({}) is False
+        assert await store.add_observation_event(object()) is False
+        assert (await store.get_feed()).items == []
+        for index in range(105):
+            assert await store.add_status_event({"task_id": f"task-{index}", "event_id": f"event-{index}"}) is True
+        assert await store.add_status_event({"task_id": "duplicate", "event_id": "event-1"}) is False
+        first = await store.get_feed(limit=1)
+        assert first.next_cursor is not None
+        deep = await store.get_feed(after="event-4", limit=2)
+        assert [item.event_id for item in deep.items] == ["event-3", "event-2"]
+        fallback = await store.get_feed(after="missing", limit=1)
+        assert fallback.items[0].event_id == "event-104"
+
+        posts: list[dict[str, object]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            posts.append(json.loads(request.content))
+            return httpx.Response(200, json={})
+
+        forwarder = StudioObservationForwarder(
+            studio_base_url="https://studio.example/",
+            service_id=" service ",
+            batch_size=1,
+            client_factory=lambda timeout: httpx.AsyncClient(
+                transport=httpx.MockTransport(handler),
+                timeout=timeout,
+            ),
+        )
+        await forwarder.flush()
+        await forwarder(object())
+        await forwarder(SSEKeepaliveSent(task_id="task"))
+        assert len(posts) == 1
+        assert posts[0]["events"][0]["service_id"] == "service"
 
     import asyncio
 

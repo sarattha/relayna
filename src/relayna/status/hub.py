@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from aio_pika.abc import AbstractChannel, AbstractQueue
 
+from .._async import run_bounded_iterator
 from ..contracts import ContractAliasConfig, normalize_contract_aliases
 from ..observability import (
     ObservationSink,
@@ -19,6 +21,12 @@ from ..observability import (
 )
 from ..rabbitmq import RelaynaRabbitClient
 from .store import RedisStatusStore
+
+
+@dataclass(slots=True)
+class _TaskLockEntry:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
 
 
 class StatusHub:
@@ -45,6 +53,7 @@ class StatusHub:
         self._alias_config = alias_config
         self._fail_fast_errors = tuple(fail_fast_errors or ())
         self._stop = asyncio.Event()
+        self._task_locks: dict[str, _TaskLockEntry] = {}
 
     def stop(self) -> None:
         self._stop.set()
@@ -70,62 +79,18 @@ class StatusHub:
                 )
                 async with queue.iterator(arguments=consume_args or None) as iterator:
                     started_consuming = True
-                    async for message in iterator:
-                        try:
-                            payload = json.loads(message.body.decode("utf-8", errors="replace"))
-                        except Exception:
-                            await message.ack()
-                            await emit_observation(
-                                self._observation_sink,
-                                StatusHubMalformedMessage(reason="malformed_json"),
-                            )
-                            continue
-
-                        await message.ack()
-                        if not isinstance(payload, Mapping):
-                            await emit_observation(
-                                self._observation_sink,
-                                StatusHubMalformedMessage(reason="payload_not_mapping"),
-                            )
-                            continue
-                        try:
-                            data = normalize_contract_aliases(payload, self._alias_config, drop_aliases=True)
-                        except Exception:
-                            await emit_observation(
-                                self._observation_sink,
-                                StatusHubMalformedMessage(reason="alias_normalization_failed"),
-                            )
-                            continue
-                        meta = data.get("meta")
-                        if isinstance(meta, Mapping):
-                            sanitized_meta = dict(meta)
-                            for key in self._sanitize_meta_keys:
-                                sanitized_meta.pop(key, None)
-                            data["meta"] = sanitized_meta
-
-                        task_id = str(data.get("task_id", "")).strip()
-                        if not task_id:
-                            continue
-                        try:
-                            await self._store.set_history(task_id, data)
-                            await emit_observation(
-                                self._observation_sink,
-                                StatusHubStoredEvent(
-                                    task_id=task_id,
-                                    event_id=_event_id(data),
-                                    status=_status_value(data),
-                                ),
-                            )
-                        except Exception as exc:
-                            await emit_observation(
-                                self._observation_sink,
-                                StatusHubStoreWriteFailed(
-                                    task_id=task_id,
-                                    exception_type=type(exc).__name__,
-                                    exception_message=str(exc),
-                                ),
-                            )
-                            continue
+                    if self._prefetch <= 1:
+                        async for message in iterator:
+                            await self._handle_message(message)
+                            if self._stop.is_set():
+                                break
+                    else:
+                        await run_bounded_iterator(
+                            iterator,
+                            concurrency=self._prefetch,
+                            handler=self._handle_message,
+                            stop_event=self._stop,
+                        )
 
             except asyncio.CancelledError:
                 raise
@@ -149,6 +114,83 @@ class StatusHub:
                         await channel.close()
                     except Exception:
                         pass
+
+    async def _handle_message(self, message: Any) -> None:
+        try:
+            payload = json.loads(message.body.decode("utf-8", errors="replace"))
+        except Exception:
+            await message.ack()
+            await emit_observation(
+                self._observation_sink,
+                StatusHubMalformedMessage(reason="malformed_json"),
+            )
+            return
+
+        if not isinstance(payload, Mapping):
+            await message.ack()
+            await emit_observation(
+                self._observation_sink,
+                StatusHubMalformedMessage(reason="payload_not_mapping"),
+            )
+            return
+        try:
+            data = normalize_contract_aliases(payload, self._alias_config, drop_aliases=True)
+        except Exception:
+            await message.ack()
+            await emit_observation(
+                self._observation_sink,
+                StatusHubMalformedMessage(reason="alias_normalization_failed"),
+            )
+            return
+        meta = data.get("meta")
+        if isinstance(meta, Mapping):
+            sanitized_meta = dict(meta)
+            for key in self._sanitize_meta_keys:
+                sanitized_meta.pop(key, None)
+            data["meta"] = sanitized_meta
+
+        task_id = str(data.get("task_id", "")).strip()
+        if not task_id:
+            await message.ack()
+            return
+
+        try:
+            await self._store_ordered(task_id, data)
+        except Exception as exc:
+            await emit_observation(
+                self._observation_sink,
+                StatusHubStoreWriteFailed(
+                    task_id=task_id,
+                    exception_type=type(exc).__name__,
+                    exception_message=str(exc),
+                ),
+            )
+            await message.reject(requeue=True)
+            return
+
+        await message.ack()
+        await emit_observation(
+            self._observation_sink,
+            StatusHubStoredEvent(
+                task_id=task_id,
+                event_id=_event_id(data),
+                status=_status_value(data),
+            ),
+        )
+
+    async def _store_ordered(self, task_id: str, data: dict[str, Any]) -> None:
+        entry = self._task_locks.get(task_id)
+        if entry is None:
+            entry = _TaskLockEntry()
+            self._task_locks[task_id] = entry
+        entry.users += 1
+        try:
+            async with entry.lock:
+                await self._store.set_history(task_id, data)
+        finally:
+            entry.users -= 1
+            if entry.users == 0 and self._task_locks.get(task_id) is entry:
+                del self._task_locks[task_id]
 
 
 def _event_id(data: Mapping[str, Any]) -> str | None:

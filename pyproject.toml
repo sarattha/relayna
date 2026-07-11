@@ -45,6 +45,7 @@ Repository = "https://github.com/sarattha/relayna"
 
 [project.optional-dependencies]
 dev = [
+    "coverage[toml]>=7.10.0",
     "cryptography>=48.0.1",
     "mkdocs>=1.6.1",
     "pytest>=8.3.0",
@@ -82,3 +83,11 @@ select = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.coverage.run]
+source = ["relayna"]
+
+[tool.coverage.report]
+fail_under = 98
+show_missing = true
+skip_covered = true

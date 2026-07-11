@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from .._async import map_bounded
 from ..topology import RelaynaTopology, SharedStatusWorkflowTopology, topology_kind
 from .store import RedisObservationStore
 
@@ -71,6 +72,7 @@ class ExecutionGraphService:
     status_store: RedisStatusStore
     observation_store: RedisObservationStore | None = None
     dlq_service: DLQService | None = None
+    max_concurrency: int = 16
 
     async def get_graph(self, task_id: str) -> ExecutionGraph | None:
         status_histories: dict[str, list[dict[str, Any]]] = {}
@@ -78,21 +80,40 @@ class ExecutionGraphService:
         related_task_ids = await self.status_store.get_child_task_ids(task_id)
         target_task_ids = [task_id, *[item for item in related_task_ids if item != task_id]]
 
-        for current_task_id in target_task_ids:
+        async def load_task_history(
+            current_task_id: str,
+        ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
             history = await self.status_store.get_history(current_task_id)
-            if history:
-                status_histories[current_task_id] = history
+            observations: list[dict[str, Any]] = []
             if self.observation_store is not None:
                 observations = await self.observation_store.get_history(current_task_id)
-                if observations:
-                    observation_histories[current_task_id] = observations
+            return current_task_id, history, observations
+
+        histories = await map_bounded(
+            target_task_ids,
+            load_task_history,
+            concurrency=self.max_concurrency,
+        )
+        for current_task_id, history, observations in histories:
+            if history:
+                status_histories[current_task_id] = history
+            if observations:
+                observation_histories[current_task_id] = observations
 
         dlq_records: dict[str, list[dict[str, Any]]] = {}
         if self.dlq_service is not None:
-            for current_task_id in target_task_ids:
+
+            async def load_dlq_records(current_task_id: str) -> tuple[str, list[dict[str, Any]]]:
+                assert self.dlq_service is not None
                 payload = await self.dlq_service.list_messages(task_id=current_task_id, limit=200)
-                if payload.items:
-                    dlq_records[current_task_id] = [item.model_dump(mode="json") for item in payload.items]
+                return current_task_id, [item.model_dump(mode="json") for item in payload.items]
+
+            task_records = await map_bounded(
+                target_task_ids,
+                load_dlq_records,
+                concurrency=self.max_concurrency,
+            )
+            dlq_records.update((current_task_id, records) for current_task_id, records in task_records if records)
 
         if not status_histories and not observation_histories and not dlq_records:
             return None

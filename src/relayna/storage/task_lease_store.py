@@ -88,9 +88,11 @@ class RedisTaskLeaseStore:
         acquired = await self._redis.set(self._lease_key(lease.lease_id), payload, ex=ttl_seconds, nx=True)
         if not acquired:
             return False
-        await self._redis.srem(self._expired_claims_key, lease.lease_id)
-        await self._redis.sadd(self._owner_key(lease.owner_id), lease.lease_id)
-        await self._redis.zadd(self._expiries_key, {lease.lease_id: lease.expires_at.timestamp()})
+        pipe = self._redis.pipeline()
+        pipe.srem(self._expired_claims_key, lease.lease_id)
+        pipe.sadd(self._owner_key(lease.owner_id), lease.lease_id)
+        pipe.zadd(self._expiries_key, {lease.lease_id: lease.expires_at.timestamp()})
+        await pipe.execute()
         return True
 
     async def heartbeat(self, lease_id: str, *, owner_id: str, expires_at: datetime) -> TaskLease | None:
@@ -99,8 +101,10 @@ class RedisTaskLeaseStore:
             return None
         updated = current.model_copy(update={"heartbeat_at": _utcnow(), "expires_at": expires_at})
         ttl_seconds = max(1, int((expires_at - _utcnow()).total_seconds()))
-        await self._redis.set(self._lease_key(lease_id), updated.model_dump_json(), ex=ttl_seconds)
-        await self._redis.zadd(self._expiries_key, {lease_id: expires_at.timestamp()})
+        pipe = self._redis.pipeline()
+        pipe.set(self._lease_key(lease_id), updated.model_dump_json(), ex=ttl_seconds)
+        pipe.zadd(self._expiries_key, {lease_id: expires_at.timestamp()})
+        await pipe.execute()
         return updated
 
     async def release(self, lease_id: str, *, owner_id: str) -> bool:
@@ -109,10 +113,12 @@ class RedisTaskLeaseStore:
             return False
         if current.owner_id != owner_id:
             return False
-        await self._redis.delete(self._lease_key(lease_id))
-        await self._redis.srem(self._owner_key(owner_id), lease_id)
-        await self._redis.zrem(self._expiries_key, lease_id)
-        await self._redis.srem(self._expired_claims_key, lease_id)
+        pipe = self._redis.pipeline()
+        pipe.delete(self._lease_key(lease_id))
+        pipe.srem(self._owner_key(owner_id), lease_id)
+        pipe.zrem(self._expiries_key, lease_id)
+        pipe.srem(self._expired_claims_key, lease_id)
+        await pipe.execute()
         return True
 
     async def get(self, lease_id: str) -> TaskLease | None:
@@ -125,39 +131,52 @@ class RedisTaskLeaseStore:
 
     async def list_by_owner(self, owner_id: str) -> list[TaskLease]:
         lease_ids = await self._redis.smembers(self._owner_key(owner_id))
-        leases: list[TaskLease] = []
-        for raw_lease_id in lease_ids:
-            lease_id = raw_lease_id.decode("utf-8") if isinstance(raw_lease_id, bytes) else str(raw_lease_id)
-            lease = await self.get(lease_id)
-            if lease is not None:
-                leases.append(lease)
-        return leases
+        normalized_ids = [
+            raw_lease_id.decode("utf-8") if isinstance(raw_lease_id, bytes) else str(raw_lease_id)
+            for raw_lease_id in lease_ids
+        ]
+        payloads = await self._redis.mget([self._lease_key(lease_id) for lease_id in normalized_ids])
+        return [TaskLease.model_validate_json(payload) for payload in payloads if payload is not None]
 
     async def claim_expired(self, *, now: datetime | None = None, limit: int = 100) -> list[TaskLease]:
         now = now or _utcnow()
         raw_ids = await self._redis.zrangebyscore(self._expiries_key, "-inf", now.timestamp(), start=0, num=limit)
+        lease_ids = [raw_id.decode("utf-8") if isinstance(raw_id, bytes) else str(raw_id) for raw_id in raw_ids]
+        if not lease_ids:
+            return []
+
+        claim_pipe = self._redis.pipeline()
+        for lease_id in lease_ids:
+            claim_pipe.sadd(self._expired_claims_key, lease_id)
+        claim_results = await claim_pipe.execute()
+        claimed_ids = [lease_id for lease_id, claimed in zip(lease_ids, claim_results, strict=True) if claimed]
+        if not claimed_ids:
+            return []
+
+        payloads = await self._redis.mget([self._lease_key(lease_id) for lease_id in claimed_ids])
         expired: list[TaskLease] = []
-        for raw_lease_id in raw_ids:
-            lease_id = raw_lease_id.decode("utf-8") if isinstance(raw_lease_id, bytes) else str(raw_lease_id)
-            if not await self._redis.sadd(self._expired_claims_key, lease_id):
-                continue
-            lease = await self.get(lease_id)
-            await self._redis.zrem(self._expiries_key, lease_id)
+        cleanup_pipe = self._redis.pipeline()
+        for lease_id, payload in zip(claimed_ids, payloads, strict=True):
+            lease = TaskLease.model_validate_json(payload) if payload is not None else None
+            cleanup_pipe.zrem(self._expiries_key, lease_id)
             if lease is None:
-                await self._redis.srem(self._expired_claims_key, lease_id)
+                cleanup_pipe.srem(self._expired_claims_key, lease_id)
                 continue
             if lease.expires_at > now:
-                await self._redis.zadd(self._expiries_key, {lease_id: lease.expires_at.timestamp()})
-                await self._redis.srem(self._expired_claims_key, lease_id)
+                cleanup_pipe.zadd(self._expiries_key, {lease_id: lease.expires_at.timestamp()})
+                cleanup_pipe.srem(self._expired_claims_key, lease_id)
                 continue
             expired.append(lease)
+        await cleanup_pipe.execute()
         return expired
 
     async def _release_expired_claim(self, lease_id: str, *, retry: bool) -> None:
         lease = await self.get(lease_id)
+        pipe = self._redis.pipeline()
         if retry and lease is not None:
-            await self._redis.zadd(self._expiries_key, {lease_id: lease.expires_at.timestamp()})
-        await self._redis.srem(self._expired_claims_key, lease_id)
+            pipe.zadd(self._expiries_key, {lease_id: lease.expires_at.timestamp()})
+        pipe.srem(self._expired_claims_key, lease_id)
+        await pipe.execute()
 
 
 LeaseStatusPublisher = Callable[[TaskLease], Awaitable[None]]
