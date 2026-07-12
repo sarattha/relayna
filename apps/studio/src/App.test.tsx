@@ -86,6 +86,12 @@ class MockEventSource {
     const event = { data: JSON.stringify(data) } as MessageEvent<string>;
     listeners.forEach((listener) => listener(event));
   }
+
+  emitRaw(type: string, data: string) {
+    const listeners = this.listeners.get(type) || [];
+    const event = { data } as MessageEvent<string>;
+    listeners.forEach((listener) => listener(event));
+  }
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -1161,6 +1167,7 @@ describe("App", () => {
   it("navigates from the service list to the routed service detail page", async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByRole("button", { name: "Reload List" }));
     fireEvent.click(await screen.findByRole("link", { name: "View" }));
 
     expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
@@ -1994,6 +2001,120 @@ describe("App", () => {
     expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
   });
 
+  it("shows stable fallback messages for non-Error service telemetry failures and ignores malformed SSE", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+      },
+    };
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (
+        url.startsWith("/studio/services/payments-api/events?") ||
+        url.startsWith("/studio/services/payments-api/logs?") ||
+        url.startsWith("/studio/services/payments-api/metrics?") ||
+        url === "/studio/services/payments-api/pods"
+      ) {
+        throw "offline";
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Unable to load service activity.")).toBeInTheDocument();
+    expect(await screen.findByText("Unable to load service logs.")).toBeInTheDocument();
+    expect(await screen.findByText("Unable to load service pods.")).toBeInTheDocument();
+    expect((await screen.findAllByText(/Unable to load (service|pod) metrics\./)).length).toBeGreaterThan(0);
+    const source = MockEventSource.instances.find((item) => item.url.includes("/services/payments-api/events/stream"));
+    expect(source).toBeDefined();
+    act(() => source?.emitRaw("event", "not-json"));
+    expect(screen.getByRole("heading", { name: "Payments API" })).toBeInTheDocument();
+  });
+
+  it("renders explicit no-provider states for a registry-only service", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = { ...services[0], log_config: null, metrics_config: null, health: null };
+
+    render(<App />);
+
+    expect(await screen.findByText("No log provider configured for this service.")).toBeInTheDocument();
+    expect((await screen.findAllByText("No metrics provider configured for this service.")).length).toBeGreaterThan(1);
+    expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
+    for (const label of ["Reload Metrics", "Reload Charts", "Reload Pods"]) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+    }
+  });
+
+  it("operates every service observe filter, reload, health, SSE, and delete control", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+      },
+    };
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/health/refresh" && method === "POST") {
+        return jsonResponse({});
+      }
+      if (url === "/studio/services/payments-api" && method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Payments API" })).toBeInTheDocument();
+    await screen.findByText("Service Logs");
+
+    const source = MockEventSource.instances.find((item) => item.url.includes("/services/payments-api/events/stream"));
+    act(() => source?.emit("event", {
+      service_id: "payments-api", ingest_method: "pull", ingested_at: "2026-04-08T12:00:00Z",
+      dedupe_key: "live", out_of_order: true, task_id: "live-task", event_type: "task.live",
+      source_kind: "observation", component: null, timestamp: null, payload: {},
+    }));
+    expect(await screen.findByText("live-task")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Filter task id"), { target: { value: "missing" } });
+    fireEvent.change(document.querySelector(".studio-form-grid--triple select")!, { target: { value: "status" } });
+    fireEvent.change(screen.getByPlaceholderText("Filter event type"), { target: { value: "missing" } });
+    fireEvent.change(screen.getByLabelText("Service log text filter"), { target: { value: "needle" } });
+    fireEvent.change(screen.getByLabelText("Service log level"), { target: { value: "error" } });
+    fireEvent.change(screen.getByLabelText("Service log source"), { target: { value: "api" } });
+    fireEvent.change(screen.getByLabelText("Service log limit"), { target: { value: "7" } });
+
+    fireEvent.change(screen.getByLabelText("Service metrics window mode"), { target: { value: "manual" } });
+    fireEvent.change(screen.getByLabelText("Service metrics from"), { target: { value: "2026-04-08T09:00" } });
+    fireEvent.change(screen.getByLabelText("Service metrics to"), { target: { value: "2026-04-08T10:00" } });
+    fireEvent.change(screen.getByLabelText("Pod metrics window mode"), { target: { value: "manual" } });
+    fireEvent.change(screen.getByLabelText("Pod metrics from"), { target: { value: "2026-04-08T09:00" } });
+    fireEvent.change(screen.getByLabelText("Pod metrics to"), { target: { value: "2026-04-08T10:00" } });
+
+    for (const label of ["Reload Metrics", "Reload Charts", "Reload Pods", "Reload Activity", "Reload Logs", "Run Health Check"]) {
+      fireEvent.click(screen.getByRole("button", { name: label }));
+    }
+
+    fireEvent.click(screen.getByText("Lifecycle actions"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete service" });
+    fireEvent.change(within(dialog).getByLabelText("Type payments-api to confirm deletion"), { target: { value: "payments-api" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete Service" }));
+    await waitFor(() => expect(window.location.pathname).toBe("/services"));
+  });
+
   it("keeps lifecycle enablement inside the labelled service action menu", async () => {
     window.history.replaceState({}, "", "/services/payments-api");
     const baseImpl = fetchMock.getMockImplementation();
@@ -2175,6 +2296,124 @@ describe("App", () => {
     expect(payloadWithoutTrace.trace_config).toBeNull();
   });
 
+  it("edits every registry form field and resets the editor to a new draft", async () => {
+    window.history.replaceState({}, "", "/services");
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit payments-api" }));
+    const editorHeading = await screen.findByRole("heading", { name: "Edit Service" });
+    const editor = editorHeading.closest("section");
+    expect(editor).not.toBeNull();
+    const form = within(editor as HTMLElement);
+
+    const textUpdates: Array<[string, string]> = [
+      ["Name", "Payments Updated"],
+      ["Base URL", "https://updated.example.test"],
+      ["Environment", "staging"],
+      ["Tags", "core, updated"],
+      ["Auth mode", "mtls"],
+      ["Log base URL", "https://loki.updated.test"],
+      ["Loki tenant id", "tenant-b"],
+      ["Service label key", "service_name"],
+      ["Service label value", "payments-updated"],
+      ["App label key", "component"],
+      ["Log pod label", "pod_name"],
+      ["Log pod value template", "^{pod}$"],
+      ["Task id label", "task"],
+      ["Correlation id label", "correlation"],
+      ["Level label", "severity"],
+      ["Task match template", "task={task_id}"],
+      ["Prometheus base URL", "https://prometheus.updated.test"],
+      ["Namespace", "payments"],
+      ["Prometheus selector key", "service"],
+      ["Prometheus selector value", "payments"],
+      ["Relayna runtime service label", "payments-runtime"],
+      ["Namespace label", "kube_namespace"],
+      ["Pod label", "kube_pod"],
+      ["Container label", "kube_container"],
+      ["Step seconds", "45"],
+      ["Task padding seconds", "180"],
+      ["Tempo base URL", "https://tempo.updated.test"],
+      ["Public Tempo URL", "https://traces.updated.test"],
+      ["Tenant ID", "tenant-b"],
+      ["Query path", "/trace/{trace_id}"],
+    ];
+    for (const [label, value] of textUpdates) {
+      fireEvent.change(form.getByLabelText(label), { target: { value } });
+    }
+    const additionalSelectors = form.getAllByLabelText("Additional selector labels");
+    expect(additionalSelectors).toHaveLength(2);
+    fireEvent.change(additionalSelectors[0], { target: { value: "zone=east" } });
+    fireEvent.change(additionalSelectors[1], { target: { value: "zone=east" } });
+    fireEvent.change(form.getByLabelText("Log provider"), { target: { value: "loki" } });
+    fireEvent.change(form.getByLabelText("Log pod match"), { target: { value: "regex" } });
+    fireEvent.change(form.getByLabelText("Task match mode"), { target: { value: "structured_metadata" } });
+    fireEvent.change(form.getByLabelText("Metrics provider"), { target: { value: "prometheus" } });
+    fireEvent.change(form.getByLabelText("Trace provider"), { target: { value: "tempo" } });
+
+    expect(form.getByLabelText("Name")).toHaveValue("Payments Updated");
+    expect(form.getByLabelText("Task match mode")).toHaveValue("structured_metadata");
+    fireEvent.click(form.getByRole("button", { name: "New Draft" }));
+    expect(await screen.findByRole("heading", { name: "Register Service" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("heading", { name: "Register Service" })).not.toBeInTheDocument();
+  });
+
+  it("covers service search result, empty, and non-error failure states", async () => {
+    window.history.replaceState({}, "", "/services");
+    const baseImpl = fetchMock.getMockImplementation();
+    let searchCalls = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith("/studio/services/search?") && (init?.method || "GET") === "GET") {
+        searchCalls += 1;
+        if (searchCalls === 1) {
+          return jsonResponse({
+            count: 1,
+            items: [{
+              service_id: "payments-api",
+              name: "Payments API",
+              environment: "prod",
+              tags: ["core"],
+              status: "healthy",
+              health_status: null,
+              base_url: "https://payments.example.test",
+              auth_mode: "internal_network",
+              matched_fields: [],
+            }],
+            next_cursor: null,
+          });
+        }
+        if (searchCalls === 2) {
+          return jsonResponse({ count: 0, items: [], next_cursor: null });
+        }
+        throw "offline";
+      }
+      return await baseImpl!(input, init);
+    });
+    render(<App />);
+
+    const searchHeading = await screen.findByRole("heading", { name: "Service Search" });
+    const searchSection = searchHeading.closest("section");
+    expect(searchSection).not.toBeNull();
+    const search = within(searchSection as HTMLElement);
+    fireEvent.change(search.getByLabelText("Keyword"), { target: { value: "payments" } });
+    fireEvent.change(search.getByLabelText("Environment"), { target: { value: "prod" } });
+    fireEvent.change(search.getByLabelText("Registry"), { target: { value: "healthy" } });
+    fireEvent.change(search.getByLabelText("Runtime Health"), { target: { value: "stale" } });
+    fireEvent.change(search.getByLabelText("Tag"), { target: { value: "core" } });
+    fireEvent.click(search.getByRole("button", { name: "Search Services" }));
+    expect(await search.findByText("matched fields: structured filters only")).toBeInTheDocument();
+
+    fireEvent.click(search.getByRole("button", { name: "Search Services" }));
+    expect(await search.findByText("No matching services found.")).toBeInTheDocument();
+    fireEvent.click(search.getByRole("button", { name: "Search Services" }));
+    expect(await search.findByText("Unable to search services.")).toBeInTheDocument();
+    fireEvent.click(search.getByRole("button", { name: "Clear" }));
+    expect(search.getByLabelText("Keyword")).toHaveValue("");
+    expect(search.queryByText("Unable to search services.")).not.toBeInTheDocument();
+  });
+
   it("keeps the edit context visible when service deletion fails", async () => {
     const baseImpl = fetchMock.getMockImplementation();
     let deleteCalls = 0;
@@ -2235,6 +2474,25 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Entry Routes" })).toBeInTheDocument();
   });
 
+  it("reports non-Error topology failures and retries them", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/topology");
+    const baseImpl = fetchMock.getMockImplementation();
+    let attempts = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/studio/services/payments-api/workflow/topology") {
+        attempts += 1;
+        throw "offline";
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Unable to load workflow topology.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(attempts).toBe(2));
+  });
+
   it("renders the DLQ explorer, applies pagination, and links back to task detail", async () => {
     window.history.replaceState({}, "", "/services/payments-api/dlq");
 
@@ -2270,6 +2528,69 @@ describe("App", () => {
     expect(screen.getByPlaceholderText("State")).toBeDisabled();
   });
 
+  it("applies every indexed DLQ filter, switches modes, and reports non-error failures", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/dlq");
+    const baseImpl = fetchMock.getMockImplementation();
+    let filteredCalls = 0;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.includes("/dlq/messages?") && !url.includes("/broker/") && url.includes("queue_name=payments.dlq") && (init?.method || "GET") === "GET") {
+        filteredCalls += 1;
+        if (filteredCalls === 1) {
+          return jsonResponse({ service_id: "payments-api", items: [], next_cursor: null });
+        }
+        throw "dlq-offline";
+      }
+      if (url === "/studio/services/payments-api/broker/dlq/messages?limit=7&queue_name=payments.dlq&task_id=task-123") {
+        return jsonResponse({ service_id: "payments-api", items: [] });
+      }
+      return await baseImpl!(input, init);
+    });
+    render(<App />);
+
+    expect(await screen.findByText("upstream_timeout")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Queue name"), { target: { value: "payments.dlq" } });
+    fireEvent.change(screen.getByPlaceholderText("Task id"), { target: { value: "task-123" } });
+    fireEvent.change(screen.getByPlaceholderText("Reason"), { target: { value: "timeout" } });
+    fireEvent.change(screen.getByPlaceholderText("Source queue"), { target: { value: "payments.stage" } });
+    fireEvent.change(screen.getByPlaceholderText("State"), { target: { value: "dead_lettered" } });
+    fireEvent.change(screen.getByPlaceholderText("50"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Filters" }));
+    expect(await screen.findByText("No DLQ messages matched the current filters.")).toBeInTheDocument();
+    expect(window.location.search).toContain("queue_name=payments.dlq");
+
+    fireEvent.click(screen.getByRole("button", { name: "Broker Mode" }));
+    expect(await screen.findByText(/Live broker inspection mode is active/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Indexed Mode" }));
+    expect(await screen.findByText("Unable to load DLQ messages.")).toBeInTheDocument();
+  });
+
+  it("shows unsupported broker mode and broker fallback fields for missing metadata", async () => {
+    window.history.replaceState({}, "", "/services/unknown/dlq?mode=broker");
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/studio/services/unknown/broker/dlq/messages?limit=50") {
+        return jsonResponse({
+          service_id: "unknown",
+          items: [{
+            service_id: "unknown", queue_name: "unknown.dlq", message_key: "message-1", task_id: null,
+            correlation_id: null, reason: null, source_queue_name: null, body_encoding: "base64",
+            dead_lettered_at: null, headers: {}, body: null, raw_body_b64: "", redelivered: null, task_ref: null,
+          }],
+        });
+      }
+      return await baseImpl!(input, init);
+    });
+    render(<App />);
+
+    expect(await screen.findByText("This service does not advertise broker-backed DLQ inspection.")).toBeInTheDocument();
+    expect(screen.getByText("broker_dead_letter")).toBeInTheDocument();
+    expect(screen.getByText(/source unknown/)).toBeInTheDocument();
+    expect(screen.getByText("Redelivered: unknown")).toBeInTheDocument();
+    expect(screen.getByText("Task: unattributed")).toBeInTheDocument();
+  });
+
   it("renders the global failed tasks page and opens a failure detail", async () => {
     window.history.replaceState({}, "", "/failed-tasks");
 
@@ -2283,6 +2604,30 @@ describe("App", () => {
 
     expect(await screen.findByText("Failure Detail")).toBeInTheDocument();
     expect(screen.getByDisplayValue(/task-123/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText("Failure Detail")).not.toBeInTheDocument();
+  });
+
+  it("uses stable fallbacks for non-Error failed-task settings and detail failures", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/studio/failed-task-email-settings") {
+        throw "settings-offline";
+      }
+      if (url === "/studio/failed-tasks/payments-api/failure-1") {
+        throw "detail-offline";
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Unable to load email notification settings.")).toBeInTheDocument();
+    expect(await screen.findByText("RuntimeError")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(await screen.findByText("Unable to load failed task detail.")).toBeInTheDocument();
   });
 
   it("updates failed-task email notification settings", async () => {
@@ -2291,6 +2636,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Email Notifications" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Email batch wait seconds"), { target: { value: "60" } });
     fireEvent.click(screen.getByLabelText("Enabled"));
 
     await waitFor(() =>
@@ -2339,6 +2685,170 @@ describe("App", () => {
       expect.objectContaining({ method: "POST" }),
     );
     confirmSpy.mockRestore();
+  });
+
+  it("operates the full failed-task investigation, retry, copy, download, pagination, and delete workflow", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+    const baseImpl = fetchMock.getMockImplementation();
+    let listCalls = 0;
+    const detail = {
+      service_id: "payments-api",
+      service_name: "Payments API",
+      failure_id: "failure-1",
+      task_id: "task-123",
+      correlation_id: "corr-123",
+      queue_name: "payments.stage",
+      source_queue_name: "payments.stage",
+      retry_queue_name: "payments.retry",
+      dlq_name: "payments.dlq",
+      status: "DLQ",
+      attempt: 3,
+      max_attempts: 3,
+      failed_at: "2026-05-26T10:30:00Z",
+      error_type: "RuntimeError",
+      error_message: "boom",
+      traceback: "traceback",
+      investigation_status: "unreviewed",
+      investigation_note: "initial note",
+      retry_status: "not_retried",
+      retry_note: "retry later",
+      payload_available: true,
+      body: { task_id: "task-123" },
+      input_preview: null,
+      metadata: {},
+      last_logs: [],
+      task_ref: null,
+    };
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url.startsWith("/studio/failed-tasks?") && method === "GET") {
+        listCalls += 1;
+        if (listCalls === 1) {
+          return jsonResponse({
+            items: [{ ...detail, error_type: null, error_message: null, task_id: null }],
+            next_cursor: "next-page",
+            errors: [{ service_id: "shipping-api", code: "unreachable", detail: "offline" }],
+          });
+        }
+        if (listCalls === 2) {
+          return jsonResponse({ items: [{ ...detail, failure_id: "failure-2" }], next_cursor: null, errors: [] });
+        }
+        return jsonResponse({ items: [{ ...detail }], next_cursor: null, errors: [] });
+      }
+      if (url === "/studio/failed-tasks/payments-api/failure-1" && method === "GET") {
+        return jsonResponse(detail);
+      }
+      if (url.endsWith("/mark-investigated") && method === "POST") {
+        return jsonResponse({ ...detail, investigation_status: "investigated" });
+      }
+      if (url.endsWith("/mark-uninvestigated") && method === "POST") {
+        return jsonResponse({ ...detail, investigation_status: "unreviewed" });
+      }
+      if (url.endsWith("/retry") && method === "POST") {
+        return jsonResponse({ failure_id: "failure-1", target_queue: "payments.retry", retry_status: "retried", retried_at: "2026-05-26T11:00:00Z" });
+      }
+      if (url === "/studio/failed-tasks/payments-api/failure-1" && method === "DELETE") {
+        return jsonResponse({ service_id: "payments-api", failure_id: "failure-1", deleted: true });
+      }
+      return await baseImpl!(input, init);
+    });
+    const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboardWrite } });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:failed-task") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<App />);
+
+    expect(await screen.findByText("1 service read failed while loading failed tasks.")).toBeInTheDocument();
+    expect(screen.getByText("No error message captured.")).toBeInTheDocument();
+    expect(screen.getByText("unattributed")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load Next Page" }));
+    await waitFor(() => expect(listCalls).toBe(2));
+
+    fireEvent.change(screen.getByPlaceholderText("Service id"), { target: { value: "payments-api" } });
+    fireEvent.change(screen.getByPlaceholderText("Queue"), { target: { value: "payments.stage" } });
+    fireEvent.change(screen.getByPlaceholderText("DLQ"), { target: { value: "payments.dlq" } });
+    fireEvent.change(screen.getByPlaceholderText("Error type"), { target: { value: "RuntimeError" } });
+    fireEvent.change(screen.getByPlaceholderText("Status"), { target: { value: "DLQ" } });
+    fireEvent.change(screen.getByPlaceholderText("Task id"), { target: { value: "task-123" } });
+    fireEvent.change(screen.getByPlaceholderText("Worker"), { target: { value: "worker-1" } });
+    fireEvent.change(screen.getByDisplayValue("Unreviewed"), { target: { value: "investigated" } });
+    fireEvent.change(screen.getByPlaceholderText("50"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply Filters" }));
+    await waitFor(() => expect(listCalls).toBe(3));
+
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    expect(await screen.findByText("Failure Detail")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy Payload" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy Error" }));
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Download JSON" }));
+    expect(anchorClick).toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText("Operator"), { target: { value: "oncall" } });
+    fireEvent.change(screen.getByPlaceholderText("Investigation note"), { target: { value: "checked" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mark Investigated" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/studio/failed-tasks/payments-api/failure-1/mark-investigated",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Mark Unreviewed" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/studio/failed-tasks/payments-api/failure-1/mark-uninvestigated",
+      expect.objectContaining({ method: "POST" }),
+    ));
+
+    fireEvent.change(screen.getByPlaceholderText("Target queue"), { target: { value: "payments.retry" } });
+    fireEvent.change(screen.getByPlaceholderText("Retry note"), { target: { value: "retry now" } });
+    fireEvent.change(screen.getByPlaceholderText("Optional JSON payload override"), { target: { value: '{"safe":true}' } });
+    confirmSpy.mockReturnValueOnce(false).mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/studio/failed-tasks/payments-api/failure-1/retry",
+      expect.objectContaining({ method: "POST" }),
+    ));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByText("Failure Detail")).not.toBeInTheDocument());
+    anchorClick.mockRestore();
+    confirmSpy.mockRestore();
+  });
+
+  it("renders failed-task loading failures, disabled email settings, and update failures", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url.startsWith("/studio/failed-tasks?") && method === "GET") {
+        throw "failed-list";
+      }
+      if (url === "/studio/failed-task-email-settings" && method === "GET") {
+        return jsonResponse({ configured: false, enabled: false, batch_wait_seconds: 172800, max_batch_wait_seconds: 604800, receivers: [] });
+      }
+      if (url === "/studio/failed-task-email-settings" && method === "PATCH") {
+        throw "failed-settings";
+      }
+      return await baseImpl!(input, init);
+    });
+    render(<App />);
+
+    expect(await screen.findByText("Unable to load failed tasks.")).toBeInTheDocument();
+    expect(await screen.findByText("Not configured")).toBeInTheDocument();
+    expect(screen.getByText("Wait: 2 days")).toBeInTheDocument();
+    expect(screen.getByLabelText("Enabled")).toBeDisabled();
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/studio/failed-task-email-settings" && (init?.method || "GET") === "PATCH") {
+        throw "failed-settings";
+      }
+      return await baseImpl!(input, init);
+    });
   });
 
   it("submits task search and renders indexed task results", async () => {
@@ -2390,6 +2900,42 @@ describe("App", () => {
     );
   });
 
+  it("appends task search pages and preserves results when a cursor request fails", async () => {
+    window.history.replaceState({}, "", "/tasks/search");
+    let calls = 0;
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url === "/studio/services") {
+        return serviceListResponse(services);
+      }
+      if (url.startsWith("/studio/tasks/search?") && new URL(url, "http://studio.test").searchParams.get("task_id") === "paged" && !url.includes("cursor=")) {
+        return jsonResponse({
+          count: 1,
+          items: [{
+            service_id: "payments-api", service_name: "Payments API", environment: "prod", task_id: "page-1",
+            first_seen_at: null, last_seen_at: null, latest_event_type: null, latest_event_at: null,
+            latest_ingested_at: null, detail_path: "/studio/tasks/payments-api/page-1",
+          }],
+          next_cursor: "next",
+        });
+      }
+      if (url.includes("cursor=next")) {
+        calls += 1;
+        throw "offline";
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+
+    render(<App />);
+    fireEvent.change(await screen.findByPlaceholderText("task_id"), { target: { value: "paged" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(await screen.findByText(/page-1/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load Next Page" }));
+    expect(await screen.findByText("Unable to search tasks.")).toBeInTheDocument();
+    expect(screen.getByText(/page-1/)).toBeInTheDocument();
+    expect(calls).toBe(1);
+  });
+
   it("renders the direct task detail route with graph, timeline, logs, joins, and SSE cleanup", async () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
 
@@ -2398,12 +2944,12 @@ describe("App", () => {
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(screen.getByText("Failure summary")).toBeInTheDocument();
     expect(screen.getByText("upstream_timeout")).toBeInTheDocument();
+    expect(await screen.findByText("Task Trace")).toBeInTheDocument();
     expect(screen.queryByTestId("rf-root")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open Graph" }));
     expect(await screen.findByTestId("rf-root")).toBeInTheDocument();
     expect(screen.getByText("Task Timeline")).toBeInTheDocument();
     expect(screen.getByText("Task Logs")).toBeInTheDocument();
-    expect(await screen.findByText("Task Trace")).toBeInTheDocument();
     expect(screen.getByText("Joined Refs")).toBeInTheDocument();
     expect(screen.getByText("Join Warnings")).toBeInTheDocument();
     expect(screen.getByText("Section Errors")).toBeInTheDocument();
@@ -2416,6 +2962,9 @@ describe("App", () => {
     expect(screen.getAllByText("null").length).toBeGreaterThan(0);
     expect(await screen.findByText("payments.process_payment")).toBeInTheDocument();
     expect(screen.getByText("Path Duration")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /gateway_timeout/ }));
+    fireEvent.click(screen.getByRole("button", { name: /attempt-1/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Filter Logs" }));
     expect(document.body.textContent?.indexOf("attempt-1")).toBeLessThan(document.body.textContent?.indexOf("gateway_timeout") ?? 0);
     expect(screen.queryByRole("link", { name: "Open Span" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "View Span" }));
@@ -2448,6 +2997,92 @@ describe("App", () => {
     unmount();
 
     expect(MockEventSource.instances[0]?.closed).toBe(true);
+  });
+
+  it("shows stable fallback messages for non-Error task telemetry failures and malformed SSE", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    services[0] = {
+      ...services[0],
+      metrics_config: {
+        provider: "prometheus",
+        base_url: "https://prometheus.example.test",
+        namespace: "prod",
+        service_selector_labels: { app: "payments-api" },
+      },
+    };
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (
+        url === "/studio/tasks/payments-api/task-123/events?limit=50" ||
+        url.startsWith("/studio/tasks/payments-api/task-123/logs?") ||
+        url.startsWith("/studio/tasks/payments-api/task-123/metrics?") ||
+        url === "/studio/tasks/payments-api/task-123/trace-path"
+      ) {
+        throw "offline";
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Unable to load task timeline.")).toBeInTheDocument();
+    expect(await screen.findByText("Unable to load task logs.")).toBeInTheDocument();
+    expect(await screen.findByText("Unable to load task metrics.")).toBeInTheDocument();
+    expect(await screen.findByText("Unable to load task trace path.")).toBeInTheDocument();
+    const source = MockEventSource.instances.find((item) => item.url.includes("/tasks/payments-api/task-123/events/stream"));
+    act(() => source?.emitRaw("event", "not-json"));
+    expect(screen.getByText("Task Detail")).toBeInTheDocument();
+  });
+
+  it("falls back to selection-based Mermaid clipboard copying", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    const writeText = vi.fn().mockRejectedValue(new Error("blocked"));
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalled();
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+  });
+
+  it("selects the visible Mermaid export when browser copy APIs are blocked", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn().mockReturnValue(false) });
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(await screen.findByRole("button", { name: "Selected" })).toBeInTheDocument();
+  });
+
+  it("renders task no-provider states and a non-Error detail failure", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    services[0] = { ...services[0], log_config: null, metrics_config: null };
+    const first = render(<App />);
+    expect(await screen.findByText("No log provider configured for this service.")).toBeInTheDocument();
+    expect(await screen.findByText("No metrics provider configured for this service.")).toBeInTheDocument();
+    first.unmount();
+
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === "/studio/services") {
+        return serviceListResponse(services);
+      }
+      if (String(input) === "/studio/tasks/payments-api/task-123?join=all") {
+        throw "offline";
+      }
+      throw new Error(`Unhandled fetch: ${String(input)}`);
+    });
+    render(<App />);
+    expect(await screen.findByText("Unable to load task detail.")).toBeInTheDocument();
   });
 
   it("lays out an execution graph with no root node in its lazy graph surface", async () => {

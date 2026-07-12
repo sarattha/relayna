@@ -23,6 +23,7 @@ dependencies = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=7.0.0",
     "pytest-mock>=3.14.0",
     "pytest-xdist",
     "ruff==0.9.2",
@@ -38,3 +39,10 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 relayna = { path = "../..", editable = true }
+
+[tool.coverage.run]
+source = ["relayna_studio"]
+
+[tool.coverage.report]
+fail_under = 98
+show_missing = true

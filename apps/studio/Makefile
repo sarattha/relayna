@@ -26,6 +26,10 @@ build: ## Build the Studio frontend bundle
 test: ## Run the Studio frontend test suite
 	$(NPM) run test
 
+.PHONY: coverage
+coverage: ## Run whole-source frontend coverage gates
+	$(NPM) run coverage
+
 .PHONY: preview
 preview: ## Preview the production frontend bundle locally
 	$(NPM) run preview

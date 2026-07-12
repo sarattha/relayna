@@ -35,15 +35,15 @@ import type {
   StudioMetricsResponse,
 } from "../types";
 
-type TimeWindowMode = "auto" | "15m" | "1h" | "12h" | "24h" | "1w" | "1mo" | "manual";
-type TimeWindow = { from: string; to: string };
-type ServicePod = {
+export type TimeWindowMode = "auto" | "15m" | "1h" | "12h" | "24h" | "1w" | "1mo" | "manual";
+export type TimeWindow = { from: string; to: string };
+export type ServicePod = {
   name: string;
   namespace: string;
   phase?: string | null;
   labels?: Record<string, string>;
 };
-type ServicePodListResponse = {
+export type ServicePodListResponse = {
   service_id: string;
   count: number;
   pods: ServicePod[];
@@ -57,7 +57,7 @@ type ConfirmationRequest = {
   onConfirm: () => Promise<void>;
 };
 
-function latestTimestamp(...values: Array<string | null | undefined>) {
+export function latestTimestamp(...values: Array<string | null | undefined>) {
   const candidates = values.filter((value): value is string => Boolean(value));
   if (!candidates.length) {
     return null;
@@ -65,7 +65,7 @@ function latestTimestamp(...values: Array<string | null | undefined>) {
   return candidates.reduce((latest, value) => (new Date(value).getTime() > new Date(latest).getTime() ? value : latest));
 }
 
-function localDateTimeToIso(value: string) {
+export function localDateTimeToIso(value: string) {
   if (!value.trim()) {
     return "";
   }
@@ -76,7 +76,7 @@ function localDateTimeToIso(value: string) {
   return new Date(timestamp).toISOString();
 }
 
-function isoToLocalDateTime(value: string) {
+export function isoToLocalDateTime(value: string) {
   if (!value.trim()) {
     return "";
   }
@@ -88,7 +88,7 @@ function isoToLocalDateTime(value: string) {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
-function resolveWindow(mode: TimeWindowMode, manualFrom: string, manualTo: string) {
+export function resolveWindow(mode: TimeWindowMode, manualFrom: string, manualTo: string) {
   if (mode === "manual") {
     return {
       from: localDateTimeToIso(manualFrom),
@@ -118,9 +118,9 @@ function resolveWindow(mode: TimeWindowMode, manualFrom: string, manualTo: strin
   };
 }
 
-const emptyWindow: TimeWindow = { from: "", to: "" };
+export const emptyWindow: TimeWindow = { from: "", to: "" };
 
-function describeWindow(mode: TimeWindowMode, from: string, to: string) {
+export function describeWindow(mode: TimeWindowMode, from: string, to: string) {
   if (mode === "auto") {
     return "Auto window: unbounded to unbounded.";
   }
@@ -144,11 +144,11 @@ function describeWindow(mode: TimeWindowMode, from: string, to: string) {
   }).`;
 }
 
-function eventTimestamp(item: { timestamp?: string | null; ingested_at?: string | null }) {
+export function eventTimestamp(item: { timestamp?: string | null; ingested_at?: string | null }) {
   return item.timestamp || item.ingested_at || "";
 }
 
-function isInWindow(value: string, window: TimeWindow) {
+export function isInWindow(value: string, window: TimeWindow) {
   if (!value.trim()) {
     return true;
   }
@@ -171,14 +171,14 @@ function isInWindow(value: string, window: TimeWindow) {
   return true;
 }
 
-function metricLabel(value: string) {
+export function metricLabel(value: string) {
   return value
     .split("_")
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
-function formatMetricValue(value: number | null | undefined, unit: string) {
+export function formatMetricValue(value: number | null | undefined, unit: string) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
@@ -209,7 +209,7 @@ function formatMetricValue(value: number | null | undefined, unit: string) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
-function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string) {
+export function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string) {
   const matchingSeries = metrics?.series.filter((item) => item.metric === metric && item.points.length) || [];
   let unit = "";
   let total = 0;
@@ -226,7 +226,7 @@ function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string
   return formatMetricValue(hasValue ? total : null, unit);
 }
 
-function metricStepSeconds(mode: TimeWindowMode) {
+export function metricStepSeconds(mode: TimeWindowMode) {
   if (mode === "15m") {
     return 30;
   }
@@ -248,7 +248,7 @@ function metricStepSeconds(mode: TimeWindowMode) {
   return undefined;
 }
 
-function servicePodSource(pod: ServicePod) {
+export function servicePodSource(pod: ServicePod) {
   const labels = pod.labels || {};
   return (
     labels.app ||
@@ -259,11 +259,11 @@ function servicePodSource(pod: ServicePod) {
   );
 }
 
-async function fetchServicePods(serviceId: string) {
+export async function fetchServicePods(serviceId: string) {
   return requestJson<ServicePodListResponse>(`/studio/services/${encodeURIComponent(serviceId)}/pods`);
 }
 
-const podMetricGroups: StudioMetricGroup[] = [
+export const podMetricGroups: StudioMetricGroup[] = [
   "cpu_usage",
   "memory_usage",
   "network_receive",
@@ -274,7 +274,7 @@ const podMetricGroups: StudioMetricGroup[] = [
   "pod_phase",
 ];
 
-const serviceMetricSummaryGroups: StudioMetricGroup[] = [
+export const serviceMetricSummaryGroups: StudioMetricGroup[] = [
   "tasks_started_rate",
   "tasks_failed_rate",
   "tasks_retried_rate",
@@ -289,7 +289,7 @@ const serviceMetricSummaryGroups: StudioMetricGroup[] = [
 
 const podMetricLineColors = ["#2f6fed", "#14966b", "#b7791f", "#9f4acb", "#d64545", "#506070"];
 
-function seriesPodLabel(series: StudioMetricSeries, podLabel?: string | null) {
+export function seriesPodLabel(series: StudioMetricSeries, podLabel?: string | null) {
   const candidateLabels = [podLabel, "pod", "pod_name", "kubernetes_pod_name"].filter(
     (label): label is string => Boolean(label?.trim()),
   );
@@ -302,17 +302,17 @@ function seriesPodLabel(series: StudioMetricSeries, podLabel?: string | null) {
   return "service";
 }
 
-function seriesLabel(series: StudioMetricSeries, podLabel?: string | null) {
+export function seriesLabel(series: StudioMetricSeries, podLabel?: string | null) {
   const pod = seriesPodLabel(series, podLabel);
   const phase = series.metric === "pod_phase" && series.labels.phase ? ` · ${series.labels.phase}` : "";
   return `${pod}${phase}`;
 }
 
-function metricSeriesFor(metrics: StudioMetricsResponse | null, metric: StudioMetricGroup) {
+export function metricSeriesFor(metrics: StudioMetricsResponse | null, metric: StudioMetricGroup) {
   return (metrics?.series || []).filter((series) => series.metric === metric && series.points.length);
 }
 
-function mergeLogResponses(responses: StudioLogListResponse[], limit: number): StudioLogListResponse {
+export function mergeLogResponses(responses: StudioLogListResponse[], limit: number): StudioLogListResponse {
   const items = responses
     .flatMap((response) => response.items)
     .sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
@@ -320,7 +320,7 @@ function mergeLogResponses(responses: StudioLogListResponse[], limit: number): S
   return { count: items.length, items, next_cursor: null };
 }
 
-function mergeMetricResponses(responses: StudioMetricsResponse[]): StudioMetricsResponse {
+export function mergeMetricResponses(responses: StudioMetricsResponse[]): StudioMetricsResponse {
   const first = responses[0];
   if (!first) {
     return {
@@ -342,7 +342,7 @@ function mergeMetricResponses(responses: StudioMetricsResponse[]): StudioMetrics
   };
 }
 
-function emptyLogResponse(): StudioLogListResponse {
+export function emptyLogResponse(): StudioLogListResponse {
   return {
     count: 0,
     items: [],
@@ -350,7 +350,7 @@ function emptyLogResponse(): StudioLogListResponse {
   };
 }
 
-function emptyMetricsResponse(targetService: ServiceRecord, window: TimeWindow): StudioMetricsResponse {
+export function emptyMetricsResponse(targetService: ServiceRecord, window: TimeWindow): StudioMetricsResponse {
   return {
     service_id: targetService.service_id,
     task_id: null,
@@ -363,7 +363,7 @@ function emptyMetricsResponse(targetService: ServiceRecord, window: TimeWindow):
   };
 }
 
-function selectedPodLabel(pods: string[]) {
+export function selectedPodLabel(pods: string[]) {
   if (!pods.length) {
     return "";
   }
@@ -373,7 +373,7 @@ function selectedPodLabel(pods: string[]) {
   return `${pods.length} pods`;
 }
 
-function normalizeSelectedPods(pods: string[], availablePods: ServicePod[], previousAvailablePods = availablePods) {
+export function normalizeSelectedPods(pods: string[], availablePods: ServicePod[], previousAvailablePods = availablePods) {
   const availableNames = availablePods.map((pod) => pod.name);
   if (!availableNames.length) {
     return [];
@@ -395,15 +395,15 @@ function normalizeSelectedPods(pods: string[], availablePods: ServicePod[], prev
   return filtered.length ? filtered : availableNames;
 }
 
-function hasLoadedPodsForService(servicePods: ServicePodListResponse | null, targetService: ServiceRecord) {
+export function hasLoadedPodsForService(servicePods: ServicePodListResponse | null, targetService: ServiceRecord) {
   return servicePods?.service_id === targetService.service_id && servicePods.pods.length > 0;
 }
 
-function podMetricLineColor(index: number) {
+export function podMetricLineColor(index: number) {
   return podMetricLineColors[index % podMetricLineColors.length];
 }
 
-function formatChartStartTime(timestamp: number) {
+export function formatChartStartTime(timestamp: number) {
   return `Start ${new Date(timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -411,7 +411,7 @@ function formatChartStartTime(timestamp: number) {
   })}`;
 }
 
-function formatChartOffset(milliseconds: number) {
+export function formatChartOffset(milliseconds: number) {
   const seconds = Math.max(0, Math.round(milliseconds / 1000));
   if (seconds < 60) {
     return `+${seconds}s`;

@@ -57,8 +57,8 @@ const TASK_TERMINAL_STATUSES = new Set([
   "timed-out",
 ]);
 
-type TaskLogWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
-type TaskLogWindow = { from: string; to: string };
+export type TaskLogWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
+export type TaskLogWindow = { from: string; to: string };
 
 const traceStatePalette: Record<string, { background: string; border: string; color: string }> = {
   dead_lettered: { background: "#fff2f0", border: "#c65f55", color: "#7a2621" },
@@ -70,7 +70,7 @@ const traceStatePalette: Record<string, { background: string; border: string; co
   unknown: { background: "#f7f7f4", border: "#b8b0a2", color: "#4b453d" },
 };
 
-function isoToLocalDateTime(value: string) {
+export function isoToLocalDateTime(value: string) {
   if (!value.trim()) {
     return "";
   }
@@ -82,7 +82,7 @@ function isoToLocalDateTime(value: string) {
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
-function localDateTimeToIso(value: string) {
+export function localDateTimeToIso(value: string) {
   if (!value.trim()) {
     return "";
   }
@@ -93,7 +93,7 @@ function localDateTimeToIso(value: string) {
   return new Date(timestamp).toISOString();
 }
 
-function resolveQuickTaskLogWindow(mode: TaskLogWindowMode) {
+export function resolveQuickTaskLogWindow(mode: TaskLogWindowMode) {
   if (mode === "auto" || mode === "manual") {
     return null;
   }
@@ -105,7 +105,7 @@ function resolveQuickTaskLogWindow(mode: TaskLogWindowMode) {
   };
 }
 
-function describeTaskLogWindow(mode: TaskLogWindowMode, from: string, to: string, warning?: string | null) {
+export function describeTaskLogWindow(mode: TaskLogWindowMode, from: string, to: string, warning?: string | null) {
   if (mode === "auto") {
     return (
       warning ||
@@ -123,12 +123,12 @@ function describeTaskLogWindow(mode: TaskLogWindowMode, from: string, to: string
   }).`;
 }
 
-function describeTaskMetricWindow(mode: TaskLogWindowMode, from: string, to: string, warning?: string | null) {
+export function describeTaskMetricWindow(mode: TaskLogWindowMode, from: string, to: string, warning?: string | null) {
   const description = describeTaskLogWindow(mode, from, to, warning);
   return description.startsWith("Auto window:") ? description.replace("Auto window:", "Metrics auto window:") : description;
 }
 
-function isInTimeWindow(value: string, window: TaskLogWindow) {
+export function isInTimeWindow(value: string, window: TaskLogWindow) {
   if (!value.trim()) {
     return true;
   }
@@ -151,14 +151,14 @@ function isInTimeWindow(value: string, window: TaskLogWindow) {
   return true;
 }
 
-function metricLabel(value: string) {
+export function metricLabel(value: string) {
   return value
     .split("_")
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
-function formatMetricValue(value: number | null | undefined, unit: string) {
+export function formatMetricValue(value: number | null | undefined, unit: string) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
@@ -189,7 +189,7 @@ function formatMetricValue(value: number | null | undefined, unit: string) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
-function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string) {
+export function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string) {
   const matchingSeries = metrics?.series.filter((item) => item.metric === metric && item.points.length) || [];
   let unit = "";
   let total = 0;
@@ -206,7 +206,7 @@ function metricLatestValue(metrics: StudioMetricsResponse | null, metric: string
   return formatMetricValue(hasValue ? total : null, unit);
 }
 
-function extractTaskResourceDelta(taskDetail: StudioTaskDetail | null) {
+export function extractTaskResourceDelta(taskDetail: StudioTaskDetail | null) {
   const taskId = taskDetail?.task_id;
   const samples = (taskDetail?.execution_graph?.nodes || [])
     .filter((node) => node.kind === "resource_sample" && (!taskId || node.task_id === taskId))
@@ -230,11 +230,11 @@ function extractTaskResourceDelta(taskDetail: StudioTaskDetail | null) {
   };
 }
 
-function normalizeStatusValue(value: unknown) {
+export function normalizeStatusValue(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
-function parseTimestamp(value: string | null | undefined) {
+export function parseTimestamp(value: string | null | undefined) {
   if (!value) {
     return null;
   }
@@ -242,7 +242,7 @@ function parseTimestamp(value: string | null | undefined) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function extractRecordTimestamp(record: Record<string, unknown> | null | undefined) {
+export function extractRecordTimestamp(record: Record<string, unknown> | null | undefined) {
   if (!record) {
     return null;
   }
@@ -255,7 +255,7 @@ function extractRecordTimestamp(record: Record<string, unknown> | null | undefin
   return null;
 }
 
-function statusFromTimelineEvent(item: StudioControlPlaneEvent) {
+export function statusFromTimelineEvent(item: StudioControlPlaneEvent) {
   const payloadStatus =
     item.payload && typeof item.payload === "object" ? normalizeStatusValue((item.payload as Record<string, unknown>).status) : "";
   if (payloadStatus) {
@@ -269,7 +269,7 @@ function statusFromTimelineEvent(item: StudioControlPlaneEvent) {
   return segments[segments.length - 1] || eventType;
 }
 
-function deriveTaskLogWindow(taskDetail: StudioTaskDetail, taskTimeline: StudioEventListResponse | null, fallbackNow: string) {
+export function deriveTaskLogWindow(taskDetail: StudioTaskDetail, taskTimeline: StudioEventListResponse | null, fallbackNow: string) {
   const taskId = taskDetail.task_id;
   const timelineItems = (taskTimeline?.items || [])
     .filter((item) => item.task_id === taskId)
@@ -322,11 +322,11 @@ function deriveTaskLogWindow(taskDetail: StudioTaskDetail, taskTimeline: StudioE
   };
 }
 
-function traceNodePalette(state: string | null | undefined) {
+export function traceNodePalette(state: string | null | undefined) {
   return traceStatePalette[state || "unknown"] || traceStatePalette.unknown;
 }
 
-function timestampMs(value: string | null | undefined) {
+export function timestampMs(value: string | null | undefined) {
   if (!value) {
     return null;
   }
@@ -334,7 +334,7 @@ function timestampMs(value: string | null | undefined) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function traceNodeOffset(node: StudioTracePathNode, path: StudioTracePathResponse) {
+export function traceNodeOffset(node: StudioTracePathNode, path: StudioTracePathResponse) {
   const start = timestampMs(path.summary.started_at);
   const current = timestampMs(node.started_at);
   const duration = path.summary.duration_ms || 0;
@@ -344,7 +344,7 @@ function traceNodeOffset(node: StudioTracePathNode, path: StudioTracePathRespons
   return Math.max(0, Math.min(92, ((current - start) / duration) * 100));
 }
 
-function traceNodeWidth(node: StudioTracePathNode, path: StudioTracePathResponse) {
+export function traceNodeWidth(node: StudioTracePathNode, path: StudioTracePathResponse) {
   const duration = path.summary.duration_ms || 0;
   const nodeDuration = node.duration_ms || 0;
   if (duration <= 0 || nodeDuration <= 0) {
@@ -353,14 +353,14 @@ function traceNodeWidth(node: StudioTracePathNode, path: StudioTracePathResponse
   return Math.max(8, Math.min(100, (nodeDuration / duration) * 100));
 }
 
-function traceNodeTimingLabel(node: StudioTracePathNode) {
+export function traceNodeTimingLabel(node: StudioTracePathNode) {
   if (node.duration_ms !== null && node.duration_ms !== undefined) {
     return formatDuration(node.duration_ms);
   }
   return formatTimestamp(node.started_at || null);
 }
 
-function traceNodeKindRank(kind: StudioTracePathNode["kind"]) {
+export function traceNodeKindRank(kind: StudioTracePathNode["kind"]) {
   if (kind === "task") {
     return 0;
   }
@@ -382,7 +382,7 @@ function traceNodeKindRank(kind: StudioTracePathNode["kind"]) {
   return 6;
 }
 
-function orderTracePathNodes(nodes: StudioTracePathNode[], edges: StudioTracePathResponse["edges"]) {
+export function orderTracePathNodes(nodes: StudioTracePathNode[], edges: StudioTracePathResponse["edges"]) {
   const indexById = new Map(nodes.map((node, index) => [node.id, index]));
   const outgoing = new Map<string, string[]>();
   const incomingCount = new Map(nodes.map((node) => [node.id, 0]));
@@ -430,7 +430,7 @@ function orderTracePathNodes(nodes: StudioTracePathNode[], edges: StudioTracePat
   return ordered;
 }
 
-function preferredTracePathNodeId(path: StudioTracePathResponse) {
+export function preferredTracePathNodeId(path: StudioTracePathResponse) {
   const orderedNodes = orderTracePathNodes(path.nodes, path.edges);
   return orderedNodes.find((node) => node.span_id || node.trace_id)?.id || orderedNodes[0]?.id || null;
 }

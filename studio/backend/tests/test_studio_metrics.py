@@ -16,6 +16,8 @@ from relayna_studio import (
     ServiceRegistryService,
     ServiceStatus,
     StudioMetricGroup,
+    StudioMetricsConfigError,
+    StudioMetricsProviderError,
     StudioMetricsQuery,
     UpdateServiceRequest,
     create_studio_app,
@@ -228,6 +230,94 @@ def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> No
     assert observed_queries[8].startswith("sum by (phase) (")
     assert observed_queries[9].startswith("sum(kube_pod_container_status_ready{")
     assert 'condition="true"' in observed_queries[9]
+
+
+def test_prometheus_provider_covers_runtime_queries_and_invalid_payloads() -> None:
+    provider = PrometheusMetricsProvider(
+        http_client=TrackingAsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)), timeout=5.0),
+        query_path="range",
+        instant_query_path="instant",
+    )
+    config = make_metrics_config()
+    record = make_record(metrics_config=config)
+    query = StudioMetricsQuery(pod="worker-1", split_by_pod=True)
+    runtime_groups = list(StudioMetricGroup)[12:]
+    for group in runtime_groups:
+        assert provider._build_query(service=record, config=config, query=query, group=group)
+    with pytest.raises(StudioMetricsConfigError):
+        provider._build_query(service=record, config=config, query=query, group="unsupported")  # type: ignore[arg-type]
+
+    invalid_matrix_payloads = [
+        {},
+        {"status": "success", "data": []},
+        {"status": "success", "data": {"resultType": "vector", "result": []}},
+        {"status": "success", "data": {"resultType": "matrix", "result": {}}},
+    ]
+    for payload in invalid_matrix_payloads:
+        with pytest.raises(StudioMetricsProviderError):
+            provider._normalize_response(group=StudioMetricGroup.CPU_USAGE, payload=payload)
+    with pytest.raises(StudioMetricsProviderError):
+        provider._normalize_series(group=StudioMetricGroup.CPU_USAGE, item={})
+    with pytest.raises(StudioMetricsProviderError):
+        provider._normalize_series(
+            group=StudioMetricGroup.CPU_USAGE,
+            item={"metric": {}, "values": [[1]]},
+        )
+    with pytest.raises(StudioMetricsProviderError):
+        provider._normalize_series(
+            group=StudioMetricGroup.CPU_USAGE,
+            item={"metric": {}, "values": [["bad", "bad"]]},
+        )
+
+    invalid_pod_payloads = [
+        {},
+        {"status": "success", "data": []},
+        {"status": "success", "data": {"resultType": "matrix", "result": []}},
+        {"status": "success", "data": {"resultType": "vector", "result": {}}},
+    ]
+    for payload in invalid_pod_payloads:
+        with pytest.raises(StudioMetricsProviderError):
+            provider._normalize_pod_response(service=record, config=config, payload=payload)
+    pods = provider._normalize_pod_response(
+        service=record,
+        config=config,
+        payload={
+            "status": "success",
+            "data": {
+                "resultType": "vector",
+                "result": ["bad", {"metric": "bad"}, {"metric": {"namespace": "prod"}}],
+            },
+        },
+    )
+    assert pods.count == 0
+
+
+@pytest.mark.parametrize("operation", ["metrics", "pods"])
+@pytest.mark.parametrize("response_kind", ["http_error", "status", "json"])
+def test_prometheus_provider_translates_transport_failures(operation: str, response_kind: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if response_kind == "http_error":
+            raise httpx.ConnectError("offline", request=request)
+        if response_kind == "status":
+            return httpx.Response(503)
+        return httpx.Response(200, text="not-json")
+
+    async def scenario() -> None:
+        config = make_metrics_config()
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        with pytest.raises(StudioMetricsProviderError):
+            if operation == "metrics":
+                await provider.query_metrics(
+                    service=make_record(metrics_config=config),
+                    config=config,
+                    query=StudioMetricsQuery(groups=[StudioMetricGroup.CPU_USAGE]),
+                )
+            else:
+                await provider.query_service_pods(service=make_record(metrics_config=config), config=config)
+
+    asyncio.run(scenario())
 
 
 def test_prometheus_provider_translates_service_selectors_to_kube_pod_labels() -> None:

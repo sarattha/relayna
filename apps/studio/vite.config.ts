@@ -14,5 +14,16 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.test.{ts,tsx}", "src/test/**"],
+      thresholds: {
+        statements: 98,
+        functions: 98,
+        lines: 98,
+        branches: 89,
+      },
+    },
   },
 });
