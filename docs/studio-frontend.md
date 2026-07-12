@@ -20,6 +20,276 @@ Its contract is:
 That boundary keeps service discovery, normalization, and error handling in the
 backend instead of in the browser.
 
+## Studio Operator Tour
+
+The screenshots in this guide come from the production Nginx frontend and
+Studio backend running with Redis, RabbitMQ, and mock Relayna services. Values
+such as `mock`, `orders-api`, and `host.docker.internal` are examples; use the
+addresses and environment names that are reachable from your Studio backend.
+
+![Studio operational overview](assets/images/studio/overview.jpg)
+
+The header is available on every page:
+
+| Control | What it does |
+| --- | --- |
+| Relayna mark and name | Returns to the operational overview. |
+| **Overview** | Opens incident-oriented service health and failed-task summaries. |
+| **Services** | Opens registry status, service search, registration, and editing. |
+| **Task Search** | Opens indexed cross-service task search. |
+| **Failed Tasks** | Opens terminal failures; the badge is the current alert count. |
+| **Environment** | Scopes service and task views. `All environments` removes the scope. |
+| **Find task** | Accepts a task ID and sends it to Task Search in the selected environment. |
+| Magnifying-glass button | Runs the global task-ID search. |
+
+## Register A Service Step By Step
+
+Before you start, confirm these facts:
+
+1. The service exposes the Relayna capability and operational routes expected
+   by the SDK version in use.
+2. The **Studio backend**, not only your browser, can resolve and connect to the
+   service base URL.
+3. `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` or
+   `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` permits the target.
+4. Any Loki, Prometheus, or Tempo URL is also reachable and allowed from the
+   backend network.
+
+### Step 1: Open the registry
+
+Choose **Services**. Review **Registry Overview** and the registered-services
+table before creating a duplicate. Use **Service Search** when the registry is
+large.
+
+![Studio services registry](assets/images/studio/services-registry.jpg)
+
+Registry and runtime health are deliberately separate:
+
+- **Registry** describes the Studio record: `healthy`, `registered`,
+  `unavailable`, or `disabled`.
+- **Runtime Health** summarizes reachability, capabilities, observations, and
+  worker heartbeat freshness: `healthy`, `degraded`, `stale`, `unreachable`,
+  `disabled`, or `unknown`.
+
+### Step 2: Start a new draft
+
+Choose **New Service**. Studio opens a registration form without changing the
+registry. **Close** abandons the visible draft; **Register Service** is the only
+action that creates the record.
+
+![Basic service registration fields](assets/images/studio/service-registration-basic.jpg)
+
+Enter the core fields:
+
+| Field | Required | Guidance |
+| --- | --- | --- |
+| **Service id** | Yes | Stable, URL-safe identity such as `payments-api`. It cannot be changed after registration. |
+| **Name** | Yes | Operator-facing label such as `Payments API`. |
+| **Base URL** | Yes | `http` or `https` origin reachable from Studio backend. Do not include credentials, query strings, or fragments. |
+| **Environment** | Yes | Stable scope such as `dev`, `staging`, or `prod`. |
+| **Tags** | No | Comma-separated search labels such as `core, checkout`. |
+| **Auth mode** | Yes | Descriptive access mode. The common internal deployment value is `internal_network`. |
+
+For Docker Desktop, a service running on the host commonly uses a base URL such
+as `http://host.docker.internal:9100`. In Kubernetes, prefer a namespace-aware
+service DNS name such as `http://payments-api.payments.svc.cluster.local:8000`.
+
+### Step 3: Configure logs, metrics, and traces
+
+The three configuration groups are optional and default to **Disabled**. Open a
+group and select its provider only when Studio should query that system for the
+service. Provider credentials remain a deployment/backend concern and should
+not be placed in these URL fields.
+
+![Loki, Prometheus, and Tempo registration configuration](assets/images/studio/service-registration-observability.jpg)
+
+#### Loki log configuration
+
+| Field | Purpose |
+| --- | --- |
+| **Log provider** | `Disabled` or `Loki`. |
+| **Log base URL** | Backend-reachable Loki origin. |
+| **Loki tenant id** | Optional `X-Scope-OrgID` value. |
+| **Service label key/value** | Primary stream selector, for example `service=payments-api`. |
+| **App label key** | Label used to identify the application/workload. |
+| **Additional selector labels** | Comma-separated `key=value` restrictions such as `namespace=prod`. |
+| **Log pod label** | Loki label containing the pod or Alloy instance identity. |
+| **Log pod match** | `Exact` for a literal pod value or `Regex` for rendered templates. |
+| **Log pod value template** | Usually `{pod}`; an Alloy example is `{namespace}/{pod}:.*`. |
+| **Task id / correlation id / level label** | Structured labels used when present. |
+| **Task match mode** | `label`, `contains`, `regex`, or `structured_metadata`. |
+| **Task match template** | Template rendered with `{task_id}` for contains/regex matching. |
+
+#### Prometheus metrics configuration
+
+| Field | Purpose |
+| --- | --- |
+| **Metrics provider** | `Disabled` or `Prometheus`. |
+| **Prometheus base URL** | Backend-reachable Prometheus origin. |
+| **Namespace** | Kubernetes namespace used in service and task metric queries. |
+| **Prometheus selector key/value** | Main workload selector. |
+| **Additional selector labels** | Extra comma-separated `key=value` restrictions. |
+| **Relayna runtime service label** | Service value used by aggregate Relayna runtime charts. |
+| **Namespace / pod / container label** | Prometheus label names used for Kubernetes series. |
+| **Step seconds** | Query resolution. Lower values increase returned samples and backend load. |
+| **Task padding seconds** | Time added before and after a task window for task charts. |
+
+#### Tempo trace configuration
+
+| Field | Purpose |
+| --- | --- |
+| **Trace provider** | `Disabled` or `Tempo`. |
+| **Tempo base URL** | Backend-reachable Tempo origin. |
+| **Public Tempo URL** | Optional operator-browser URL used for outbound links. |
+| **Tenant ID** | Optional Tempo tenant header value. |
+| **Query path** | Trace lookup template, normally `/api/traces/{trace_id}`. |
+
+### Step 4: Register and verify
+
+Choose **Register Service**. After the record appears:
+
+1. Confirm its environment, status, runtime health, and base URL in the table.
+2. Choose **View** to open the service detail page.
+3. Choose **Run Health Check**, then **Refresh**, and inspect any reachability or
+   capability errors.
+4. Open **Topology**, **DLQ Explorer**, activity, logs, metrics, and pods as
+   applicable to the service.
+5. If Gateway Admin consumes Studio records, use **Open Export** to inspect the
+   generated `/studio/gateway/services` catalog.
+
+Do not mark a service `healthy` based only on the registry chip. Runtime health
+must also show the expected reachability and freshness for the deployment.
+
+## Complete UI Control Reference
+
+This section explains the visible buttons, filters, status actions, and page
+configuration controls. Disabled buttons indicate that the capability or
+required selection is unavailable.
+
+### Overview
+
+| Control | Effect |
+| --- | --- |
+| **Investigate failed tasks** | Opens the global failed-task registry. |
+| **Manage registry** | Opens Services. |
+| **Open service** | Opens the selected incident's service detail. |
+
+### Services and registration
+
+| Control | Effect |
+| --- | --- |
+| **Reload List** | Reloads registry records and their latest summarized health. |
+| **Open Export** | Opens the Gateway import JSON catalog. It does not import or mutate Gateway. |
+| **Keyword / Environment / Registry / Runtime Health / Tag** | Narrow service search by the corresponding indexed fields. |
+| **Search Services** | Runs the service search. |
+| **Clear** | Restores all service-search defaults. |
+| **New Service** | Opens a blank registration draft. |
+| **View** | Opens service detail. |
+| **Edit** | Opens the service editor populated from the selected record. |
+| **New Draft** | Leaves edit mode and starts a blank record. |
+| **Close** | Closes the editor without submitting. |
+| **Register Service** | Creates the record. |
+| **Save Service** | Updates mutable fields on an existing record. |
+| **Open Detail Page** | Opens detail for the record currently being edited. |
+| **Delete Service** | Opens typed confirmation and permanently removes the registry record. It does not delete the deployed service. |
+
+### Service detail
+
+![Service detail controls and operational panels](assets/images/studio/service-detail.jpg)
+
+| Control | Effect |
+| --- | --- |
+| **Back to Services** | Returns to registry search/list. |
+| **Topology** | Opens the service workflow topology. |
+| **DLQ Explorer** | Opens indexed or broker-backed DLQ inspection. |
+| **Task Search** | Opens Task Search pre-scoped to the service. |
+| **Refresh** | Refreshes the registered service's capabilities/metadata. |
+| **Run Health Check** | Requests an immediate Studio health evaluation. |
+| **Enable** | Sets registry status to `registered`. |
+| **Mark Unavailable** | Marks the service unavailable after confirmation. |
+| **Disable** | Disables Studio operations for the service after confirmation. |
+| **Delete** | Permanently removes the registry record after typed confirmation. |
+| **Reload Metrics / Reload Charts** | Requeries aggregate or selected-pod Prometheus data. |
+| **Reload Pods** | Refreshes pods matched by metrics configuration. |
+| **Select All Pods / Deselect All Pods** | Applies an explicit pod selection to logs and pod metric charts. |
+| Pod chip | Toggles one pod in the current selection. |
+| **Reload Activity** | Reloads retained events; live events also arrive over SSE. |
+| **Reload Logs** | Reruns the current Loki service-log query. |
+| Task ID in activity | Opens task detail. |
+
+### Task Search
+
+![Task Search filters and results](assets/images/studio/task-search.jpg)
+
+The filters cover task ID, service ID, environment, status, workflow ID,
+correlation ID, failure state, sort order, and page size. **Search** writes the
+filters to the URL and runs the query. **Clear** resets them. **Open Task
+Detail** opens the canonical service/task route. **Load Next Page** follows the
+returned cursor without discarding current filters. **Back to Service** appears
+when search was opened from a service.
+
+### Task detail
+
+| Control | Effect |
+| --- | --- |
+| **Back to Service** | Returns to the task's registered service. |
+| **Reload** | Reloads canonical task status/history data. |
+| **Open Graph / Hide Graph** | Lazily loads or hides the execution graph. |
+| **Reload Timeline** | Reloads retained task events. |
+| **Reload Trace** | Rebuilds the trace-path view from Tempo and correlated evidence. |
+| **Filter Logs** | Applies the selected trace/span identifier to task logs. |
+| **View Span** | Opens details for a selected trace span. |
+| **Reload Logs** | Reruns the task-window Loki query. |
+| Metrics reload action | Reruns the task Kubernetes metrics query. |
+| **Close** | Closes the selected span detail. |
+
+### Failed Tasks
+
+![Failed-task registry and incident actions](assets/images/studio/failed-tasks.jpg)
+
+| Control | Effect |
+| --- | --- |
+| Email notification fields | Configure enabled state, recipient list, retry attempts, base delay, and maximum delay. |
+| **Save Wait** | Saves the notification retry/wait configuration. |
+| Failure filters | Narrow by service, environment, investigation status, or cursor. |
+| **Apply Filters** | Reloads the terminal-failure registry with current filters. |
+| **View** | Opens the failure payload and operator actions. |
+| **Load Next Page** | Follows the failure cursor. |
+| **Close** | Closes failure detail. |
+| **Copy Payload / Copy Error** | Copies the complete payload or error-focused subset. |
+| **Download JSON** | Downloads a diagnostic JSON file. |
+| **Mark Investigated / Mark Unreviewed** | Changes the operator-review state. |
+| **Retry** | Requests replay and shows the returned retry task information. |
+| **Delete** | Permanently removes the failed-task/DLQ record after confirmation. |
+
+### Workflow Topology
+
+![Workflow topology](assets/images/studio/topology.jpg)
+
+**Back to Service** returns to service detail. **Reload** fetches the topology
+again. Nodes, routes, stages, fan-in policy, and entry routes are read-only in
+Studio; change the service's SDK topology declaration to change this view.
+
+### DLQ Explorer
+
+![DLQ explorer](assets/images/studio/dlq.jpg)
+
+| Control | Effect |
+| --- | --- |
+| **Back to Service** | Returns to service detail. |
+| **Indexed Mode** | Reads Relayna's indexed DLQ view with cursor pagination. |
+| **Broker Mode** | Reads broker-backed DLQ messages when the service advertises support. |
+| Queue / stage / task / limit filters | Restrict the current mode's query. |
+| **Apply Filters** | Reloads from the beginning with current filters. |
+| **Load Next Page** | Follows the indexed cursor. |
+
+### Confirmation and safety behavior
+
+Status changes, deletes, retries, and other destructive operations use explicit
+confirmation. When a dialog presents a challenge phrase, type it exactly. A
+confirmation changes only the resource named in the dialog; closing or
+cancelling the dialog has no effect.
+
 ## App Boundaries
 
 The frontend lives in:

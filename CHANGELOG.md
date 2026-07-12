@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.27 - 2026-07-12
+
+### Added
+
+- Added an incident-first Studio overview, route-aware navigation, shareable
+  task-search filters, improved failed-task investigation context, and clearer
+  service lifecycle controls.
+- Added lazy-loaded Studio topology and execution-graph surfaces so graph
+  dependencies are downloaded only when an operator opens them.
+- Added whole-source Studio coverage commands and regression gates, with
+  historical frontend and backend behavior covered by focused tests.
+- Added screenshot-led Studio operator documentation, including a complete
+  service-registration walkthrough and control/configuration reference.
+
+### Changed
+
+- Batched Studio backend registry, health, event, and search hydration to reduce
+  Redis round trips while preserving routes, response shapes, persisted keys,
+  and result ordering.
+- Reworked the Studio shell into a rounded floating header and replaced the
+  legacy letter tile with a minimal Relayna route mark.
+- Reduced the initial Studio JavaScript bundle from 504.86 kB to 219.53 kB
+  minified and isolated graph tooling in an on-demand chunk.
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.27`, and updated the Studio backend dependency floor to
+  `relayna>=1.4.27`.
+- Established `v1.4.27` as the strict SDK, Studio backend, Studio frontend, and
+  contributor-policy production freeze perimeter.
+
+### Verification
+
+- Passed 416 SDK tests, 241 Studio backend tests, and 91 Studio frontend tests.
+- Measured 98.01% Studio backend statements/lines and more than 98% Studio
+  frontend statements, functions, and lines without excluding production
+  source files or branches.
+- Verified production frontend/backend Docker images with Redis, RabbitMQ, live
+  mock services, frontend proxying, task history, SSE, and a Chrome walkthrough.
+
 ## 1.4.26 - 2026-06-29
 
 ### Added
