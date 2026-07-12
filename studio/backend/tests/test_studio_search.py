@@ -351,7 +351,7 @@ def test_search_service_indexes_events_and_filters_tasks() -> None:
         assert "name" in service_results.items[0].matched_fields
         assert redis.get_calls == 0
         assert len(redis.mget_calls) == 2
-        assert sorted(len(keys) for keys in redis.mget_calls) == [1, 2]
+        assert sorted(len(keys) for keys in redis.mget_calls) == [1, 1]
 
         class StoreProxy:
             def __init__(self, target: RedisStudioSearchStore) -> None:

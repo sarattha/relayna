@@ -25,7 +25,10 @@ export function OverviewPage() {
     incidentStatuses.has(service.health?.overall_status || "unknown"),
   );
   const healthy = scopedServices.filter((service) => service.health?.overall_status === "healthy").length;
-  const unknown = scopedServices.filter((service) => !service.health?.overall_status).length;
+  const unknown = scopedServices.filter((service) => {
+    const status = service.health?.overall_status;
+    return !status || status === "unknown";
+  }).length;
 
   return (
     <div className="studio-stack-lg">

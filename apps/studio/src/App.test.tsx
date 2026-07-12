@@ -936,6 +936,13 @@ describe("App", () => {
       ...services[0],
       health: { ...(services[0].health || {}), overall_status: "degraded" },
     };
+    services.push({
+      ...buildMockService(),
+      service_id: "unrefreshed-api",
+      name: "Unrefreshed API",
+      base_url: "https://unrefreshed.example.test",
+      health: { ...(buildMockService().health || {}), overall_status: "unknown" },
+    });
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "What needs attention now" })).toBeInTheDocument();
@@ -943,6 +950,7 @@ describe("App", () => {
     expect(window.location.pathname).toBe("/");
     expect(screen.getByRole("link", { name: "Manage registry" })).toHaveAttribute("href", "/services");
     expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+    expect(within(screen.getByText("Unknown").closest("article")!).getByText("1")).toBeInTheDocument();
     const brandLink = screen.getByRole("link", { name: "Relayna Studio overview" });
     expect(brandLink.querySelector("img.studio-brand__mark")).toHaveAttribute("src", expect.stringContaining("relayna-mark"));
     fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "prod" } });
@@ -2997,6 +3005,27 @@ describe("App", () => {
     unmount();
 
     expect(MockEventSource.instances[0]?.closed).toBe(true);
+  });
+
+  it("does not present a completed task as a failure", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/studio/tasks/payments-api/task-123?join=all") {
+        const detail = taskDetailResponse({ dlqItems: [] });
+        detail.latest_status.event.status = "completed";
+        detail.execution_graph.summary.status = "completed";
+        return jsonResponse(detail);
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Task Detail")).toBeInTheDocument();
+    expect(screen.getByText("Current signal")).toBeInTheDocument();
+    expect(screen.getByText("Task has no terminal failure signal.")).toBeInTheDocument();
+    expect(screen.queryByText("Failure summary")).not.toBeInTheDocument();
   });
 
   it("shows stable fallback messages for non-Error task telemetry failures and malformed SSE", async () => {

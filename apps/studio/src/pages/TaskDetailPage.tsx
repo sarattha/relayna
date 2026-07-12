@@ -56,6 +56,16 @@ const TASK_TERMINAL_STATUSES = new Set([
   "timed_out",
   "timed-out",
 ]);
+const TASK_FAILURE_STATUSES = new Set([
+  "dead_lettered",
+  "dead-lettered",
+  "error",
+  "errored",
+  "failed",
+  "timeout",
+  "timed_out",
+  "timed-out",
+]);
 
 export type TaskLogWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
 export type TaskLogWindow = { from: string; to: string };
@@ -943,7 +953,7 @@ export function TaskDetailPage() {
       statusEvent.detail ||
       "No failure reason was reported.",
   );
-  const failedTask = TASK_TERMINAL_STATUSES.has(latestStatusValue.toLowerCase()) || dlqCount > 0;
+  const failedTask = TASK_FAILURE_STATUSES.has(latestStatusValue.toLowerCase()) || dlqCount > 0;
 
   return (
     <>

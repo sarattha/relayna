@@ -556,13 +556,15 @@ class StudioSearchService(StudioSearchIndexer):
         else:
             candidate_ids = await self.store.list_service_document_ids()
 
-        documents_by_id = await self._load_service_documents(sorted(candidate_ids))
         matched_fields_by_service: dict[str, list[str]] = {}
         query_terms = _tokenize(query.query)
         if query_terms:
             for term in query_terms:
                 token_matches = await self.store.list_service_document_ids_for_token(term)
                 candidate_ids &= token_matches
+
+        documents_by_id = await self._load_service_documents(sorted(candidate_ids))
+        if query_terms:
             for service_id in list(candidate_ids):
                 document = documents_by_id.get(service_id)
                 if document is None:
