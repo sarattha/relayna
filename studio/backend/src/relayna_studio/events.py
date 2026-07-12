@@ -70,6 +70,12 @@ def _timestamp_key(value: str | None) -> tuple[int, datetime]:
     return (1, parsed)
 
 
+def _decode_optional(value: str | bytes | None) -> str | None:
+    if value is None:
+        return None
+    return value.decode() if isinstance(value, bytes) else value
+
+
 def _parse_required_timestamp(value: str | None, *, field_name: str) -> datetime | None:
     if value is None:
         return None
@@ -215,23 +221,21 @@ class RedisStudioEventStore:
     async def insert_event(self, envelope: StudioEventEnvelope) -> bool:
         event = envelope.event
         dedupe_key = _event_dedupe_key(envelope.service_id, event)
-        latest_timestamp = await cast(
-            Awaitable[str | bytes | None],
-            self.redis.get(self.task_latest_timestamp_key(envelope.service_id, event.task_id)),
+        latest_timestamp, latest_service_status_timestamp, latest_service_observation_timestamp = await cast(
+            Awaitable[list[str | bytes | None]],
+            self.redis.mget(
+                [
+                    self.task_latest_timestamp_key(envelope.service_id, event.task_id),
+                    self.service_latest_status_timestamp_key(envelope.service_id),
+                    self.service_latest_observation_timestamp_key(envelope.service_id),
+                ]
+            ),
         )
         latest_timestamp_value = latest_timestamp.decode() if isinstance(latest_timestamp, bytes) else latest_timestamp
-        latest_service_status_timestamp = await cast(
-            Awaitable[str | bytes | None],
-            self.redis.get(self.service_latest_status_timestamp_key(envelope.service_id)),
-        )
         latest_service_status_timestamp_value = (
             latest_service_status_timestamp.decode()
             if isinstance(latest_service_status_timestamp, bytes)
             else latest_service_status_timestamp
-        )
-        latest_service_observation_timestamp = await cast(
-            Awaitable[str | bytes | None],
-            self.redis.get(self.service_latest_observation_timestamp_key(envelope.service_id)),
         )
         latest_service_observation_timestamp_value = (
             latest_service_observation_timestamp.decode()
@@ -352,33 +356,45 @@ class RedisStudioEventStore:
         await self.redis.set(self.pull_cursor_key(service_id), cursor)
 
     async def get_service_activity_snapshot(self, service_id: str) -> StudioServiceActivitySnapshot:
-        latest_status = await cast(
-            Awaitable[str | bytes | None],
-            self.redis.get(self.service_latest_status_timestamp_key(service_id)),
-        )
-        latest_observation = await cast(
-            Awaitable[str | bytes | None],
-            self.redis.get(self.service_latest_observation_timestamp_key(service_id)),
-        )
-        latest_ingested = await cast(
-            Awaitable[str | bytes | None],
-            self.redis.get(self.service_latest_ingested_timestamp_key(service_id)),
-        )
-        return StudioServiceActivitySnapshot(
-            service_id=service_id,
-            latest_status_event_at=latest_status.decode() if isinstance(latest_status, bytes) else latest_status,
-            latest_observation_event_at=(
-                latest_observation.decode() if isinstance(latest_observation, bytes) else latest_observation
-            ),
-            latest_ingested_at=latest_ingested.decode() if isinstance(latest_ingested, bytes) else latest_ingested,
-        )
+        snapshots = await self._get_service_activity_snapshots([service_id])
+        return snapshots[0]
+
+    async def _get_service_activity_snapshots(self, service_ids: list[str]) -> list[StudioServiceActivitySnapshot]:
+        if not service_ids:
+            return []
+        keys = [
+            key
+            for service_id in service_ids
+            for key in (
+                self.service_latest_status_timestamp_key(service_id),
+                self.service_latest_observation_timestamp_key(service_id),
+                self.service_latest_ingested_timestamp_key(service_id),
+            )
+        ]
+        values = await cast(Awaitable[list[str | bytes | None]], self.redis.mget(keys))
+        snapshots: list[StudioServiceActivitySnapshot] = []
+        for index, service_id in enumerate(service_ids):
+            latest_status, latest_observation, latest_ingested = values[index * 3 : index * 3 + 3]
+            snapshots.append(
+                StudioServiceActivitySnapshot(
+                    service_id=service_id,
+                    latest_status_event_at=_decode_optional(latest_status),
+                    latest_observation_event_at=_decode_optional(latest_observation),
+                    latest_ingested_at=_decode_optional(latest_ingested),
+                )
+            )
+        return snapshots
 
     async def _load_history(self, key: str) -> list[StudioControlPlaneEvent]:
         ids = await cast(Awaitable[list[str | bytes]], self.redis.lrange(key, 0, max(0, self.history_maxlen - 1)))
+        if not ids:
+            return []
+        event_keys = [
+            self.event_key(item_id.decode() if isinstance(item_id, bytes) else str(item_id)) for item_id in ids
+        ]
+        payloads = await cast(Awaitable[list[str | bytes | None]], self.redis.mget(event_keys))
         items: list[StudioControlPlaneEvent] = []
-        for item_id in ids:
-            normalized_id = item_id.decode() if isinstance(item_id, bytes) else str(item_id)
-            payload = await cast(Awaitable[str | bytes | None], self.redis.get(self.event_key(normalized_id)))
+        for payload in payloads:
             if payload is None:
                 continue
             try:

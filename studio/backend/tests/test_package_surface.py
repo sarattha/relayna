@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from relayna_studio import (
+    build_dlq_view,
     build_execution_view,
     build_run_view,
+    build_stage_view,
     build_topology_view,
     create_service_registry_router,
     create_studio_app,
 )
 
+from relayna.dlq.models import DLQMessageSummary, DLQQueueSummary, DLQRecordState
 from relayna.observability import ExecutionGraph
+from relayna.observability.stage_metrics import StageHealthSnapshot
 from relayna.topology import build_linear_workflow_topology, topology_kind
 from relayna.workflow import WorkflowRunState
 
@@ -63,3 +69,31 @@ def test_build_execution_view_includes_mermaid_and_graph_payload() -> None:
     assert payload["task_id"] == "task-123"
     assert payload["graph"] == graph.model_dump(mode="json")
     assert "flowchart LR" in payload["mermaid"]
+
+
+def test_build_dlq_and_stage_views_serialize_presenter_models() -> None:
+    timestamp = datetime(2026, 7, 12, tzinfo=UTC)
+    queue = DLQQueueSummary(queue_name="payments.dlq", indexed_count=1, exists=True, message_count=2)
+    message = DLQMessageSummary(
+        dlq_id="dlq-1",
+        queue_name="payments.dlq",
+        source_queue_name="payments",
+        retry_queue_name="payments.retry",
+        task_id="task-1",
+        reason="timeout",
+        retry_attempt=1,
+        max_retries=3,
+        body_encoding="json",
+        dead_lettered_at=timestamp,
+        state=DLQRecordState.DEAD_LETTERED,
+        replay_count=0,
+    )
+
+    dlq_payload = build_dlq_view([queue], [message])
+    healthy = build_stage_view(StageHealthSnapshot(stage="charge", received=2, published=2, failed=0))
+    unhealthy = build_stage_view(StageHealthSnapshot(stage="charge", received=2, published=1, failed=1))
+
+    assert dlq_payload["queues"][0]["queue_name"] == "payments.dlq"  # type: ignore[index]
+    assert dlq_payload["messages"][0]["dead_lettered_at"] == "2026-07-12T00:00:00Z"  # type: ignore[index]
+    assert healthy == {"stage": "charge", "received": 2, "published": 2, "failed": 0, "healthy": True}
+    assert unhealthy["healthy"] is False

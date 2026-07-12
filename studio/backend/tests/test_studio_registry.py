@@ -33,6 +33,8 @@ class FakeRedis:
         self.values: dict[str, str] = {}
         self.sets: dict[str, set[str]] = {}
         self.close_calls = 0
+        self.get_calls = 0
+        self.mget_calls: list[list[str]] = []
         FakeRedis.instances.append(self)
 
     @classmethod
@@ -40,7 +42,12 @@ class FakeRedis:
         return cls(url)
 
     async def get(self, key: str) -> str | None:
+        self.get_calls += 1
         return self.values.get(key)
+
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        self.mget_calls.append(list(keys))
+        return [self.values.get(key) for key in keys]
 
     async def set(self, key: str, value: str, *, nx: bool = False) -> bool:
         if nx and key in self.values:
@@ -686,3 +693,20 @@ def test_create_studio_app_mounts_registry_routes_and_closes_redis(monkeypatch) 
 
     assert FakeRedis.instances[0].url == "redis://studio-test/0"
     assert FakeRedis.instances[0].close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_list_hydrates_records_with_one_batch_read() -> None:
+    redis = FakeRedis()
+    store = RedisServiceRegistryStore(redis)
+    await store.create(make_record(service_id="payments-api"))
+    await store.create(make_record(service_id="billing-api", base_url="https://billing.test"))
+
+    redis.get_calls = 0
+    redis.mget_calls.clear()
+    records = await store.list_records()
+
+    assert [record.service_id for record in records] == ["billing-api", "payments-api"]
+    assert redis.get_calls == 0
+    assert len(redis.mget_calls) == 1
+    assert len(redis.mget_calls[0]) == 2

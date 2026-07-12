@@ -39,6 +39,10 @@ fix: ## Lint + safe auto-fixes for the Studio backend package
 test: ## Run the Studio backend test suite
 	$(PYTEST) tests
 
+.PHONY: coverage
+coverage: ## Run whole-package backend coverage gate
+	$(UV) run --extra dev pytest --cov=relayna_studio --cov-report=term-missing tests
+
 .PHONY: typecheck
 typecheck: ## Static type analysis for the Studio backend package
 	$(TY) check src/relayna_studio

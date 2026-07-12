@@ -40,7 +40,7 @@ const initialQuery: FailedTaskQueryState = {
   cursor: null,
 };
 
-function formatBatchWait(seconds: number) {
+export function formatBatchWait(seconds: number) {
   if (seconds <= 0) {
     return "0 sec";
   }

@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { searchTasks } from "../api";
@@ -29,13 +29,27 @@ function buildInitialQuery(searchParams: URLSearchParams): StudioTaskSearchQuery
 }
 
 export function TaskSearchPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState<StudioTaskSearchQuery>(() => buildInitialQuery(searchParams));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StudioTaskSearchResponse | null>(null);
 
   const backServiceId = useMemo(() => searchParams.get("service_id") || query.service_id || "", [query.service_id, searchParams]);
+
+  useEffect(() => {
+    setQuery(buildInitialQuery(searchParams));
+  }, [searchParams]);
+
+  function writeQueryToUrl(nextQuery: StudioTaskSearchQuery) {
+    const nextParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(nextQuery)) {
+      if (key !== "cursor" && key !== "limit" && typeof value === "string" && value.trim()) {
+        nextParams.set(key, value.trim());
+      }
+    }
+    setSearchParams(nextParams);
+  }
 
   async function loadSearch(nextQuery: StudioTaskSearchQuery) {
     setLoading(true);
@@ -65,7 +79,16 @@ export function TaskSearchPage() {
     event.preventDefault();
     const nextQuery = { ...query, cursor: null };
     setQuery(nextQuery);
+    writeQueryToUrl(nextQuery);
     await loadSearch(nextQuery);
+  }
+
+  function clearSearch() {
+    const nextQuery = buildInitialQuery(new URLSearchParams());
+    setQuery(nextQuery);
+    setSearchParams(new URLSearchParams());
+    setResult(null);
+    setError(null);
   }
 
   return (
@@ -85,52 +108,79 @@ export function TaskSearchPage() {
         }
       >
         <form onSubmit={handleSubmit} className="studio-form-grid studio-form-grid--task-search">
-          <input
-            value={query.service_id || ""}
-            onChange={(event) => setQuery((current) => ({ ...current, service_id: event.target.value }))}
-            placeholder="service_id"
-            style={inputStyle}
-          />
-          <input
-            value={query.task_id || ""}
-            onChange={(event) => setQuery((current) => ({ ...current, task_id: event.target.value }))}
-            placeholder="task_id"
-            style={inputStyle}
-          />
-          <input
-            value={query.correlation_id || ""}
-            onChange={(event) => setQuery((current) => ({ ...current, correlation_id: event.target.value }))}
-            placeholder="correlation_id"
-            style={inputStyle}
-          />
-          <input
-            value={query.status || ""}
-            onChange={(event) => setQuery((current) => ({ ...current, status: event.target.value }))}
-            placeholder="status"
-            style={inputStyle}
-          />
-          <input
-            value={query.stage || ""}
-            onChange={(event) => setQuery((current) => ({ ...current, stage: event.target.value }))}
-            placeholder="stage"
-            style={inputStyle}
-          />
-          <input
-            type="datetime-local"
-            value={query.from || ""}
-            onChange={(event) => setQuery((current) => ({ ...current, from: event.target.value }))}
-            style={inputStyle}
-          />
-          <input
-            type="datetime-local"
-            value={query.to || ""}
-            onChange={(event) => setQuery((current) => ({ ...current, to: event.target.value }))}
-            style={inputStyle}
-          />
-          <button type="submit" style={primaryButtonStyle}>
-            <StudioIcon name="search" />
-            Search
-          </button>
+          <label className="studio-filter-field">
+            <span>Service ID</span>
+            <input
+              value={query.service_id || ""}
+              onChange={(event) => setQuery((current) => ({ ...current, service_id: event.target.value }))}
+              placeholder="service_id"
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>Task ID</span>
+            <input
+              value={query.task_id || ""}
+              onChange={(event) => setQuery((current) => ({ ...current, task_id: event.target.value }))}
+              placeholder="task_id"
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>Correlation ID</span>
+            <input
+              value={query.correlation_id || ""}
+              onChange={(event) => setQuery((current) => ({ ...current, correlation_id: event.target.value }))}
+              placeholder="correlation_id"
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>Status</span>
+            <input
+              value={query.status || ""}
+              onChange={(event) => setQuery((current) => ({ ...current, status: event.target.value }))}
+              placeholder="status"
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>Stage</span>
+            <input
+              value={query.stage || ""}
+              onChange={(event) => setQuery((current) => ({ ...current, stage: event.target.value }))}
+              placeholder="stage"
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>From (local time)</span>
+            <input
+              type="datetime-local"
+              value={query.from || ""}
+              onChange={(event) => setQuery((current) => ({ ...current, from: event.target.value }))}
+              style={inputStyle}
+            />
+          </label>
+          <label className="studio-filter-field">
+            <span>To (local time)</span>
+            <input
+              type="datetime-local"
+              value={query.to || ""}
+              onChange={(event) => setQuery((current) => ({ ...current, to: event.target.value }))}
+              style={inputStyle}
+            />
+          </label>
+          <div className="studio-search-actions">
+            <button type="submit" style={primaryButtonStyle}>
+              <StudioIcon name="search" />
+              Search
+            </button>
+            <button type="button" onClick={clearSearch} style={secondaryButtonStyle}>
+              <StudioIcon name="clear" />
+              Clear
+            </button>
+          </div>
         </form>
 
         {loading ? <p style={mutedTextStyle}>Searching retained task summaries...</p> : null}
@@ -153,9 +203,13 @@ export function TaskSearchPage() {
                 <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                   task={item.task_id}
                   {item.correlation_id ? ` · correlation=${item.correlation_id}` : ""}
-                  {item.status ? ` · status=${item.status}` : ""}
-                  {item.stage ? ` · stage=${item.stage}` : ""}
                 </span>
+                {item.status || item.stage ? (
+                  <div className="studio-chip-row">
+                    {item.status ? <span className={`studio-task-chip studio-task-chip--${item.status}`}>{item.status}</span> : null}
+                    {item.stage ? <span className="studio-task-chip">Stage: {item.stage}</span> : null}
+                  </div>
+                ) : null}
                 <span className="studio-inline-meta" style={{ fontSize: 13 }}>
                   last seen: {item.last_seen_at ? new Date(item.last_seen_at).toLocaleString() : "unknown"}
                 </span>

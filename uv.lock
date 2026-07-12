@@ -1243,7 +1243,7 @@ wheels = [
 
 [[package]]
 name = "relayna"
-version = "1.4.26"
+version = "1.4.27"
 source = { editable = "." }
 dependencies = [
     { name = "aio-pika" },

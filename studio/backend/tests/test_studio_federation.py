@@ -28,6 +28,9 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
+    async def mget(self, keys: list[str]) -> list[str | None]:
+        return [self.values.get(key) for key in keys]
+
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
         if nx and key in self.values:
             return False
