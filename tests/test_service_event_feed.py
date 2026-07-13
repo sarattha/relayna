@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -74,7 +75,11 @@ class FakeRedis:
         self.values: dict[str, str] = {}
         self.lists: dict[str, list[str]] = {}
         self.sets: dict[str, set[str]] = {}
+        self.sorted_sets: dict[str, dict[str, float]] = {}
+        self.hashes: dict[str, dict[str, str]] = {}
         self.expirations: dict[str, int] = {}
+        self.cursor_read_counts: list[int] = []
+        self.payload_read_counts: list[int] = []
 
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
         if nx and key in self.values:
@@ -90,6 +95,100 @@ class FakeRedis:
     async def lrange(self, key: str, start: int, stop: int) -> list[str]:
         items = self.lists.get(key, [])
         return items[int(start) : int(stop) + 1]
+
+    async def eval(self, script: str, numkeys: int, *keys_and_args: object) -> int | list[int | str]:
+        if "ZADD" not in script:
+            assert "ZREVRANGEBYSCORE" in script
+            assert numkeys == 2
+            index_key, payloads_key = [str(value) for value in keys_and_args[:numkeys]]
+            after = str(keys_and_args[numkeys])
+            page_size = int(keys_and_args[numkeys + 1])
+            index = self.sorted_sets.get(index_key, {})
+            if after and after in index:
+                members = [member for member in self._ordered_members(index_key) if index[member] < index[after]][
+                    : page_size + 1
+                ]
+            else:
+                members = self._ordered_members(index_key)[: page_size + 1]
+            self.cursor_read_counts.append(len(members))
+            self.payload_read_counts.append(len(members))
+            payloads = self.hashes.get(payloads_key, {})
+            result: list[int | str] = [1]
+            for member in members:
+                payload = payloads.get(member)
+                if payload is None:
+                    return [0, member]
+                result.extend((member, payload))
+            return result
+
+        assert numkeys == 4
+        dedupe_key, sequence_key, index_key, payloads_key = [str(value) for value in keys_and_args[:numkeys]]
+        serialized, cursor = [str(value) for value in keys_and_args[numkeys : numkeys + 2]]
+        maxlen = int(keys_and_args[numkeys + 2])
+        ttl_seconds = int(keys_and_args[numkeys + 3])
+        if dedupe_key in self.values:
+            return 0
+        self.values[dedupe_key] = "1"
+        if ttl_seconds:
+            self.expirations[dedupe_key] = ttl_seconds
+
+        sequence = int(self.values.get(sequence_key, "0")) + 1
+        self.values[sequence_key] = str(sequence)
+        index = self.sorted_sets.setdefault(index_key, {})
+        index[cursor] = float(sequence)
+        self.hashes.setdefault(payloads_key, {})[cursor] = serialized
+        excess = len(index) - maxlen
+        if excess > 0:
+            evicted = sorted(index, key=lambda member: (index[member], member))[:excess]
+            for member in evicted:
+                del index[member]
+                self.hashes[payloads_key].pop(member, None)
+        if ttl_seconds:
+            self.expirations[sequence_key] = ttl_seconds
+            self.expirations[index_key] = ttl_seconds
+            self.expirations[payloads_key] = ttl_seconds
+        return 1
+
+    def register_script(self, script: str):
+        async def execute(*, keys: list[str], args: list[object]) -> int | list[int | str]:
+            return await self.eval(script, len(keys), *keys, *args)
+
+        return execute
+
+    def _ordered_members(self, key: str) -> list[str]:
+        index = self.sorted_sets.get(key, {})
+        return sorted(index, key=lambda member: (index[member], member), reverse=True)
+
+    async def zrevrange(self, key: str, start: int, stop: int) -> list[str]:
+        members = self._ordered_members(key)[int(start) : int(stop) + 1]
+        self.cursor_read_counts.append(len(members))
+        return members
+
+    async def zscore(self, key: str, member: str) -> float | None:
+        return self.sorted_sets.get(key, {}).get(member)
+
+    async def zrevrangebyscore(
+        self,
+        key: str,
+        max_score: str,
+        min_score: str,
+        *,
+        start: int,
+        num: int,
+    ) -> list[str]:
+        assert max_score.startswith("(")
+        assert min_score == "-inf"
+        maximum = float(max_score[1:])
+        index = self.sorted_sets.get(key, {})
+        members = [member for member in self._ordered_members(key) if index[member] < maximum]
+        page = members[int(start) : int(start) + int(num)]
+        self.cursor_read_counts.append(len(page))
+        return page
+
+    async def hmget(self, key: str, members: list[str]) -> list[str | None]:
+        self.payload_read_counts.append(len(members))
+        values = self.hashes.get(key, {})
+        return [values.get(member) for member in members]
 
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
@@ -225,6 +324,8 @@ def test_service_event_feed_edge_paths_and_automatic_forwarder_flush() -> None:
         assert [item.event_id for item in deep.items] == ["event-3", "event-2"]
         fallback = await store.get_feed(after="missing", limit=1)
         assert fallback.items[0].event_id == "event-104"
+        assert len(redis.sorted_sets[store.feed_key()]) == 105
+        assert len(redis.hashes[store.feed_payloads_key()]) == 105
 
         posts: list[dict[str, object]] = []
 
@@ -250,3 +351,93 @@ def test_service_event_feed_edge_paths_and_automatic_forwarder_flush() -> None:
     import asyncio
 
     asyncio.run(scenario())
+
+
+def test_service_event_feed_bounds_deep_and_missing_cursor_reads() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        store = RedisServiceEventFeedStore(redis, prefix="bounded", ttl_seconds=60, feed_maxlen=5000)
+        for index in range(5000):
+            assert await store.add_status_event({"task_id": f"task-{index}", "event_id": f"event-{index}"})
+
+        redis.cursor_read_counts.clear()
+        redis.payload_read_counts.clear()
+        head = await store.get_feed(limit=100)
+        assert [item.event_id for item in head.items[:2]] == ["event-4999", "event-4998"]
+        assert head.next_cursor == "event-4900"
+        assert redis.cursor_read_counts == [101]
+        assert redis.payload_read_counts == [101]
+
+        redis.cursor_read_counts.clear()
+        redis.payload_read_counts.clear()
+        deep = await store.get_feed(after="event-2500", limit=100)
+        assert [item.event_id for item in deep.items[:2]] == ["event-2499", "event-2498"]
+        assert deep.next_cursor == "event-2400"
+        assert redis.cursor_read_counts == [101]
+        assert redis.payload_read_counts == [101]
+
+        redis.cursor_read_counts.clear()
+        redis.payload_read_counts.clear()
+        missing = await store.get_feed(after="missing", limit=100)
+        assert [item.event_id for item in missing.items[:2]] == ["event-4999", "event-4998"]
+        assert missing.next_cursor == "event-4900"
+        assert redis.cursor_read_counts == [101]
+        assert redis.payload_read_counts == [101]
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_service_event_feed_atomically_trims_index_and_payloads() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        store = RedisServiceEventFeedStore(redis, prefix="trimmed", ttl_seconds=30, feed_maxlen=3)
+        for index in range(5):
+            assert await store.add_status_event({"task_id": f"task-{index}", "event_id": f"event-{index}"})
+
+        assert store.feed_key() == "trimmed:feed:index"
+        assert store.feed_payloads_key() == "trimmed:feed:payloads"
+        assert store.feed_sequence_key() == "trimmed:feed:sequence"
+        assert set(redis.sorted_sets[store.feed_key()]) == {"event-2", "event-3", "event-4"}
+        assert set(redis.hashes[store.feed_payloads_key()]) == {"event-2", "event-3", "event-4"}
+        assert redis.expirations[store.feed_key()] == 30
+        assert redis.expirations[store.feed_payloads_key()] == 30
+        assert redis.expirations[store.feed_sequence_key()] == 30
+        assert redis.expirations[store.event_key("event-4")] == 30
+        assert [item.event_id for item in (await store.get_feed(limit=10)).items] == ["event-4", "event-3", "event-2"]
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_service_event_feed_rejects_inconsistent_index_payloads() -> None:
+    async def scenario() -> None:
+        redis = FakeRedis()
+        store = RedisServiceEventFeedStore(redis, prefix="corrupt", ttl_seconds=None, feed_maxlen=10)
+        assert await store.add_status_event({"task_id": "task", "event_id": "event-1"})
+        del redis.hashes[store.feed_payloads_key()]["event-1"]
+        with pytest.raises(RuntimeError, match="payload is missing"):
+            await store.get_feed()
+
+        mismatched = normalize_status_feed_event({"task_id": "task", "event_id": "different"})
+        assert mismatched is not None
+        redis.hashes[store.feed_payloads_key()]["event-1"] = mismatched.model_dump_json()
+        with pytest.raises(RuntimeError, match="payload cursor mismatch"):
+            await store.get_feed()
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+    with pytest.raises(RuntimeError, match="empty script response"):
+        RedisServiceEventFeedStore._parse_page([])
+    with pytest.raises(RuntimeError, match="cursor 'unknown'"):
+        RedisServiceEventFeedStore._parse_page([0])
+    with pytest.raises(RuntimeError, match="cursor 'event-1'"):
+        RedisServiceEventFeedStore._parse_page([0, b"event-1"])
+    with pytest.raises(RuntimeError, match="incomplete cursor/payload pair"):
+        RedisServiceEventFeedStore._parse_page([1, "event-1"])
+    with pytest.raises(RuntimeError, match="invalid cursor/payload value"):
+        RedisServiceEventFeedStore._parse_page([1, 7, "payload"])

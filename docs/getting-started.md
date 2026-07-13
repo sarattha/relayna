@@ -45,13 +45,13 @@ GitHub Releases are the canonical source for SDK artifacts.
 Install the wheel:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.27/relayna-1.4.27-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28-py3-none-any.whl
 ```
 
 Or install the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.27/relayna-1.4.27.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28.tar.gz
 ```
 
 For local development in this repository:
@@ -2480,7 +2480,10 @@ your operating model:
 - `observation_store_prefix`
   Improves execution graphs and event-driven task views.
 - `service_event_store_prefix`
-  Enables `GET /events/feed` for centralized event ingestion.
+  Enables `GET /events/feed` for centralized event ingestion. Starting in
+  `v1.4.28`, this uses an indexed Redis feed so deep and missing cursors load a
+  bounded page instead of scanning retained JSON payloads. The v1 list is not
+  migrated; upgrade all service instances sharing a prefix together.
 - worker heartbeat route
   Lets Studio show `/relayna/health/workers`.
 - `make_logging_sink(...)`

@@ -501,6 +501,16 @@ class StudioEventIngestService:
     async def sync_service(self, service: ServiceRecord) -> None:
         self._validate_service_base_url(service)
         stored_cursor = await self.event_store.get_pull_cursor(service.service_id)
+        if stored_cursor is not None:
+            probe_response = await self.http_client.get(
+                f"{service.base_url.rstrip('/')}/events/feed",
+                params={"limit": 1},
+            )
+            probe_response.raise_for_status()
+            probe = RelaynaServiceEventFeedResponse.model_validate(probe_response.json())
+            if not probe.items or probe.items[0].cursor == stored_cursor:
+                return
+
         newest_cursor: str | None = None
         next_after: str | None = None
         for page_index in range(self.pull_max_pages):

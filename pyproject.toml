@@ -1,6 +1,6 @@
 [project]
 name = "relayna"
-version = "1.4.27"
+version = "1.4.28"
 description = "Shared RabbitMQ/Redis infrastructure for Relayna."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -45,6 +45,7 @@ Repository = "https://github.com/sarattha/relayna"
 
 [project.optional-dependencies]
 dev = [
+    "click>=8.3.3",
     "coverage[toml]>=7.10.0",
     "cryptography>=48.0.1",
     "mkdocs>=1.6.1",

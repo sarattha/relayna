@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.28 - 2026-07-13
+
+### Changed
+
+- Replaced the SDK service-event Redis list with a bounded sorted-set cursor
+  index, payload hash, and monotonic sequence. Feed reads now resolve deep or
+  missing cursors without transferring and parsing the retained history, and
+  each page loads at most `limit + 1` event payloads.
+- Made service-event writes atomic across deduplication, ordering, payload
+  storage, trimming, and TTL refresh through a cached Redis script.
+- Changed Studio pull-sync to probe only the newest event when it already has a
+  stored cursor, downloading the normal 200-event page only when the service
+  feed changed.
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.28`, raised the Studio backend dependency floor to `relayna>=1.4.28`,
+  and established `v1.4.28` as the strict production freeze perimeter.
+- Raised the SDK and Studio backend development toolchains' Click floor to
+  `8.3.3` to address `PYSEC-2026-2132` in documentation and security-audit
+  environments.
+
+### Compatibility
+
+- The `v1.4.28` SDK does not read or migrate the `v1.4.27`
+  `{prefix}:feed` Redis list. Upgrade every SDK instance sharing a service-event
+  prefix together; the v2 feed begins with events written after the upgrade.
+  The `/events/feed` route, query parameters, response model, event cursors,
+  ordering, retention limit, and missing-cursor fallback remain unchanged.
+
+### Verification
+
+- Passed 419 SDK tests, 241 Studio backend tests, and 92 Studio frontend tests,
+  plus SDK and backend formatting, linting, and type checking.
+- Verified 5,000-event pagination, concurrent writes and trims, deduplication,
+  TTLs, and missing-cursor fallback against Redis 7; each 100-event request
+  reads at most 101 indexed payloads.
+- Built the SDK and Studio backend packages and production Studio containers,
+  then validated idle probing, changed-feed catch-up, event history, and task
+  search through the production frontend with real Redis.
+
 ## 1.4.27 - 2026-07-12
 
 ### Added
