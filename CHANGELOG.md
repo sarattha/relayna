@@ -18,8 +18,9 @@ All notable changes to this project will be documented in this file.
 - Bumped the SDK, Studio backend, and Studio frontend package versions to
   `1.4.28`, raised the Studio backend dependency floor to `relayna>=1.4.28`,
   and established `v1.4.28` as the strict production freeze perimeter.
-- Raised the SDK development toolchain's Click floor to `8.3.3` to address
-  `PYSEC-2026-2132` in documentation and security-audit environments.
+- Raised the SDK and Studio backend development toolchains' Click floor to
+  `8.3.3` to address `PYSEC-2026-2132` in documentation and security-audit
+  environments.
 
 ### Compatibility
 

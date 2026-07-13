@@ -70,10 +70,12 @@ as before, with bounded Redis and HTTP traffic.
   tests/test_service_event_feed_redis.py -q` reported `1 passed`.
 
 - Observation: The first GitHub Actions security job exposed a newly published
-  `PYSEC-2026-2132` advisory for transitive development dependency Click 8.3.1;
-  Click 8.3.3 contains the fix. This was unrelated to the feed implementation
-  but blocked the release security gate.
-  Evidence: PR #108 Actions run 29266595774 and local `make security-sdk`.
+  `PYSEC-2026-2132` advisory for transitive development dependency Click 8.3.1
+  in the SDK and 8.3.2 in Studio backend; Click 8.3.3 contains the fix. This was
+  unrelated to the feed implementation but blocked the release security gate.
+  Evidence: PR #108 Actions runs 29266595774 and 29266789226; local
+  `make security-sdk` and `make -C studio/backend security` both passed after
+  the dependency-floor updates.
 
 ## Decision Log
 
