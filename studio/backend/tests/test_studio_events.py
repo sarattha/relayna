@@ -410,6 +410,7 @@ def test_studio_pull_sync_ingests_service_feed(monkeypatch) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/events/feed"
+        assert request.url.params["limit"] == "200"
         return httpx.Response(
             200,
             json={
@@ -496,11 +497,13 @@ def test_studio_pull_sync_refuses_stored_disallowed_base_url_before_request(monk
 def test_studio_pull_sync_advances_existing_cursor(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
     request_count = 0
+    request_limits: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal request_count
         request_count += 1
         assert request.url.path == "/events/feed"
+        request_limits.append(request.url.params["limit"])
         if request_count == 1:
             return httpx.Response(
                 200,
@@ -519,6 +522,26 @@ def test_studio_pull_sync_advances_existing_cursor(monkeypatch) -> None:
                         }
                     ],
                     "next_cursor": None,
+                },
+            )
+        if request_count in {2, 4}:
+            return httpx.Response(
+                200,
+                json={
+                    "count": 1,
+                    "items": [
+                        {
+                            "cursor": "evt-2",
+                            "task_id": "task-123",
+                            "event_type": "status.completed",
+                            "source_kind": "status",
+                            "component": "status",
+                            "timestamp": "2026-04-10T02:00:00Z",
+                            "event_id": "evt-2",
+                            "payload": {"status": "completed"},
+                        }
+                    ],
+                    "next_cursor": "evt-2",
                 },
             )
         return httpx.Response(
@@ -580,6 +603,11 @@ def test_studio_pull_sync_advances_existing_cursor(monkeypatch) -> None:
         assert response.json()["count"] == 2
         assert response.json()["items"][0]["event_id"] == "evt-2"
         assert asyncio.run(runtime.event_store.get_pull_cursor("payments-api")) == "evt-2"
+
+        asyncio.run(runtime.event_ingest_service.sync_registered_services())
+        unchanged = client.get("/studio/services/payments-api/events")
+        assert unchanged.json()["count"] == 2
+        assert request_limits == ["200", "1", "200", "1"]
 
 
 @pytest.mark.asyncio

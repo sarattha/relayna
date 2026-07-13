@@ -58,11 +58,22 @@ Default prefix: `relayna-service-events`.
 
 | Key | Type | Purpose |
 | --- | --- | --- |
-| `{prefix}:feed` | list | Bounded feed of normalized service events. |
+| `{prefix}:feed:index` | sorted set | Bounded cursor index scored by an atomic monotonic sequence. |
+| `{prefix}:feed:payloads` | hash | Normalized JSON event payloads keyed by cursor. |
+| `{prefix}:feed:sequence` | string | Monotonic ordering sequence used by the cursor index. |
 | `{prefix}:event:{cursor}` | string | Dedupe marker for one feed event cursor. |
 
 Retention is controlled by `service_event_store_ttl_seconds`; bounded feed
-length is controlled by `service_event_feed_maxlen`.
+length is controlled by `service_event_feed_maxlen`. The index and payload hash
+are trimmed together atomically. Feed pagination performs an indexed cursor
+lookup and loads no more than `limit + 1` payloads, including when the cursor is
+deep or missing.
+
+`v1.4.28` intentionally replaces the `v1.4.27` `{prefix}:feed` list without a
+data migration or backward read. Upgrade all Relayna service instances sharing
+one prefix together. The v2 feed starts with newly written events; after all old
+instances are drained, the unused legacy list may be deleted. Existing
+`{prefix}:event:{cursor}` dedupe markers remain valid and can be left in place.
 
 ### DLQ Store
 

@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.27/relayna-1.4.27-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.27/relayna-1.4.27.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28.tar.gz
 ```
 
 For local development in this repository:
@@ -232,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.27`, and the backend requires `relayna>=1.4.27`.
+release version is `1.4.28`, and the backend requires `relayna>=1.4.28`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -619,6 +619,9 @@ Operator guidance:
   Loki text filter for the requested task id.
 - Studio pull-sync is the default event ingestion path; direct push ingestion
   requires `RELAYNA_STUDIO_PUSH_INGEST_ENABLED=true`
+- Relayna `v1.4.28` stores `GET /events/feed` in an indexed Redis feed and
+  Studio uses a one-event head probe to avoid downloading full pages while a
+  service is idle
 
 The Studio registration UI exposes AKS-friendly fields for:
 

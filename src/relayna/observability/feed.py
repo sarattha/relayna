@@ -13,6 +13,65 @@ from redis.asyncio import Redis
 
 from .exporters import event_to_dict
 
+_STORE_SERVICE_EVENT_SCRIPT = """
+local ttl_seconds = tonumber(ARGV[4])
+local set_result
+if ttl_seconds ~= 0 then
+    set_result = redis.call("SET", KEYS[1], "1", "NX", "EX", ttl_seconds)
+else
+    set_result = redis.call("SET", KEYS[1], "1", "NX")
+end
+if not set_result then
+    return 0
+end
+
+local sequence = redis.call("INCR", KEYS[2])
+redis.call("ZADD", KEYS[3], sequence, ARGV[2])
+redis.call("HSET", KEYS[4], ARGV[2], ARGV[1])
+
+local excess = redis.call("ZCARD", KEYS[3]) - tonumber(ARGV[3])
+if excess > 0 then
+    local evicted = redis.call("ZRANGE", KEYS[3], 0, excess - 1)
+    for _, cursor in ipairs(evicted) do
+        redis.call("HDEL", KEYS[4], cursor)
+    end
+    redis.call("ZREMRANGEBYRANK", KEYS[3], 0, excess - 1)
+end
+
+if ttl_seconds ~= 0 then
+    redis.call("EXPIRE", KEYS[2], ttl_seconds)
+    redis.call("EXPIRE", KEYS[3], ttl_seconds)
+    redis.call("EXPIRE", KEYS[4], ttl_seconds)
+end
+return 1
+"""
+
+_READ_SERVICE_EVENT_PAGE_SCRIPT = """
+local page_size = tonumber(ARGV[2])
+local cursors
+if ARGV[1] == "" then
+    cursors = redis.call("ZREVRANGE", KEYS[1], 0, page_size)
+else
+    local score = redis.call("ZSCORE", KEYS[1], ARGV[1])
+    if not score then
+        cursors = redis.call("ZREVRANGE", KEYS[1], 0, page_size)
+    else
+        cursors = redis.call("ZREVRANGEBYSCORE", KEYS[1], "(" .. score, "-inf", "LIMIT", 0, page_size + 1)
+    end
+end
+
+local result = {1}
+for _, cursor in ipairs(cursors) do
+    local payload = redis.call("HGET", KEYS[2], cursor)
+    if not payload then
+        return {0, cursor}
+    end
+    table.insert(result, cursor)
+    table.insert(result, payload)
+end
+return result
+"""
+
 
 def _json_default(value: Any) -> str:
     if isinstance(value, datetime):
@@ -136,9 +195,17 @@ class RedisServiceEventFeedStore:
         self.prefix = prefix
         self.ttl_seconds = ttl_seconds
         self.feed_maxlen = feed_maxlen
+        self._store_script = None
+        self._read_script = None
 
     def feed_key(self) -> str:
-        return f"{self.prefix}:feed"
+        return f"{self.prefix}:feed:index"
+
+    def feed_payloads_key(self) -> str:
+        return f"{self.prefix}:feed:payloads"
+
+    def feed_sequence_key(self) -> str:
+        return f"{self.prefix}:feed:sequence"
 
     def event_key(self, cursor: str) -> str:
         return f"{self.prefix}:event:{cursor}"
@@ -157,63 +224,64 @@ class RedisServiceEventFeedStore:
 
     async def get_feed(self, *, after: str | None = None, limit: int = 100) -> RelaynaServiceEventFeedResponse:
         page_size = max(1, limit)
-        chunk_size = max(100, page_size + 1)
-        candidates: list[RelaynaServiceEvent] = []
-        head: list[RelaynaServiceEvent] = []
-        cursor_found = after is None
-        offset = 0
-
-        while offset < self.feed_maxlen and len(candidates) <= page_size:
-            items = await cast(
-                Awaitable[list[str | bytes]],
-                self.redis.lrange(
-                    self.feed_key(),
-                    offset,
-                    min(self.feed_maxlen - 1, offset + chunk_size - 1),
-                ),
-            )
-            if not items:
-                break
-            parsed = [RelaynaServiceEvent.model_validate_json(item) for item in items]
-            if offset == 0:
-                head = parsed[: page_size + 1]
-            for item in parsed:
-                if not cursor_found:
-                    if item.cursor == after:
-                        cursor_found = True
-                    continue
-                if after is not None and item.cursor == after:
-                    continue
-                candidates.append(item)
-                if len(candidates) > page_size:
-                    break
-            if len(candidates) > page_size or len(items) < chunk_size:
-                break
-            offset += len(items)
-
-        if after is not None and not cursor_found:
-            candidates = head
+        read_script = self._read_script
+        if read_script is None:
+            read_script = self.redis.register_script(_READ_SERVICE_EVENT_PAGE_SCRIPT)
+            self._read_script = read_script
+        raw_page = await cast(
+            Awaitable[list[int | str | bytes]],
+            read_script(
+                keys=[self.feed_key(), self.feed_payloads_key()],
+                args=[after or "", page_size],
+            ),
+        )
+        candidates = self._parse_page(raw_page)
         page = candidates[:page_size]
         next_cursor = page[-1].cursor if len(candidates) > page_size and page else None
         return RelaynaServiceEventFeedResponse(count=len(page), items=page, next_cursor=next_cursor)
 
-    async def _store(self, event: RelaynaServiceEvent) -> bool:
-        dedupe_key = self.event_key(event.cursor)
-        set_kwargs: dict[str, Any] = {"nx": True}
-        if self.ttl_seconds:
-            set_kwargs["ex"] = self.ttl_seconds
-        inserted = await self.redis.set(dedupe_key, "1", **set_kwargs)
-        if not inserted:
-            return False
+    @staticmethod
+    def _parse_page(raw_page: list[int | str | bytes]) -> list[RelaynaServiceEvent]:
+        if not raw_page:
+            raise RuntimeError("Service event feed returned an empty script response.")
+        if raw_page[0] != 1:
+            cursor = raw_page[1] if len(raw_page) > 1 else "unknown"
+            if isinstance(cursor, bytes):
+                cursor = cursor.decode()
+            raise RuntimeError(f"Service event feed payload is missing for cursor '{cursor}'.")
+        values = raw_page[1:]
+        if len(values) % 2:
+            raise RuntimeError("Service event feed returned an incomplete cursor/payload pair.")
+        items: list[RelaynaServiceEvent] = []
+        for raw_cursor, payload in zip(values[::2], values[1::2], strict=True):
+            if isinstance(raw_cursor, int) or isinstance(payload, int):
+                raise RuntimeError("Service event feed returned an invalid cursor/payload value.")
+            cursor = raw_cursor.decode() if isinstance(raw_cursor, bytes) else raw_cursor
+            item = RelaynaServiceEvent.model_validate_json(payload)
+            if item.cursor != cursor:
+                raise RuntimeError(f"Service event feed payload cursor mismatch for '{cursor}'.")
+            items.append(item)
+        return items
 
+    async def _store(self, event: RelaynaServiceEvent) -> bool:
         serialized = event.model_dump_json()
-        pipe = self.redis.pipeline()
-        pipe.lpush(self.feed_key(), serialized)
-        pipe.ltrim(self.feed_key(), 0, self.feed_maxlen - 1)
-        if self.ttl_seconds:
-            pipe.expire(self.feed_key(), self.ttl_seconds)
-        await pipe.execute()
-        return True
+        store_script = self._store_script
+        if store_script is None:
+            store_script = self.redis.register_script(_STORE_SERVICE_EVENT_SCRIPT)
+            self._store_script = store_script
+        stored = await cast(
+            Awaitable[int],
+            store_script(
+                keys=[
+                    self.event_key(event.cursor),
+                    self.feed_sequence_key(),
+                    self.feed_key(),
+                    self.feed_payloads_key(),
+                ],
+                args=[serialized, event.cursor, self.feed_maxlen, self.ttl_seconds or 0],
+            ),
+        )
+        return bool(stored)
 
 
 class StudioObservationForwarder:

@@ -613,6 +613,8 @@ The backend can run three periodic workers:
   - ingests events from registered services into the central event store
   - controlled by `RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS`
   - this is the default ingestion path for internal AKS deployments
+  - when a service already has a stored pull cursor, requests one head event
+    first and skips the normal 200-event page while the feed is unchanged
 - health refresh worker
   - refreshes service health snapshots and staleness state
   - controlled by `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS`
