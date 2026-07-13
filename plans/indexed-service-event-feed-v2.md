@@ -34,7 +34,7 @@ as before, with bounded Redis and HTTP traffic.
 - [x] (2026-07-13 16:24Z) Added SDK and Studio regression, complexity-bound, corruption-invariant, and opt-in real-Redis integration tests.
 - [x] (2026-07-13 16:24Z) Updated the approved freeze perimeter, release version `1.4.28`, changelog, lock metadata, and operator/developer documentation.
 - [x] (2026-07-13 16:30Z) Passed focused and complete verification, Redis 7 concurrency/pagination acceptance, package and container builds, and production Studio browser validation using `$computer-use`.
-- [ ] Review, commit, push, open a draft PR, then monitor and address the first review cycle.
+- [x] (2026-07-13 16:47Z) Reviewed and published the scoped changes as PR #108, repaired the newly exposed Click audit advisory in both Python workspaces, obtained the first Codex review, and confirmed it reported no major issues or actionable threads.
 
 ## Surprises & Discoveries
 
@@ -128,7 +128,7 @@ as before, with bounded Redis and HTTP traffic.
 
 ## Outcomes & Retrospective
 
-Implementation and local acceptance are complete. The indexed feed bounds each
+Implementation and acceptance are complete. The indexed feed bounds each
 100-event request to 101 cursors and payloads even for deep or missing cursors,
 while Studio's unchanged-feed loop uses a one-item HTTP probe. The complete
 verification stack passed with 419 SDK tests, 241 Studio backend tests, and 92
@@ -136,10 +136,13 @@ Studio frontend tests. Redis 7 acceptance covered 5,000 concurrent inserts,
 full pagination, trimming under concurrent reads, duplicate rejection, and
 TTLs. Production container builds and a Computer Use walkthrough verified the
 overview, service health and capabilities, recent activity, task history, and
-task search against real Redis. The remaining work is publication and the
-first PR review cycle. The intentional operational risk is the documented lack
-of a v1 list migration: all SDK instances sharing a feed prefix must move to
-v1.4.28 together.
+task search against real Redis. PR #108 is open and ready for review at
+`https://github.com/sarattha/relayna/pull/108`; every GitHub Actions SDK,
+Studio, and security-hardening check passed. The first Codex review inspected
+commit `7b008e27e5`, reported no major issues, and created no actionable review
+threads. The intentional operational risk is the documented lack of a v1 list
+migration: all SDK instances sharing a feed prefix must move to v1.4.28
+together.
 
 ## Context and Orientation
 
