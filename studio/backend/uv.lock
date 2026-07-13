@@ -604,6 +604,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aio-pika", specifier = ">=9.4.1" },
+    { name = "click", marker = "extra == 'dev'", specifier = ">=8.3.3" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=7.10.0" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=48.0.1" },
     { name = "fastapi", specifier = ">=0.115.11" },

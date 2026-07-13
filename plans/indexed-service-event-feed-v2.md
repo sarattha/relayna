@@ -69,6 +69,12 @@ as before, with bounded Redis and HTTP traffic.
   Evidence: `RELAYNA_TEST_REDIS_URL=redis://127.0.0.1:16379/15 uv run pytest
   tests/test_service_event_feed_redis.py -q` reported `1 passed`.
 
+- Observation: The first GitHub Actions security job exposed a newly published
+  `PYSEC-2026-2132` advisory for transitive development dependency Click 8.3.1;
+  Click 8.3.3 contains the fix. This was unrelated to the feed implementation
+  but blocked the release security gate.
+  Evidence: PR #108 Actions run 29266595774 and local `make security-sdk`.
+
 ## Decision Log
 
 - Decision: Compatibility boundary is release tag `v1.4.27`; directly replace
