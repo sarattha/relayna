@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.29/relayna-1.4.29-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.29/relayna-1.4.29.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.4.28.tar.gz`
-- `dist/relayna-1.4.28-py3-none-any.whl`
+- `dist/relayna-1.4.29.tar.gz`
+- `dist/relayna-1.4.29-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,14 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.4.29
+
+No data migration or API change is required. Studio `1.4.29` makes
+Prometheus-backed pod ownership joins resilient to duplicate
+`kube_pod_labels` series and adds bounded upstream error diagnostics. Upgrade
+the SDK, Studio backend, and Studio frontend together to keep the shared release
+line aligned.
 
 ### Upgrading to 1.4.28
 

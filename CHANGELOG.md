@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.29 - 2026-07-15
+
+### Fixed
+
+- Deduplicated fully filtered `kube_pod_labels` ownership to one series per
+  configured namespace and pod match key before Studio Prometheus range-query
+  joins, preventing many-to-many HTTP 422 failures when ownership series differ
+  by pod UID or scrape metadata.
+- Kept current-pod discovery unique while preserving one selector-label series
+  for the existing Studio pod source caption.
+- Preserved bounded, control-character-safe Prometheus `errorType` and `error`
+  details and logged sanitized endpoint, range, step, and PromQL context for
+  failed range and instant queries.
+
+### Changed
+
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.29`, raised the Studio backend dependency floor to `relayna>=1.4.29`,
+  and advanced the strict production freeze perimeter to `v1.4.29` with no
+  public export, route, configuration, response-shape, or persisted-data
+  changes.
+
+### Compatibility
+
+- Existing Studio metrics routes and response models are unchanged. The
+  generated PromQL now enforces the uniqueness already required by Prometheus
+  binary matching, so correctly unique deployments retain the same metric
+  values while duplicate ownership metadata no longer breaks the query.
+
+### Verification
+
+- Passed 419 SDK tests with one skipped and 244 Studio backend tests, plus SDK
+  and backend formatting, linting, and type checking.
+- Passed 92 Studio frontend tests and built the production frontend, SDK wheel
+  and source distribution, and Studio backend wheel at version `1.4.29`.
+- Reproduced the original many-to-many failure against Prometheus `v3.7.3`,
+  then verified 10 ownership series containing a reused pod name resolve to 9
+  current pods and 9 CPU, memory, and phase series through the Studio frontend.
+
 ## 1.4.28 - 2026-07-13
 
 ### Changed

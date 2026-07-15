@@ -94,7 +94,8 @@ The same AKS stack supports all four Studio observability phases:
 2. Kubernetes metrics: Prometheus scrapes cAdvisor and kube-state-metrics so
    Studio can show service and task-window infrastructure metrics. Studio uses
    `kube_pod_labels` to resolve registered service selector labels to owned
-   pods, then joins platform metrics by namespace and pod.
+   pods, reduces the ownership vector to one series per namespace and pod, then
+   joins platform metrics without depending on UID or scrape-label uniqueness.
 3. Relayna runtime metrics and observations: API/worker `/metrics` endpoints
    expose aggregate counters/histograms while Redis observations preserve exact
    per-task CPU/RSS samples for execution graphs.
@@ -278,6 +279,12 @@ selected pod over quick ranges such as 15 minutes, 1 hour, 12 hours, 24 hours,
 `kube_pod_labels`, cAdvisor, and kube-state-metrics sharing the configured
 `namespace_label` and `pod_label` values.
 
+Studio normalizes the fully filtered ownership vector before every arithmetic
+join. Multiple `kube_pod_labels` series for the same namespace and pod—such as
+overlapping UID or scrape-label variants during pod replacement—therefore do
+not cause Prometheus many-to-many execution errors. The current-pod query also
+selects one metadata series per join key so the UI retains its source label.
+
 Minimal Prometheus scrape config:
 
 ```yaml
@@ -456,7 +463,7 @@ Install application-owned tracing dependencies in the service image:
 ```toml
 [project]
 dependencies = [
-  "relayna>=1.4.28",
+  "relayna>=1.4.29",
   "opentelemetry-sdk>=1.28.0",
   "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
   "structlog>=24.0.0",

@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.29/relayna-1.4.29-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.28/relayna-1.4.28.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.29/relayna-1.4.29.tar.gz
 ```
 
 For local development in this repository:
@@ -232,7 +232,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.28`, and the backend requires `relayna>=1.4.28`.
+release version is `1.4.29`, and the backend requires `relayna>=1.4.29`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).
@@ -645,9 +645,11 @@ Prometheus integration covers two metric classes:
 - Kubernetes pod/container metrics from cAdvisor and kube-state-metrics, shown
   at service scope, per-pod scope, and over a task lifecycle window. Studio
   resolves `service_selector_labels` through `kube_pod_labels` and joins
-  platform metrics by namespace and pod. The service detail page includes a
-  dedicated Pod Metrics panel with CPU, memory, network, restart, OOMKilled,
-  readiness, and phase graphs across all current service pods.
+  platform metrics by namespace and pod. Studio reduces filtered ownership to
+  one series per join key, so stale UID or scrape-label variants cannot create
+  many-to-many Prometheus joins. The service detail page includes a dedicated
+  Pod Metrics panel with CPU, memory, network, restart, OOMKilled, readiness,
+  and phase graphs across all current service pods.
 - Relayna runtime metrics from API and worker `/metrics` endpoints, shown as
   aggregate throughput, failure, retry, DLQ, queue, status, and observation
   charts

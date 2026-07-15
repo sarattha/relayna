@@ -384,6 +384,9 @@ Field-by-field guidance:
   - Studio translates these to `kube_pod_labels` matchers such as
     `label_service="<logical-service-name>"` and joins platform metrics by
     namespace and pod
+  - after all selector filters, Studio reduces ownership to one series per
+    configured namespace/pod key; duplicate UID or scrape-label variants cannot
+    turn the arithmetic join into an invalid many-to-many match
   - for AKS, this is usually `{ "service": "<logical-service-name>" }`
 - `runtime_service_label_value`
   - optional value for Relayna runtime metrics where the Prometheus label is
@@ -416,6 +419,11 @@ Prometheus needs kubelet/cAdvisor, kube-state-metrics, Relayna API/worker
 `/metrics`, and Studio backend `/metrics` scrape targets for complete Studio
 charts. See [AKS observability stack](aks-observability.md) for a deployable
 starter stack and architecture diagram.
+
+When Prometheus rejects a query, Studio keeps bounded, sanitized upstream
+`errorType` and `error` details and logs the endpoint, range, step, and generated
+PromQL. The configured Prometheus base URL is not included in that diagnostic
+log entry.
 
 ### Tempo `trace_config` for task trace correlation
 

@@ -26,9 +26,9 @@ query that previously returned HTTP 422.
 - [x] (2026-07-15 13:00Z) Added bounded, control-character-safe Prometheus 4xx diagnostics and regression coverage for range and instant queries.
 - [x] (2026-07-15 13:04Z) Passed focused tests, SDK and Studio formatting/lint/type checks, 419 SDK tests with one skip, and 244 Studio backend tests.
 - [x] (2026-07-15 13:04Z) Validated through Computer Use against a real Prometheus 3.7.3 scrape: 10 ownership series including a duplicate UID resolved to 9 pods and 9 CPU, memory, and phase UI series after reload.
-- [ ] Commit, push, open a ready-for-review pull request, and wait for the first code review.
-- [ ] Address actionable first-review feedback, reply, resolve threads, and rerun verification.
-- [ ] Bump the release to `1.4.29`, update changelog and operator documentation, rerun required verification, and finalize the pull request.
+- [x] (2026-07-15 13:05Z) Committed `fd4ed35`, pushed the branch, opened ready-for-review PR #110, and passed all 10 initial CI jobs.
+- [x] (2026-07-15 13:13Z) Received the first Codex review with no major issues and no actionable or unresolved review threads.
+- [x] (2026-07-15 13:16Z) Bumped the release and freeze perimeter to `1.4.29`, updated changelog and operator documentation, reran the mandatory verification stack, passed 92 frontend tests, and built all release artifacts.
 
 ## Surprises & Discoveries
 
@@ -73,12 +73,24 @@ query that previously returned HTTP 422.
   while retaining one original series so `group_left` can preserve the existing
   pod source label shown by the frontend.
   Date/Author: 2026-07-15 / Codex.
+- Decision: the user explicitly approved breaking the `v1.4.28` production
+  freeze perimeter for this task.
+  Rationale: the requested `1.4.29` release bump can intentionally advance the
+  package and freeze manifests after the first review. Runtime and response
+  compatibility will still be preserved because no breaking API change is
+  needed for the fix itself.
+  Date/Author: 2026-07-15 / User and Codex.
 
 ## Outcomes & Retrospective
 
-Work is in progress. This section will record the final implementation, real
-environment evidence, PR/review outcome, release metadata changes, and any
-remaining risks.
+Studio now enforces one ownership series per configured namespace/pod join key.
+The real Prometheus fixture that previously returned a many-to-many error
+resolved 10 ownership series to 9 current pods and produced 9 CPU, memory, and
+phase series in Chrome. PR #110 passed its initial 10 CI jobs and first Codex
+review without requested changes. Release metadata, freeze manifests,
+installation instructions, changelog, and operator guidance now identify
+`v1.4.29`; no route, response, configuration, or persisted-data migration was
+introduced.
 
 ## Context and Orientation
 
@@ -102,8 +114,9 @@ Compatibility boundary: latest release tag `v1.4.28`; preserve all Studio
 backend routes, response models, configuration models, frontend contract types,
 and existing label behavior where it is safe. The fix changes only generated
 PromQL and provider error detail. No shim or migration is needed because no
-persisted or wire format changes. The production freeze manifests must remain
-unchanged unless a later diff proves that the public perimeter changed.
+persisted or wire format changes. The user explicitly approved advancing the
+production freeze perimeter for the requested `1.4.29` release metadata step;
+manifest edits must remain narrow and be called out in the PR.
 
 ## Plan of Work
 
