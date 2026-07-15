@@ -175,7 +175,7 @@ def test_prometheus_provider_builds_queries_and_normalizes_series() -> None:
     asyncio.run(scenario())
     assert observed_queries[0].startswith(
         'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
-        " * on(namespace, pod) group_left() "
+        " * on(namespace, pod) group_left() max by (namespace, pod) ("
     )
     assert 'kube_pod_labels{namespace="prod"}' in observed_queries[0]
     assert 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in observed_queries[0]
@@ -221,7 +221,8 @@ def test_prometheus_provider_builds_owned_pod_joins_for_platform_queries() -> No
     asyncio.run(scenario())
     assert len(observed_queries) == len(platform_groups)
     assert all(
-        ' * on(namespace, pod) group_left() (kube_pod_labels{namespace="prod"}' in query
+        " * on(namespace, pod) group_left() max by (namespace, pod) (" in query
+        and 'kube_pod_labels{namespace="prod"}' in query
         and 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in query
         for query in observed_queries
     )
@@ -352,7 +353,7 @@ def test_prometheus_provider_translates_service_selectors_to_kube_pod_labels() -
     query = observed_queries[0]
     assert query.startswith(
         'sum(rate(container_cpu_usage_seconds_total{container!="",image!="",namespace="prod",pod=~".+"}[5m])'
-        " * on(namespace, pod) group_left() "
+        " * on(namespace, pod) group_left() max by (namespace, pod) ("
     )
     assert 'kube_pod_labels{label_app_kubernetes_io_name="payments",namespace="prod"}' in query
     assert 'kube_pod_labels{label_app_kubernetes_io_name_conflict1="payments",namespace="prod"}' in query
@@ -388,7 +389,101 @@ def test_prometheus_provider_queries_current_service_pods() -> None:
         '(kube_pod_status_phase{namespace="prod",phase=~"Pending|Running|Succeeded|Failed|Unknown",pod=~".+"} == 1)'
         " * on(namespace, pod) group_left(label_app"
     )
+    assert "topk by (namespace, pod) (1, " in observed["query"]
     assert 'kube_pod_labels{label_app="payments-api",namespace="prod"}' in observed["query"]
+
+
+def test_prometheus_provider_deduplicates_ownership_by_configured_join_labels() -> None:
+    config = PrometheusMetricsConfig(
+        provider="prometheus",
+        base_url="https://prometheus.example.test",
+        namespace="prod",
+        namespace_label="kube_namespace",
+        pod_label="pod_name",
+        container_label="container_name",
+        service_selector_labels={
+            "app.kubernetes.io/name": "payments",
+            "team/service": "payments-platform",
+        },
+    )
+    provider = PrometheusMetricsProvider(
+        http_client=TrackingAsyncClient(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200)),
+            timeout=5.0,
+        )
+    )
+
+    metric_query = provider._build_query(
+        service=make_record(metrics_config=config),
+        config=config,
+        query=StudioMetricsQuery(groups=[StudioMetricGroup.CPU_USAGE]),
+        group=StudioMetricGroup.CPU_USAGE,
+    )
+    pod_query = provider._build_pod_list_query(config)
+
+    assert "* on(kube_namespace, pod_name) group_left() max by (kube_namespace, pod_name) (" in metric_query
+    assert "* on(kube_namespace, pod_name) group_left(" in pod_query
+    assert "topk by (kube_namespace, pod_name) (1, " in pod_query
+    assert 'kube_pod_labels{kube_namespace="prod"}' in metric_query
+    assert 'label_app_kubernetes_io_name_conflict9="payments"' in metric_query
+    assert 'label_team_service_conflict9="payments-platform"' in metric_query
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_endpoint"),
+    [("metrics", "/api/v1/query_range"), ("pods", "/api/v1/query")],
+)
+def test_prometheus_provider_preserves_sanitized_422_diagnostics(
+    operation: str,
+    expected_endpoint: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={
+                "status": "error",
+                "errorType": "execution",
+                "error": "many-to-many\nmatching\x00not allowed",
+            },
+        )
+
+    async def scenario() -> None:
+        config = make_metrics_config()
+        provider = PrometheusMetricsProvider(
+            http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
+        )
+        with pytest.raises(StudioMetricsProviderError) as exc_info:
+            if operation == "metrics":
+                await provider.query_metrics(
+                    service=make_record(metrics_config=config),
+                    config=config,
+                    query=StudioMetricsQuery(
+                        from_time="2024-04-10T21:00:00Z",
+                        to_time="2024-04-10T21:01:00Z",
+                        step=30,
+                        groups=[StudioMetricGroup.CPU_USAGE],
+                    ),
+                )
+            else:
+                await provider.query_service_pods(service=make_record(metrics_config=config), config=config)
+
+        assert "status 422" in str(exc_info.value)
+        assert "errorType=execution" in str(exc_info.value)
+        assert "error=many-to-many matching not allowed" in str(exc_info.value)
+
+    with caplog.at_level("WARNING", logger="relayna_studio.metrics"):
+        asyncio.run(scenario())
+
+    assert f"endpoint='{expected_endpoint}'" in caplog.text
+    assert "error_type='execution'" in caplog.text
+    assert "error='many-to-many matching not allowed'" in caplog.text
+    assert "query='" in caplog.text
+    assert "https://prometheus.example.test" not in caplog.text
+    if operation == "metrics":
+        assert "start='1712782800.0'" in caplog.text
+        assert "end='1712782860.0'" in caplog.text
+        assert "step='30'" in caplog.text
 
 
 def test_prometheus_provider_builds_pod_split_and_filter_queries() -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -52,6 +53,9 @@ _TASK_APPROXIMATION_WARNING = (
 )
 _KUBE_POD_LABEL_UNSAFE_CHARS = re.compile(r"[^a-zA-Z0-9_]")
 _KUBE_POD_LABEL_CONFLICT_SUFFIXES = ("", *(f"_conflict{index}" for index in range(1, 10)))
+_PROMETHEUS_DIAGNOSTIC_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+_PROMETHEUS_DIAGNOSTIC_LIMIT = 1_000
+LOGGER = logging.getLogger(__name__)
 
 
 def _normalize_optional_string(value: Any) -> str | None:
@@ -83,6 +87,17 @@ def _kube_pod_label_metric_name(value: str) -> str:
 def _kube_pod_label_metric_name_candidates(value: str) -> tuple[str, ...]:
     name = _kube_pod_label_metric_name(value)
     return tuple(f"{name}{suffix}" for suffix in _KUBE_POD_LABEL_CONFLICT_SUFFIXES)
+
+
+def _sanitize_prometheus_diagnostic(value: Any) -> str | None:
+    normalized = _normalize_optional_string(value)
+    if normalized is None:
+        return None
+    sanitized = _PROMETHEUS_DIAGNOSTIC_CONTROL_CHARS.sub(" ", normalized)
+    sanitized = " ".join(sanitized.split())
+    if len(sanitized) <= _PROMETHEUS_DIAGNOSTIC_LIMIT:
+        return sanitized
+    return f"{sanitized[:_PROMETHEUS_DIAGNOSTIC_LIMIT]}..."
 
 
 class StudioMetricPoint(BaseModel):
@@ -271,9 +286,12 @@ class PrometheusMetricsProvider:
             ) from exc
 
         if response.status_code != 200:
-            raise StudioMetricsProviderError(
-                f"Prometheus pod query for service '{service.service_id}' returned unexpected status "
-                f"{response.status_code}."
+            raise self._unexpected_status_error(
+                response=response,
+                service=service,
+                operation="pod query",
+                endpoint=self._instant_query_path,
+                params=params,
             )
         try:
             payload = response.json()
@@ -311,9 +329,12 @@ class PrometheusMetricsProvider:
             raise StudioMetricsProviderError(f"Prometheus query failed for service '{service.service_id}'.") from exc
 
         if response.status_code != 200:
-            raise StudioMetricsProviderError(
-                f"Prometheus query for service '{service.service_id}' returned unexpected status "
-                f"{response.status_code}."
+            raise self._unexpected_status_error(
+                response=response,
+                service=service,
+                operation="query",
+                endpoint=self._query_path,
+                params=params,
             )
         try:
             payload = response.json()
@@ -459,7 +480,7 @@ class PrometheusMetricsProvider:
                 config.pod_label: ("=~", ".+"),
             },
         )
-        ownership = self._pod_ownership_selector(config)
+        ownership = self._single_pod_ownership_selector(config)
         group_labels = sorted(
             {
                 candidate
@@ -508,6 +529,58 @@ class PrometheusMetricsProvider:
             ownership = f"({ownership} and on({config.namespace_label}, {config.pod_label}) ({candidates}))"
         return ownership
 
+    def _unique_pod_ownership_selector(self, config: PrometheusMetricsConfig) -> str:
+        join_labels = f"{config.namespace_label}, {config.pod_label}"
+        return f"max by ({join_labels}) ({self._pod_ownership_selector(config)})"
+
+    def _single_pod_ownership_selector(self, config: PrometheusMetricsConfig) -> str:
+        join_labels = f"{config.namespace_label}, {config.pod_label}"
+        return f"topk by ({join_labels}) (1, {self._pod_ownership_selector(config)})"
+
+    def _unexpected_status_error(
+        self,
+        *,
+        response: httpx.Response,
+        service: ServiceRecord,
+        operation: str,
+        endpoint: str,
+        params: Mapping[str, str],
+    ) -> StudioMetricsProviderError:
+        error_type: str | None = None
+        upstream_error: str | None = None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, Mapping):
+            error_type = _sanitize_prometheus_diagnostic(payload.get("errorType"))
+            upstream_error = _sanitize_prometheus_diagnostic(payload.get("error"))
+
+        LOGGER.warning(
+            "Prometheus %s failed for service=%r status=%s endpoint=%r start=%r end=%r step=%r "
+            "error_type=%r error=%r query=%r",
+            operation,
+            service.service_id,
+            response.status_code,
+            endpoint,
+            params.get("start"),
+            params.get("end"),
+            params.get("step"),
+            error_type,
+            upstream_error,
+            _sanitize_prometheus_diagnostic(params.get("query")),
+        )
+
+        detail_parts = [
+            f"Prometheus {operation} for service '{service.service_id}' returned unexpected status "
+            f"{response.status_code}"
+        ]
+        if error_type is not None:
+            detail_parts.append(f"errorType={error_type}")
+        if upstream_error is not None:
+            detail_parts.append(f"error={upstream_error}")
+        return StudioMetricsProviderError("; ".join(detail_parts) + ".")
+
     def _format_selector(self, labels: Mapping[str, tuple[str, str]]) -> str:
         return ",".join(
             f'{key}{operator}"{_escape_promql_string(value)}"' for key, (operator, value) in sorted(labels.items())
@@ -525,7 +598,7 @@ class PrometheusMetricsProvider:
         *,
         query: StudioMetricsQuery,
     ) -> str:
-        ownership = self._pod_ownership_selector(config)
+        ownership = self._unique_pod_ownership_selector(config)
         join = f"{expression} * on({config.namespace_label}, {config.pod_label}) group_left() {ownership}"
         if group_labels:
             formatted_labels = ", ".join(dict.fromkeys(group_labels))
