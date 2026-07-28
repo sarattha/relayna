@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "exceptions": [
+    {
+      "advisory": "GHSA-qwww-vcr4-c8h2",
+      "packages": [
+        "react-router",
+        "react-router-dom"
+      ],
+      "expires_on": "2026-08-28",
+      "reason": "The advisory only affects unstable React Server Components APIs. Relayna Studio is a client-only BrowserRouter application and does not use RSC APIs.",
+      "tracking": "https://github.com/sarattha/relayna/pull/111"
+    }
+  ]
+}

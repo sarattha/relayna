@@ -20,6 +20,11 @@ environment metadata to reproduce the run.
 
 ## Progress
 
+- [x] (2026-07-28 17:29Z) Updated vulnerable Python documentation and Studio
+  frontend dependencies, documented the RSC-only React Router advisory
+  exception, and added an expiring fail-closed npm audit filter with Node tests.
+- [x] (2026-07-28 17:20Z) Replied to and resolved the first Codex review
+  thread after pushing the cross-platform mode-assertion fix.
 - [x] (2026-07-28 17:19Z) Addressed the first Codex review finding by
   restricting the exact report-mode assertion to POSIX while retaining the
   cross-platform readability/content assertion.
@@ -156,6 +161,13 @@ artifacts, while benchmark-specific fixtures, timing, matrices, and rendering
 remain isolated. The authoring guide defines how to add and verify future
 types. Final verification passed with 437 SDK tests, one existing skip, and 244
 Studio backend tests.
+
+PR follow-up resolved the first Codex review finding and repaired newly failing
+dependency audits. The Python documentation dependency now resolves to a
+non-vulnerable version. Studio uses the newest compatible React Router and
+PostCSS releases; a single expiring exception covers an advisory that upstream
+explicitly limits to unused unstable RSC APIs. A tested audit wrapper continues
+to fail on every other high or critical npm finding.
 
 ## Context and Orientation
 

@@ -110,7 +110,8 @@ security-sdk: ## Audit SDK Python dependencies
 	$(PIP_AUDIT) --skip-editable
 
 security-frontend: ## Audit Studio frontend npm dependencies
-	cd apps/studio && npm audit --audit-level=high
+	cd apps/studio && node --test scripts/audit-dependencies.node-test.mjs
+	cd apps/studio && node scripts/audit-dependencies.mjs
 
 security-fs: ## Run repository filesystem, secret, and static-analysis checks
 	trivy fs --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .venv --skip-dirs dist --skip-dirs site .
