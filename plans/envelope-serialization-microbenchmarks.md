@@ -20,6 +20,9 @@ environment metadata to reproduce the run.
 
 ## Progress
 
+- [x] (2026-07-28 17:19Z) Addressed the first Codex review finding by
+  restricting the exact report-mode assertion to POSIX while retaining the
+  cross-platform readability/content assertion.
 - [x] (2026-07-28 17:07Z) Generalized the one-off envelope entry point into a
   discoverable benchmark CLI with `list`, `run`, and `run-all` commands.
 - [x] (2026-07-28 17:07Z) Documented CLI usage, benchmark authoring

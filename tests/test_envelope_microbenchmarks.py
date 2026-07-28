@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -92,7 +93,8 @@ def test_html_report_contains_methodology_results_and_metadata(tmp_path) -> None
 
     assert report_path == (tmp_path / "nested" / "report.html").resolve()
     assert report_path.read_text(encoding="utf-8") == rendered
-    assert report_path.stat().st_mode & 0o777 == 0o644
+    if os.name == "posix":
+        assert report_path.stat().st_mode & 0o777 == 0o644
     assert "<!doctype html>" in rendered
     assert "Methodology" in rendered
     assert "Results" in rendered
