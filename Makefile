@@ -10,7 +10,7 @@ TY              := $(UV) ty
 COVERAGE        := $(UV) coverage
 PYTEST          := $(UV) pytest
 PIP_AUDIT       := $(UV) --with pip-audit pip-audit
-SDK_PY_PATHS     := src tests
+SDK_PY_PATHS     := src tests benchmarks
 
 #  Ruff & Black share the same default 88-char line length.                   #
 #  Set your project-wide preference *once* here and both the linter           #
@@ -56,7 +56,7 @@ fix: ## Lint + safe auto-fixes for the SDK workspace
 
 .PHONY: typecheck
 typecheck: ## Static type analysis for the SDK package
-	$(TY) check src/relayna
+	$(TY) check src/relayna benchmarks
 
 # --------------------------------------------------------------------------- #
 #  Tests & coverage
@@ -110,10 +110,11 @@ security-sdk: ## Audit SDK Python dependencies
 	$(PIP_AUDIT) --skip-editable
 
 security-frontend: ## Audit Studio frontend npm dependencies
-	cd apps/studio && npm audit --audit-level=high
+	cd apps/studio && node --test scripts/audit-dependencies.node-test.mjs
+	cd apps/studio && node scripts/audit-dependencies.mjs
 
 security-fs: ## Run repository filesystem, secret, and static-analysis checks
-	trivy fs --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .venv --skip-dirs dist --skip-dirs site .
+	trivy fs --ignorefile .trivyignore.yaml --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .venv --skip-dirs dist --skip-dirs site .
 	gitleaks detect --source . --redact
 	semgrep scan --config .semgrep.yml --error
 
@@ -140,8 +141,28 @@ studio-mocks-register: ## Register/update the mock services against Studio on lo
 	./.venv/bin/python scripts/studio_mock_services.py register
 
 # --------------------------------------------------------------------------- #
+#  Benchmarks
+# --------------------------------------------------------------------------- #
+BENCHMARK      ?= envelope-serialization
+BENCHMARK_ARGS ?=
+
+.PHONY: benchmark-list benchmark benchmark-all benchmark-envelopes
+benchmark-list: ## List registered benchmark types
+	$(UV) python -m benchmarks list
+
+benchmark: ## Run BENCHMARK (default: envelope-serialization); pass options with BENCHMARK_ARGS
+	$(UV) python -m benchmarks run $(BENCHMARK) $(BENCHMARK_ARGS)
+
+benchmark-all: ## Run every registered benchmark with canonical defaults
+	$(UV) python -m benchmarks run-all
+
+benchmark-envelopes: ## Benchmark task envelope JSON operations and write the HTML report
+	$(MAKE) benchmark BENCHMARK=envelope-serialization
+
+# --------------------------------------------------------------------------- #
 #  Misc
 # --------------------------------------------------------------------------- #
+
 .PHONY: clean
 clean: ## Remove SDK caches & artefacts
 	rm -rf .mypy_cache .ruff_cache .pytest_cache htmlcov coverage.xml

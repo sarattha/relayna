@@ -616,6 +616,7 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = ">=1.28.0" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
+    { name = "pymdown-extensions", marker = "extra == 'dev'", specifier = ">=11.0.0" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'" },
