@@ -1,0 +1,9 @@
+vulnerabilities:
+  - id: GHSA-qwww-vcr4-c8h2
+    paths:
+      - apps/studio/package-lock.json
+    expired_at: 2026-08-28
+    statement: >-
+      Relayna Studio is a client-only BrowserRouter application and does not
+      use the unstable React Server Components APIs affected by this advisory.
+      See docs/security-exceptions.md and PR #111.

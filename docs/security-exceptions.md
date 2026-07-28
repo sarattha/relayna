@@ -3,7 +3,7 @@
 Relayna CI fails on high or critical dependency, filesystem, image, secret, and
 static-analysis findings unless an exception is explicitly documented.
 
-Document every entry added to `.trivyignore`, `.gitleaks.toml`, `.semgrep.yml`,
+Document every entry added to `.trivyignore.yaml`, `.gitleaks.toml`, `.semgrep.yml`,
 or a dependency-audit exception file here with:
 
 - finding ID or rule name
@@ -27,3 +27,6 @@ or a dependency-audit exception file here with:
   critical npm finding fails CI.
 - Tracking link: https://github.com/sarattha/relayna/pull/111
 - Expiration date: 2026-08-28
+- Enforcement: `apps/studio/security-audit-exceptions.json` limits npm audit,
+  while `.trivyignore.yaml` limits the repository filesystem scan to the Studio
+  lockfile. Both exceptions expire on the same date.

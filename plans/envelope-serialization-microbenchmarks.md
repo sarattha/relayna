@@ -20,6 +20,9 @@ environment metadata to reproduce the run.
 
 ## Progress
 
+- [x] (2026-07-28 17:45Z) Scoped the RSC-only exception to the Studio lockfile
+  in Trivy's structured ignore format after CI showed that the independent
+  filesystem scanner does not consume the npm audit exception file.
 - [x] (2026-07-28 17:29Z) Updated vulnerable Python documentation and Studio
   frontend dependencies, documented the RSC-only React Router advisory
   exception, and added an expiring fail-closed npm audit filter with Node tests.
@@ -167,7 +170,9 @@ dependency audits. The Python documentation dependency now resolves to a
 non-vulnerable version. Studio uses the newest compatible React Router and
 PostCSS releases; a single expiring exception covers an advisory that upstream
 explicitly limits to unused unstable RSC APIs. A tested audit wrapper continues
-to fail on every other high or critical npm finding.
+to fail on every other high or critical npm finding. The same exception is
+represented in Trivy's structured YAML format, scoped to the Studio lockfile,
+and expires on the same date.
 
 ## Context and Orientation
 

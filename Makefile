@@ -114,7 +114,7 @@ security-frontend: ## Audit Studio frontend npm dependencies
 	cd apps/studio && node scripts/audit-dependencies.mjs
 
 security-fs: ## Run repository filesystem, secret, and static-analysis checks
-	trivy fs --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .venv --skip-dirs dist --skip-dirs site .
+	trivy fs --ignorefile .trivyignore.yaml --severity HIGH,CRITICAL --exit-code 1 --skip-dirs .venv --skip-dirs dist --skip-dirs site .
 	gitleaks detect --source . --redact
 	semgrep scan --config .semgrep.yml --error
 
