@@ -1545,6 +1545,12 @@ def _package_version(package_name: str) -> str:
         return "not installed"
 
 
+def _prepare_run_all(args: argparse.Namespace) -> None:
+    """Allow the aggregate CLI to run the supported partial matrix without orjson."""
+
+    args.allow_missing_orjson = True
+
+
 def run_from_cli(args: argparse.Namespace) -> BenchmarkOutcome:
     """Run the JSON engine study from parsed shared-CLI arguments."""
 
@@ -1588,4 +1594,5 @@ BENCHMARK = BenchmarkDefinition(
     default_output=DEFAULT_OUTPUT,
     add_arguments=add_cli_arguments,
     run=run_from_cli,
+    prepare_run_all=_prepare_run_all,
 )

@@ -54,7 +54,10 @@ def _print_outcome(definition: BenchmarkDefinition, outcome: BenchmarkOutcome) -
 def _default_arguments(definition: BenchmarkDefinition) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     definition.add_arguments(parser)
-    return parser.parse_args([])
+    args = parser.parse_args([])
+    if definition.prepare_run_all is not None:
+        definition.prepare_run_all(args)
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:

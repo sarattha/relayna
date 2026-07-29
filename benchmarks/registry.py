@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BenchmarkArgumentBuilder = Callable[[argparse.ArgumentParser], None]
+BenchmarkArgumentPreparer = Callable[[argparse.Namespace], None]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class BenchmarkDefinition:
     default_output: Path
     add_arguments: BenchmarkArgumentBuilder
     run: Callable[[argparse.Namespace], BenchmarkOutcome]
+    prepare_run_all: BenchmarkArgumentPreparer | None = None
 
 
 def _validate_definitions(definitions: tuple[BenchmarkDefinition, ...]) -> tuple[BenchmarkDefinition, ...]:

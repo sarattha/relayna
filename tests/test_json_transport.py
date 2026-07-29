@@ -23,6 +23,13 @@ class _NestedModel(BaseModel):
     value: str
 
 
+def _nested_mapping(depth: int) -> dict[str, object]:
+    value: dict[str, object] = {"value": "leaf"}
+    for _ in range(depth):
+        value = {"nested": value}
+    return value
+
+
 def test_transport_encoder_uses_compact_utf8_and_preserves_accepted_numeric_domain() -> None:
     value = {
         "unicode": "สวัสดี",
@@ -44,6 +51,14 @@ def test_transport_encoder_uses_compact_utf8_and_preserves_accepted_numeric_doma
     assert parsed["numbers"][1] == float("inf")
     assert parsed["numbers"][2] == float("-inf")
     assert parsed["1"] == "one"
+
+
+def test_transport_round_trips_payload_at_encoder_supported_nesting_depth() -> None:
+    payload = _nested_mapping(200)
+
+    encoded = encode_transport_json(payload)
+
+    assert parse_transport_json(encoded) == payload
 
 
 def test_transport_non_string_key_domain_is_explicit() -> None:

@@ -59,6 +59,14 @@ enabled it follows the existing malformed-message path; without retry it is
 rejected or acknowledged according to the existing consumer-specific malformed
 message policy.
 
+### Nesting depth
+
+Relayna preserves messages at the outbound encoder's supported nesting depth.
+When Pydantic Core reaches its lower inbound recursion limit, Relayna retries
+that body with the standard-library parser after a strict UTF-8 decode. This
+fallback does not restore the `v1.4.29` replacement-character behavior:
+invalid UTF-8 remains `malformed_json`.
+
 ### Huge integers
 
 Integers beyond signed or unsigned 64-bit ranges remain accepted and exact on

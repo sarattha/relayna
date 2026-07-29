@@ -107,17 +107,22 @@ def test_cli_run_all_dispatches_canonical_defaults(monkeypatch, tmp_path, capsys
         args.output.write_text("complete", encoding="utf-8")
         return BenchmarkOutcome(artifacts=(args.output,), measurement_count=3)
 
+    def prepare_run_all(args: argparse.Namespace) -> None:
+        args.aggregate_default = "partial"
+
     definition = BenchmarkDefinition(
         name="fake-benchmark",
         summary="Fake benchmark.",
         default_output=Path("reports/fake.html"),
         add_arguments=add_arguments,
         run=run,
+        prepare_run_all=prepare_run_all,
     )
     monkeypatch.setattr("benchmarks.cli.registered_benchmarks", lambda: (definition,))
 
     assert main(["run-all"]) == 0
     assert len(received) == 1
+    assert received[0].aggregate_default == "partial"
     assert received[0].output.read_text(encoding="utf-8") == "complete"
     assert "Completed fake-benchmark: 3 measurements" in capsys.readouterr().out
 

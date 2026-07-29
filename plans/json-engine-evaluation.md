@@ -75,6 +75,16 @@ production path.
 - [x] (2026-07-29 10:55Z) Passed focused migration/freeze tests, strict docs
   build, full SDK and Studio checks, mandatory `$code-change-verification`, and
   desktop/mobile browser QA; collected final `$pr-draft-summary` inputs.
+- [x] (2026-07-29 12:30Z) Addressed the first Codex review by preserving
+  encoder-supported nesting through a strict-UTF-8 depth-only parser fallback
+  and making `run-all` use the supported partial JSON matrix when orjson is not
+  installed.
+- [x] (2026-07-29 12:30Z) Added deterministic regression coverage and
+  reproduced `uv run python -m benchmarks run-all` without the benchmark extra;
+  all three registered benchmarks completed.
+- [x] (2026-07-29 12:30Z) Passed the strict docs build and the mandatory
+  `$code-change-verification` stack after the review fixes: SDK 521 passed with
+  three skips and Studio backend 244 passed.
 
 ## Surprises & Discoveries
 
@@ -249,6 +259,23 @@ production path.
   boundary rather than altering unrelated public-surface or route manifests.
   Date/Author: 2026-07-29 / Codex.
 
+- Decision: Preserve valid payloads at the production encoder's supported
+  nesting depth with a strict-UTF-8 stdlib parser fallback only when Pydantic
+  Core reports its recursion-limit error.
+  Rationale: This retains the chosen fast path and strict invalid-UTF-8 domain
+  while preventing Relayna from rejecting a body its own encoder successfully
+  published. It restores released compatibility for deeply nested valid JSON
+  without changing wire bytes, aliases, persistence, or rejection stages.
+  Date/Author: 2026-07-29 / Codex.
+
+- Decision: Let each benchmark definition prepare its canonical `run-all`
+  arguments, and configure the JSON study to allow its documented partial mode.
+  Rationale: `run-all` has no benchmark-specific flags. A definition-owned
+  preparer keeps the shared CLI generic, allows the complete orjson matrix when
+  installed, and otherwise lets envelope, partial JSON, and Redis benchmarks
+  all finish in a normal development environment.
+  Date/Author: 2026-07-29 / Codex.
+
 ## Outcomes & Retrospective
 
 The repository now has a registered `json-engine-evaluation` benchmark with a
@@ -323,6 +350,16 @@ passed end to end. The 101,962-byte mode-`0644` report passed desktop and mobile
 headed-browser QA; the only first-load console event was the local server's
 unsolicited favicon 404.
 
+The first Codex review identified two post-implementation compatibility gaps.
+Relayna now falls back to strict-UTF-8 stdlib parsing only when Pydantic Core
+hits its lower recursion limit, so a 200-level payload accepted by the encoder
+round-trips successfully. The aggregate benchmark CLI now applies
+definition-owned `run-all` defaults, allowing the JSON study to generate its
+supported partial report when orjson is absent. The exact default-environment
+`run-all` command completed the envelope, JSON, and Redis benchmarks, and the
+post-review verification stack passed with 521 SDK tests, three skips, and 244
+Studio backend tests.
+
 ## Context and Orientation
 
 The Relayna SDK lives under
@@ -356,6 +393,9 @@ transport encoding/parsing optimization. `$implementation-strategy` and
   accepted as described in the migration guide.
 - Built-in/configured aliases and malformed-JSON versus invalid-envelope
   rejection stages remain behaviorally stable.
+- Valid JSON emitted within the outbound encoder's nesting limit remains
+  readable through a strict-UTF-8 fallback when Pydantic Core reaches its lower
+  inbound recursion limit.
 - Canonical hash/dedup inputs, Redis/persisted JSON, SSE/API JSON, public
   exports, contracts, routes, topology, and Studio behavior remain unchanged.
 - `tests/freeze/feature_perimeter.json` changes intentionally to record the new
