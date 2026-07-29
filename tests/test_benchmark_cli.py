@@ -20,7 +20,7 @@ from benchmarks.registry import (  # noqa: E402
 def test_registry_has_unique_valid_repository_relative_definitions() -> None:
     definitions = registered_benchmarks()
 
-    assert [definition.name for definition in definitions] == ["envelope-serialization"]
+    assert [definition.name for definition in definitions] == ["envelope-serialization", "redis-storage-cpu"]
     assert all(not definition.default_output.is_absolute() for definition in definitions)
 
 
@@ -52,6 +52,8 @@ def test_cli_lists_registered_benchmarks(capsys) -> None:
     assert "NAME" in output
     assert "envelope-serialization" in output
     assert "reports/envelope-microbenchmarks.html" in output
+    assert "redis-storage-cpu" in output
+    assert "reports/redis-storage-cpu-microbenchmarks.html" in output
 
 
 def test_cli_runs_envelope_benchmark_with_specific_options(tmp_path, capsys) -> None:

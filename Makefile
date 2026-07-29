@@ -146,7 +146,7 @@ studio-mocks-register: ## Register/update the mock services against Studio on lo
 BENCHMARK      ?= envelope-serialization
 BENCHMARK_ARGS ?=
 
-.PHONY: benchmark-list benchmark benchmark-all benchmark-envelopes
+.PHONY: benchmark-list benchmark benchmark-all benchmark-envelopes benchmark-redis-storage
 benchmark-list: ## List registered benchmark types
 	$(UV) python -m benchmarks list
 
@@ -158,6 +158,9 @@ benchmark-all: ## Run every registered benchmark with canonical defaults
 
 benchmark-envelopes: ## Benchmark task envelope JSON operations and write the HTML report
 	$(MAKE) benchmark BENCHMARK=envelope-serialization
+
+benchmark-redis-storage: ## Benchmark Redis-facing CPU operations and write the HTML report
+	$(MAKE) benchmark BENCHMARK=redis-storage-cpu
 
 # --------------------------------------------------------------------------- #
 #  Misc

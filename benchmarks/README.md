@@ -13,6 +13,7 @@ Run commands from the repository root. Discover the available benchmark types:
 Run one benchmark with its canonical defaults:
 
     uv run python -m benchmarks run envelope-serialization
+    uv run python -m benchmarks run redis-storage-cpu
 
 Show the options owned by one benchmark:
 
@@ -28,6 +29,7 @@ Equivalent Make targets are available:
     make benchmark
     make benchmark BENCHMARK=envelope-serialization
     make benchmark-all
+    make benchmark-redis-storage
 
 Pass benchmark-specific options through Make with `BENCHMARK_ARGS`:
 
@@ -36,7 +38,8 @@ Pass benchmark-specific options through Make with `BENCHMARK_ARGS`:
       BENCHMARK_ARGS='--repeats 1 --iterations "1 MB=2"'
 
 `make benchmark-envelopes` remains a convenience alias for the canonical
-envelope benchmark.
+envelope benchmark. `make benchmark-redis-storage` is the matching convenience
+alias for the Redis-facing CPU benchmark.
 
 ## Envelope serialization benchmark
 
@@ -65,6 +68,44 @@ report path:
       --iterations "128 KB=1" \
       --iterations "1 MB=1" \
       --output /tmp/envelope-microbenchmarks.html
+
+## Redis-facing CPU benchmark
+
+`redis-storage-cpu` isolates the deterministic CPU work immediately around
+Redis persistence. It does not start Redis or measure commands, sockets,
+networking, or event-loop scheduling.
+
+The matrix covers:
+
+- generic status and observation JSON storage
+- Pydantic DLQ, task-lease, and merged service-feed records
+- canonical service-event and workflow dedup hashes
+- encode and decode for stored records, plus canonical-hash operations
+- exact 1 KB, 16 KB, and 128 KB processed payloads
+- ASCII and Unicode/numeric profiles
+
+A successful canonical run writes the self-contained report to
+`reports/redis-storage-cpu-microbenchmarks.html`. Run it with:
+
+    uv run python -m benchmarks run redis-storage-cpu
+
+The canonical run uses five repeats and these fixed iteration counts per
+repeat:
+
+| Target | Iterations |
+| --- | ---: |
+| 1 KB | 3,000 |
+| 16 KB | 600 |
+| 128 KB | 80 |
+
+For a fast development run:
+
+    uv run python -m benchmarks run redis-storage-cpu \
+      --repeats 1 \
+      --iterations "1 KB=2" \
+      --iterations "16 KB=2" \
+      --iterations "128 KB=1" \
+      --output /tmp/redis-storage-cpu-microbenchmarks.html
 
 ## Adding a benchmark type
 
