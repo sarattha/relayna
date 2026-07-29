@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -9,6 +8,7 @@ from typing import Any
 from aio_pika.abc import AbstractChannel, AbstractQueue
 
 from .._async import run_bounded_iterator
+from .._transport_json import parse_transport_json
 from ..contracts import ContractAliasConfig, normalize_contract_aliases
 from ..observability import (
     ObservationSink,
@@ -117,7 +117,7 @@ class StatusHub:
 
     async def _handle_message(self, message: Any) -> None:
         try:
-            payload = json.loads(message.body.decode("utf-8", errors="replace"))
+            payload = parse_transport_json(message.body)
         except Exception:
             await message.ack()
             await emit_observation(

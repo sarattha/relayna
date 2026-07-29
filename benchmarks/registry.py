@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BenchmarkArgumentBuilder = Callable[[argparse.ArgumentParser], None]
+BenchmarkArgumentPreparer = Callable[[argparse.Namespace], None]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class BenchmarkDefinition:
     default_output: Path
     add_arguments: BenchmarkArgumentBuilder
     run: Callable[[argparse.Namespace], BenchmarkOutcome]
+    prepare_run_all: BenchmarkArgumentPreparer | None = None
 
 
 def _validate_definitions(definitions: tuple[BenchmarkDefinition, ...]) -> tuple[BenchmarkDefinition, ...]:
@@ -47,6 +49,7 @@ def registered_benchmarks() -> tuple[BenchmarkDefinition, ...]:
     """Return every benchmark exposed by the repository CLI."""
 
     from benchmarks.envelope_serialization import BENCHMARK
+    from benchmarks.json_engine_evaluation import BENCHMARK as JSON_ENGINE_BENCHMARK
     from benchmarks.redis_storage_cpu import BENCHMARK as REDIS_STORAGE_CPU_BENCHMARK
 
-    return _validate_definitions((BENCHMARK, REDIS_STORAGE_CPU_BENCHMARK))
+    return _validate_definitions((BENCHMARK, JSON_ENGINE_BENCHMARK, REDIS_STORAGE_CPU_BENCHMARK))

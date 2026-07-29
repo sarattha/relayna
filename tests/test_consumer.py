@@ -1991,6 +1991,27 @@ async def test_task_consumer_dead_letters_malformed_json_when_retry_enabled() ->
 
 
 @pytest.mark.asyncio
+async def test_task_consumer_classifies_invalid_utf8_as_malformed_json() -> None:
+    message = FakeMessage(b'{"task_id":"task-1","payload":{"text":"a\xffb"}}')
+    queue = FakeQueue([message])
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        raise AssertionError("handler should not run")
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert message.acked is True
+    assert rabbit.raw_queue_publishes[0]["headers"]["x-relayna-failure-reason"] == "malformed_json"
+
+
+@pytest.mark.asyncio
 async def test_task_consumer_indexes_malformed_dead_letter_payload_as_text() -> None:
     message = FakeMessage(b"{not-json")
     queue = FakeQueue([message])

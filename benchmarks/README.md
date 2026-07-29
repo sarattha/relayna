@@ -15,6 +15,10 @@ Run one benchmark with its canonical defaults:
     uv run python -m benchmarks run envelope-serialization
     uv run python -m benchmarks run redis-storage-cpu
 
+Benchmarks that compare optional engines should install the benchmark extra:
+
+    uv run --extra benchmark python -m benchmarks run json-engine-evaluation
+
 Show the options owned by one benchmark:
 
     uv run python -m benchmarks run envelope-serialization --help
@@ -40,6 +44,49 @@ Pass benchmark-specific options through Make with `BENCHMARK_ARGS`:
 `make benchmark-envelopes` remains a convenience alias for the canonical
 envelope benchmark. `make benchmark-redis-storage` is the matching convenience
 alias for the Redis-facing CPU benchmark.
+
+## JSON engine decision benchmark
+
+`json-engine-evaluation` compares Relayna's complete deterministic CPU-side JSON
+paths, including the implemented private Pydantic Core production transport
+codec. It covers the released v1.4.29 stdlib reference, the new production path,
+direct model-aware Pydantic JSON, and orjson for:
+
+- outbound model/mapping preparation, encoding, and AMQP-ready bytes;
+- canonical inbound parsing and validated envelope construction;
+- alias-compatible inbound parsing, `documentId` normalization, and validation;
+- task and two-task batch envelopes at exact current-wire targets of 1 KB,
+  16 KB, 128 KB, and 1 MB; and
+- ASCII-heavy and Unicode/numeric payload profiles.
+
+The canonical run writes the self-contained performance, compatibility,
+packaging, and recommendation report to
+`reports/json-engine-evaluation.html`:
+
+    uv run --extra benchmark python -m benchmarks run json-engine-evaluation
+
+or:
+
+    make benchmark BENCHMARK=json-engine-evaluation
+
+orjson is pinned in the optional `benchmark` extra. It is not a production
+runtime dependency. A contributor intentionally testing optional-engine
+handling can omit the extra and generate a clearly marked partial report:
+
+    uv run python -m benchmarks run json-engine-evaluation \
+      --allow-missing-orjson \
+      --output /tmp/json-engine-evaluation-partial.html
+
+For a quick development run, restrict the profile and iterations:
+
+    uv run --extra benchmark python -m benchmarks run json-engine-evaluation \
+      --profile ascii \
+      --repeats 1 \
+      --iterations "1 KB=2" \
+      --iterations "16 KB=2" \
+      --iterations "128 KB=1" \
+      --iterations "1 MB=1" \
+      --output /tmp/json-engine-evaluation.html
 
 ## Envelope serialization benchmark
 

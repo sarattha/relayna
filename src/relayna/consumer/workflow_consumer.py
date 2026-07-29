@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -10,6 +9,7 @@ from opentelemetry.trace import SpanKind
 from pydantic import ValidationError
 
 from .._async import run_bounded_iterator
+from .._transport_json import parse_transport_json
 from ..contracts import ContractAliasConfig, WorkflowEnvelope
 from ..dlq import DLQRecorder
 from ..metrics import RelaynaMetrics
@@ -238,7 +238,7 @@ class WorkflowConsumer:
         retry_policy: RetryPolicy | None,
     ) -> bool:
         try:
-            payload = json.loads(message.body.decode("utf-8", errors="replace"))
+            payload = parse_transport_json(message.body)
         except Exception:
             if retry_policy is None:
                 await message.reject(requeue=False)
