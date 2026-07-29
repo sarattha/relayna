@@ -14,6 +14,7 @@ from benchmarks.json_engine_evaluation import (  # noqa: E402
     DEFAULT_PROFILES,
     TARGET_SIZES,
     BenchmarkResult,
+    available_orjson,
     build_fixture,
     build_matrix,
     collect_environment,
@@ -38,12 +39,14 @@ def minimal_results() -> list[BenchmarkResult]:
         repeats=1,
         iterations_by_size={size: 1 for size in TARGET_SIZES.values()},
         profiles=("ascii",),
+        include_orjson=False,
+        orjson_module=None,
     )
 
 
 @pytest.fixture(scope="module")
 def compatibility_findings():
-    return run_compatibility_checks()
+    return run_compatibility_checks(include_orjson=False, orjson_module=None)
 
 
 @pytest.mark.parametrize("envelope_kind", ["task", "batch"])
@@ -100,11 +103,20 @@ def test_outbound_candidates_preserve_parsed_semantics_but_not_current_bytes() -
     candidates = [
         pydantic_core_outbound(fixture),
         pydantic_direct_outbound(fixture),
-        orjson_outbound(fixture),
     ]
 
     assert all(json.loads(candidate) == baseline_semantics for candidate in candidates)
     assert all(candidate != baseline for candidate in candidates)
+
+
+@pytest.mark.skipif(available_orjson() is None, reason="orjson benchmark extra is not installed")
+def test_orjson_outbound_preserves_parsed_semantics_but_not_current_bytes() -> None:
+    fixture = build_fixture("task", TARGET_SIZES["1 KB"], "unicode-numeric")
+    baseline = stdlib_outbound(fixture)
+    candidate = orjson_outbound(fixture)
+
+    assert json.loads(candidate) == json.loads(baseline)
+    assert candidate != baseline
 
 
 @pytest.mark.parametrize("envelope_kind", ["task", "batch"])
@@ -131,7 +143,7 @@ def test_canonical_and_alias_paths_validate_equivalent_models(envelope_kind: str
 
 
 def test_minimal_run_reports_complete_positive_metrics(minimal_results) -> None:
-    assert len(minimal_results) == 96
+    assert len(minimal_results) == 72
     assert all(result.actual_bytes > 0 for result in minimal_results)
     assert all(result.median_ns_per_op > 0 for result in minimal_results)
     assert all(result.p25_ns_per_op > 0 for result in minimal_results)
@@ -150,7 +162,7 @@ def _finding(findings, scenario: str, engine: str):
 def test_compatibility_findings_capture_required_semantic_boundaries(compatibility_findings) -> None:
     scenarios = {finding.scenario for finding in compatibility_findings}
 
-    assert len(compatibility_findings) == 61
+    assert len(compatibility_findings) == 46
     assert {
         "Prepared Unicode/numeric TaskEnvelope",
         "Valid Unicode and UTF-8",
@@ -180,11 +192,6 @@ def test_compatibility_findings_capture_required_semantic_boundaries(compatibili
         compatibility_findings,
         "Invalid UTF-8 byte inside a JSON string",
         "New production: Pydantic Core transport",
-    )
-    orjson_huge = _finding(
-        compatibility_findings,
-        "Inbound integer beyond 64-bit (2**100)",
-        "orjson",
     )
     direct_alias = _finding(
         compatibility_findings,
@@ -221,7 +228,6 @@ def test_compatibility_findings_capture_required_semantic_boundaries(compatibili
     assert current_invalid_utf8.outcome == "accepted"
     assert core_invalid_utf8.outcome == "rejected"
     assert core_invalid_utf8.rejection_stage == "JSON parse"
-    assert orjson_huge.outcome == "precision loss"
     assert direct_alias.outcome == "compatible with fallback"
     assert "fallback is required" in direct_alias.detail
     assert malformed.rejection_stage == "JSON parse"
@@ -230,6 +236,15 @@ def test_compatibility_findings_capture_required_semantic_boundaries(compatibili
     assert '"None"' in production_none_key.detail
     assert released_tuple_key.outcome == "rejected"
     assert '"x,y"' in production_tuple_key.detail
+
+
+@pytest.mark.skipif(available_orjson() is None, reason="orjson benchmark extra is not installed")
+def test_orjson_compatibility_findings_capture_numeric_domain() -> None:
+    findings = run_compatibility_checks()
+    orjson_huge = _finding(findings, "Inbound integer beyond 64-bit (2**100)", "orjson")
+
+    assert len(findings) == 61
+    assert orjson_huge.outcome == "precision loss"
 
 
 def test_optional_orjson_handling_is_explicit_and_partial_matrix_remains_usable() -> None:
@@ -265,14 +280,14 @@ def test_html_report_contains_decision_compatibility_packaging_and_next_benchmar
         minimal_results,
         compatibility_findings,
         environment,
-        include_orjson=True,
+        include_orjson=False,
     )
     report_path = write_html_report(
         tmp_path / "nested" / "report.html",
         minimal_results,
         compatibility_findings,
         environment,
-        include_orjson=True,
+        include_orjson=False,
     )
 
     assert report_path == (tmp_path / "nested" / "report.html").resolve()
@@ -291,6 +306,7 @@ def test_html_report_contains_decision_compatibility_packaging_and_next_benchmar
     assert "Operations/s" in rendered
     assert "MiB/s" in rendered
     assert "orjson==3.11.9" in rendered
+    assert "explicitly partial report" in rendered
     assert "Pydantic Core 2.41.5 (production)" in rendered
     assert "pydantic_core-2.41.5-cp314-cp314-manylinux_2_17_aarch64" in rendered
     assert "CPython 3.14" in rendered

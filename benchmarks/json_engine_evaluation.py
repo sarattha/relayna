@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib import import_module
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from statistics import median
@@ -31,11 +32,9 @@ from relayna.contracts import (
 )
 
 try:
-    import orjson
+    _orjson_module: ModuleType | None = import_module("orjson")
 except ImportError:  # pragma: no cover - exercised through injected absence
-    _orjson_module: ModuleType | None = None
-else:
-    _orjson_module = orjson
+    _orjson_module = None
 
 Envelope = TaskEnvelope | BatchTaskEnvelope
 EnvelopeType = type[TaskEnvelope] | type[BatchTaskEnvelope]
