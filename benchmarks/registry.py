@@ -47,5 +47,6 @@ def registered_benchmarks() -> tuple[BenchmarkDefinition, ...]:
     """Return every benchmark exposed by the repository CLI."""
 
     from benchmarks.envelope_serialization import BENCHMARK
+    from benchmarks.redis_storage_cpu import BENCHMARK as REDIS_STORAGE_CPU_BENCHMARK
 
-    return _validate_definitions((BENCHMARK,))
+    return _validate_definitions((BENCHMARK, REDIS_STORAGE_CPU_BENCHMARK))
