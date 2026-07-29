@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -10,6 +9,7 @@ from typing import Any, Protocol
 
 from pydantic import ValidationError
 
+from .._transport_json import encode_transport_json
 from ..contracts import (
     ContractAliasConfig,
     StatusEventEnvelope,
@@ -673,7 +673,7 @@ def _normalize_batch_payload(payload: Mapping[str, Any], *, alias_config: Contra
 
 
 def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
-    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return encode_transport_json(payload)
 
 
 async def _persist_dlq_record(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -11,6 +10,7 @@ from opentelemetry.trace import SpanKind
 from pydantic import ValidationError
 
 from .._async import map_bounded, run_bounded_iterator
+from .._transport_json import parse_transport_json
 from ..contracts import BatchTaskEnvelope, ContractAliasConfig, StatusEventEnvelope, TaskEnvelope, is_batch_task_payload
 from ..dlq import DLQRecorder
 from ..metrics import RelaynaMetrics, sample_task_resources
@@ -251,7 +251,7 @@ class TaskConsumer:
         self, message: Any, *, source_queue_name: str, retry_infrastructure: RetryInfrastructure | None
     ) -> None:
         try:
-            payload = json.loads(message.body.decode("utf-8", errors="replace"))
+            payload = parse_transport_json(message.body)
         except Exception:
             if self._retry_policy is None:
                 await message.reject(requeue=False)
@@ -1070,7 +1070,7 @@ class AggregationConsumer:
     ) -> None:
         payload: Any = None
         try:
-            payload = json.loads(message.body.decode("utf-8", errors="replace"))
+            payload = parse_transport_json(message.body)
         except Exception:
             if self._retry_policy is None:
                 await message.reject(requeue=False)
@@ -1388,7 +1388,7 @@ def _task_type_from_body(body: bytes | None, *, alias_config: ContractAliasConfi
     if body is None:
         return None
     try:
-        payload = json.loads(body.decode("utf-8", errors="replace"))
+        payload = parse_transport_json(body)
     except Exception:
         return None
     return _coerce_task_type(_normalize_payload(payload, alias_config=alias_config))

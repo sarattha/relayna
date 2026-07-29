@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast
@@ -19,6 +18,7 @@ from opentelemetry.trace import SpanKind
 from pydantic import BaseModel
 
 from .._async import map_bounded
+from .._transport_json import encode_transport_json
 from ..contracts import (
     BatchTaskEnvelope,
     ContractAliasConfig,
@@ -635,7 +635,7 @@ def _to_dict(payload: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _to_json_bytes(payload: Mapping[str, Any]) -> bytes:
-    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return encode_transport_json(payload)
 
 
 def _coerce_queue_max_priority(arguments: Mapping[str, Any]) -> int | None:

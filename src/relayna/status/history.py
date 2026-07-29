@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable
 from typing import Any, Literal
 
 from aio_pika.abc import AbstractChannel, AbstractQueue
 
+from .._transport_json import parse_transport_json
 from ..contracts import ContractAliasConfig, normalize_contract_aliases, public_output_aliases
 from ..rabbitmq import RelaynaRabbitClient
 
@@ -71,8 +71,8 @@ class StreamHistoryReader:
                         break
 
                     try:
-                        payload = json.loads(message.body.decode("utf-8", errors="replace"))
-                    except json.JSONDecodeError:
+                        payload = parse_transport_json(message.body)
+                    except ValueError:
                         await message.ack()
                         continue
                     await message.ack()

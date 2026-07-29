@@ -10,6 +10,7 @@
     "public package surface": ["tests/test_package_root.py", "tests/test_public_api_imports.py", "tests/test_package_export_consistency.py"],
     "routing and topology": ["tests/test_routing.py", "tests/test_v2_packages.py"],
     "status storage and hub": ["tests/test_status_store.py", "tests/test_status_hub.py"],
-    "task leases": ["tests/test_task_leases.py", "tests/test_consumer.py"]
+    "task leases": ["tests/test_task_leases.py", "tests/test_consumer.py"],
+    "transport JSON domain (approved v1.4.29 perimeter change)": ["tests/test_json_transport.py", "tests/test_consumer.py", "tests/test_status_hub.py", "tests/test_status_history.py"]
   }
 }

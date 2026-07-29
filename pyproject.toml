@@ -44,6 +44,9 @@ Releases = "https://github.com/sarattha/relayna/releases"
 Repository = "https://github.com/sarattha/relayna"
 
 [project.optional-dependencies]
+benchmark = [
+    "orjson==3.11.9",
+]
 dev = [
     "click>=8.3.3",
     "coverage[toml]>=7.10.0",

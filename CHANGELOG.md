@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Replaced Relayna-owned AMQP JSON encoding and parsing with Pydantic Core after
+  complete-path benchmarking. Outbound bodies are compact and inbound bodies
+  now require valid UTF-8.
+- Preserved task/workflow/status alias normalization, malformed-versus-invalid
+  envelope classification, arbitrary-size integers, non-finite transport
+  tokens, original DLQ-body replay, persisted JSON, and canonical hash/dedup
+  inputs.
+
+### Compatibility
+
+- This is an intentionally approved breaking change against the `v1.4.29`
+  production perimeter. Raw AMQP bytes and some non-string-key coercions change;
+  invalid UTF-8 is now rejected as `malformed_json` instead of being replaced.
+- See
+  [JSON transport migration after v1.4.29](docs/json-transport-migration.md)
+  for the accepted JSON domain, exact breaks, rollout guidance, and rollback
+  implications.
+
 ## 1.4.29 - 2026-07-15
 
 ### Fixed

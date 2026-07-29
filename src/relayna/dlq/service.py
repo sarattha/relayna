@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import base64
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from .._transport_json import encode_transport_json
 from ..rabbitmq import RelaynaRabbitClient
 from ..status.store import RedisStatusStore
 from .broker import BrokerDLQMessageInspector
@@ -450,7 +450,7 @@ def _retry_payload_bytes(record: DLQRecord, override_payload: Any) -> bytes:
         return base64.b64decode(record.raw_body_b64.encode("ascii"))
     if isinstance(override_payload, str):
         return override_payload.encode("utf-8")
-    return json.dumps(override_payload, ensure_ascii=False).encode("utf-8")
+    return encode_transport_json(override_payload)
 
 
 def _task_id_from_payload(payload: Any) -> str | None:
