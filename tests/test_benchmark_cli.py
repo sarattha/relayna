@@ -21,6 +21,7 @@ def test_registry_has_unique_valid_repository_relative_definitions() -> None:
     definitions = registered_benchmarks()
 
     assert [definition.name for definition in definitions] == [
+        "consumer-processing",
         "envelope-serialization",
         "json-engine-evaluation",
         "publish-preparation",
@@ -57,6 +58,8 @@ def test_cli_lists_registered_benchmarks(capsys) -> None:
     assert "NAME" in output
     assert "envelope-serialization" in output
     assert "reports/envelope-microbenchmarks.html" in output
+    assert "consumer-processing" in output
+    assert "reports/consumer-processing.html" in output
     assert "json-engine-evaluation" in output
     assert "reports/json-engine-evaluation.html" in output
     assert "publish-preparation" in output

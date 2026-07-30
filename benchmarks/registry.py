@@ -48,6 +48,7 @@ def _validate_definitions(definitions: tuple[BenchmarkDefinition, ...]) -> tuple
 def registered_benchmarks() -> tuple[BenchmarkDefinition, ...]:
     """Return every benchmark exposed by the repository CLI."""
 
+    from benchmarks.consumer_processing import BENCHMARK as CONSUMER_PROCESSING_BENCHMARK
     from benchmarks.envelope_serialization import BENCHMARK
     from benchmarks.json_engine_evaluation import BENCHMARK as JSON_ENGINE_BENCHMARK
     from benchmarks.publish_preparation import BENCHMARK as PUBLISH_PREPARATION_BENCHMARK
@@ -56,6 +57,7 @@ def registered_benchmarks() -> tuple[BenchmarkDefinition, ...]:
     return _validate_definitions(
         (
             BENCHMARK,
+            CONSUMER_PROCESSING_BENCHMARK,
             JSON_ENGINE_BENCHMARK,
             PUBLISH_PREPARATION_BENCHMARK,
             REDIS_STORAGE_CPU_BENCHMARK,

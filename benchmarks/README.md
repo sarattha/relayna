@@ -13,6 +13,7 @@ Run commands from the repository root. Discover the available benchmark types:
 Run one benchmark with its canonical defaults:
 
     uv run python -m benchmarks run envelope-serialization
+    uv run python -m benchmarks run consumer-processing
     uv run python -m benchmarks run publish-preparation
     uv run python -m benchmarks run redis-storage-cpu
 
@@ -45,6 +46,52 @@ Pass benchmark-specific options through Make with `BENCHMARK_ARGS`:
 `make benchmark-envelopes` remains a convenience alias for the canonical
 envelope benchmark. `make benchmark-redis-storage` is the matching convenience
 alias for the Redis-facing CPU benchmark.
+
+## Consumer processing benchmark
+
+`consumer-processing` measures Relayna's real inbound `TaskConsumer` operation
+after RabbitMQ has already delivered a message. It excludes connections,
+sockets, broker work, queue declaration latency, retry sleeps, and application
+business logic.
+
+The default `all` mode writes both measurement families to the self-contained
+`reports/consumer-processing.html` report:
+
+    uv run python -m benchmarks run consumer-processing
+    uv run python -m benchmarks run consumer-processing --measurement all
+
+Run only the real per-message `_handle_message()` path:
+
+    uv run python -m benchmarks run consumer-processing \
+      --measurement per-message
+
+Run only the public `TaskConsumer.run_forever()` loop over deterministic
+preloaded AMQP fakes:
+
+    uv run python -m benchmarks run consumer-processing \
+      --measurement consumer-loop
+
+For a fast development run in any mode, lower the repeats and override every
+size-specific count:
+
+    uv run python -m benchmarks run consumer-processing \
+      --measurement all \
+      --repeats 1 \
+      --iterations "1 KB=1" \
+      --iterations "16 KB=1" \
+      --iterations "128 KB=1" \
+      --iterations "1 MB=1" \
+      --loop-messages "1 KB=1" \
+      --loop-messages "16 KB=1" \
+      --loop-messages "128 KB=1" \
+      --loop-messages "1 MB=1" \
+      --output /tmp/consumer-processing.html
+
+Per-message timing covers canonical and configured-alias input with minimal and
+observability-enabled profiles at exact 1 KB, 16 KB, 128 KB, and 1 MB actual
+body sizes. Loop timing keeps canonical input, uses both profiles, and tests
+prefetch 1, 8, and 32 with size-aware message cardinality. The report states
+all optional-feature settings and exact counts.
 
 ## Publish preparation benchmark
 
