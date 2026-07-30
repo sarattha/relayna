@@ -23,6 +23,7 @@ def test_registry_has_unique_valid_repository_relative_definitions() -> None:
     assert [definition.name for definition in definitions] == [
         "envelope-serialization",
         "json-engine-evaluation",
+        "publish-preparation",
         "redis-storage-cpu",
     ]
     assert all(not definition.default_output.is_absolute() for definition in definitions)
@@ -58,6 +59,8 @@ def test_cli_lists_registered_benchmarks(capsys) -> None:
     assert "reports/envelope-microbenchmarks.html" in output
     assert "json-engine-evaluation" in output
     assert "reports/json-engine-evaluation.html" in output
+    assert "publish-preparation" in output
+    assert "reports/publish-preparation.html" in output
     assert "redis-storage-cpu" in output
     assert "reports/redis-storage-cpu-microbenchmarks.html" in output
 

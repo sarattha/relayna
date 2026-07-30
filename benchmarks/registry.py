@@ -50,6 +50,14 @@ def registered_benchmarks() -> tuple[BenchmarkDefinition, ...]:
 
     from benchmarks.envelope_serialization import BENCHMARK
     from benchmarks.json_engine_evaluation import BENCHMARK as JSON_ENGINE_BENCHMARK
+    from benchmarks.publish_preparation import BENCHMARK as PUBLISH_PREPARATION_BENCHMARK
     from benchmarks.redis_storage_cpu import BENCHMARK as REDIS_STORAGE_CPU_BENCHMARK
 
-    return _validate_definitions((BENCHMARK, JSON_ENGINE_BENCHMARK, REDIS_STORAGE_CPU_BENCHMARK))
+    return _validate_definitions(
+        (
+            BENCHMARK,
+            JSON_ENGINE_BENCHMARK,
+            PUBLISH_PREPARATION_BENCHMARK,
+            REDIS_STORAGE_CPU_BENCHMARK,
+        )
+    )

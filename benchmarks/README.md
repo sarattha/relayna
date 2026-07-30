@@ -13,6 +13,7 @@ Run commands from the repository root. Discover the available benchmark types:
 Run one benchmark with its canonical defaults:
 
     uv run python -m benchmarks run envelope-serialization
+    uv run python -m benchmarks run publish-preparation
     uv run python -m benchmarks run redis-storage-cpu
 
 Benchmarks that compare optional engines should install the benchmark extra:
@@ -44,6 +45,51 @@ Pass benchmark-specific options through Make with `BENCHMARK_ARGS`:
 `make benchmark-envelopes` remains a convenience alias for the canonical
 envelope benchmark. `make benchmark-redis-storage` is the matching convenience
 alias for the Redis-facing CPU benchmark.
+
+## Publish preparation benchmark
+
+`publish-preparation` measures the complete local CPU-side public publish path
+through a deterministic no-op exchange. It includes input conversion and alias
+normalization, Pydantic validation and dumping, topology routing, trace/header
+construction, Pydantic Core transport JSON encoding, `aio_pika.Message`
+construction, priority handling, metrics, and async publication. It excludes
+RabbitMQ connections, sockets, broker work, and network latency.
+
+The 72-cell matrix covers individual and batch tasks, workflow messages, and
+status events; model, canonical-mapping, and configured-alias inputs; exact
+1 KB, 16 KB, 128 KB, and 1 MB AMQP bodies; and direct/shared, task-type, and
+workflow-stage routing where applicable. One event loop is reused for the
+entire run.
+
+The canonical command writes `reports/publish-preparation.html`:
+
+    uv run python -m benchmarks run publish-preparation
+
+For a quick development run:
+
+    uv run python -m benchmarks run publish-preparation \
+      --repeats 1 \
+      --iterations "1 KB=1" \
+      --iterations "16 KB=1" \
+      --iterations "128 KB=1" \
+      --iterations "1 MB=1" \
+      --output /tmp/publish-preparation.html
+
+The corrected pre-optimization baseline is retained immutably as
+`reports/publish-preparation-baseline.html`, with hash-bound revision,
+methodology, matrix, and environment provenance in
+`reports/publish-preparation-baseline.json`. The benchmark contains no
+executable copy of the old publishing algorithm. Generate a current-runtime
+comparison against that retained artifact with:
+
+    uv run python -m benchmarks run publish-preparation \
+      --run-label candidate \
+      --baseline-report reports/publish-preparation-baseline.html \
+      --output reports/publish-preparation.html
+
+Baseline comparison requires the canonical repeats and iteration matrix. The
+command fails clearly if the HTML or provenance sidecar is missing, modified,
+or incompatible with the current canonical matrix.
 
 ## JSON engine decision benchmark
 
