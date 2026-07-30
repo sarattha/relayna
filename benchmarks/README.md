@@ -75,17 +75,21 @@ For a quick development run:
       --iterations "1 MB=1" \
       --output /tmp/publish-preparation.html
 
-To retain and compare two implementations, run the baseline first and pass its
-self-contained report to the candidate:
+The corrected pre-optimization baseline is retained immutably as
+`reports/publish-preparation-baseline.html`, with hash-bound revision,
+methodology, matrix, and environment provenance in
+`reports/publish-preparation-baseline.json`. The benchmark contains no
+executable copy of the old publishing algorithm. Generate a current-runtime
+comparison against that retained artifact with:
 
-    uv run python -m benchmarks run publish-preparation \
-      --run-label baseline \
-      --legacy-duplicate-preparation \
-      --output reports/publish-preparation-baseline.html
     uv run python -m benchmarks run publish-preparation \
       --run-label candidate \
       --baseline-report reports/publish-preparation-baseline.html \
       --output reports/publish-preparation.html
+
+Baseline comparison requires the canonical repeats and iteration matrix. The
+command fails clearly if the HTML or provenance sidecar is missing, modified,
+or incompatible with the current canonical matrix.
 
 ## JSON engine decision benchmark
 

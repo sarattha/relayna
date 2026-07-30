@@ -114,6 +114,21 @@ class LegacyBatchClient(RelaynaRabbitClient):
         )
 
 
+class PublishTaskOverrideClient(RelaynaRabbitClient):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.publish_task_calls: list[BaseModel | Mapping[str, Any]] = []
+
+    async def publish_task(
+        self,
+        task: BaseModel | Mapping[str, Any],
+        *,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
+        self.publish_task_calls.append(task)
+        await super().publish_task(task, headers={**dict(headers or {}), "publish-hook": "subclass"})
+
+
 class FixedBatchTaskEnvelope(BatchTaskEnvelope):
     created_at: datetime = Field(default_factory=lambda: _FIXED_CREATED_AT)
 
@@ -219,6 +234,55 @@ async def test_publish_tasks_individual_prepares_each_input_exactly_once(
     assert len(validation_calls) == len(tasks)
     assert CountingTaskInput.dump_calls == (len(tasks) if input_kind == "model" else 0)
     assert len(exchange.calls) == len(tasks)
+
+
+@pytest.mark.asyncio
+async def test_publish_tasks_individual_preserves_subclass_publish_task_override() -> None:
+    client, exchange = _client(PublishTaskOverrideClient)
+    assert isinstance(client, PublishTaskOverrideClient)
+    tasks = [_canonical_task(1), _canonical_task(2)]
+
+    await client.publish_tasks(tasks, mode="individual", max_concurrency=2)
+
+    assert [task["task_id"] for task in client.publish_task_calls if isinstance(task, Mapping)] == [
+        "task-1",
+        "task-2",
+    ]
+    assert all(isinstance(task, Mapping) and task["spec_version"] == "1.0" for task in client.publish_task_calls)
+    assert len(exchange.calls) == len(tasks)
+    assert all(message.headers["publish-hook"] == "subclass" for message, _ in exchange.calls)
+
+
+@pytest.mark.asyncio
+async def test_publish_tasks_individual_preserves_monkey_patched_publish_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[BaseModel | Mapping[str, Any]] = []
+    original_publish_task = RelaynaRabbitClient.publish_task
+
+    async def patched_publish_task(
+        self: RelaynaRabbitClient,
+        task: BaseModel | Mapping[str, Any],
+        *,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
+        calls.append(task)
+        await original_publish_task(
+            self,
+            task,
+            headers={**dict(headers or {}), "publish-hook": "monkey-patch"},
+        )
+
+    monkeypatch.setattr(RelaynaRabbitClient, "publish_task", patched_publish_task)
+    client, exchange = _client()
+    tasks = [_canonical_task(1), _canonical_task(2)]
+
+    await client.publish_tasks(tasks, mode="individual", max_concurrency=2)
+
+    assert [task["task_id"] for task in calls if isinstance(task, Mapping)] == ["task-1", "task-2"]
+    assert all(isinstance(task, Mapping) and task["spec_version"] == "1.0" for task in calls)
+    assert len(exchange.calls) == len(tasks)
+    assert all(message.headers["publish-hook"] == "monkey-patch" for message, _ in exchange.calls)
 
 
 @pytest.mark.asyncio

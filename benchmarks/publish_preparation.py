@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gc
+import hashlib
 import html
 import json
 import time
@@ -20,7 +21,6 @@ from pydantic import BaseModel
 
 from benchmarks.registry import BenchmarkDefinition, BenchmarkOutcome
 from benchmarks.reporting import collect_environment, write_text_artifact
-from relayna._async import map_bounded
 from relayna._transport_json import encode_transport_json
 from relayna.contracts import (
     BatchTaskEnvelope,
@@ -59,6 +59,7 @@ DEFAULT_ITERATIONS: dict[int, int] = {
 }
 DEFAULT_REPEATS = 5
 DEFAULT_OUTPUT = Path("reports/publish-preparation.html")
+BASELINE_SCHEMA_VERSION = 1
 TASKS_PER_OPERATION = 2
 _FIXED_TIMESTAMP = datetime(2025, 1, 1, 0, 0, tzinfo=UTC)
 _ALIAS_CONFIG = ContractAliasConfig(field_aliases={"task_id": "attempt_id"})
@@ -148,41 +149,6 @@ class PreparationCountingClient(RelaynaRabbitClient):
     def _prepare_task_envelope(self, task: BaseModel | Mapping[str, Any]) -> TaskEnvelope:
         self.task_preparation_count += 1
         return super()._prepare_task_envelope(task)
-
-
-class LegacyPreparationClient(RelaynaRabbitClient):
-    """Benchmark-only reproduction of the starting duplicate-preparation paths."""
-
-    async def publish_tasks(
-        self,
-        tasks: Sequence[BaseModel | Mapping[str, Any]],
-        *,
-        mode: Literal["individual", "batch_envelope"] = "individual",
-        batch_id: str | None = None,
-        meta: Mapping[str, Any] | None = None,
-        max_concurrency: int = 16,
-    ) -> None:
-        prepared_tasks = [self._prepare_task_payload(task) for task in tasks]
-        if mode == "individual":
-            await map_bounded(prepared_tasks, self.publish_task, concurrency=max_concurrency)
-            return
-        if mode != "batch_envelope":
-            raise ValueError(f"Unsupported publish mode '{mode}'.")
-        if not batch_id or not str(batch_id).strip():
-            raise ValueError("batch_id is required when mode='batch_envelope'.")
-        envelope = BatchTaskEnvelope(
-            batch_id=str(batch_id),
-            tasks=[TaskEnvelope.model_validate(task) for task in prepared_tasks],
-            meta=dict(meta or {}),
-        )
-        await self._publish_batch_envelope(
-            envelope.model_dump(mode="json", exclude_none=True),
-            priority=self._resolve_batch_priority(prepared_tasks),
-        )
-
-
-class LegacyCountingPreparationClient(PreparationCountingClient, LegacyPreparationClient):
-    """Legacy benchmark path plus the untimed real-preparation counter."""
 
 
 def build_matrix(iterations_by_size: Mapping[int, int] | None = None) -> list[BenchmarkCase]:
@@ -397,12 +363,8 @@ def _client_for(
     case: BenchmarkCase,
     *,
     counting: bool = False,
-    legacy_duplicate_preparation: bool = False,
 ) -> tuple[RelaynaRabbitClient, NoOpExchange]:
-    if legacy_duplicate_preparation:
-        client_type = LegacyCountingPreparationClient if counting else LegacyPreparationClient
-    else:
-        client_type = PreparationCountingClient if counting else RelaynaRabbitClient
+    client_type = PreparationCountingClient if counting else RelaynaRabbitClient
     client = client_type(
         cast(Any, _topology(case.topology)),
         alias_config=_ALIAS_CONFIG,
@@ -423,13 +385,8 @@ def _operation_for(
     fixture: BenchmarkFixture,
     *,
     counting: bool = False,
-    legacy_duplicate_preparation: bool = False,
 ) -> tuple[AsyncOperation, RelaynaRabbitClient, NoOpExchange]:
-    client, exchange = _client_for(
-        fixture.case,
-        counting=counting,
-        legacy_duplicate_preparation=legacy_duplicate_preparation,
-    )
+    client, exchange = _client_for(fixture.case, counting=counting)
     case = fixture.case
     if case.message_kind == "individual-task":
         tasks = cast(tuple[BaseModel | Mapping[str, Any], ...], fixture.value)
@@ -485,14 +442,8 @@ def _time_operation(loop: asyncio.AbstractEventLoop, operation: AsyncOperation, 
 def _measure_preparations(
     loop: asyncio.AbstractEventLoop,
     fixture: BenchmarkFixture,
-    *,
-    legacy_duplicate_preparation: bool,
 ) -> int:
-    operation, client, exchange = _operation_for(
-        fixture,
-        counting=True,
-        legacy_duplicate_preparation=legacy_duplicate_preparation,
-    )
+    operation, client, exchange = _operation_for(fixture, counting=True)
     loop.run_until_complete(operation())
     if exchange.published_count != fixture.publications_per_operation:
         raise RuntimeError(
@@ -513,13 +464,16 @@ def run_benchmarks(
     repeats: int = DEFAULT_REPEATS,
     iterations_by_size: Mapping[int, int] | None = None,
     baseline_results: Sequence[BenchmarkResult] | None = None,
-    legacy_duplicate_preparation: bool = False,
 ) -> list[BenchmarkResult]:
     """Run every case using one event loop and calculate counts and dispersion."""
 
     if repeats < 1:
         raise ValueError("Repeats must be positive.")
     cases = build_matrix(iterations_by_size)
+    if baseline_results is not None:
+        baseline_cases = {result.case for result in baseline_results}
+        if baseline_cases != set(cases) or {result.repeats for result in baseline_results} != {repeats}:
+            raise ValueError("Baseline matrix is incompatible with the requested repeats or iteration configuration.")
     fixtures = {case: build_fixture(case) for case in cases}
     baseline_by_identity = {_case_identity(result.case): result for result in (baseline_results or ())}
     samples: dict[BenchmarkCase, list[float]] = {case: [] for case in cases}
@@ -530,20 +484,13 @@ def run_benchmarks(
     contract_module.datetime = _FixedDateTime
     try:
         for case in cases:
-            preparation_counts[case] = _measure_preparations(
-                loop,
-                fixtures[case],
-                legacy_duplicate_preparation=legacy_duplicate_preparation,
-            )
+            preparation_counts[case] = _measure_preparations(loop, fixtures[case])
         for repeat_index in range(repeats):
             ordered = cases[repeat_index % len(cases) :] + cases[: repeat_index % len(cases)]
             if repeat_index % 2:
                 ordered.reverse()
             for case in ordered:
-                operation, _client, exchange = _operation_for(
-                    fixtures[case],
-                    legacy_duplicate_preparation=legacy_duplicate_preparation,
-                )
+                operation, _client, exchange = _operation_for(fixtures[case])
                 loop.run_until_complete(operation())
                 before = exchange.published_count
                 samples[case].append(_time_operation(loop, operation, case.iterations))
@@ -647,6 +594,8 @@ def _result_from_data(data: Mapping[str, Any]) -> BenchmarkResult:
 def load_embedded_results(report_path: Path) -> list[BenchmarkResult]:
     """Load self-contained comparison data from a prior HTML report."""
 
+    if not report_path.is_file():
+        raise FileNotFoundError(f"Publish-preparation report not found: {report_path}")
     content = report_path.read_text(encoding="utf-8")
     start = content.find(_EMBEDDED_DATA_PREFIX)
     end = content.find(_EMBEDDED_DATA_SUFFIX, start)
@@ -655,6 +604,104 @@ def load_embedded_results(report_path: Path) -> list[BenchmarkResult]:
     encoded = content[start + len(_EMBEDDED_DATA_PREFIX) : end].strip()
     payload = json.loads(html.unescape(encoded))
     return [_result_from_data(item) for item in payload["results"]]
+
+
+def baseline_metadata_path(report_path: Path) -> Path:
+    """Return the stable provenance sidecar path for a retained baseline report."""
+
+    return report_path.with_suffix(".json")
+
+
+def load_baseline_results(report_path: Path) -> list[BenchmarkResult]:
+    """Load and validate an immutable baseline report plus its provenance sidecar."""
+
+    if not report_path.is_file():
+        raise FileNotFoundError(f"Retained publish-preparation baseline report not found: {report_path}")
+    metadata_path = baseline_metadata_path(report_path)
+    if not metadata_path.is_file():
+        raise FileNotFoundError(f"Retained publish-preparation baseline metadata not found: {metadata_path}")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid baseline metadata JSON in {metadata_path}: {exc}") from exc
+    if not isinstance(metadata, Mapping):
+        raise ValueError(f"Incompatible baseline metadata in {metadata_path}: expected a JSON object.")
+
+    def require_mapping(key: str) -> Mapping[str, Any]:
+        value = metadata.get(key)
+        if not isinstance(value, Mapping):
+            raise ValueError(f"Incompatible baseline metadata in {metadata_path}: missing object {key!r}.")
+        return value
+
+    if metadata.get("schema_version") != BASELINE_SCHEMA_VERSION:
+        raise ValueError(
+            f"Incompatible baseline schema in {metadata_path}: expected "
+            f"{BASELINE_SCHEMA_VERSION}, found {metadata.get('schema_version')!r}."
+        )
+    if metadata.get("benchmark") != "publish-preparation":
+        raise ValueError(f"Incompatible baseline benchmark identity in {metadata_path}.")
+    if metadata.get("report") != report_path.name:
+        raise ValueError(f"Incompatible baseline report name in {metadata_path}.")
+    expected_hash = metadata.get("report_sha256")
+    actual_hash = hashlib.sha256(report_path.read_bytes()).hexdigest()
+    if expected_hash != actual_hash:
+        raise ValueError(
+            f"Retained baseline report hash mismatch for {report_path}: "
+            f"expected {expected_hash!r}, found {actual_hash!r}."
+        )
+
+    provenance = require_mapping("provenance")
+    for key in ("source_branch", "base_revision", "baseline_runtime_revision", "artifact_revision"):
+        value = provenance.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Incompatible baseline provenance in {metadata_path}: missing {key!r}.")
+    methodology = require_mapping("methodology")
+    environment = require_mapping("environment")
+    if not environment:
+        raise ValueError(f"Incompatible baseline metadata in {metadata_path}: environment is empty.")
+    if methodology.get("fixed_clock_utc") != _FIXED_TIMESTAMP.isoformat().replace("+00:00", "Z"):
+        raise ValueError(f"Incompatible baseline fixed-clock methodology in {metadata_path}.")
+    if methodology.get("exact_message_sizes_bytes") != TARGET_SIZES:
+        raise ValueError(f"Incompatible baseline target sizes in {metadata_path}.")
+    if methodology.get("tasks_per_operation") != TASKS_PER_OPERATION:
+        raise ValueError(f"Incompatible baseline task count in {metadata_path}.")
+    if methodology.get("individual_preparations_per_operation") != TASKS_PER_OPERATION * 2:
+        raise ValueError(f"Incompatible baseline preparation count in {metadata_path}.")
+
+    raw_iterations = methodology.get("iterations_by_size")
+    if not isinstance(raw_iterations, Mapping):
+        raise ValueError(f"Incompatible baseline iteration metadata in {metadata_path}.")
+    try:
+        iterations_by_size = {int(size): int(count) for size, count in raw_iterations.items()}
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Incompatible baseline iteration metadata in {metadata_path}.") from exc
+    repeats = methodology.get("repeats")
+    if iterations_by_size != DEFAULT_ITERATIONS or repeats != DEFAULT_REPEATS:
+        raise ValueError(f"Incompatible baseline canonical configuration in {metadata_path}.")
+
+    results = load_embedded_results(report_path)
+    expected_cases = set(build_matrix(iterations_by_size))
+    actual_cases = {result.case for result in results}
+    if (
+        len(results) != len(expected_cases)
+        or actual_cases != expected_cases
+        or methodology.get("matrix_case_count") != len(expected_cases)
+    ):
+        raise ValueError(f"Incompatible baseline matrix in {report_path}.")
+    for result in results:
+        if (
+            result.actual_message_bytes != result.case.target_bytes
+            or result.repeats != repeats
+            or len(result.sample_ns_per_operation) != repeats
+            or result.relative_speedup is not None
+        ):
+            raise ValueError(f"Incompatible baseline result data for {result.case} in {report_path}.")
+        if result.case.message_kind == "individual-task" and (
+            result.preparations_per_operation != TASKS_PER_OPERATION * 2
+            or result.publications_per_operation != TASKS_PER_OPERATION
+        ):
+            raise ValueError(f"Incompatible baseline preparation evidence for {result.case} in {report_path}.")
+    return results
 
 
 def render_html(
@@ -839,11 +886,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--run-label", default="candidate")
-    parser.add_argument("--baseline-report", type=Path)
     parser.add_argument(
-        "--legacy-duplicate-preparation",
-        action="store_true",
-        help="Reproduce the starting duplicate task-preparation paths for a fair retained baseline.",
+        "--baseline-report",
+        type=Path,
+        help="Retained baseline HTML; a matching validated .json provenance sidecar is required.",
     )
 
 
@@ -851,24 +897,36 @@ def run(args: argparse.Namespace) -> BenchmarkOutcome:
     if args.repeats < 1:
         raise ValueError("Repeats must be positive.")
     iterations = _parse_iterations(args.iterations)
-    baseline_results = load_embedded_results(args.baseline_report) if args.baseline_report is not None else None
+    baseline_results = None
+    baseline_environment: dict[str, str] = {}
+    if args.baseline_report is not None:
+        baseline_results = load_baseline_results(args.baseline_report)
+        baseline_metadata = json.loads(baseline_metadata_path(args.baseline_report).read_text(encoding="utf-8"))
+        provenance = baseline_metadata["provenance"]
+        baseline_environment = {
+            "Baseline report": str(args.baseline_report),
+            "Baseline metadata": str(baseline_metadata_path(args.baseline_report)),
+            "Baseline report SHA-256": str(baseline_metadata["report_sha256"]),
+            "Baseline source branch": str(provenance["source_branch"]),
+            "Baseline base revision": str(provenance["base_revision"]),
+            "Baseline runtime revision": str(provenance["baseline_runtime_revision"]),
+            "Baseline artifact revision": str(provenance["artifact_revision"]),
+        }
     results = run_benchmarks(
         repeats=args.repeats,
         iterations_by_size=iterations,
         baseline_results=baseline_results,
-        legacy_duplicate_preparation=args.legacy_duplicate_preparation,
     )
     environment = collect_environment(
         package_names=("relayna", "pydantic", "pydantic-core", "aio-pika", "prometheus-client"),
         extra={
             "Benchmark": "publish-preparation",
             "Run label": args.run_label,
-            "Task preparation implementation": (
-                "starting duplicate-preparation baseline" if args.legacy_duplicate_preparation else "current runtime"
-            ),
+            "Task preparation implementation": "current runtime",
             "Event loop policy": type(asyncio.get_event_loop_policy()).__name__,
             "Tasks per individual/batch operation": str(TASKS_PER_OPERATION),
             "Network/broker": "excluded; deterministic no-op exchange",
+            **baseline_environment,
         },
     )
     report = write_html_report(
@@ -898,8 +956,10 @@ __all__ = [
     "BenchmarkCase",
     "BenchmarkFixture",
     "BenchmarkResult",
+    "baseline_metadata_path",
     "build_fixture",
     "build_matrix",
+    "load_baseline_results",
     "load_embedded_results",
     "render_html",
     "run_benchmarks",

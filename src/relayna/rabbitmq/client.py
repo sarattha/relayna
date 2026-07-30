@@ -235,7 +235,11 @@ class RelaynaRabbitClient:
         prepared_envelopes = [self._prepare_task_envelope(task) for task in tasks]
         prepared_tasks = [envelope.model_dump(mode="json", exclude_none=True) for envelope in prepared_envelopes]
         if mode == "individual":
-            await map_bounded(prepared_tasks, self._publish_prepared_task_item, concurrency=max_concurrency)
+            publish_task = self.publish_task
+            if getattr(publish_task, "__func__", publish_task) is _DEFAULT_PUBLISH_TASK:
+                await map_bounded(prepared_tasks, self._publish_prepared_task_item, concurrency=max_concurrency)
+            else:
+                await map_bounded(prepared_tasks, publish_task, concurrency=max_concurrency)
             return
         if mode != "batch_envelope":
             raise ValueError(f"Unsupported publish mode '{mode}'.")
@@ -599,6 +603,9 @@ async def declare_stream_queue(
     queue_arguments: dict[str, Any] | None,
 ) -> AbstractQueue:
     return await channel.declare_queue(queue_name, durable=True, arguments=queue_arguments or None)
+
+
+_DEFAULT_PUBLISH_TASK = RelaynaRabbitClient.publish_task
 
 
 class DirectQueuePublisher:

@@ -43,6 +43,13 @@ ordering, error, and concurrency behavior remains unchanged.
   SDK + Studio backend `code-change-verification` sequence.
 - [x] (2026-07-29 15:42Z) Completed benchmark conclusions and outcomes; PR
   draft handoff remains the final response step.
+- [x] (2026-07-30 08:10Z) Removed executable legacy benchmark logic and replaced
+  it with strict loading of an immutable, provenance-bound baseline artifact.
+- [x] (2026-07-30 08:25Z) Regenerated the current-runtime comparison and reran mandatory
+  verification after the retained-baseline revision.
+- [x] (2026-07-30 09:25Z) Addressed first Codex review by preserving subclass
+  and monkey-patched `publish_task()` dispatch while retaining the base-client
+  single-pass fast path; full verification passed.
 
 ## Surprises & Discoveries
 
@@ -61,9 +68,9 @@ ordering, error, and concurrency behavior remains unchanged.
 
 - Observation: Duplicate-removal benefit is largest before JSON encoding
   dominates.
-  Evidence: The final individual-task geometric-mean speedup was 1.112× at
-  1 KB, 1.103× at 16 KB, and 1.030× at 1 MB; the full individual matrix
-  geometric mean was 1.071×.
+  Evidence: The final regenerated immutable-baseline comparison measured
+  1.081× at 1 KB, 1.072× at 16 KB, and 1.012× at 1 MB; the full individual
+  matrix geometric mean was 1.052×.
 
 - Observation: The original one-second canonical workload was too sensitive to
   ordinary machine drift, and the generated batch timestamp made actual bodies
@@ -71,6 +78,12 @@ ordering, error, and concurrency behavior remains unchanged.
   Evidence: Strengthening iteration counts roughly ninefold brought unchanged
   workflow/status controls to within about 1%; freezing the contract clock in
   the benchmark now asserts every actual AMQP body is exactly its target size.
+
+- Observation: Released individual batch publishing dispatched each prepared
+  mapping through `self.publish_task`, so an unconditional private fast path
+  bypassed subclass and monkey-patched extension behavior.
+  Evidence: `v1.4.29` calls `map_bounded(prepared_tasks, self.publish_task, ...)`;
+  the first Codex review identified the compatibility regression.
 
 ## Decision Log
 
@@ -104,13 +117,23 @@ ordering, error, and concurrency behavior remains unchanged.
   `model_construct`, a public bypass, a new export, or any wire-format change.
   Date/Author: 2026-07-29 / Codex.
 
-- Decision: Refresh the retained baseline through a benchmark-only faithful
-  reproduction of the starting duplicate paths after fixing the harness clock.
-  Rationale: The initial pre-edit artifact proved duplication but mislabeled
-  batch bodies by seven timestamp bytes. The refreshed artifact uses the same
-  final harness, exact bodies, sequential execution, and starting runtime logic;
-  the reproduction is outside `src/relayna` and never enters production.
-  Date/Author: 2026-07-29 / Codex.
+- Decision: Retain the corrected baseline HTML immutably and bind it to a small
+  schema-versioned provenance sidecar instead of keeping executable legacy
+  publishing code.
+  Rationale: The report already contains the full result matrix and preparation
+  evidence. Hash, revision, fixed-clock, exact-size, matrix, environment, and
+  preparation-count validation preserves trustworthy comparison without a
+  second implementation of the old production algorithm.
+  Date/Author: 2026-07-30 / Codex.
+
+- Decision: Use the private single-pass publisher only when the resolved
+  `publish_task` method is the original base implementation. If a subclass or
+  monkey-patch replaces the method, dispatch through that public override as
+  `v1.4.29` did.
+  Rationale: This preserves released retries, auditing, header customization,
+  and arbitrary override behavior. Falling back to public validation also
+  avoids trusting a prepared mapping that an override may mutate.
+  Date/Author: 2026-07-30 / Codex.
 
 ## Outcomes & Retrospective
 
@@ -119,10 +142,13 @@ path now prepares two inputs twice total rather than four times, and public
 `publish_task()` remains exactly once. Representative old/new individual and
 batch publications match byte-for-byte and structurally across routing,
 headers, correlation IDs, priorities, trace fields, metrics counters, ordering,
-exceptions, and concurrency limits. Canonical measurements show 1.071×
-geometric-mean individual total-path speedup and 1.070× batch speedup. The
-mandatory verification stack passed 623 SDK tests (3 skipped) and all 244
+exceptions, and concurrency limits. The final immutable-baseline comparison
+shows 1.052× geometric-mean individual total-path speedup and 1.065× batch
+speedup. The
+mandatory verification stack passed 631 SDK tests (3 skipped) and all 244
 Studio backend tests after format, lint, and type checking in both workspaces.
+Subclass and monkey-patched `publish_task()` implementations continue to receive
+each canonical prepared mapping through the released public dispatch path.
 
 ## Context and Orientation
 
@@ -239,18 +265,20 @@ reverted or reformatted.
 
 Baseline:
 `/Users/jobz/.codex/worktrees/34f6/relayna/reports/publish-preparation-baseline.html`.
+Its immutable provenance and SHA-256 binding are stored in
+`/Users/jobz/.codex/worktrees/34f6/relayna/reports/publish-preparation-baseline.json`.
 
 Candidate:
 `/Users/jobz/.codex/worktrees/34f6/relayna/reports/publish-preparation.html`.
 
 The baseline probe records four real preparation calls per two-task individual
 operation. The candidate records two. Across individual cases, final
-geometric-mean speedup is 1.071×; by size it is 1.112× at 1 KB, 1.103× at
-16 KB, 1.040× at 128 KB, and 1.030× at 1 MB. The diminishing large-payload
+geometric-mean speedup is 1.052×; by size it is 1.081× at 1 KB, 1.072× at
+16 KB, 1.044× at 128 KB, and 1.012× at 1 MB. The diminishing large-payload
 gain identifies transport JSON encoding and memory copying as the remaining
-dominant work. Batch-envelope cells improved by 1.070× geometric mean after
+dominant work. Batch-envelope cells improved by 1.065× geometric mean after
 reusing the already validated task models. The final report’s all-cell
-geometric mean is 1.049×, including unchanged workflow/status controls.
+geometric mean is 1.042×, including unchanged workflow/status controls.
 
 ## Interfaces and Dependencies
 
