@@ -172,6 +172,19 @@ class RelaynaRabbitClient:
         if self._tasks_exchange is None:
             raise RuntimeError("Tasks exchange is not initialized")
         task_dict = self._prepare_task_payload(task)
+        await self._publish_prepared_task(task_dict, headers=headers)
+
+    async def _publish_prepared_task(
+        self,
+        task_dict: dict[str, Any],
+        *,
+        headers: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Publish task data validated and dumped by the current public operation."""
+
+        tasks_exchange = self._tasks_exchange
+        if tasks_exchange is None:
+            raise RuntimeError("Tasks exchange is not initialized")
         self._validate_task_priority(task_dict)
         routing_key = self._topology.task_routing_key(task_dict)
         with relayna_span(
@@ -196,9 +209,19 @@ class RelaynaRabbitClient:
                 headers=cast(Any, message_headers),
             )
             _clear_default_priority(message, priority=cast(int | None, task_dict.get("priority")))
-            await self._tasks_exchange.publish(message, routing_key=routing_key)
+            await tasks_exchange.publish(message, routing_key=routing_key)
         if self._metrics is not None:
             self._metrics.record_queue_publish(queue=routing_key, status="task", worker_type="api")
+
+    async def _publish_prepared_task_item(self, task: dict[str, Any]) -> None:
+        """Publish one task prepared by the surrounding multi-task operation."""
+
+        if isinstance(self._topology, SharedStatusWorkflowTopology):
+            raise RuntimeError("SharedStatusWorkflowTopology requires publish_to_stage(...) or publish_to_entry(...)")
+        await self._ensure_ready()
+        if self._tasks_exchange is None:
+            raise RuntimeError("Tasks exchange is not initialized")
+        await self._publish_prepared_task(task)
 
     async def publish_tasks(
         self,
@@ -209,9 +232,10 @@ class RelaynaRabbitClient:
         meta: Mapping[str, Any] | None = None,
         max_concurrency: int = 16,
     ) -> None:
-        prepared_tasks = [self._prepare_task_payload(task) for task in tasks]
+        prepared_envelopes = [self._prepare_task_envelope(task) for task in tasks]
+        prepared_tasks = [envelope.model_dump(mode="json", exclude_none=True) for envelope in prepared_envelopes]
         if mode == "individual":
-            await map_bounded(prepared_tasks, self.publish_task, concurrency=max_concurrency)
+            await map_bounded(prepared_tasks, self._publish_prepared_task_item, concurrency=max_concurrency)
             return
         if mode != "batch_envelope":
             raise ValueError(f"Unsupported publish mode '{mode}'.")
@@ -219,7 +243,7 @@ class RelaynaRabbitClient:
             raise ValueError("batch_id is required when mode='batch_envelope'.")
         envelope = BatchTaskEnvelope(
             batch_id=str(batch_id),
-            tasks=[TaskEnvelope.model_validate(task) for task in prepared_tasks],
+            tasks=prepared_envelopes,
             meta=dict(meta or {}),
         )
         await self._publish_batch_envelope(
@@ -435,9 +459,12 @@ class RelaynaRabbitClient:
         return ensure_status_event_id(event_dict)
 
     def _prepare_task_payload(self, task: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
-        normalized = normalize_contract_aliases(_to_dict(task), self._alias_config, drop_aliases=True)
-        envelope = TaskEnvelope.model_validate(normalized)
+        envelope = self._prepare_task_envelope(task)
         return envelope.model_dump(mode="json", exclude_none=True)
+
+    def _prepare_task_envelope(self, task: BaseModel | Mapping[str, Any]) -> TaskEnvelope:
+        normalized = normalize_contract_aliases(_to_dict(task), self._alias_config, drop_aliases=True)
+        return TaskEnvelope.model_validate(normalized)
 
     def _prepare_workflow_payload(
         self,
