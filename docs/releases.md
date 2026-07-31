@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.29/relayna-1.4.29-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.30/relayna-1.4.30-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.29/relayna-1.4.29.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.30/relayna-1.4.30.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.4.29.tar.gz`
-- `dist/relayna-1.4.29-py3-none-any.whl`
+- `dist/relayna-1.4.30.tar.gz`
+- `dist/relayna-1.4.30-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,22 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.4.30
+
+Relayna `1.4.30` moves AMQP JSON transport encoding and parsing to Pydantic
+Core. Review the
+[JSON transport migration after v1.4.29](json-transport-migration.md) before
+upgrading because raw outbound bytes, invalid UTF-8 handling, and some input
+coercions intentionally differ from `1.4.29`.
+
+The consumer performance change needs no migration. `TaskConsumer` skips
+resource sampling and successful-path observation construction only when no
+observation sink or metrics recorder could receive the result. Observation-only,
+metrics-only, combined instrumentation, OpenTelemetry tracing, acknowledgements,
+retries, lifecycle statuses, and message contracts keep their existing
+behavior. Upgrade the SDK, Studio backend, and Studio frontend together to keep
+the shared release line aligned.
 
 ### Upgrading to 1.4.29
 

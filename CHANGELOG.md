@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.30 - 2026-07-31
+
 ### Changed
 
 - Replaced Relayna-owned AMQP JSON encoding and parsing with Pydantic Core after
@@ -13,6 +15,16 @@ All notable changes to this project will be documented in this file.
   envelope classification, arbitrary-size integers, non-finite transport
   tokens, original DLQ-body replay, persisted JSON, and canonical hash/dedup
   inputs.
+- Removed successful `TaskConsumer` instrumentation work that cannot be
+  observed: consumers without an observation sink no longer construct receive,
+  resource-sample, or acknowledgement events, and consumers without either an
+  observation sink or metrics recorder no longer sample task CPU/RSS.
+  Metrics-only consumers still sample and record resource metrics, and
+  observation-only or combined consumers retain the same four-event successful
+  path and start/end samples.
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.30`, raised the Studio backend dependency floor to `relayna>=1.4.30`,
+  and advanced the strict production freeze manifests to `v1.4.30`.
 
 ### Compatibility
 
@@ -23,6 +35,44 @@ All notable changes to this project will be documented in this file.
   [JSON transport migration after v1.4.29](docs/json-transport-migration.md)
   for the accepted JSON domain, exact breaks, rollout guidance, and rollback
   implications.
+- The consumer optimization is private and behavior-preserving. It does not
+  change public exports or signatures, task/status/workflow contracts, AMQP or
+  Redis bytes, routing, acknowledgements or rejections, trace propagation,
+  OpenTelemetry spans, lifecycle/retry/DLQ behavior, exceptions, or
+  cancellation. The freeze-manifest changes are version-only; API, route, and
+  schema entries are unchanged.
+
+### Performance
+
+- The authoritative sequential five-benchmark comparison improved the minimal
+  consumer per-message geometric mean by `22.1%` and the minimal consumer-loop
+  geometric mean by `18.3%`. Minimal per-message 1 KB and 16 KB groups improved
+  by `26.4%` and `25.3%`, respectively.
+- Observation-enabled per-message and loop groups measured `+1.9%` and `-3.3%`
+  aggregate drift, while the four unchanged control benchmarks ranged from
+  `-1.7%` to `+1.0%`. No automated timing threshold or favorable-cell
+  selection was used. Retained reports, checksums, methodology, all 40 consumer
+  deltas, and 368 control cells are under
+  `reports/consumer-disabled-instrumentation/`.
+
+### Verification
+
+- Passed 104 focused consumer tests, including deterministic disabled,
+  observation-only, metrics-only, combined, lifecycle, retry, exception,
+  cancellation, acknowledgement, and rejection coverage.
+- Ran two complete sequential baseline/candidate `uv run python -m benchmarks
+  run-all` pairs plus two focused consumer repetitions. The authoritative pair
+  completed all five registered benchmarks from executable historical and
+  candidate source states; the repository's canonical reports were restored
+  byte-for-byte.
+- Passed the final SDK formatting, linting, and type checks with 657 tests
+  passed and 1 skipped; passed Studio backend formatting, linting, and type
+  checks with 244 tests passed; and passed 92 Studio frontend tests and its
+  production build.
+- Passed 198 benchmark smoke/regression tests and a final canonical five-suite
+  `run-all`, then built and inspected the `1.4.30` SDK wheel/source
+  distribution and Studio backend wheel. Verified all SDK, backend, and
+  frontend freeze manifests changed only their `freeze_version`.
 
 ## 1.4.29 - 2026-07-15
 

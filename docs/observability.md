@@ -401,6 +401,15 @@ Use these when you want to understand:
 - `ConsumerDeadLetterPublished`
 - `ConsumerDLQRecordPersistFailed`
 
+When `observation_sink` is omitted, Relayna does not construct or dispatch these
+task observation objects. If both `observation_sink` and `metrics` are omitted,
+the successful task path also skips start/end CPU and RSS sampling. A
+metrics-only consumer still performs both samples and records
+`resource_start`/`resource_end`; an observation-enabled consumer still emits
+`TaskMessageReceived`, both `TaskResourceSampled` events, and
+`TaskMessageAcked` in that order. This optimization does not disable or bypass
+OpenTelemetry tracing.
+
 `AggregationConsumer` and `AggregationWorkerRuntime` also emit aggregation-
 specific task-linked events:
 

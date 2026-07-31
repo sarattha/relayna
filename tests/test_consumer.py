@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from dataclasses import asdict
 from typing import Any
 
 import pytest
@@ -21,7 +22,7 @@ from relayna.consumer import (
 )
 from relayna.contracts import ActionSchema, PayloadSchema, StatusEventEnvelope, WorkflowEnvelope
 from relayna.dlq import DLQRecord
-from relayna.metrics import RelaynaMetrics
+from relayna.metrics import RelaynaMetrics, TaskResourceSample
 from relayna.observability import (
     AggregationHandlerFailed,
     ConsumerDeadLetterPublished,
@@ -1106,10 +1107,199 @@ async def test_task_consumer_emits_resource_samples_and_runtime_metrics() -> Non
     assert [sample.sample_kind for sample in samples] == ["start", "end"]
     assert all(sample.task_id == "task-123" for sample in samples)
     rendered = metrics.render().decode("utf-8")
+    assert [type(item) for item in observations] == [
+        TaskConsumerStarted,
+        TaskMessageReceived,
+        TaskResourceSampled,
+        TaskResourceSampled,
+        TaskMessageAcked,
+    ]
     assert 'service="payments-api"' in rendered
     assert "relayna_tasks_started_total" in rendered
     assert "relayna_tasks_completed_total" in rendered
     assert 'task_id="' not in rendered
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_skips_disabled_success_instrumentation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "task_type": "payment", "payload": {}}).encode("utf-8"),
+        correlation_id="corr-123",
+    )
+    rabbit = FakeRabbitClient(
+        topology=make_topology(),
+        acquire_results=[FakeChannel(FakeQueue([message]))],
+    )
+    handled: list[str] = []
+
+    def unexpected_call(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("disabled instrumentation must not be constructed or sampled")
+
+    monkeypatch.setattr("relayna.consumer.task_consumer.sample_task_resources", unexpected_call)
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskConsumerStarted", unexpected_call)
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskMessageReceived", unexpected_call)
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskResourceSampled", unexpected_call)
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskMessageAcked", unexpected_call)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        handled.append(task.task_id)
+        assert context.correlation_id == "corr-123"
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler)
+
+    await run_consumer_until_message_done(consumer, message)
+
+    assert handled == ["task-123"]
+    assert message.acked is True
+    assert message.rejected_with is None
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_observation_only_preserves_success_event_order_and_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = FakeMessage(
+        json.dumps({"task_id": "task-123", "task_type": "payment", "payload": {}}).encode("utf-8"),
+        correlation_id="corr-123",
+        delivery_tag=7,
+        redelivered=True,
+    )
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+    observed: list[object] = []
+    samples = iter(
+        (
+            TaskResourceSample(cpu_process_seconds=1.25, memory_rss_bytes=2048),
+            TaskResourceSample(cpu_process_seconds=1.75, memory_rss_bytes=4096),
+        )
+    )
+    monkeypatch.setattr("relayna.consumer.task_consumer.sample_task_resources", lambda: next(samples))
+
+    async def sink(event: object) -> None:
+        observed.append(event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        assert task.task_id == "task-123"
+        assert context.correlation_id == "corr-123"
+
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        consumer_name="worker-a",
+        observation_sink=sink,
+    )
+
+    await consumer._handle_message(
+        message,
+        source_queue_name="tasks.queue",
+        retry_infrastructure=None,
+    )
+
+    assert [type(event) for event in observed] == [
+        TaskMessageReceived,
+        TaskResourceSampled,
+        TaskResourceSampled,
+        TaskMessageAcked,
+    ]
+    received = observed[0]
+    start_sample = observed[1]
+    end_sample = observed[2]
+    acked = observed[3]
+    assert isinstance(received, TaskMessageReceived)
+    assert isinstance(start_sample, TaskResourceSampled)
+    assert isinstance(end_sample, TaskResourceSampled)
+    assert isinstance(acked, TaskMessageAcked)
+    assert {key: value for key, value in asdict(received).items() if key != "timestamp"} == {
+        "consumer_name": "worker-a",
+        "queue_name": "tasks.queue",
+        "task_id": "task-123",
+        "delivery_tag": 7,
+        "redelivered": True,
+        "correlation_id": "corr-123",
+        "retry_attempt": 0,
+        "task_type": "payment",
+        "component": "consumer",
+    }
+    start_data = {key: value for key, value in asdict(start_sample).items() if key != "timestamp"}
+    assert start_data == {
+        "task_id": "task-123",
+        "correlation_id": "corr-123",
+        "task_type": "payment",
+        "consumer_name": "worker-a",
+        "queue_name": "tasks.queue",
+        "sample_kind": "start",
+        "cpu_process_seconds": 1.25,
+        "memory_rss_bytes": 2048,
+        "component": "consumer",
+    }
+    assert {key: value for key, value in asdict(end_sample).items() if key != "timestamp"} == {
+        **start_data,
+        "sample_kind": "end",
+        "cpu_process_seconds": 1.75,
+        "memory_rss_bytes": 4096,
+    }
+    assert {key: value for key, value in asdict(acked).items() if key != "timestamp"} == {
+        "consumer_name": "worker-a",
+        "queue_name": "tasks.queue",
+        "task_id": "task-123",
+        "correlation_id": "corr-123",
+        "retry_attempt": 0,
+        "task_type": "payment",
+        "component": "consumer",
+    }
+    timestamps = [event.timestamp for event in observed]
+    assert timestamps == sorted(timestamps)
+    assert message.acked is True
+    assert message.rejected_with is None
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_metrics_only_samples_without_constructing_observations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = FakeMessage(json.dumps({"task_id": "task-123", "task_type": "payment", "payload": {}}).encode("utf-8"))
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+    metrics = RelaynaMetrics(service="payments-api")
+    sample_calls: list[TaskResourceSample] = []
+
+    def sample_resources() -> TaskResourceSample:
+        sample = TaskResourceSample(
+            cpu_process_seconds=float(len(sample_calls) + 1),
+            memory_rss_bytes=(len(sample_calls) + 1) * 1024,
+        )
+        sample_calls.append(sample)
+        return sample
+
+    def unexpected_event(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("metrics-only processing must not construct observation events")
+
+    monkeypatch.setattr("relayna.consumer.task_consumer.sample_task_resources", sample_resources)
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskMessageReceived", unexpected_event)
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskResourceSampled", unexpected_event)
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskMessageAcked", unexpected_event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+
+    consumer = TaskConsumer(rabbitmq=rabbit, handler=handler, metrics=metrics)
+
+    await consumer._handle_message(
+        message,
+        source_queue_name="tasks.queue",
+        retry_infrastructure=None,
+    )
+
+    assert len(sample_calls) == 2
+    rendered = metrics.render().decode("utf-8")
+    assert 'status="resource_start"' in rendered
+    assert 'status="resource_end"' in rendered
+    assert "relayna_tasks_started_total" in rendered
+    assert "relayna_tasks_completed_total" in rendered
+    assert message.acked is True
+    assert message.rejected_with is None
 
 
 @pytest.mark.asyncio
@@ -2086,7 +2276,9 @@ async def test_task_consumer_rejects_batch_envelope_without_retry_policy() -> No
 
 
 @pytest.mark.asyncio
-async def test_task_consumer_fans_out_batch_envelope_into_individual_messages() -> None:
+async def test_task_consumer_fans_out_batch_without_disabled_ack_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     message = FakeMessage(
         json.dumps(
             {
@@ -2104,6 +2296,12 @@ async def test_task_consumer_fans_out_batch_envelope_into_individual_messages() 
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise AssertionError("handler should not run for the original batch envelope")
+
+    def unexpected_ack_observation(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("disabled batch acknowledgement observation must not be constructed")
+
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskMessageAcked", unexpected_ack_observation)
 
     consumer = TaskConsumer(
         rabbitmq=rabbit,

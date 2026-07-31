@@ -133,11 +133,12 @@ class TaskConsumer:
                         retry_queue_suffix=self._retry_policy.retry_queue_suffix,
                         dead_letter_queue_suffix=self._retry_policy.dead_letter_queue_suffix,
                     )
-                if not started:
+                if not started and self._observation_sink is not None:
                     await emit_observation(
                         self._observation_sink,
                         TaskConsumerStarted(consumer_name=self._consumer_name, queue_name=queue_name),
                     )
+                if not started:
                     started = True
 
                 channel = await self._rabbitmq.acquire_channel(prefetch=prefetch)
@@ -281,19 +282,20 @@ class TaskConsumer:
             return
 
         normalized_payload = _normalize_payload(payload, alias_config=self._alias_config)
-        await emit_observation(
-            self._observation_sink,
-            TaskMessageReceived(
-                consumer_name=self._consumer_name,
-                queue_name=source_queue_name,
-                task_id=_coerce_task_id(normalized_payload),
-                correlation_id=getattr(message, "correlation_id", None),
-                retry_attempt=_retry_attempt(message),
-                task_type=_coerce_task_type(normalized_payload),
-                delivery_tag=getattr(message, "delivery_tag", None),
-                redelivered=bool(getattr(message, "redelivered", False)),
-            ),
-        )
+        if self._observation_sink is not None:
+            await emit_observation(
+                self._observation_sink,
+                TaskMessageReceived(
+                    consumer_name=self._consumer_name,
+                    queue_name=source_queue_name,
+                    task_id=_coerce_task_id(normalized_payload),
+                    correlation_id=getattr(message, "correlation_id", None),
+                    retry_attempt=_retry_attempt(message),
+                    task_type=_coerce_task_type(normalized_payload),
+                    delivery_tag=getattr(message, "delivery_tag", None),
+                    redelivered=bool(getattr(message, "redelivered", False)),
+                ),
+            )
 
         if isinstance(normalized_payload, Mapping) and is_batch_task_payload(normalized_payload):
             if self._retry_policy is None:
@@ -362,17 +364,18 @@ class TaskConsumer:
         )
         if success:
             await message.ack()
-            await emit_observation(
-                self._observation_sink,
-                TaskMessageAcked(
-                    consumer_name=self._consumer_name,
-                    queue_name=source_queue_name,
-                    task_id=task.task_id,
-                    correlation_id=context.correlation_id,
-                    retry_attempt=context.retry_attempt,
-                    task_type=task.task_type,
-                ),
-            )
+            if self._observation_sink is not None:
+                await emit_observation(
+                    self._observation_sink,
+                    TaskMessageAcked(
+                        consumer_name=self._consumer_name,
+                        queue_name=source_queue_name,
+                        task_id=task.task_id,
+                        correlation_id=context.correlation_id,
+                        retry_attempt=context.retry_attempt,
+                        task_type=task.task_type,
+                    ),
+                )
 
     async def _handle_batch_message(
         self,
@@ -436,15 +439,16 @@ class TaskConsumer:
         )
 
         await message.ack()
-        await emit_observation(
-            self._observation_sink,
-            TaskMessageAcked(
-                consumer_name=self._consumer_name,
-                queue_name=source_queue_name,
-                task_id=None,
-                retry_attempt=_retry_attempt(message),
-            ),
-        )
+        if self._observation_sink is not None:
+            await emit_observation(
+                self._observation_sink,
+                TaskMessageAcked(
+                    consumer_name=self._consumer_name,
+                    queue_name=source_queue_name,
+                    task_id=None,
+                    retry_attempt=_retry_attempt(message),
+                ),
+            )
 
     def _make_task_context(
         self,
@@ -494,7 +498,7 @@ class TaskConsumer:
         retry_correlation_id: str | None = None,
         retry_headers: Mapping[str, Any] | None = None,
     ) -> bool:
-        started_at = time.perf_counter()
+        started_at = time.perf_counter() if self._metrics is not None else None
         resource_sampling_started = False
         outcome: str | None = None
         if self._metrics is not None:
@@ -508,10 +512,11 @@ class TaskConsumer:
             await self._publish_lifecycle_status(
                 context, status=self._lifecycle_statuses.processing_status, message="Task processing started."
             )
-            await self._emit_task_resource_sample(
-                task=task, context=context, queue_name=source_queue_name, sample_kind="start"
-            )
-            resource_sampling_started = True
+            if self._observation_sink is not None or self._metrics is not None:
+                await self._emit_task_resource_sample(
+                    task=task, context=context, queue_name=source_queue_name, sample_kind="start"
+                )
+                resource_sampling_started = True
             try:
                 await self._handler(task, context)
             except _ManualRetryRequested:
@@ -637,7 +642,7 @@ class TaskConsumer:
                 await self._emit_task_resource_sample(
                     task=task, context=context, queue_name=source_queue_name, sample_kind="end"
                 )
-            if self._metrics is not None and outcome is not None:
+            if self._metrics is not None and outcome is not None and started_at is not None:
                 self._metrics.record_task_finished(
                     outcome="completed" if outcome == "completed" else "failed",
                     stage=task.task_type,
@@ -746,22 +751,25 @@ class TaskConsumer:
         queue_name: str | None,
         sample_kind: Literal["start", "end"],
     ) -> None:
+        if self._observation_sink is None and self._metrics is None:
+            return
         sample = sample_task_resources()
         if sample is None:
             return
-        await emit_observation(
-            self._observation_sink,
-            TaskResourceSampled(
-                task_id=task.task_id,
-                correlation_id=context.correlation_id,
-                task_type=task.task_type,
-                consumer_name=self._consumer_name,
-                queue_name=queue_name,
-                sample_kind=sample_kind,
-                cpu_process_seconds=sample.cpu_process_seconds,
-                memory_rss_bytes=sample.memory_rss_bytes,
-            ),
-        )
+        if self._observation_sink is not None:
+            await emit_observation(
+                self._observation_sink,
+                TaskResourceSampled(
+                    task_id=task.task_id,
+                    correlation_id=context.correlation_id,
+                    task_type=task.task_type,
+                    consumer_name=self._consumer_name,
+                    queue_name=queue_name,
+                    sample_kind=sample_kind,
+                    cpu_process_seconds=sample.cpu_process_seconds,
+                    memory_rss_bytes=sample.memory_rss_bytes,
+                ),
+            )
         if self._metrics is not None:
             self._metrics.record_observation_event(
                 stage=task.task_type,
