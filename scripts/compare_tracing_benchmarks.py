@@ -41,6 +41,7 @@ EXPECTED_PER_MODE = {
     "publish-preparation": 72,
     "redis-storage-cpu": 72,
 }
+TARGET_RUNTIME_PATHS = frozenset({"src/relayna/observability/tracing.py"})
 
 
 def _sha256(path: Path) -> str:
@@ -250,6 +251,17 @@ def _load_cells(run_dir: Path) -> tuple[dict[str, dict[str, Any]], dict[str, Any
 def _validate_pair(baseline_manifest: dict[str, Any], candidate_manifest: dict[str, Any]) -> list[str]:
     if baseline_manifest["source"]["runtime_base_commit"] != candidate_manifest["source"]["runtime_base_commit"]:
         raise ValueError("Runtime base commits differ.")
+    baseline_runtime = baseline_manifest["source"]["runtime_content_sha256"]
+    candidate_runtime = candidate_manifest["source"]["runtime_content_sha256"]
+    if baseline_runtime.keys() != candidate_runtime.keys() or not TARGET_RUNTIME_PATHS <= baseline_runtime.keys():
+        raise ValueError("Runtime content hash inventories differ.")
+    non_target_mismatches = sorted(
+        path
+        for path in baseline_runtime.keys() - TARGET_RUNTIME_PATHS
+        if baseline_runtime[path] != candidate_runtime[path]
+    )
+    if non_target_mismatches:
+        raise ValueError(f"Non-target runtime content differs: {', '.join(non_target_mismatches)}")
     if baseline_manifest["packages"] != candidate_manifest["packages"]:
         raise ValueError("Resolved benchmark packages differ.")
     baseline_controls = baseline_manifest["execution"]["environment_controls"]
@@ -261,7 +273,10 @@ def _validate_pair(baseline_manifest: dict[str, Any], candidate_manifest: dict[s
     for key in ("python", "os", "kernel", "architecture", "cpu"):
         if baseline_manifest["environment"][key] != candidate_manifest["environment"][key]:
             raise ValueError(f"Environment field differs: {key}")
-    notes: list[str] = []
+    notes = [
+        "Runtime content hashes prove that all measured consumer and publisher "
+        "paths outside src/relayna/observability/tracing.py are identical."
+    ]
     baseline_locks = baseline_manifest["dependency_state"]["lock_sha256"]
     candidate_locks = candidate_manifest["dependency_state"]["lock_sha256"]
     if baseline_locks != candidate_locks:

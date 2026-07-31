@@ -144,3 +144,8 @@ def test_comparison_generator_is_deterministic_and_rejects_package_mismatch(
     candidate["packages"]["opentelemetry-sdk"] = "0.0.0"
     with pytest.raises(ValueError, match="Resolved benchmark packages differ"):
         comparison_script._validate_pair(baseline, candidate)
+
+    candidate = json.loads(json.dumps(_manifest("candidate")))
+    candidate["source"]["runtime_content_sha256"]["src/relayna/rabbitmq/client.py"] = "0" * 64
+    with pytest.raises(ValueError, match="Non-target runtime content differs.*rabbitmq/client.py"):
+        comparison_script._validate_pair(baseline, candidate)

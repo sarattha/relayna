@@ -68,9 +68,13 @@ the matched evidence.
   only the derived comparison and checksums, passed the focused test on Python
   3.13 and 3.14, and reran `$code-change-verification` from the beginning to a
   clean pass.
-- [ ] Push the CI correction, babysit the replacement CI run and first Codex
-  review to terminal status, and resolve all actionable feedback without
-  merging.
+- [x] (2026-07-31 07:58Z) Addressed the first Codex review's sole actionable
+  P2 by rejecting baseline/candidate comparisons when any measured consumer or
+  publisher runtime hash outside the intended tracing target differs; added a
+  regression test, regenerated the derived comparison, and reran focused tests
+  plus `$code-change-verification` from the beginning to a clean pass.
+- [ ] Push the review fix, reply with evidence, resolve its thread, and babysit
+  the replacement CI run to terminal status without merging.
 
 ## Surprises & Discoveries
 
@@ -207,6 +211,14 @@ the matched evidence.
   the same generator now passes exact-byte regeneration on Python 3.13 and
   3.14 after switching only aggregate arithmetic to 40-digit `Decimal`.
 
+- Observation: the first Codex review found that shared
+  `runtime_base_commit` and package metadata alone would not reject an
+  unrelated candidate edit to an already-hashed consumer or publisher path.
+  Evidence: PR #118 thread `discussion_r3688929187`. The comparator now
+  requires an identical runtime hash inventory and identical non-target hashes;
+  a focused regression test mutates `src/relayna/rabbitmq/client.py` and proves
+  comparison is rejected.
+
 - Observation: after a fresh fetch and tag check, `origin/main` remained exact
   base/tag `v1.4.31`; no branch, tag, changelog, or version surface reserved
   `1.4.32`.
@@ -277,6 +289,14 @@ the matched evidence.
   Rationale: raw baseline and candidate measurements remain untouched while
   comparison JSON, standalone HTML, manifests, and checksums regenerate
   byte-identically across supported Python versions and operating systems.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: allow the matched benchmark pair to differ only at
+  `src/relayna/observability/tracing.py` among its measured runtime hash
+  inventory.
+  Rationale: this makes the attribution boundary executable and prevents the
+  merge-worth assessment from silently incorporating consumer or publisher
+  changes outside the stated optimization.
   Date/Author: 2026-07-31 / Codex.
 
 ## Outcomes & Retrospective

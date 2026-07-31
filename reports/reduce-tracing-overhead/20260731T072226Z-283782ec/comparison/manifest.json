@@ -1,12 +1,12 @@
 {
   "artifacts": {
     "comparison.html": {
-      "bytes": 2733508,
-      "sha256": "0103dbf07df1bf5740ab1502497b15cd347afd6bc06a7c6d2a3cdfb4f61520d5"
+      "bytes": 2733800,
+      "sha256": "85059cef0807b2ca99e6aa4939a32dbc8ef3fe6ea662345e76b665c5b88d0107"
     },
     "comparison.json": {
-      "bytes": 1761202,
-      "sha256": "7e5c5f221ea7829e8355c50589ee6421614e92e1ba17654a184fcab2cbc760f2"
+      "bytes": 1761345,
+      "sha256": "773db3cd59c87ed311c9e3094e2852f6fad3bf0b0715be082983236186ff0d26"
     }
   },
   "assessment": {

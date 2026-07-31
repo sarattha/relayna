@@ -52396,6 +52396,7 @@
     }
   ],
   "comparability_notes": [
+    "Runtime content hashes prove that all measured consumer and publisher paths outside src/relayna/observability/tracing.py are identical.",
     "Lock digests differ because the candidate adds the already-resolved opentelemetry-sdk benchmark dependency to the dev extra for tests; the complete resolved benchmark package/version maps are identical."
   ],
   "export_validation": {
