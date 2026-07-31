@@ -1,18 +1,18 @@
 {
   "artifacts": {
     "comparison.html": {
-      "bytes": 2733513,
-      "sha256": "47fb60fa13ed9a8ec14b258037d6f2f4c3e4146bdeb5f8c51ae80f0e75badea0"
+      "bytes": 2733508,
+      "sha256": "0103dbf07df1bf5740ab1502497b15cd347afd6bc06a7c6d2a3cdfb4f61520d5"
     },
     "comparison.json": {
-      "bytes": 1761207,
-      "sha256": "9244fe8937801ff74d093f83573da8da5b2f4b937d3a555c70755fd2bddc3864"
+      "bytes": 1761202,
+      "sha256": "7e5c5f221ea7829e8355c50589ee6421614e92e1ba17654a184fcab2cbc760f2"
     }
   },
   "assessment": {
     "all_enabled_target_summaries_exceed_control_drift": true,
     "enabled_target_summary_count": 12,
-    "maximum_absolute_control_drift_percent": 1.5308517128133081,
+    "maximum_absolute_control_drift_percent": 1.5308517128132415,
     "rationale": "Every enabled-tracing consumer and publish family aggregate improves by more than the maximum absolute unchanged-control aggregate drift.",
     "verdict": "worth merging"
   },

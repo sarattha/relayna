@@ -7,8 +7,8 @@ import argparse
 import hashlib
 import html
 import json
-import math
 from collections import defaultdict
+from decimal import Decimal, localcontext
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +50,10 @@ def _sha256(path: Path) -> str:
 def _geometric_mean(values: list[float]) -> float:
     if not values or any(value <= 0 for value in values):
         raise ValueError("Geometric means require positive values.")
-    return math.exp(sum(math.log(value) for value in values) / len(values))
+    with localcontext() as context:
+        context.prec = 40
+        logarithmic_mean = sum(Decimal(str(value)).ln() for value in values) / len(values)
+        return float(logarithmic_mean.exp())
 
 
 def _number(value: str) -> float:

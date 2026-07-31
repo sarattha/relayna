@@ -59,9 +59,18 @@ the matched evidence.
 - [x] (2026-07-31 07:51Z) Ran `$code-change-verification` from the beginning to
   a clean pass after syncing the new worktree's Studio dev tools, plus frontend,
   package, benchmark, artifact, HTML, freeze, and version validation.
-- [ ] Use `$pr-draft-summary`, intentionally stage/commit/push, open a ready PR,
-  babysit CI, request the first Codex review, and resolve all actionable
-  feedback without merging.
+- [x] (2026-07-31 07:53Z) Used `$pr-draft-summary`, intentionally committed and
+  pushed the scoped work, opened ready PR #118, and requested the first Codex
+  review through the established `@codex review` mechanism.
+- [x] (2026-07-31 07:55Z) Diagnosed the first CI run's cross-platform
+  byte-determinism failure in the derived comparison, replaced
+  platform-dependent `libm` aggregation with decimal arithmetic, regenerated
+  only the derived comparison and checksums, passed the focused test on Python
+  3.13 and 3.14, and reran `$code-change-verification` from the beginning to a
+  clean pass.
+- [ ] Push the CI correction, babysit the replacement CI run and first Codex
+  review to terminal status, and resolve all actionable feedback without
+  merging.
 
 ## Surprises & Discoveries
 
@@ -188,6 +197,16 @@ the matched evidence.
   Evidence: per-side `enabled-sampled-exported/tracing-suite.json` and
   comparison `export_validation`.
 
+- Observation: Python's platform `libm` produces last-bit differences for
+  logarithm/exponential geometric means, so the initially retained derived
+  comparison was semantically identical but not byte-identical when regenerated
+  on Linux CI.
+  Evidence: the first PR #118 SDK jobs passed formatting, linting, and typing,
+  then failed only
+  `test_comparison_generator_is_deterministic_and_rejects_package_mismatch`;
+  the same generator now passes exact-byte regeneration on Python 3.13 and
+  3.14 after switching only aggregate arithmetic to 40-digit `Decimal`.
+
 - Observation: after a fresh fetch and tag check, `origin/main` remained exact
   base/tag `v1.4.31`; no branch, tag, changelog, or version surface reserved
   `1.4.32`.
@@ -253,6 +272,13 @@ the matched evidence.
   installed OpenTelemetry APIs.
   Date/Author: 2026-07-31 / Codex.
 
+- Decision: compute derived comparison geometric means with a local 40-digit
+  decimal context.
+  Rationale: raw baseline and candidate measurements remain untouched while
+  comparison JSON, standalone HTML, manifests, and checksums regenerate
+  byte-identically across supported Python versions and operating systems.
+  Date/Author: 2026-07-31 / Codex.
+
 ## Outcomes & Retrospective
 
 Work is in progress. The isolated branch and compatibility boundary are
@@ -265,7 +291,10 @@ identical at 504,104 sampled spans.
 Version `1.4.32`, version-only freeze advances, changelog, release, tracing,
 benchmark, and report documentation are complete. The mandatory SDK and Studio
 backend stack passes, as do Studio frontend tests/build and SDK/backend package
-builds. Publication, terminal CI, and first Codex review remain.
+builds. PR #118 is open and the first Codex review has been requested. A
+cross-platform exact-regeneration issue found by initial CI has been corrected
+without changing any raw measurement; terminal replacement CI and review
+resolution remain.
 
 The frontend dependency installation reports two existing high-severity npm
 audit advisories. This task changes only package version metadata in the
