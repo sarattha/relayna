@@ -61,6 +61,10 @@ per-message CPU path from full consumer-loop throughput.
   retained only the capacity-counter prototype, which improved every tested
   real concurrent cell by 1.8–2.8% across 15 alternating 8,192-message trials
   with exact behavior counts.
+- [x] (2026-07-31 08:41Z) Re-fetched unchanged `origin/main`, captured and
+  validated the first complete candidate, rejected its non-adjacent comparison
+  as environmentally drifted, and extended retention/comparison tooling for a
+  fresh back-to-back archived-baseline/current-candidate pair.
 - [ ] Re-fetch `origin/main`, integrate any relevant merged work, and capture a
   fresh final matched baseline/candidate pair if the base or environment moved.
 - [ ] Generate and validate complete-suite JSON/HTML comparison evidence,
@@ -160,6 +164,16 @@ per-message CPU path from full consumer-loop throughput.
   2.39%/1.83%. Every sample preserved exact handler/ack counts, zero rejects,
   and peak concurrency equal to prefetch.
 
+- Observation: the first canonical full candidate is complete and internally
+  valid, but its comparison to the 20-minute-earlier baseline is not
+  attributable to the scheduler.
+  Evidence: concurrent-loop latency moved -3.12% disabled, -9.45% unsampled,
+  and -9.94% sampled/exported, while the untouched sequential prefetch-1
+  controls moved -3.61%, -10.94%, and -10.06%. Per-message controls also moved
+  -2.64% to -5.72%. Both sides still contain 1,224 unique cases, 15 standalone
+  reports, exact runtime hashes, matching dependencies/event-loop/tracing
+  configuration, and identical 504,104-span sampled inventories.
+
 ## Decision Log
 
 - Decision: use exact refreshed base
@@ -225,6 +239,16 @@ per-message CPU path from full consumer-loop throughput.
   `loop.create_task` still honors custom task factories and copies ContextVars;
   in-flight set/callback exception retrieval, stop timing, cancellation, and
   final drain remain in place.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: retain the first complete pair as immutable non-authoritative
+  evidence and capture a new back-to-back pair under a new run ID.
+  Rationale: source, dependency, and configuration parity cannot compensate for
+  the observed temporal host drift. The final pair will run the baseline from
+  an exact read-only `git archive` of pre-runtime commit `6988fc6` via
+  `PYTHONPATH`, immediately followed by the current candidate. Both processes
+  use the same committed current benchmark harness; no extra worktree is
+  created and no source file is switched or overwritten.
   Date/Author: 2026-07-31 / Codex.
 
 ## Outcomes & Retrospective

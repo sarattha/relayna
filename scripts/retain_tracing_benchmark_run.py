@@ -239,7 +239,17 @@ def main() -> int:
     parser.add_argument("--source-clean-before-run", action="store_true")
     parser.add_argument("--task", default="reduce-tracing-overhead")
     parser.add_argument("--runtime-content-path", action="append")
+    parser.add_argument("--runtime-content-root", type=Path)
     parser.add_argument("--uv-sync-command", default="uv sync --extra benchmark --frozen")
+    parser.add_argument(
+        "--canonical-command",
+        default="uv run --extra benchmark python -m benchmarks.tracing_suite --output-root <unique-suite-dir>",
+    )
+    parser.add_argument("--source-commit")
+    parser.add_argument("--source-commit-subject")
+    parser.add_argument("--source-status")
+    parser.add_argument("--runtime-source-label", default="source root working tree")
+    parser.add_argument("--benchmark-harness-commit")
     args = parser.parse_args()
 
     if args.output_dir.exists():
@@ -293,7 +303,13 @@ def main() -> int:
     shutil.copy2(args.suite_dir / SUMMARY_FILE, args.output_dir / SUMMARY_FILE)
 
     lock_files = ("pyproject.toml", "uv.lock")
-    source_commit = _git(args.source_root, "rev-parse", "HEAD")
+    source_commit = args.source_commit or _git(args.source_root, "rev-parse", "HEAD")
+    source_commit_subject = args.source_commit_subject or _git(
+        args.source_root, "show", "-s", "--format=%s", source_commit
+    )
+    source_status = args.source_status or _git(args.source_root, "status", "--short", "--branch")
+    runtime_content_root = args.runtime_content_root or args.source_root
+    benchmark_harness_commit = args.benchmark_harness_commit or _git(args.source_root, "rev-parse", "HEAD")
     runtime_content_paths = args.runtime_content_path or [
         "src/relayna/observability/tracing.py",
         "src/relayna/rabbitmq/client.py",
@@ -309,17 +325,17 @@ def main() -> int:
         "source": {
             "repository": "sarattha/relayna",
             "commit": source_commit,
-            "commit_subject": _git(args.source_root, "show", "-s", "--format=%s", source_commit),
+            "commit_subject": source_commit_subject,
             "runtime_base_commit": args.runtime_base_commit,
             "branch_under_test": args.branch_under_test,
             "clean_before_run": args.source_clean_before_run,
-            "status": _git(args.source_root, "status", "--short", "--branch"),
-            "runtime_content_sha256": {name: _sha256(args.source_root / name) for name in runtime_content_paths},
+            "status": source_status,
+            "runtime_source": args.runtime_source_label,
+            "runtime_content_sha256": {name: _sha256(runtime_content_root / name) for name in runtime_content_paths},
         },
         "execution": {
-            "canonical_command": (
-                "uv run --extra benchmark python -m benchmarks.tracing_suite --output-root <unique-suite-dir>"
-            ),
+            "canonical_command": args.canonical_command,
+            "benchmark_harness_commit": benchmark_harness_commit,
             "environment_controls": {
                 "PYTHONHASHSEED": "0",
                 "LC_ALL": "C",
