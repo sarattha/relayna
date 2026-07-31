@@ -53,7 +53,7 @@ All notable changes to this project will be documented in this file.
 - Completed both authoritative canonical benchmark suites with all five
   registered families and 408 unique cases per side; validated every retained
   checksum, raw sidecar, standalone HTML report, and complete comparison.
-- Passed SDK formatting, linting, and type checking with 661 tests passed and 1
+- Passed SDK formatting, linting, and type checking with 667 tests passed and 1
   skipped; passed Studio backend formatting, linting, and type checking with
   244 tests passed; passed 92 Studio frontend tests and its production build.
 - Built and inspected the `1.4.31` SDK wheel/source distribution and Studio

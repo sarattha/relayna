@@ -276,6 +276,85 @@ def _validate_retained(directory: Path, manifest: dict[str, Any]) -> None:
         raise ValueError(f"Invalid retained case set: {directory}")
 
 
+def _validate_pair(
+    baseline_manifest: dict[str, Any],
+    candidate_manifest: dict[str, Any],
+) -> None:
+    if baseline_manifest["run_id"] != candidate_manifest["run_id"]:
+        raise ValueError("Baseline and candidate run IDs differ")
+    if baseline_manifest["environment"] != candidate_manifest["environment"]:
+        raise ValueError("Baseline and candidate execution environments differ")
+    for field in (
+        "canonical_command",
+        "environment_controls",
+        "repetitions",
+        "warmups",
+    ):
+        if baseline_manifest["execution"][field] != candidate_manifest["execution"][field]:
+            raise ValueError(f"Baseline and candidate execution field differs: {field}")
+    baseline_packages = {name: version for name, version in baseline_manifest["packages"].items() if name != "relayna"}
+    candidate_packages = {
+        name: version for name, version in candidate_manifest["packages"].items() if name != "relayna"
+    }
+    if baseline_packages != candidate_packages:
+        raise ValueError("Baseline and candidate resolved third-party packages differ")
+    if baseline_manifest["execution"]["finished_at_utc"] != candidate_manifest["execution"]["started_at_utc"]:
+        raise ValueError("Baseline and candidate did not run back-to-back")
+
+
+def _assessment(
+    *,
+    per_message_delta_percent: float,
+    loop_delta_percent: float,
+    max_control_drift_percent: float,
+) -> dict[str, Any]:
+    target_deltas = (per_message_delta_percent, loop_delta_percent)
+    improves_beyond_drift = all(delta < -max_control_drift_percent for delta in target_deltas)
+    regresses_beyond_drift = all(delta > max_control_drift_percent for delta in target_deltas)
+    if improves_beyond_drift:
+        outcome = "meaningful-improvement"
+        label = "Meaningful improvement"
+        rationale = (
+            f"Minimal per-message latency improved {-per_message_delta_percent:.2f}% "
+            f"and minimal consumer-loop latency improved {-loop_delta_percent:.2f}% "
+            f"(equivalent throughput gains), while unchanged benchmark-family "
+            f"geometric means stayed within ±{max_control_drift_percent:.2f}%. "
+            "Both target groups improved by more than the maximum absolute "
+            "unchanged-suite aggregate drift."
+        )
+    elif regresses_beyond_drift:
+        outcome = "meaningful-regression"
+        label = "Meaningful regression"
+        rationale = (
+            f"Minimal per-message latency regressed {per_message_delta_percent:.2f}% "
+            f"and minimal consumer-loop latency regressed {loop_delta_percent:.2f}%, "
+            f"exceeding the ±{max_control_drift_percent:.2f}% maximum absolute "
+            "unchanged-suite aggregate drift."
+        )
+    else:
+        outcome = "inconclusive"
+        label = "Inconclusive"
+        rationale = (
+            f"Minimal per-message latency changed {per_message_delta_percent:+.2f}% "
+            f"and minimal consumer-loop latency changed {loop_delta_percent:+.2f}%. "
+            f"At least one target group did not move beyond the ±"
+            f"{max_control_drift_percent:.2f}% maximum absolute unchanged-suite "
+            "aggregate drift, so this pair does not establish a meaningful result."
+        )
+    return {
+        "outcome": outcome,
+        "label": label,
+        "meaningful": outcome != "inconclusive",
+        "improvement": outcome == "meaningful-improvement",
+        "max_absolute_control_geomean_drift_percent": max_control_drift_percent,
+        "rule": (
+            "Both minimal target groups must move in the same direction by more "
+            "than the maximum absolute unchanged-suite geometric-mean drift."
+        ),
+        "rationale": rationale,
+    }
+
+
 def _artifact_rows(
     baseline_dir: Path,
     candidate_dir: Path,
@@ -365,7 +444,7 @@ def _render_html(data: dict[str, Any]) -> str:
   <h1>Extract message metadata once</h1>
   <p class="lede">Complete back-to-back canonical benchmark comparison. Negative latency deltas and
   positive throughput deltas are improvements. All 408 benchmark cases are included.</p>
-  <p class="decision"><strong>Assessment: meaningful improvement.</strong>
+  <p class="decision"><strong>Assessment: {html.escape(data["assessment"]["label"])}.</strong>
   {html.escape(data["assessment"]["rationale"])}</p>
 
   <h2>All benchmark families</h2>
@@ -418,8 +497,7 @@ def main() -> int:
     candidate_manifest = _read_json(args.candidate_dir / "manifest.json")
     _validate_retained(args.baseline_dir, baseline_manifest)
     _validate_retained(args.candidate_dir, candidate_manifest)
-    if baseline_manifest["run_id"] != candidate_manifest["run_id"]:
-        raise ValueError("Baseline and candidate run IDs differ")
+    _validate_pair(baseline_manifest, candidate_manifest)
 
     raw = {
         benchmark: (
@@ -454,6 +532,11 @@ def main() -> int:
     loop = by_name["consumer-loop / minimal"]
     controls = [item for item in benchmark_summaries if item["name"] != "consumer-processing"]
     max_control_drift = max(abs(item["relative_geometric_mean_delta_percent"]) for item in controls)
+    assessment = _assessment(
+        per_message_delta_percent=per_message["relative_geometric_mean_delta_percent"],
+        loop_delta_percent=loop["relative_geometric_mean_delta_percent"],
+        max_control_drift_percent=max_control_drift,
+    )
     all_cells = [cell for cells in cells_by_benchmark.values() for cell in cells]
     data = {
         "schema_version": 1,
@@ -464,6 +547,7 @@ def main() -> int:
             "pairing": "baseline and candidate ran back-to-back",
             "direction": ("negative latency delta and positive throughput delta are improvements"),
             "automated_threshold": None,
+            "assessment_rule": assessment["rule"],
             "case_count": len(all_cells),
         },
         "baseline": baseline_manifest,
@@ -477,18 +561,7 @@ def main() -> int:
             baseline_manifest,
             candidate_manifest,
         ),
-        "assessment": {
-            "meaningful": True,
-            "max_absolute_control_geomean_drift_percent": max_control_drift,
-            "rationale": (
-                f"Minimal per-message latency improved "
-                f"{-per_message['relative_geometric_mean_delta_percent']:.2f}% and minimal "
-                f"consumer-loop latency improved {-loop['relative_geometric_mean_delta_percent']:.2f}% "
-                f"(equivalent throughput gains), while unchanged benchmark-family geometric means "
-                f"stayed within ±{max_control_drift:.2f}%. The target-path direction also matches "
-                "the retained focused paired run."
-            ),
-        },
+        "assessment": assessment,
         "limitations": [
             "The consumer benchmark starts after RabbitMQ delivery.",
             "The benchmark uses a no-op handler and excludes application work.",

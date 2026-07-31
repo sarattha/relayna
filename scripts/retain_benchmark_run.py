@@ -154,6 +154,44 @@ def _package_version(source_root: Path) -> str:
         return str(tomllib.load(stream)["project"]["version"])
 
 
+def _optional_command(*command: str) -> str:
+    try:
+        return subprocess.check_output(
+            command,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return ""
+
+
+def _operating_system() -> str:
+    system = platform.system()
+    if system == "Darwin":
+        version = platform.mac_ver()[0]
+        build = _optional_command("sw_vers", "-buildVersion")
+        details = " ".join(part for part in (version, f"({build})" if build else "") if part)
+        return f"macOS {details}".strip()
+    return platform.platform()
+
+
+def _cpu_name() -> str:
+    system = platform.system()
+    if system == "Darwin":
+        cpu = _optional_command("sysctl", "-n", "machdep.cpu.brand_string")
+        if cpu:
+            return cpu
+    elif system == "Linux":
+        cpuinfo = Path("/proc/cpuinfo")
+        if cpuinfo.is_file():
+            for line in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.lower().startswith(("model name", "hardware")) and ":" in line:
+                    value = line.split(":", maxsplit=1)[1].strip()
+                    if value:
+                        return value
+    return platform.processor() or platform.machine() or "unknown"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-root", type=Path, required=True)
@@ -265,10 +303,10 @@ def main() -> int:
         "environment": {
             "python": f"{platform.python_implementation()} {platform.python_version()}",
             "uv": subprocess.check_output(("uv", "--version"), text=True).strip().removeprefix("uv "),
-            "os": "macOS 26.5.2 (25F84)",
-            "kernel": platform.platform(),
+            "os": _operating_system(),
+            "kernel": f"{platform.system()} {platform.release()} {platform.machine()}",
             "architecture": platform.machine(),
-            "cpu": subprocess.check_output(("sysctl", "-n", "machdep.cpu.brand_string"), text=True).strip(),
+            "cpu": _cpu_name(),
         },
         "dependency_state": {
             "uv_sync_command": "uv sync --extra benchmark --frozen",

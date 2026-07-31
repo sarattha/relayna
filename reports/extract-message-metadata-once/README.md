@@ -12,14 +12,19 @@ baseline and candidate suites plus the complete comparison:
   `44adab85adbd7e8355e66742748c5b75178b0656`;
 - `candidate/`: the isolated candidate runtime snapshot, bound by per-file
   content hashes;
-- `comparison/`: standalone HTML and machine-readable JSON covering every one
-  of the 408 cases exactly once.
+- `comparison-reviewed/`: final standalone HTML and machine-readable JSON
+  covering every one of the 408 cases exactly once.
 
 Every baseline and candidate HTML report has a raw JSON sidecar. Consumer and
 publish sidecars retain embedded unrounded repeat samples; JSON-engine retains
 the available P25–P75 interval; envelope and Redis-storage retain the exact
 rounded table values exposed by their harnesses. Each directory includes a
 manifest and SHA-256 index.
+
+The original derived `comparison/` directory is also preserved unchanged.
+`comparison-reviewed/` supersedes it after review hardened the reusable
+generator to reject environment/package/control/timestamp mismatches and to
+derive improvement, regression, or inconclusive wording from the measurements.
 
 The grouped authoritative result is `-4.05%` minimal per-message latency,
 `-4.19%` minimal consumer-loop latency, and `-5.38%` over the complete

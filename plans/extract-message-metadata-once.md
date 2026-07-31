@@ -133,6 +133,13 @@ without selecting favorable runs.
   Evidence: fetched ref, repository version surfaces, and changelog immediately
   before the version update.
 
+- Observation: the first Codex review found three reusable-tooling weaknesses:
+  comparison wording forced a successful outcome, pair validation did not prove
+  matching environments, and host detection hard-coded the original macOS
+  machine.
+  Evidence: PR #117 review threads `r3688630340`, `r3688630345`, and
+  `r3688630350`.
+
 ## Decision Log
 
 - Decision: use exact base `44adab85adbd7e8355e66742748c5b75178b0656`
@@ -183,6 +190,16 @@ without selecting favorable runs.
   configuration, persisted data, or wire protocol.
   Date/Author: 2026-07-31 / Codex.
 
+- Decision: preserve the original derived `comparison/` directory and publish
+  `comparison-reviewed/` as the final derived report.
+  Rationale: benchmark measurements and retained evidence are immutable.
+  Review hardening belongs in a new checksum-bound derived artifact. The final
+  generator rejects host/interpreter/control/package/timestamp mismatches and
+  reports meaningful improvement, meaningful regression, or inconclusive based
+  on both minimal target groups relative to maximum unchanged-suite aggregate
+  drift.
+  Date/Author: 2026-07-31 / Codex.
+
 ## Outcomes & Retrospective
 
 The implementation now extracts a delivery-scoped metadata snapshot exactly
@@ -198,8 +215,14 @@ The authoritative 408-case pair measures `-4.05%` minimal per-message latency,
 The earlier drifted complete run remains immutable but explicitly
 non-authoritative.
 
-Remaining work is the full mandatory verification stack, final artifact/diff
-audit, PR summary and publication, CI, and first Codex-review babysitting.
+The first Codex review produced three actionable benchmark-tooling findings.
+All three are fixed with six focused regression tests. The mandatory stack then
+passed again with 667 SDK tests passed and 1 skipped plus 244 Studio backend
+tests. `comparison-reviewed/` regenerated all 408 cases and retained the same
+meaningful-improvement assessment through derived, neutral-capable logic.
+
+Remaining work is commit/push of the review fixes, thread replies/resolution,
+and the resulting CI terminal state. The PR stays open and unmerged.
 
 ## Context and Orientation
 

@@ -159,13 +159,20 @@ and repetitions. Each side contains five standalone HTML reports, five raw
 machine-readable sidecars, a manifest, and SHA-256 checksums. The comparison
 contains all 408 cases once:
 
-- `comparison/comparison.html`: standalone methodology, summary and complete
+- `comparison-reviewed/comparison.html`: standalone methodology, summary and complete
   case tables, sample-variance interpretation, artifact links, and checksums;
-- `comparison/comparison.json`: the same comparison with absolute and
+- `comparison-reviewed/comparison.json`: the same comparison with absolute and
   percentage latency deltas, throughput deltas, consumer/publish repeat samples,
   and JSON-engine P25–P75 intervals;
-- `comparison/manifest.json` and `checksums.sha256`: case-count and integrity
-  validation.
+- `comparison-reviewed/manifest.json` and `checksums.sha256`: case-count and
+  integrity validation.
+
+The original derived `comparison/` directory remains immutable but is
+superseded by `comparison-reviewed/`. The reviewed generator validates matching
+hosts, interpreters, controls, warmups, repetitions, back-to-back timestamps,
+and resolved third-party packages before comparison. It derives improvement,
+regression, or inconclusive wording from both minimal target groups relative to
+the maximum unchanged-suite aggregate drift.
 
 The earlier `20260731T061143Z-44adab85` run is retained as non-authoritative
 drift evidence. Its candidate consumer-loop aggregate moved about `+8%` while a
