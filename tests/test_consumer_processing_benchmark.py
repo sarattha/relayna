@@ -14,6 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from benchmarks.cli import _default_arguments, main  # noqa: E402
 from benchmarks.consumer_processing import (  # noqa: E402
     BENCHMARK,
+    DEFAULT_LOOP_MESSAGES,
+    DEFAULT_REPEATS,
     PREFETCH_VALUES,
     TARGET_SIZES,
     MessageFixture,
@@ -72,6 +74,21 @@ def test_consumer_loop_matrix_is_canonical_and_covers_prefetch() -> None:
     assert {case.prefetch for case in matrix} == set(PREFETCH_VALUES)
     assert all(case.message_count == case.prefetch for case in matrix)
     assert {case.target_bytes for case in matrix} == set(TARGET_SIZES.values())
+
+
+def test_consumer_loop_defaults_are_high_cardinality_and_size_aware() -> None:
+    matrix = build_consumer_loop_matrix()
+
+    assert DEFAULT_REPEATS == 5
+    assert DEFAULT_LOOP_MESSAGES == {
+        1_024: 8_192,
+        16_384: 2_048,
+        131_072: 256,
+        1_048_576: 64,
+    }
+    assert {
+        case.target_bytes: case.message_count for case in matrix if case.profile == "minimal" and case.prefetch == 32
+    } == DEFAULT_LOOP_MESSAGES
 
 
 def test_per_message_uses_real_path_and_validates_success_counts() -> None:
@@ -293,6 +310,7 @@ def test_cli_default_and_run_all_arguments_select_all(
     args = _default_arguments(BENCHMARK)
     assert isinstance(args, argparse.Namespace)
     assert args.measurement == "all"
+    assert args.repeats == DEFAULT_REPEATS
     assert args.output == Path("reports/consumer-processing.html")
 
 

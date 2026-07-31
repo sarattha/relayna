@@ -40,12 +40,12 @@ DEFAULT_ITERATIONS: dict[int, int] = {
     1_048_576: 8,
 }
 DEFAULT_LOOP_MESSAGES: dict[int, int] = {
-    1_024: 1_024,
-    16_384: 256,
-    131_072: 64,
-    1_048_576: 32,
+    1_024: 8_192,
+    16_384: 2_048,
+    131_072: 256,
+    1_048_576: 64,
 }
-DEFAULT_REPEATS = 3
+DEFAULT_REPEATS = 5
 PREFETCH_VALUES = (1, 8, 32)
 DEFAULT_OUTPUT = Path("reports/consumer-processing.html")
 _FIXED_TIMESTAMP = datetime(2025, 1, 1, 0, 0, tzinfo=UTC)

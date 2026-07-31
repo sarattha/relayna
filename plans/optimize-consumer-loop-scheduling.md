@@ -73,6 +73,9 @@ per-message CPU path from full consumer-loop throughput.
   comparison under all three tracing modes; all 12 profile/prefetch cells
   improved 1.50–6.17%, proving the implementation signal is reproducible and
   the short canonical loop samples are insufficient for final attribution.
+- [x] (2026-07-31 09:00Z) Stabilized the canonical consumer benchmark at five
+  repeats and 8,192/2,048/256/64 loop messages by body size; 34 harness tests,
+  formatting/lint, and a complete 40-cell candidate run pass.
 - [ ] Re-fetch `origin/main`, integrate any relevant merged work, and capture a
   fresh final matched baseline/candidate pair if the base or environment moved.
 - [ ] Generate and validate complete-suite JSON/HTML comparison evidence,

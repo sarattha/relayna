@@ -90,8 +90,10 @@ size-specific count:
 Per-message timing covers canonical and configured-alias input with minimal and
 observability-enabled profiles at exact 1 KB, 16 KB, 128 KB, and 1 MB actual
 body sizes. Loop timing keeps canonical input, uses both profiles, and tests
-prefetch 1, 8, and 32 with size-aware message cardinality. The report states
-all optional-feature settings and exact counts.
+prefetch 1, 8, and 32 with five repeats and size-aware message cardinalities of
+8,192, 2,048, 256, and 64 respectively. These counts keep the scheduling-heavy
+small-body cells stable while bounding large-body parsing time. The report
+states all optional-feature settings and exact counts.
 
 ### Disabled instrumentation comparison
 
