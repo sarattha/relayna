@@ -48,17 +48,17 @@ the matched evidence.
   processing evidence.
 - [x] (2026-07-31 07:34Z) Implemented the narrow behavior-preserving internal
   optimization and added focused tracing equivalence/call-count tests.
-- [ ] Run exploratory focused benchmarks, retain only reproducible changes, and
-  refresh `origin/main` before the final matched pair. Completed: rejected the
-  noisy one-iteration suite and completed a stable seven-repeat real-consumer
-  pair. Remaining: refresh and reconcile `origin/main`.
-- [ ] Generate and validate complete immutable candidate and comparison
-  artifacts against a freshly matched final-base baseline if required.
-- [ ] Select the next unused patch version and update every authoritative
-  version, changelog, freeze, benchmark, release, tracing, and performance
-  documentation surface required by repository convention.
-- [ ] Run `$code-change-verification` from the beginning to a clean pass plus
-  frontend, package, benchmark, artifact, HTML, and final-diff validation.
+- [x] (2026-07-31 07:34Z) Rejected the noisy one-iteration suite, completed a
+  stable seven-repeat real-consumer pair, refreshed unchanged `origin/main`,
+  and retained only the reproducible implementation.
+- [x] (2026-07-31 07:42Z) Generated and validated complete immutable candidate
+  and comparison artifacts for all 1,224 matched final-base cases.
+- [x] (2026-07-31 07:48Z) Selected next unused patch version `1.4.32` after a
+  fresh tag/ref check and updated authoritative version, changelog, freeze,
+  benchmark, release, tracing, and performance report documentation surfaces.
+- [x] (2026-07-31 07:51Z) Ran `$code-change-verification` from the beginning to
+  a clean pass after syncing the new worktree's Studio dev tools, plus frontend,
+  package, benchmark, artifact, HTML, freeze, and version validation.
 - [ ] Use `$pr-draft-summary`, intentionally stage/commit/push, open a ready PR,
   babysit CI, request the first Codex review, and resolve all actionable
   feedback without merging.
@@ -168,6 +168,32 @@ the matched evidence.
   Evidence: `/tmp/reduce-tracing-overhead-focused/baseline` and
   `/tmp/reduce-tracing-overhead-focused/candidate`.
 
+- Observation: the final 1,224-case comparison improved complete
+  consumer-processing latency `16.47%` unsampled and `16.29%`
+  sampled/exported. Complete publish-preparation improved `13.86%` and
+  `12.14%`, respectively.
+  Evidence:
+  `reports/reduce-tracing-overhead/20260731T072226Z-283782ec/comparison/comparison.json`.
+
+- Observation: maximum absolute unchanged-control benchmark aggregate drift
+  was `1.53%`. Every enabled consumer and publish family aggregate improved by
+  more than that bound, yielding the neutral derived assessment "worth
+  merging."
+  Evidence: comparison `assessment`, `target_summaries`, and
+  `benchmark_summaries`.
+
+- Observation: baseline and candidate each exported exactly 504,104 sampled
+  spans with identical names, kinds, and status counts; both unsampled runs
+  exported zero.
+  Evidence: per-side `enabled-sampled-exported/tracing-suite.json` and
+  comparison `export_validation`.
+
+- Observation: after a fresh fetch and tag check, `origin/main` remained exact
+  base/tag `v1.4.31`; no branch, tag, changelog, or version surface reserved
+  `1.4.32`.
+  Evidence: `git fetch --prune --tags origin`, sorted tags, version files, and
+  changelog immediately before versioning.
+
 ## Decision Log
 
 - Decision: use exact base `283782ec95955f50e187e5fde82d12f03691834a`
@@ -230,8 +256,21 @@ the matched evidence.
 ## Outcomes & Retrospective
 
 Work is in progress. The isolated branch and compatibility boundary are
-established, the complete benchmark registry is known, and the measurement gap
-that must be closed before the baseline is explicit.
+established. The retained implementation reduces complete enabled-unsampled
+consumer/publish latency by `16.47%`/`13.86%` and enabled-sampled/exported
+latency by `16.29%`/`12.14%`, with maximum unchanged-control aggregate drift of
+`1.53%`. Tracing remains active and baseline/candidate exporter inventories are
+identical at 504,104 sampled spans.
+
+Version `1.4.32`, version-only freeze advances, changelog, release, tracing,
+benchmark, and report documentation are complete. The mandatory SDK and Studio
+backend stack passes, as do Studio frontend tests/build and SDK/backend package
+builds. Publication, terminal CI, and first Codex review remain.
+
+The frontend dependency installation reports two existing high-severity npm
+audit advisories. This task changes only package version metadata in the
+frontend lockfile and does not alter that dependency graph; remediation is
+outside this tracing optimization.
 
 ## Context and Orientation
 
@@ -355,8 +394,8 @@ threads. Do not merge.
 
 ## Concrete Steps
 
-Run from `/Users/jobz/.codex/worktrees/2320/relayna` unless a temporary
-detached benchmark worktree is explicitly recorded:
+Run from the repository root unless a temporary detached benchmark worktree is
+explicitly recorded:
 
     git status --short --branch
     git fetch --prune origin

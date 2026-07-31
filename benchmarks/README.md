@@ -195,6 +195,55 @@ The comparison therefore treats the grouped target-path improvement as
 meaningful, while preserving individual noisy cells and applying no automated
 timing threshold.
 
+### Tracing overhead comparison
+
+Relayna `1.4.32` reduces tracing span setup overhead without disabling tracing.
+The benchmark extension runs all five registered suites in three isolated
+process configurations:
+
+- `disabled`: Relayna instrumentation uses the OpenTelemetry API no-op provider;
+- `enabled-unsampled`: SDK `TracerProvider`, `ALWAYS_OFF`, and
+  `SimpleSpanProcessor`;
+- `enabled-sampled-exported`: SDK `TracerProvider`, `ALWAYS_ON`,
+  `SimpleSpanProcessor`, and a synchronous non-retaining counting exporter.
+
+Isolation is required because OpenTelemetry supports setting the global tracer
+provider once per process. Every standalone report records its provider,
+sampler, processor, exporter, propagator, package versions, and environment.
+Run the canonical 1,224-case suite with:
+
+    uv sync --extra benchmark --frozen
+    env PYTHONHASHSEED=0 LC_ALL=C LANG=C TZ=UTC \
+      uv run --extra benchmark python -m benchmarks.tracing_suite \
+      --output-root /tmp/reduce-tracing-overhead-suite
+
+Use `--quick` only to validate the harness shape. Quick runs use one repeat and
+one operation per size and are not performance evidence.
+
+The retained baseline, candidate, and comparison are under
+`reports/reduce-tracing-overhead/20260731T072226Z-283782ec/`. Each run contains
+15 standalone HTML reports, 15 raw sidecars, per-mode exporter inventories, a
+provenance manifest, and checksums. The comparison contains all 1,224 cases in
+JSON and standalone HTML.
+
+Regenerate the derived comparison without changing retained measurements:
+
+    uv run python scripts/compare_tracing_benchmarks.py \
+      --baseline-dir reports/reduce-tracing-overhead/20260731T072226Z-283782ec/baseline \
+      --candidate-dir reports/reduce-tracing-overhead/20260731T072226Z-283782ec/candidate \
+      --output-dir /tmp/reduce-tracing-overhead-comparison
+
+Enabled-unsampled consumer and publish aggregates improved `16.47%` and
+`13.86%`; enabled-sampled/exported aggregates improved `16.29%` and `12.14%`.
+The maximum absolute unchanged-control aggregate drift was `1.53%`. Baseline
+and candidate each exported the same 504,104 sampled spans with identical
+names, kinds, and status counts.
+
+These local deterministic benchmarks exclude broker, network, application
+handler, batching-exporter serialization, OTLP, collector, and storage latency.
+The synchronous counting exporter measures SDK/exporter-facing processing
+without retaining spans.
+
 ## Publish preparation benchmark
 
 `publish-preparation` measures the complete local CPU-side public publish path

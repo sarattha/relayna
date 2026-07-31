@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relayna Envelope Serialization Microbenchmarks</title>
+  <style>
+    :root { color-scheme: light; --ink: #172033; --muted: #5d687a; --line: #d9deea;
+      --panel: #f7f8fc; --accent: #3155a6; --baseline: #eef4ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: var(--ink);
+      font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width: min(1500px, calc(100% - 32px)); margin: 36px auto 72px; }
+    h1 { margin-bottom: 4px; font-size: clamp(28px, 4vw, 44px); line-height: 1.1; }
+    h2 { margin-top: 38px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+    p, li { max-width: 90ch; }
+    .lede { color: var(--muted); font-size: 17px; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px; margin: 26px 0; }
+    .summary div { border: 1px solid var(--line); border-radius: 10px; padding: 15px;
+      background: var(--panel); }
+    .summary strong { display: block; color: var(--accent); font-size: 22px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 11px; border-bottom: 1px solid var(--line); text-align: left;
+      vertical-align: top; white-space: nowrap; }
+    thead th { position: sticky; top: 0; background: #172033; color: #fff; }
+    tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+    tbody tr.baseline { background: var(--baseline); }
+    .number { text-align: right; font-variant-numeric: tabular-nums; }
+    code { background: #edf0f7; border-radius: 4px; padding: 2px 5px; }
+    .note { padding: 14px 16px; border-left: 4px solid var(--accent); background: var(--panel); }
+    @media print { main { width: 100%; margin: 0; } thead th { position: static; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Relayna Envelope Serialization Microbenchmarks</h1>
+  <p class="lede">Deterministic task and batch envelope JSON encoding and validated parsing,
+  measured without changing Relayna production behavior.</p>
+
+  <div class="summary">
+    <div><strong>32</strong>matrix cases</div>
+    <div><strong>4</strong>target wire sizes</div>
+    <div><strong>206,800</strong>timed operations</div>
+    <div><strong>µs/op</strong>primary timing unit</div>
+  </div>
+
+  <h2>Methodology</h2>
+  <p>Fixtures use fixed identifiers, a fixed UTC timestamp, stable Relayna-shaped metadata,
+  and deterministic ASCII padding. For each envelope kind, the current Relayna outbound
+  pipeline is calibrated to exactly 1,024, 16,384, 131,072, and 1,048,576 bytes. The
+  “Actual bytes” column reports the bytes processed or emitted by each case, so compact
+  serializers are visible rather than normalized away.</p>
+  <p>Outbound baseline: <code>model_dump(mode="json", exclude_none=True)</code>, then
+  <code>json.dumps(..., ensure_ascii=False).encode("utf-8")</code>. Outbound comparison:
+  <code>model_dump_json(exclude_none=True).encode("utf-8")</code>. Inbound baseline:
+  UTF-8 decode with replacement, <code>json.loads</code>, then
+  <code>Envelope.model_validate</code>. Inbound comparison:
+  <code>Envelope.model_validate_json</code>. Both inbound implementations receive the
+  identical current-baseline byte payload.</p>
+  <p>Every implementation is checked for model equivalence before timing. Cases receive
+  one untimed warm-up call. Each displayed value is the median of repeated
+  <code>perf_counter_ns</code> samples, with garbage collection disabled only inside each
+  timed loop. Case order rotates and reverses between repeat rounds. Throughput uses
+  decimal MB (1,000,000 bytes). “vs current” is current median divided by case median, so
+  values above 1.00× indicate faster execution.</p>
+  <p class="note">These measurements compare available implementations; they do not change
+  or recommend changing Relayna runtime behavior. Results are local-machine observations,
+  not cross-machine performance guarantees.</p>
+
+  <h2>Results</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Envelope</th><th>Target</th><th>Direction</th><th>Implementation</th>
+        <th class="number">Actual bytes</th><th class="number">Iterations × repeats</th>
+        <th class="number">Median µs/op</th><th class="number">Throughput MB/s</th>
+        <th class="number">vs current</th>
+      </tr></thead>
+      <tbody>
+<tr class="baseline"><td>Task</td><td>1 KB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">1,024</td><td class="number">4,000 × 5</td><td class="number">5.81</td><td class="number">176.23</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>1 KB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">1,004</td><td class="number">4,000 × 5</td><td class="number">2.01</td><td class="number">500.09</td><td class="number">2.89×</td></tr>
+<tr class="baseline"><td>Task</td><td>1 KB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">1,024</td><td class="number">4,000 × 5</td><td class="number">3.98</td><td class="number">257.54</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>1 KB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">1,024</td><td class="number">4,000 × 5</td><td class="number">1.72</td><td class="number">597.03</td><td class="number">2.32×</td></tr>
+<tr class="baseline"><td>Task</td><td>16 KB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">16,384</td><td class="number">1,000 × 5</td><td class="number">43.66</td><td class="number">375.22</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>16 KB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">16,364</td><td class="number">1,000 × 5</td><td class="number">8.48</td><td class="number">1,930.55</td><td class="number">5.15×</td></tr>
+<tr class="baseline"><td>Task</td><td>16 KB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">16,384</td><td class="number">1,000 × 5</td><td class="number">17.20</td><td class="number">952.71</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>16 KB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">16,384</td><td class="number">1,000 × 5</td><td class="number">3.47</td><td class="number">4,726.72</td><td class="number">4.96×</td></tr>
+<tr class="baseline"><td>Task</td><td>128 KB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">131,072</td><td class="number">150 × 5</td><td class="number">328.74</td><td class="number">398.71</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>128 KB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">131,052</td><td class="number">150 × 5</td><td class="number">60.71</td><td class="number">2,158.62</td><td class="number">5.41×</td></tr>
+<tr class="baseline"><td>Task</td><td>128 KB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">131,072</td><td class="number">150 × 5</td><td class="number">118.19</td><td class="number">1,108.96</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>128 KB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">131,072</td><td class="number">150 × 5</td><td class="number">15.96</td><td class="number">8,211.82</td><td class="number">7.40×</td></tr>
+<tr class="baseline"><td>Task</td><td>1 MB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">1,048,576</td><td class="number">20 × 5</td><td class="number">2,599.77</td><td class="number">403.33</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>1 MB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">1,048,556</td><td class="number">20 × 5</td><td class="number">448.81</td><td class="number">2,336.30</td><td class="number">5.79×</td></tr>
+<tr class="baseline"><td>Task</td><td>1 MB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">1,048,576</td><td class="number">20 × 5</td><td class="number">917.02</td><td class="number">1,143.46</td><td class="number">1.00×</td></tr>
+<tr><td>Task</td><td>1 MB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">1,048,576</td><td class="number">20 × 5</td><td class="number">115.74</td><td class="number">9,059.46</td><td class="number">7.92×</td></tr>
+<tr class="baseline"><td>Batch</td><td>1 KB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">1,024</td><td class="number">4,000 × 5</td><td class="number">9.38</td><td class="number">109.22</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>1 KB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">971</td><td class="number">4,000 × 5</td><td class="number">3.85</td><td class="number">252.31</td><td class="number">2.44×</td></tr>
+<tr class="baseline"><td>Batch</td><td>1 KB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">1,024</td><td class="number">4,000 × 5</td><td class="number">7.44</td><td class="number">137.72</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>1 KB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">1,024</td><td class="number">4,000 × 5</td><td class="number">4.08</td><td class="number">251.27</td><td class="number">1.82×</td></tr>
+<tr class="baseline"><td>Batch</td><td>16 KB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">16,384</td><td class="number">1,000 × 5</td><td class="number">46.73</td><td class="number">350.62</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>16 KB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">16,331</td><td class="number">1,000 × 5</td><td class="number">10.18</td><td class="number">1,604.09</td><td class="number">4.59×</td></tr>
+<tr class="baseline"><td>Batch</td><td>16 KB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">16,384</td><td class="number">1,000 × 5</td><td class="number">21.10</td><td class="number">776.52</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>16 KB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">16,384</td><td class="number">1,000 × 5</td><td class="number">5.98</td><td class="number">2,737.66</td><td class="number">3.53×</td></tr>
+<tr class="baseline"><td>Batch</td><td>128 KB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">131,072</td><td class="number">150 × 5</td><td class="number">331.49</td><td class="number">395.41</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>128 KB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">131,019</td><td class="number">150 × 5</td><td class="number">59.44</td><td class="number">2,204.20</td><td class="number">5.58×</td></tr>
+<tr class="baseline"><td>Batch</td><td>128 KB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">131,072</td><td class="number">150 × 5</td><td class="number">119.93</td><td class="number">1,092.89</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>128 KB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">131,072</td><td class="number">150 × 5</td><td class="number">20.33</td><td class="number">6,448.36</td><td class="number">5.90×</td></tr>
+<tr class="baseline"><td>Batch</td><td>1 MB</td><td>Outbound</td><td>Current: model_dump + stdlib JSON</td><td class="number">1,048,576</td><td class="number">20 × 5</td><td class="number">2,595.46</td><td class="number">404.00</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>1 MB</td><td>Outbound</td><td>Pydantic: model_dump_json</td><td class="number">1,048,523</td><td class="number">20 × 5</td><td class="number">453.94</td><td class="number">2,309.81</td><td class="number">5.72×</td></tr>
+<tr class="baseline"><td>Batch</td><td>1 MB</td><td>Inbound</td><td>Current: decode + stdlib JSON + model_validate</td><td class="number">1,048,576</td><td class="number">20 × 5</td><td class="number">942.05</td><td class="number">1,113.08</td><td class="number">1.00×</td></tr>
+<tr><td>Batch</td><td>1 MB</td><td>Inbound</td><td>Pydantic: model_validate_json</td><td class="number">1,048,576</td><td class="number">20 × 5</td><td class="number">133.15</td><td class="number">7,875.03</td><td class="number">7.08×</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Environment and reproducibility</h2>
+  <p>From the repository root, rerun
+  <code>uv run python -m benchmarks run envelope-serialization</code>. A successful run
+  atomically replaces <code>reports/envelope-microbenchmarks.html</code>.</p>
+  <div class="table-wrap"><table><tbody>
+<tr><th>Timestamp (UTC)</th><td>2026-07-31T07:34:52.909851Z</td></tr>
+<tr><th>Python</th><td>3.13.2</td></tr>
+<tr><th>Python implementation</th><td>CPython</td></tr>
+<tr><th>Python executable</th><td>python3</td></tr>
+<tr><th>Platform</th><td>macOS-26.5.2-arm64-arm-64bit-Mach-O</td></tr>
+<tr><th>Architecture</th><td>arm64</td></tr>
+<tr><th>Processor</th><td>arm</td></tr>
+<tr><th>Package: relayna</th><td>1.4.31</td></tr>
+<tr><th>Package: pydantic</th><td>2.12.5</td></tr>
+<tr><th>Package: pydantic-core</th><td>2.41.5</td></tr>
+<tr><th>Tracing mode</th><td>enabled-unsampled</td></tr>
+<tr><th>OpenTelemetry tracer provider</th><td>TracerProvider</td></tr>
+<tr><th>OpenTelemetry sampler</th><td>StaticSampler</td></tr>
+<tr><th>OpenTelemetry span processor</th><td>SimpleSpanProcessor</td></tr>
+<tr><th>OpenTelemetry exporter</th><td>CountingExporter (synchronous, non-retaining)</td></tr>
+<tr><th>OpenTelemetry propagator</th><td>CompositePropagator</td></tr>
+  </tbody></table></div>
+</main>
+</body>
+</html>
