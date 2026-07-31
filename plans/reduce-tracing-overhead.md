@@ -73,8 +73,10 @@ the matched evidence.
   publisher runtime hash outside the intended tracing target differs; added a
   regression test, regenerated the derived comparison, and reran focused tests
   plus `$code-change-verification` from the beginning to a clean pass.
-- [ ] Push the review fix, reply with evidence, resolve its thread, and babysit
-  the replacement CI run to terminal status without merging.
+- [x] (2026-07-31 07:59Z) Pushed the review fix, replied with commit/test/full
+  verification evidence, resolved the sole review thread, and observed all ten
+  push and pull-request CI jobs complete successfully on the code-bearing head.
+  The PR remains ready for review and unmerged.
 
 ## Surprises & Discoveries
 
@@ -301,20 +303,22 @@ the matched evidence.
 
 ## Outcomes & Retrospective
 
-Work is in progress. The isolated branch and compatibility boundary are
-established. The retained implementation reduces complete enabled-unsampled
-consumer/publish latency by `16.47%`/`13.86%` and enabled-sampled/exported
-latency by `16.29%`/`12.14%`, with maximum unchanged-control aggregate drift of
-`1.53%`. Tracing remains active and baseline/candidate exporter inventories are
-identical at 504,104 sampled spans.
+The work is complete on isolated branch `codex/reduce-tracing-overhead` and
+published as ready, unmerged PR #118. The retained implementation reduces
+complete enabled-unsampled consumer/publish latency by `16.47%`/`13.86%` and
+enabled-sampled/exported latency by `16.29%`/`12.14%`, with maximum
+unchanged-control aggregate drift of `1.53%`. Tracing remains active and
+baseline/candidate exporter inventories are identical at 504,104 sampled
+spans.
 
 Version `1.4.32`, version-only freeze advances, changelog, release, tracing,
 benchmark, and report documentation are complete. The mandatory SDK and Studio
 backend stack passes, as do Studio frontend tests/build and SDK/backend package
-builds. PR #118 is open and the first Codex review has been requested. A
-cross-platform exact-regeneration issue found by initial CI has been corrected
-without changing any raw measurement; terminal replacement CI and review
-resolution remain.
+builds. A cross-platform exact-regeneration issue found by initial CI was
+corrected without changing any raw measurement. The first Codex review's one
+actionable P2 attribution-boundary comment was fixed with a regression test,
+answered with evidence, and resolved. All ten code-bearing PR checks are green,
+and no actionable review feedback remains.
 
 The frontend dependency installation reports two existing high-severity npm
 audit advisories. This task changes only package version metadata in the
