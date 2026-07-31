@@ -100,9 +100,10 @@ per-message CPU path from full consumer-loop throughput.
   both P2 findings by making target subgroup regressions verdict-blocking and
   documenting durable post-squash reproduction refs. Focused tests and the
   complete SDK/Studio verification stack pass after the fixes.
-- [ ] Commit only intentional files, push the requested branch, open a ready
-  PR, monitor all CI, request the first Codex review, and resolve every
-  actionable review finding.
+- [x] (2026-07-31 09:15Z) Committed and pushed only intentional files to the
+  requested branch. All ten post-fix CI checks passed, and both actionable
+  first-review threads have evidence-backed replies and are resolved. PR #119
+  remains ready for review and unmerged.
 
 ## Surprises & Discoveries
 
@@ -365,9 +366,9 @@ benchmark, reusable source-provenance and scheduling-comparison tooling,
 deterministic cleanup/fairness/ContextVar/cancellation/exception tests, and
 immutable evidence showing why the candidate should not merge as a runtime
 change. The mandatory SDK and Studio verification stacks pass. Ready PR #119
-is published; its initial CI was fully green, and both first-review findings
-were fixed and locally reverified. Final post-fix CI and thread resolution
-remain to be recorded.
+is published and its initial and post-fix CI runs are fully green. Both
+first-review P2 findings were fixed, locally reverified, replied to with
+evidence, and resolved. No user approval or merge action was taken.
 
 ## Context and Orientation
 
