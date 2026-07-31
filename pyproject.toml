@@ -45,6 +45,7 @@ Repository = "https://github.com/sarattha/relayna"
 
 [project.optional-dependencies]
 benchmark = [
+    "opentelemetry-sdk==1.41.1",
     "orjson==3.11.9",
 ]
 dev = [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import sys
 import tempfile
@@ -11,6 +12,14 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 DEFAULT_METADATA_PACKAGES = ("relayna", "pydantic", "pydantic-core")
+_TRACING_ENVIRONMENT_KEYS = {
+    "REL_BENCHMARK_TRACING_MODE": "Tracing mode",
+    "REL_BENCHMARK_TRACER_PROVIDER": "OpenTelemetry tracer provider",
+    "REL_BENCHMARK_SAMPLER": "OpenTelemetry sampler",
+    "REL_BENCHMARK_SPAN_PROCESSOR": "OpenTelemetry span processor",
+    "REL_BENCHMARK_EXPORTER": "OpenTelemetry exporter",
+    "REL_BENCHMARK_PROPAGATOR": "OpenTelemetry propagator",
+}
 
 
 def collect_environment(
@@ -26,7 +35,7 @@ def collect_environment(
         "Timestamp (UTC)": captured_at.isoformat().replace("+00:00", "Z"),
         "Python": platform.python_version(),
         "Python implementation": platform.python_implementation(),
-        "Python executable": sys.executable,
+        "Python executable": Path(sys.executable).name,
         "Platform": platform.platform(),
         "Architecture": platform.machine() or "unknown",
         "Processor": platform.processor() or "unknown",
@@ -36,6 +45,9 @@ def collect_environment(
             metadata[f"Package: {package_name}"] = version(package_name)
         except PackageNotFoundError:
             metadata[f"Package: {package_name}"] = "not installed"
+    for environment_key, metadata_key in _TRACING_ENVIRONMENT_KEYS.items():
+        if value := os.environ.get(environment_key):
+            metadata[metadata_key] = value
     metadata.update(extra or {})
     return metadata
 

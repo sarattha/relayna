@@ -8,6 +8,7 @@ import gc
 import hashlib
 import html
 import json
+import os
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -227,6 +228,7 @@ def _canonical_body(
     content: str,
     *,
     adjustment: int = 0,
+    trace_fields: Mapping[str, str] | None = None,
 ) -> tuple[bytes, tuple[BaseModel, ...]]:
     if message_kind == "individual-task":
         models = tuple(
@@ -250,29 +252,37 @@ def _canonical_body(
         workflow = _workflow_model(content)
         return encode_transport_json(workflow.as_transport_dict()), (workflow,)
     status = _status_model(content)
-    return encode_transport_json(status.as_transport_dict()), (status,)
+    status_payload = status.as_transport_dict()
+    status_payload.update(trace_fields or {})
+    return encode_transport_json(status_payload), (status,)
 
 
-def _calibrated_content(message_kind: MessageKind, target_bytes: int) -> tuple[str, tuple[BaseModel, ...]]:
-    empty_body, _ = _canonical_body(message_kind, "")
+def _calibrated_content(
+    message_kind: MessageKind,
+    target_bytes: int,
+    *,
+    trace_fields: Mapping[str, str] | None = None,
+) -> tuple[str, tuple[BaseModel, ...]]:
+    empty_body, _ = _canonical_body(message_kind, "", trace_fields=trace_fields)
     if len(empty_body) > target_bytes:
         raise ValueError(f"Target {target_bytes} bytes is too small for {message_kind}; minimum is {len(empty_body)}.")
     low = 0
     high = target_bytes - len(empty_body) + 1
     while low + 1 < high:
         middle = (low + high) // 2
-        body, _ = _canonical_body(message_kind, "x" * middle)
+        body, _ = _canonical_body(message_kind, "x" * middle, trace_fields=trace_fields)
         if len(body) <= target_bytes:
             low = middle
         else:
             high = middle
     content = "x" * low
-    body, models = _canonical_body(message_kind, content)
+    body, models = _canonical_body(message_kind, content, trace_fields=trace_fields)
     if len(body) != target_bytes:
         body, models = _canonical_body(
             message_kind,
             content,
             adjustment=target_bytes - len(body),
+            trace_fields=trace_fields,
         )
     if len(body) != target_bytes:
         raise RuntimeError(f"Fixture sizing failed for {message_kind}: expected {target_bytes}, produced {len(body)}.")
@@ -292,7 +302,17 @@ def _mapping_for(model: BaseModel, *, alias: bool) -> dict[str, Any]:
 def build_fixture(case: BenchmarkCase) -> BenchmarkFixture:
     """Build a deterministic public input that emits exact-sized AMQP bodies."""
 
-    _content, models = _calibrated_content(case.message_kind, case.target_bytes)
+    trace_fields = (
+        {"trace_id": "0" * 32, "span_id": "0" * 16}
+        if case.message_kind == "status"
+        and os.environ.get("REL_BENCHMARK_TRACING_MODE") in {"enabled-unsampled", "enabled-sampled-exported"}
+        else None
+    )
+    _content, models = _calibrated_content(
+        case.message_kind,
+        case.target_bytes,
+        trace_fields=trace_fields,
+    )
     alias = case.input_kind == "alias-mapping"
     if case.input_kind == "model":
         values: tuple[BaseModel | Mapping[str, Any], ...] = models
