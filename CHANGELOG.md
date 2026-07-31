@@ -4,6 +4,70 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.32 - 2026-07-31
+
+### Changed
+
+- Reused OpenTelemetry's standard module-level proxy tracer instead of
+  repeating provider/tracer registry lookup for every Relayna producer and
+  consumer span.
+- Reused stateless propagation carrier adapters and returned OpenTelemetry's
+  span context manager directly, while continuing to resolve the configured
+  global propagator on every extraction and injection.
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.32`, raised the Studio backend dependency floor to `relayna>=1.4.32`,
+  and advanced the strict production freeze manifests to `v1.4.32`.
+
+### Compatibility
+
+- This optimization is private and behavior-preserving. It does not change
+  public exports or signatures, tracing configuration timing, sampling,
+  provider/processor/exporter behavior, W3C or baggage propagation, span names,
+  kinds, parents, links, attributes, events, status or exception recording,
+  async context isolation, task/status/workflow contracts, AMQP or Redis bytes,
+  acknowledgements/rejections/requeues, retries, idempotency, persisted data,
+  route shapes, or wire formats.
+- Applications may still import Relayna before installing their one supported
+  global OpenTelemetry provider; the cached `ProxyTracer` binds when the
+  application configures the provider. Dynamic global propagator replacement
+  remains visible to subsequent Relayna calls.
+- The user explicitly approved advancing the production perimeter for this
+  task. Freeze-manifest changes are version-only; API, route, configuration,
+  and schema entries are unchanged.
+
+### Performance
+
+- The matched 1,224-case comparison improved complete consumer-processing
+  latency by `16.47%` with enabled unsampled tracing and `16.29%` with enabled
+  sampled/exported tracing. Complete publish-preparation latency improved
+  `13.86%` and `12.14%`, respectively.
+- Tracing-disabled consumer and publish controls improved `7.94%` and `5.71%`.
+  Unchanged envelope, JSON-engine, and Redis-storage benchmark aggregates had
+  maximum absolute drift of `1.53%`. Every enabled consumer/publish family
+  aggregate exceeded that control-drift bound.
+- Baseline and candidate each delivered the same `504,104` sampled spans with
+  identical span names, kinds, and status counts; disabled and unsampled modes
+  exported zero. No span, sampling, or exporter work was suppressed.
+- All standalone HTML, raw data, checksums, manifests, sample distributions,
+  methodology, and comparison rows are retained under
+  `reports/reduce-tracing-overhead/20260731T072226Z-283782ec/`.
+
+### Verification
+
+- Added sampled/unsampled exporter, valid/missing/malformed context, W3C and
+  baggage propagation, producer injection, parent/link, error, cancellation,
+  concurrent async isolation, dynamic propagator, late provider configuration,
+  and redundant-work call-count coverage.
+- Passed SDK formatting, linting, and type checking with 683 tests passed and 1
+  skipped; passed Studio backend formatting, linting, and type checking with
+  244 tests passed; passed 92 Studio frontend tests and its production build.
+- Built and inspected the `1.4.32` SDK wheel/source distribution and Studio
+  backend wheel/source distribution. Verified the Studio backend wheel requires
+  `relayna>=1.4.32`.
+- Validated all baseline, candidate, and comparison checksums, all standalone
+  HTML, every raw sidecar, and exact case uniqueness. Verified every SDK,
+  backend, and frontend freeze manifest changed only its `freeze_version`.
+
 ## 1.4.31 - 2026-07-31
 
 ### Changed

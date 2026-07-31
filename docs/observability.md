@@ -199,6 +199,14 @@ The `opentelemetry-sdk` and OTLP exporter packages are application
 dependencies. Add them to the service image that wants to export traces; Relayna
 does not install them for you.
 
+Relayna obtains its tracer at module scope using OpenTelemetry's standard
+`ProxyTracer` behavior. Services may continue to import Relayna before calling
+`trace.set_tracer_provider(...)`: the proxy binds to the application-owned
+provider when it is configured. OpenTelemetry supports installing the global
+provider once. Relayna does not cache the global propagator, so supported
+runtime changes made with `propagate.set_global_textmap(...)` are observed by
+subsequent RabbitMQ extraction and injection calls.
+
 ## How it works
 
 Observability in `relayna` is built around two public concepts from

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
-from contextlib import AbstractContextManager
 from typing import Any
 
 from opentelemetry import propagate, trace
@@ -60,7 +59,7 @@ def relayna_span(
     headers: Mapping[str, Any] | None = None,
     attributes: Mapping[str, Any] | None = None,
     kind: SpanKind = SpanKind.INTERNAL,
-) -> AbstractContextManager[Span]:
+):
     return _TRACER.start_as_current_span(
         name,
         context=extract_trace_context(headers),
