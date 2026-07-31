@@ -439,15 +439,16 @@ class TaskConsumer:
         )
 
         await message.ack()
-        await emit_observation(
-            self._observation_sink,
-            TaskMessageAcked(
-                consumer_name=self._consumer_name,
-                queue_name=source_queue_name,
-                task_id=None,
-                retry_attempt=_retry_attempt(message),
-            ),
-        )
+        if self._observation_sink is not None:
+            await emit_observation(
+                self._observation_sink,
+                TaskMessageAcked(
+                    consumer_name=self._consumer_name,
+                    queue_name=source_queue_name,
+                    task_id=None,
+                    retry_attempt=_retry_attempt(message),
+                ),
+            )
 
     def _make_task_context(
         self,

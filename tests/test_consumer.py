@@ -2276,7 +2276,9 @@ async def test_task_consumer_rejects_batch_envelope_without_retry_policy() -> No
 
 
 @pytest.mark.asyncio
-async def test_task_consumer_fans_out_batch_envelope_into_individual_messages() -> None:
+async def test_task_consumer_fans_out_batch_without_disabled_ack_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     message = FakeMessage(
         json.dumps(
             {
@@ -2294,6 +2296,12 @@ async def test_task_consumer_fans_out_batch_envelope_into_individual_messages() 
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise AssertionError("handler should not run for the original batch envelope")
+
+    def unexpected_ack_observation(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("disabled batch acknowledgement observation must not be constructed")
+
+    monkeypatch.setattr("relayna.consumer.task_consumer.TaskMessageAcked", unexpected_ack_observation)
 
     consumer = TaskConsumer(
         rabbitmq=rabbit,

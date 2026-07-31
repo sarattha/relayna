@@ -436,6 +436,11 @@ def main() -> int:
     consumer_summaries = _consumer_summaries(consumer)
     per_message_minimal = next(item for item in consumer_summaries if item["name"] == "per-message / minimal")
     loop_minimal = next(item for item in consumer_summaries if item["name"] == "consumer-loop / minimal")
+    pair_label = (
+        f"authoritative sequential rerun ({args.baseline_dir.name}/{args.candidate_dir.name})"
+        if baseline_manifest["authoritative"] and candidate_manifest["authoritative"]
+        else f"retained non-authoritative pair ({args.baseline_dir.name}/{args.candidate_dir.name})"
+    )
 
     data = {
         "schema_version": 1,
@@ -446,7 +451,7 @@ def main() -> int:
             "direction": "negative deltas are faster",
             "baseline_and_candidate_are_executable_source_states": True,
             "legacy_runtime_copy": False,
-            "authoritative_pair": "initial sequential baseline/candidate pair",
+            "authoritative_pair": pair_label,
         },
         "baseline": baseline_manifest,
         "candidate": candidate_manifest,

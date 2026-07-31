@@ -65,8 +65,8 @@ All notable changes to this project will be documented in this file.
   completed all five registered benchmarks from executable historical and
   candidate source states; the repository's canonical reports were restored
   byte-for-byte.
-- Passed the final SDK formatting, linting, and type checks with 655 tests
-  passed and 3 skipped; passed Studio backend formatting, linting, and type
+- Passed the final SDK formatting, linting, and type checks with 657 tests
+  passed and 1 skipped; passed Studio backend formatting, linting, and type
   checks with 244 tests passed; and passed 92 Studio frontend tests and its
   production build.
 - Passed 198 benchmark smoke/regression tests and a final canonical five-suite

@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at_utc": "2026-07-31T04:08:50.420288Z",
+  "generated_at_utc": "2026-07-31T04:16:39.620949Z",
   "methodology": {
     "command": "uv run python -m benchmarks run-all",
     "timing_threshold": null,
     "direction": "negative deltas are faster",
     "baseline_and_candidate_are_executable_source_states": true,
     "legacy_runtime_copy": false,
-    "authoritative_pair": "initial sequential baseline/candidate pair"
+    "authoritative_pair": "authoritative sequential rerun (baseline-authoritative/candidate-authoritative)"
   },
   "baseline": {
     "schema_version": 1,
@@ -156,6 +156,12 @@
       "relayna": "1.4.29+working-tree-candidate",
       "ruff": "0.9.2",
       "ty": "0.0.25"
+    },
+    "post_run_review_change": {
+      "final_runtime_diff_sha256": "2f6e4ae499df95d9236713a918abb6c8baef8ac754d47e67e15192c7d8cceb8e",
+      "scope": "Guard the successful batch-envelope acknowledgement event when observation delivery is disabled.",
+      "consumer_processing_matrix_affected": false,
+      "evidence": "The benchmark matrix processes individual TaskEnvelope messages; deterministic batch fan-out coverage and the full verification stack validate the review fix."
     },
     "reports": [
       {

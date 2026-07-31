@@ -58,6 +58,12 @@ cell without a timing pass/fail gate or favorable-cell selection.
 - [ ] Monitor required checks and the first Codex code review, fix and verify
   actionable findings, reply to exact threads, resolve addressed threads, and
   leave the pull request unmerged.
+- [x] (2026-07-31 04:17Z) Received the first Codex review with two actionable
+  P2 findings, guarded disabled batch acknowledgements, added deterministic
+  batch coverage, corrected the authoritative-pair label, passed 10 focused
+  tests, and reran the full verification stack (657 SDK tests passed, 1
+  skipped; 244 backend tests passed). Commit, replies, and thread resolution
+  remain.
 
 ## Surprises & Discoveries
 
@@ -98,6 +104,11 @@ cell without a timing pass/fail gate or favorable-cell selection.
   Evidence: `reports/consumer-disabled-instrumentation/comparison.html` and
   `comparison.json` include every consumer and control cell.
 
+- Observation: the first Codex review found one unguarded successful batch
+  acknowledgement event and one contradictory hardcoded comparison label.
+  Evidence: PR #116 review threads
+  `PRRT_kwDORkX1KM6VUKpy` and `PRRT_kwDORkX1KM6VUKp0`.
+
 ## Decision Log
 
 - Decision: treat this as a private, behavior-preserving fast path at the
@@ -137,6 +148,15 @@ cell without a timing pass/fail gate or favorable-cell selection.
   only authoritative comparison.
   Rationale: this follows the protocol for unchanged-profile drift without
   deleting evidence or choosing favorable cells.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: accept and fix both first-review findings.
+  Rationale: the batch acknowledgement constructor was unobservable with no
+  sink and belongs inside the same private fast-path boundary; the comparison
+  label must derive from authoritative manifest inputs. The batch-only runtime
+  guard does not execute in the individual-task benchmark matrix, so retained
+  timing remains valid and the manifests explicitly record the post-run review
+  change and final runtime-diff hash.
   Date/Author: 2026-07-31 / Codex.
 
 ## Outcomes & Retrospective
