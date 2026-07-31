@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cache
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from pydantic import ValidationError
 
@@ -85,6 +85,15 @@ class _ManualRetryRequest:
 
 class _ManualRetryRequested(Exception):
     pass
+
+
+class _MessageMetadata(NamedTuple):
+    headers: Mapping[str, Any]
+    correlation_id: str | None
+    delivery_tag: int | None
+    redelivered: bool
+    content_type: str | None
+    retry_attempt: int
 
 
 @dataclass(slots=True)
@@ -477,8 +486,24 @@ def _message_headers(message: Any) -> dict[str, Any]:
     return {}
 
 
+def _extract_message_metadata(message: Any) -> _MessageMetadata:
+    headers = _message_headers(message)
+    return _MessageMetadata(
+        headers=headers,
+        correlation_id=getattr(message, "correlation_id", None),
+        delivery_tag=getattr(message, "delivery_tag", None),
+        redelivered=bool(getattr(message, "redelivered", False)),
+        content_type=getattr(message, "content_type", "application/json"),
+        retry_attempt=_retry_attempt_from_headers(headers),
+    )
+
+
 def _retry_attempt(message: Any) -> int:
-    value = _message_headers(message).get("x-relayna-retry-attempt")
+    return _retry_attempt_from_headers(_message_headers(message))
+
+
+def _retry_attempt_from_headers(headers: Mapping[str, Any]) -> int:
+    value = headers.get("x-relayna-retry-attempt")
     if value is None:
         return 0
     try:
@@ -488,7 +513,7 @@ def _retry_attempt(message: Any) -> int:
 
 
 def _retry_headers(
-    message: Any,
+    message_headers: Mapping[str, Any],
     *,
     source_queue_name: str,
     retry_attempt: int,
@@ -497,7 +522,7 @@ def _retry_headers(
     exception_type: str | None,
     extra_headers: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    headers = _message_headers(message)
+    headers = dict(message_headers)
     headers.update(dict(extra_headers or {}))
     headers["x-relayna-retry-attempt"] = int(retry_attempt)
     headers["x-relayna-max-retries"] = int(max_retries)
@@ -755,6 +780,8 @@ __all__ = [
     "_manual_retry_count",
     "_manual_retry_meta_from_status",
     "_merge_batch_retry_headers",
+    "_MessageMetadata",
+    "_extract_message_metadata",
     "_message_headers",
     "_normalize_batch_payload",
     "_normalize_payload",

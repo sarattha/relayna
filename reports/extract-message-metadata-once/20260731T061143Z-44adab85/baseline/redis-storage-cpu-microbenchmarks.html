@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relayna Redis-Facing CPU Microbenchmarks</title>
+  <style>
+    :root { color-scheme: light; --ink: #172033; --muted: #5d687a; --line: #d9deea;
+      --panel: #f7f8fc; --accent: #3155a6; --baseline: #eef4ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: var(--ink);
+      font: 15px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width: min(1600px, calc(100% - 32px)); margin: 36px auto 72px; }
+    h1 { margin-bottom: 4px; font-size: clamp(28px, 4vw, 44px); line-height: 1.1; }
+    h2 { margin-top: 38px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+    p, li { max-width: 94ch; }
+    .lede { color: var(--muted); font-size: 17px; }
+    .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px; margin: 26px 0; }
+    .summary div { border: 1px solid var(--line); border-radius: 10px; padding: 15px;
+      background: var(--panel); }
+    .summary strong { display: block; color: var(--accent); font-size: 22px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 9px 11px; border-bottom: 1px solid var(--line); text-align: left;
+      vertical-align: top; white-space: nowrap; }
+    thead th { position: sticky; top: 0; background: #172033; color: #fff; }
+    tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+    tbody tr.baseline { background: var(--baseline); }
+    .number { text-align: right; font-variant-numeric: tabular-nums; }
+    code { background: #edf0f7; border-radius: 4px; padding: 2px 5px; }
+    .note { padding: 14px 16px; border-left: 4px solid var(--accent); background: var(--panel); }
+    @media print { main { width: 100%; margin: 0; } thead th { position: static; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Relayna Redis-Facing CPU Microbenchmarks</h1>
+  <p class="lede">Deterministic serialization, validated parsing, and canonical hashing
+  immediately around Redis persistence, without Redis server or network variability.</p>
+
+  <div class="summary">
+    <div><strong>72</strong>matrix cases</div>
+    <div><strong>7</strong>representations</div>
+    <div><strong>3</strong>exact payload sizes</div>
+    <div><strong>441,600</strong>timed operations</div>
+  </div>
+
+  <h2>Methodology</h2>
+  <p>The matrix covers generic status and observation JSON storage; Pydantic DLQ,
+  task-lease, and merged service-feed records; service-event canonical hashes; and
+  workflow dedup hashes. Storage representations measure encode and decode. Hash
+  representations measure canonical JSON construction plus SHA-256.</p>
+  <p>Every representation uses fixed identifiers and timestamps. ASCII fixtures use
+  ASCII metadata and content. Unicode/numeric fixtures include Thai, Japanese, emoji,
+  signed integers, floating-point values, and large integers. Deterministic content is
+  calibrated so the exact UTF-8 bytes produced or consumed by every case equal 1,024,
+  16,384, or 131,072 bytes. For hashes, the byte count is the canonical material passed
+  to SHA-256, not the fixed-size hexadecimal digest.</p>
+  <p>All operations mirror current Relayna behavior. Standard-library JSON cases use
+  <code>json.dumps(..., ensure_ascii=False)</code> and <code>json.loads</code>.
+  Observation and event cases use Relayna's datetime fallback. Pydantic records use
+  <code>model_dump_json</code> and <code>model_validate_json</code>; lease decode also
+  includes the current explicit UTF-8 decode. Workflow dedup uses
+  <code>build_dedup_signature</code>.</p>
+  <p>Every case passes an untimed semantic preflight. Displayed timing is the median of
+  repeated <code>perf_counter_ns</code> samples, with garbage collection disabled only
+  inside timed loops. Case order rotates and reverses between repeat rounds. Throughput
+  uses decimal MB. “vs ASCII” is the matching ASCII median divided by the case median,
+  so values above 1.00× indicate faster execution.</p>
+  <p class="note">No Redis process, command execution, socket, network, or event-loop
+  scheduling is measured. This benchmark isolates deterministic CPU cost and does not
+  change or recommend changing Relayna's production storage formats.</p>
+
+  <h2>Results</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Family</th><th>Representation</th><th>Operation</th><th>Profile</th>
+        <th>Target</th><th class="number">Actual bytes</th>
+        <th class="number">Iterations × repeats</th><th class="number">Median µs/op</th>
+        <th class="number">Throughput MB/s</th><th class="number">vs ASCII</th>
+      </tr></thead>
+      <tbody>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic status JSON</td><td>Encode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.42</td><td class="number">231.42</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic status JSON</td><td>Encode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.48</td><td class="number">228.40</td><td class="number">0.99×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic status JSON</td><td>Decode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">2.49</td><td class="number">411.41</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic status JSON</td><td>Decode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">3.53</td><td class="number">290.41</td><td class="number">0.71×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic status JSON</td><td>Encode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">43.31</td><td class="number">378.29</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic status JSON</td><td>Encode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">28.86</td><td class="number">567.68</td><td class="number">1.50×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic status JSON</td><td>Decode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">15.81</td><td class="number">1,036.20</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic status JSON</td><td>Decode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">18.31</td><td class="number">894.82</td><td class="number">0.86×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic status JSON</td><td>Encode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">330.59</td><td class="number">396.48</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic status JSON</td><td>Encode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">215.48</td><td class="number">608.28</td><td class="number">1.53×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic status JSON</td><td>Decode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">118.04</td><td class="number">1,110.40</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic status JSON</td><td>Decode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">126.49</td><td class="number">1,036.23</td><td class="number">0.93×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Encode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">5.49</td><td class="number">186.62</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Encode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">5.47</td><td class="number">187.14</td><td class="number">1.00×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Decode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">2.52</td><td class="number">406.49</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Decode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">3.60</td><td class="number">284.61</td><td class="number">0.70×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Encode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">44.17</td><td class="number">370.94</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Encode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">29.68</td><td class="number">552.04</td><td class="number">1.49×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Decode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">15.81</td><td class="number">1,036.03</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Decode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">18.17</td><td class="number">901.92</td><td class="number">0.87×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Encode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">336.94</td><td class="number">389.01</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Encode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">213.31</td><td class="number">614.46</td><td class="number">1.58×</td></tr>
+<tr class="baseline"><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Decode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">117.32</td><td class="number">1,117.25</td><td class="number">1.00×</td></tr>
+<tr><td>Generic JSON storage</td><td>Generic observation JSON</td><td>Decode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">123.34</td><td class="number">1,062.70</td><td class="number">0.95×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Encode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">3.31</td><td class="number">309.33</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Encode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.51</td><td class="number">227.24</td><td class="number">0.73×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Decode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.28</td><td class="number">239.31</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Decode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.82</td><td class="number">212.50</td><td class="number">0.89×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Encode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">10.01</td><td class="number">1,636.74</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Encode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">24.22</td><td class="number">676.56</td><td class="number">0.41×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Decode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">6.14</td><td class="number">2,666.38</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Decode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">58.35</td><td class="number">280.78</td><td class="number">0.11×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Encode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">61.66</td><td class="number">2,125.80</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Encode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">159.40</td><td class="number">822.28</td><td class="number">0.39×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Decode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">20.90</td><td class="number">6,271.39</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic DLQ record</td><td>Decode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">445.62</td><td class="number">294.13</td><td class="number">0.05×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Encode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">2.69</td><td class="number">381.10</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Encode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">3.84</td><td class="number">266.91</td><td class="number">0.70×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Decode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">1.94</td><td class="number">528.72</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Decode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">5.40</td><td class="number">189.74</td><td class="number">0.36×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Encode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">9.20</td><td class="number">1,780.92</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Encode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">23.17</td><td class="number">707.18</td><td class="number">0.40×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Decode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">4.48</td><td class="number">3,657.14</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Decode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">71.73</td><td class="number">228.41</td><td class="number">0.06×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Encode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">60.61</td><td class="number">2,162.38</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Encode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">157.77</td><td class="number">830.77</td><td class="number">0.38×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Decode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">24.81</td><td class="number">5,282.72</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic task lease</td><td>Decode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">558.46</td><td class="number">234.70</td><td class="number">0.04×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Encode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">1.90</td><td class="number">539.83</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Encode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">3.10</td><td class="number">330.42</td><td class="number">0.61×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Decode</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">2.03</td><td class="number">504.29</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Decode</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.38</td><td class="number">233.52</td><td class="number">0.46×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Encode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">8.49</td><td class="number">1,928.79</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Encode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">21.86</td><td class="number">749.43</td><td class="number">0.39×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Decode</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">3.94</td><td class="number">4,153.11</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Decode</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">56.71</td><td class="number">288.93</td><td class="number">0.07×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Encode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">60.00</td><td class="number">2,184.63</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Encode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">156.70</td><td class="number">836.44</td><td class="number">0.38×</td></tr>
+<tr class="baseline"><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Decode</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">18.31</td><td class="number">7,157.52</td><td class="number">1.00×</td></tr>
+<tr><td>Pydantic record storage</td><td>Pydantic service-feed record</td><td>Decode</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">446.01</td><td class="number">293.87</td><td class="number">0.04×</td></tr>
+<tr class="baseline"><td>Canonical hashes</td><td>Canonical event hash</td><td>Canonical-Hash</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">6.37</td><td class="number">160.66</td><td class="number">1.00×</td></tr>
+<tr><td>Canonical hashes</td><td>Canonical event hash</td><td>Canonical-Hash</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">6.59</td><td class="number">155.40</td><td class="number">0.97×</td></tr>
+<tr class="baseline"><td>Canonical hashes</td><td>Canonical event hash</td><td>Canonical-Hash</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">51.21</td><td class="number">319.91</td><td class="number">1.00×</td></tr>
+<tr><td>Canonical hashes</td><td>Canonical event hash</td><td>Canonical-Hash</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">37.29</td><td class="number">439.35</td><td class="number">1.37×</td></tr>
+<tr class="baseline"><td>Canonical hashes</td><td>Canonical event hash</td><td>Canonical-Hash</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">385.70</td><td class="number">339.83</td><td class="number">1.00×</td></tr>
+<tr><td>Canonical hashes</td><td>Canonical event hash</td><td>Canonical-Hash</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">273.41</td><td class="number">479.41</td><td class="number">1.41×</td></tr>
+<tr class="baseline"><td>Canonical hashes</td><td>Workflow dedup hash</td><td>Canonical-Hash</td><td>ASCII</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.89</td><td class="number">209.41</td><td class="number">1.00×</td></tr>
+<tr><td>Canonical hashes</td><td>Workflow dedup hash</td><td>Canonical-Hash</td><td>Unicode + numeric</td><td>1 KB</td><td class="number">1,024</td><td class="number">3,000 × 5</td><td class="number">4.34</td><td class="number">236.03</td><td class="number">1.13×</td></tr>
+<tr class="baseline"><td>Canonical hashes</td><td>Workflow dedup hash</td><td>Canonical-Hash</td><td>ASCII</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">35.88</td><td class="number">456.63</td><td class="number">1.00×</td></tr>
+<tr><td>Canonical hashes</td><td>Workflow dedup hash</td><td>Canonical-Hash</td><td>Unicode + numeric</td><td>16 KB</td><td class="number">16,384</td><td class="number">600 × 5</td><td class="number">20.89</td><td class="number">784.29</td><td class="number">1.72×</td></tr>
+<tr class="baseline"><td>Canonical hashes</td><td>Workflow dedup hash</td><td>Canonical-Hash</td><td>ASCII</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">271.72</td><td class="number">482.38</td><td class="number">1.00×</td></tr>
+<tr><td>Canonical hashes</td><td>Workflow dedup hash</td><td>Canonical-Hash</td><td>Unicode + numeric</td><td>128 KB</td><td class="number">131,072</td><td class="number">80 × 5</td><td class="number">146.17</td><td class="number">896.72</td><td class="number">1.86×</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Environment and reproducibility</h2>
+  <p>From the repository root, rerun
+  <code>uv run python -m benchmarks run redis-storage-cpu</code>. A successful run
+  atomically replaces <code>reports/redis-storage-cpu-microbenchmarks.html</code>.</p>
+  <div class="table-wrap"><table><tbody>
+<tr><th>Timestamp (UTC)</th><td>2026-07-31T06:12:19.396712Z</td></tr>
+<tr><th>Python</th><td>3.13.2</td></tr>
+<tr><th>Python implementation</th><td>CPython</td></tr>
+<tr><th>Python executable</th><td>/private/tmp/relayna-message-metadata-baseline.hkSdkR/repo/.venv/bin/python3</td></tr>
+<tr><th>Platform</th><td>macOS-26.5.2-arm64-arm-64bit-Mach-O</td></tr>
+<tr><th>Architecture</th><td>arm64</td></tr>
+<tr><th>Processor</th><td>arm</td></tr>
+<tr><th>Package: relayna</th><td>1.4.30</td></tr>
+<tr><th>Package: pydantic</th><td>2.12.5</td></tr>
+<tr><th>Package: pydantic-core</th><td>2.41.5</td></tr>
+<tr><th>Package: redis</th><td>7.2.1</td></tr>
+<tr><th>Redis interaction</th><td>none (CPU-only)</td></tr>
+<tr><th>Canonical hash</th><td>SHA-256</td></tr>
+<tr><th>Payload profiles</th><td>ASCII; Unicode + numeric</td></tr>
+  </tbody></table></div>
+</main>
+</body>
+</html>

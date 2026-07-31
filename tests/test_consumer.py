@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any
 
@@ -20,6 +21,7 @@ from relayna.consumer import (
     WorkflowConsumer,
     WorkflowContext,
 )
+from relayna.consumer.context import _extract_message_metadata
 from relayna.contracts import ActionSchema, PayloadSchema, StatusEventEnvelope, WorkflowEnvelope
 from relayna.dlq import DLQRecord
 from relayna.metrics import RelaynaMetrics, TaskResourceSample
@@ -1026,6 +1028,249 @@ async def test_task_consumer_acknowledges_successful_messages() -> None:
     assert rabbit.acquire_channel_calls == [1]
     assert channel.declare_queue_calls == [{"name": "tasks.queue", "durable": True, "arguments": None}]
     assert channel.close_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_extracts_metadata_once_per_public_loop_delivery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = [
+        FakeMessage(
+            json.dumps({"task_id": "task-1", "task_type": "payment", "payload": {}}).encode(),
+            correlation_id="amqp-correlation-1",
+            headers={
+                "traceparent": "00-" + ("1" * 32) + "-" + ("2" * 16) + "-01",
+                "x-relayna-retry-attempt": "2",
+                "custom": "first",
+            },
+        ),
+        FakeMessage(
+            json.dumps({"task_id": "task-2", "task_type": "payment", "payload": {}}).encode(),
+            correlation_id="amqp-correlation-2",
+            headers={"custom": "second"},
+        ),
+    ]
+    delivered = tuple(messages)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(FakeQueue(messages))])
+    metrics = RelaynaMetrics(service="metadata-once")
+    observations: list[object] = []
+    contexts: list[tuple[str | None, int, dict[str, Any]]] = []
+    span_inputs: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    extraction_count = 0
+    original_extract = _extract_message_metadata
+
+    def counted_extract(message: Any) -> Any:
+        nonlocal extraction_count
+        extraction_count += 1
+        return original_extract(message)
+
+    @contextmanager
+    def capture_span(
+        name: str,
+        *,
+        headers: Mapping[str, Any],
+        attributes: Mapping[str, Any],
+        kind: Any,
+    ) -> Any:
+        del name, kind
+        span_inputs.append((headers, attributes))
+        yield None
+
+    async def sink(event: object) -> None:
+        observations.append(event)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task
+        contexts.append((context.correlation_id, context.retry_attempt, dict(context.headers)))
+
+    monkeypatch.setattr("relayna.consumer.task_consumer._extract_message_metadata", counted_extract)
+    monkeypatch.setattr("relayna.consumer.task_consumer.relayna_span", capture_span)
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        observation_sink=sink,
+        metrics=metrics,
+    )
+
+    await run_consumer_until_message_done(consumer, messages[-1])
+
+    assert extraction_count == len(delivered) == 2
+    assert contexts == [
+        ("amqp-correlation-1", 2, delivered[0].headers),
+        ("amqp-correlation-2", 0, delivered[1].headers),
+    ]
+    assert [dict(headers) for headers, _ in span_inputs] == [message.headers for message in delivered]
+    assert [attributes["relayna.retry_attempt"] for _, attributes in span_inputs] == [2, 0]
+    assert all(message.acked and message.rejected_with is None for message in delivered)
+    assert sum(isinstance(event, TaskMessageReceived) for event in observations) == 2
+    assert "relayna_tasks_completed_total" in metrics.render().decode()
+
+
+def test_message_metadata_snapshot_is_immutable_and_preserves_missing_malformed_defaults() -> None:
+    message = FakeMessage(
+        b"{}",
+        headers={
+            "x-relayna-retry-attempt": "not-an-int",
+            "batch_id": " batch-1 ",
+            "batch_index": "not-an-int",
+            "batch_size": "3",
+            "x-relayna-manual-retry-count": "-2",
+        },
+    )
+    del message.correlation_id
+    del message.delivery_tag
+    del message.redelivered
+    del message.content_type
+
+    metadata = _extract_message_metadata(message)
+    message.headers["batch_id"] = "changed"
+
+    assert metadata.correlation_id is None
+    assert metadata.delivery_tag is None
+    assert metadata.redelivered is False
+    assert metadata.content_type == "application/json"
+    assert metadata.retry_attempt == 0
+    assert metadata.headers["batch_id"] == " batch-1 "
+    with pytest.raises(AttributeError):
+        metadata.retry_attempt = 4  # type: ignore[misc]
+
+
+@pytest.mark.asyncio
+async def test_task_consumer_extracts_metadata_once_for_malformed_and_retry_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    malformed = FakeMessage(b"{")
+    malformed.headers = ["not", "a", "mapping"]  # type: ignore[assignment]
+    del malformed.correlation_id
+    del malformed.delivery_tag
+    del malformed.redelivered
+    del malformed.content_type
+    retry = FakeMessage(
+        json.dumps({"task_id": "task-retry", "task_type": "payment", "payload": {}}).encode(),
+        correlation_id="corr-retry",
+        headers={"x-relayna-retry-attempt": "bad", "custom": "preserved"},
+    )
+    messages = [malformed, retry]
+    delivered = tuple(messages)
+    rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(FakeQueue(messages))])
+    extraction_count = 0
+    original_extract = _extract_message_metadata
+
+    def counted_extract(message: Any) -> Any:
+        nonlocal extraction_count
+        extraction_count += 1
+        return original_extract(message)
+
+    async def handler(task: Any, context: TaskContext) -> None:
+        del task, context
+        raise RuntimeError("retry me")
+
+    monkeypatch.setattr("relayna.consumer.task_consumer._extract_message_metadata", counted_extract)
+    consumer = TaskConsumer(
+        rabbitmq=rabbit,
+        handler=handler,
+        retry_policy=RetryPolicy(max_retries=2, delay_ms=1000),
+    )
+
+    await run_consumer_until_message_done(consumer, retry)
+
+    assert extraction_count == len(delivered) == 2
+    assert [publish["queue_name"] for publish in rabbit.raw_queue_publishes] == [
+        "tasks.queue.dlq",
+        "tasks.queue.retry",
+    ]
+    assert rabbit.raw_queue_publishes[0]["content_type"] == "application/json"
+    assert rabbit.raw_queue_publishes[1]["correlation_id"] == "corr-retry"
+    assert rabbit.raw_queue_publishes[1]["headers"]["custom"] == "preserved"
+    assert rabbit.raw_queue_publishes[1]["headers"]["x-relayna-retry-attempt"] == 1
+    assert all(message.acked and message.rejected_with is None for message in delivered)
+
+
+@pytest.mark.asyncio
+async def test_workflow_and_aggregation_consumers_extract_metadata_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counts = {"workflow": 0, "aggregation": 0}
+    original_extract = _extract_message_metadata
+
+    def workflow_extract(message: Any) -> Any:
+        counts["workflow"] += 1
+        return original_extract(message)
+
+    def aggregation_extract(message: Any) -> Any:
+        counts["aggregation"] += 1
+        return original_extract(message)
+
+    monkeypatch.setattr("relayna.consumer.workflow_consumer._extract_message_metadata", workflow_extract)
+    monkeypatch.setattr("relayna.consumer.task_consumer._extract_message_metadata", aggregation_extract)
+
+    workflow_rabbit = FakeRabbitClient(topology=make_workflow_topology(), acquire_results=[])
+    workflow_contexts: list[WorkflowContext] = []
+
+    async def workflow_handler(envelope: WorkflowEnvelope, context: WorkflowContext) -> None:
+        del envelope
+        workflow_contexts.append(context)
+
+    workflow_consumer = WorkflowConsumer(
+        rabbitmq=workflow_rabbit,
+        handler=workflow_handler,
+        stage="docsearch_planner",
+    )
+    workflow_message = FakeMessage(
+        json.dumps(
+            {
+                "task_id": "task-workflow",
+                "message_id": "message-workflow",
+                "stage": "docsearch_planner",
+                "origin_stage": "topic_planner",
+                "action": "collect",
+                "payload": {"query": "example"},
+            }
+        ).encode(),
+        correlation_id="workflow-correlation",
+        headers={"x-relayna-retry-attempt": "3", "custom": "workflow"},
+    )
+
+    acknowledged = await workflow_consumer._handle_message(
+        workflow_message,
+        stage="docsearch_planner",
+        source_queue_name="cq.docsearch_planner.in_queue",
+        retry_infrastructure=None,
+        retry_policy=None,
+    )
+
+    aggregation_rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[])
+    aggregation_contexts: list[TaskContext] = []
+
+    async def aggregation_handler(event: StatusEventEnvelope, context: TaskContext) -> None:
+        del event
+        aggregation_contexts.append(context)
+
+    aggregation_consumer = AggregationConsumer(
+        rabbitmq=aggregation_rabbit,
+        handler=aggregation_handler,
+        shards=[0],
+    )
+    aggregation_message = FakeMessage(
+        json.dumps({"task_id": "task-aggregation", "status": "completed"}).encode(),
+        correlation_id="aggregation-correlation",
+        headers={"x-relayna-retry-attempt": 2, "custom": "aggregation"},
+    )
+    await aggregation_consumer._handle_message(
+        aggregation_message,
+        source_queue_name="aggregation.queue.0",
+        retry_infrastructure=None,
+    )
+
+    assert counts == {"workflow": 1, "aggregation": 1}
+    assert acknowledged is True
+    assert workflow_contexts[0].correlation_id == "workflow-correlation"
+    assert workflow_contexts[0].retry_attempt == 3
+    assert workflow_contexts[0].headers["custom"] == "workflow"
+    assert aggregation_message.acked is True
+    assert aggregation_contexts[0].correlation_id == "aggregation-correlation"
+    assert aggregation_contexts[0].retry_attempt == 2
+    assert aggregation_contexts[0].headers["custom"] == "aggregation"
 
 
 @pytest.mark.asyncio
@@ -2293,14 +2538,22 @@ async def test_task_consumer_fans_out_batch_without_disabled_ack_observation(
     )
     queue = FakeQueue([message])
     rabbit = FakeRabbitClient(topology=make_topology(), acquire_results=[FakeChannel(queue)])
+    extraction_count = 0
+    original_extract = _extract_message_metadata
 
     async def handler(task: Any, context: TaskContext) -> None:
         raise AssertionError("handler should not run for the original batch envelope")
+
+    def counted_extract(delivered: Any) -> Any:
+        nonlocal extraction_count
+        extraction_count += 1
+        return original_extract(delivered)
 
     def unexpected_ack_observation(*args: object, **kwargs: object) -> None:
         del args, kwargs
         raise AssertionError("disabled batch acknowledgement observation must not be constructed")
 
+    monkeypatch.setattr("relayna.consumer.task_consumer._extract_message_metadata", counted_extract)
     monkeypatch.setattr("relayna.consumer.task_consumer.TaskMessageAcked", unexpected_ack_observation)
 
     consumer = TaskConsumer(
@@ -2312,6 +2565,7 @@ async def test_task_consumer_fans_out_batch_without_disabled_ack_observation(
     await run_consumer_until_message_done(consumer, message)
 
     assert message.acked is True
+    assert extraction_count == 1
     assert len(rabbit.raw_queue_publishes) == 2
     assert [publish["queue_name"] for publish in rabbit.raw_queue_publishes] == ["tasks.queue", "tasks.queue"]
     first_payload = json.loads(rabbit.raw_queue_publishes[0]["body"].decode("utf-8"))
@@ -3864,6 +4118,7 @@ async def test_workflow_consumer_status_infrastructure_and_cleanup_edge_paths() 
     with pytest.raises(RuntimeError, match="Retry infrastructure"):
         await consumer._publish_retry(
             message,
+            metadata=_extract_message_metadata(message),
             retry_infrastructure=None,
             source_queue_name="queue",
             task_id="task",
@@ -3876,6 +4131,7 @@ async def test_workflow_consumer_status_infrastructure_and_cleanup_edge_paths() 
     with pytest.raises(RuntimeError, match="Retry infrastructure"):
         await consumer._publish_dead_letter(
             message,
+            metadata=_extract_message_metadata(message),
             retry_infrastructure=None,
             source_queue_name="queue",
             task_id="task",
@@ -4112,9 +4368,12 @@ async def test_aggregation_consumer_status_metrics_and_infrastructure_edge_paths
     with pytest.raises(asyncio.CancelledError):
         await consumer._publish_dead_letter_status(context, RuntimeError("failed"), meta={})
 
+    message = FakeMessage(body)
+    metadata = _extract_message_metadata(message)
     with pytest.raises(RuntimeError, match="Retry infrastructure"):
         await consumer._publish_retry(
-            FakeMessage(body),
+            message,
+            metadata=metadata,
             retry_infrastructure=None,
             source_queue_name="aggregation.queue.0",
             task_id="task",
@@ -4125,7 +4384,8 @@ async def test_aggregation_consumer_status_metrics_and_infrastructure_edge_paths
         )
     with pytest.raises(RuntimeError, match="Retry infrastructure"):
         await consumer._publish_dead_letter(
-            FakeMessage(body),
+            message,
+            metadata=metadata,
             retry_infrastructure=None,
             source_queue_name="aggregation.queue.0",
             task_id="task",

@@ -142,6 +142,59 @@ unchanged benchmarks as drift evidence. The consumer benchmark starts after
 RabbitMQ delivery and uses a no-op handler; it does not represent broker,
 network, business-handler, or application end-to-end latency.
 
+### One-time message metadata comparison
+
+Relayna `1.4.31` snapshots delivered AMQP headers and message properties once
+per task, workflow, or aggregation delivery. The private immutable metadata
+value is reused by tracing, handler contexts, retry and DLQ publication,
+metrics, and observations. It is scoped to one delivery and never retains the
+message body.
+
+The complete retained evidence is under
+`reports/extract-message-metadata-once/`. Run
+`20260731T063554Z-44adab85-paired` is authoritative because its baseline and
+candidate suites ran back-to-back with matching interpreter, resolved
+third-party dependencies, environment controls, benchmark options, warmups,
+and repetitions. Each side contains five standalone HTML reports, five raw
+machine-readable sidecars, a manifest, and SHA-256 checksums. The comparison
+contains all 408 cases once:
+
+- `comparison-reviewed/comparison.html`: standalone methodology, summary and complete
+  case tables, sample-variance interpretation, artifact links, and checksums;
+- `comparison-reviewed/comparison.json`: the same comparison with absolute and
+  percentage latency deltas, throughput deltas, consumer/publish repeat samples,
+  and JSON-engine P25–P75 intervals;
+- `comparison-reviewed/manifest.json` and `checksums.sha256`: case-count and
+  integrity validation.
+
+The original derived `comparison/` directory remains immutable but is
+superseded by `comparison-reviewed/`. The reviewed generator validates matching
+hosts, interpreters, controls, warmups, repetitions, back-to-back timestamps,
+and resolved third-party packages before comparison. It derives improvement,
+regression, or inconclusive wording from both minimal target groups relative to
+the maximum unchanged-suite aggregate drift.
+
+The earlier `20260731T061143Z-44adab85` run is retained as non-authoritative
+drift evidence. Its candidate consumer-loop aggregate moved about `+8%` while a
+nearby focused pair moved in the opposite direction, so it is not used for the
+release claim.
+
+Recreate a retained run and the comparison with:
+
+    uv run python scripts/retain_benchmark_run.py --help
+    uv run python scripts/compare_message_metadata.py \
+      --baseline-dir reports/extract-message-metadata-once/20260731T063554Z-44adab85-paired/baseline \
+      --candidate-dir reports/extract-message-metadata-once/20260731T063554Z-44adab85-paired/candidate \
+      --output-dir /tmp/extract-message-metadata-comparison
+
+The authoritative minimal per-message geometric mean improved `4.05%`, and the
+minimal consumer-loop geometric mean improved `4.19%`. The complete
+consumer-processing matrix improved `5.38%`; 35 of 40 cells improved.
+Unchanged benchmark-family geometric means ranged from `-2.03%` to `+1.24%`.
+The comparison therefore treats the grouped target-path improvement as
+meaningful, while preserving individual noisy cells and applying no automated
+timing threshold.
+
 ## Publish preparation benchmark
 
 `publish-preparation` measures the complete local CPU-side public publish path

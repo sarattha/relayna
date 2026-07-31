@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.4.31 - 2026-07-31
+
+### Changed
+
+- Extracted delivered AMQP headers and message properties once at the start of
+  each task, workflow, and aggregation consumer path, then reused a private
+  typed immutable metadata snapshot for tracing, contexts, retry and
+  dead-letter publication, metrics, and observations.
+- Preserved one delivery-scoped header copy without caching across messages or
+  retaining message bodies.
+- Bumped the SDK, Studio backend, and Studio frontend package versions to
+  `1.4.31`, raised the Studio backend dependency floor to `relayna>=1.4.31`,
+  and advanced the strict production freeze manifests to `v1.4.31`.
+
+### Compatibility
+
+- This optimization is private and behavior-preserving. It does not change
+  public exports or signatures, task/status/workflow contracts, AMQP or Redis
+  bytes, header precedence or defaults, missing or malformed metadata handling,
+  routing, middleware or handler context contents, retries, idempotency,
+  acknowledgements/rejections/requeues, tracing, observations, exceptions,
+  persisted data, route shapes, or wire formats.
+- The user explicitly approved advancing the production perimeter for this
+  task. Freeze-manifest changes are version-only; API, route, configuration,
+  and schema entries are unchanged.
+
+### Performance
+
+- A complete back-to-back canonical five-suite comparison improved minimal
+  per-message latency by `4.05%`, minimal consumer-loop latency by `4.19%`, and
+  the complete 40-cell consumer-processing matrix by `5.38%`; 35 of 40
+  consumer cells improved.
+- Unchanged benchmark-family geometric means ranged from `-2.03%` to `+1.24%`.
+  No automated timing threshold or favorable-cell selection was used. The
+  retained standalone HTML, raw machine-readable data, checksums, sample
+  distributions, methodology, and all 408 comparison rows are under
+  `reports/extract-message-metadata-once/20260731T063554Z-44adab85-paired/`.
+- An earlier complete but environmentally drifted pair remains retained and is
+  explicitly excluded from the performance claim.
+
+### Verification
+
+- Added deterministic success, malformed/missing metadata, retry/error,
+  handler-context, tracing, metrics, observation, workflow, aggregation, batch,
+  and public consumer-loop coverage, including assertions that metadata is
+  extracted once per delivered message.
+- Completed both authoritative canonical benchmark suites with all five
+  registered families and 408 unique cases per side; validated every retained
+  checksum, raw sidecar, standalone HTML report, and complete comparison.
+- Passed SDK formatting, linting, and type checking with 667 tests passed and 1
+  skipped; passed Studio backend formatting, linting, and type checking with
+  244 tests passed; passed 92 Studio frontend tests and its production build.
+- Built and inspected the `1.4.31` SDK wheel/source distribution and Studio
+  backend wheel, and verified every SDK, backend, and frontend freeze manifest
+  changed only its `freeze_version`.
+
 ## 1.4.30 - 2026-07-31
 
 ### Changed
