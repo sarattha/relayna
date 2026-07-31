@@ -86,9 +86,15 @@ per-message CPU path from full consumer-loop throughput.
   reproducible commands without claiming a gain.
 - [x] (2026-07-31 09:05Z) Re-fetched unchanged `origin/main`; no consumer,
   tracing, version, or benchmark integration was required.
-- [ ] Run the mandatory verification stack, applicable RabbitMQ integration
-  coverage, artifact integrity checks, and a final diff/secret/path/semantic
-  audit.
+- [x] (2026-07-31 09:10Z) Ran the mandatory verification stack from the
+  beginning after syncing the Studio development extra: SDK format, lint,
+  typecheck, and 693 tests passed with one Redis-dependent skip; Studio backend
+  format, lint, typecheck, and all 244 tests passed.
+- [x] (2026-07-31 09:11Z) Completed artifact integrity, unique-case,
+  standalone-HTML, runtime-identity, version/freeze, diff, secret, and
+  machine-path audits. The repository has no live-broker RabbitMQ integration
+  target; the complete deterministic SDK suite covers the available consumer
+  lifecycle boundary.
 - [ ] Commit only intentional files, push the requested branch, open a ready
   PR, monitor all CI, request the first Codex review, and resolve every
   actionable review finding.
@@ -337,8 +343,8 @@ The durable outcome is a stronger five-repeat/high-cardinality consumer
 benchmark, reusable source-provenance and scheduling-comparison tooling,
 deterministic cleanup/fairness/ContextVar/cancellation/exception tests, and
 immutable evidence showing why the candidate should not merge as a runtime
-change. Verification, publication, CI, and first-review results remain to be
-recorded.
+change. The mandatory SDK and Studio verification stacks pass. Publication,
+CI, and first-review results remain to be recorded.
 
 ## Context and Orientation
 
@@ -452,7 +458,7 @@ merging.
 
 ## Concrete Steps
 
-Run from `/Users/jobz/.codex/worktrees/2247/relayna`:
+Run from the repository root:
 
     git status --short --branch
     git fetch origin main --tags --prune
