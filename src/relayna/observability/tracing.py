@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
-from contextlib import contextmanager
 from typing import Any
 
 from opentelemetry import propagate, trace
@@ -29,6 +28,11 @@ class _Setter(Setter[MutableMapping[str, Any]]):
         carrier[key] = value
 
 
+_GETTER = _Getter()
+_SETTER = _Setter()
+_TRACER = trace.get_tracer("relayna")
+
+
 def active_trace_fields() -> dict[str, str]:
     span_context = trace.get_current_span().get_span_context()
     if not span_context.is_valid:
@@ -41,15 +45,14 @@ def active_trace_fields() -> dict[str, str]:
 
 def inject_trace_headers(headers: Mapping[str, Any] | None = None) -> dict[str, Any]:
     carrier: dict[str, Any] = dict(headers or {})
-    propagate.inject(carrier, setter=_Setter())
+    propagate.inject(carrier, setter=_SETTER)
     return carrier
 
 
 def extract_trace_context(headers: Mapping[str, Any] | None):
-    return propagate.extract(dict(headers or {}), getter=_Getter())
+    return propagate.extract(dict(headers or {}), getter=_GETTER)
 
 
-@contextmanager
 def relayna_span(
     name: str,
     *,
@@ -57,14 +60,12 @@ def relayna_span(
     attributes: Mapping[str, Any] | None = None,
     kind: SpanKind = SpanKind.INTERNAL,
 ):
-    tracer = trace.get_tracer("relayna")
-    with tracer.start_as_current_span(
+    return _TRACER.start_as_current_span(
         name,
         context=extract_trace_context(headers),
         kind=kind,
-        attributes={key: value for key, value in dict(attributes or {}).items() if value is not None},
-    ) as span:
-        yield span
+        attributes={key: value for key, value in (attributes or {}).items() if value is not None},
+    )
 
 
 def span_trace_fields(span: Span | None) -> dict[str, str]:

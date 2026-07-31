@@ -588,7 +588,7 @@ wheels = [
 
 [[package]]
 name = "relayna"
-version = "1.4.31"
+version = "1.4.32"
 source = { editable = "../../" }
 dependencies = [
     { name = "aio-pika" },
@@ -614,6 +614,8 @@ requires-dist = [
     { name = "mkdocs-static-i18n", marker = "extra == 'dev'" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "opentelemetry-api", specifier = ">=1.28.0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'benchmark'", specifier = "==1.41.1" },
+    { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = "==1.41.1" },
     { name = "orjson", marker = "extra == 'benchmark'", specifier = "==3.11.9" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
@@ -634,7 +636,7 @@ provides-extras = ["benchmark", "dev"]
 
 [[package]]
 name = "relayna-studio"
-version = "1.4.31"
+version = "1.4.32"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.31/relayna-1.4.31-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.32/relayna-1.4.32-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.31/relayna-1.4.31.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.32/relayna-1.4.32.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.4.31.tar.gz`
-- `dist/relayna-1.4.31-py3-none-any.whl`
+- `dist/relayna-1.4.32.tar.gz`
+- `dist/relayna-1.4.32-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,19 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.4.32
+
+No data, wire-format, configuration, or public-API migration is required.
+Relayna `1.4.32` reuses the OpenTelemetry API's standard module-level proxy
+tracer and stateless carrier adapters instead of repeating provider/tracer
+lookup and wrapper allocation for every producer and consumer span. Tracing,
+sampling, W3C/baggage propagation, span names and relationships, attributes,
+exception/status handling, async context isolation, and exporter delivery
+remain enabled and unchanged.
+
+Upgrade the SDK, Studio backend, and Studio frontend together to keep the
+shared release line aligned.
 
 ### Upgrading to 1.4.31
 

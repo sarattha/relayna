@@ -1,0 +1,34 @@
+{
+  "artifacts": {
+    "comparison.html": {
+      "bytes": 2733800,
+      "sha256": "85059cef0807b2ca99e6aa4939a32dbc8ef3fe6ea662345e76b665c5b88d0107"
+    },
+    "comparison.json": {
+      "bytes": 1761345,
+      "sha256": "773db3cd59c87ed311c9e3094e2852f6fad3bf0b0715be082983236186ff0d26"
+    }
+  },
+  "assessment": {
+    "all_enabled_target_summaries_exceed_control_drift": true,
+    "enabled_target_summary_count": 12,
+    "maximum_absolute_control_drift_percent": 1.5308517128132415,
+    "rationale": "Every enabled-tracing consumer and publish family aggregate improves by more than the maximum absolute unchanged-control aggregate drift.",
+    "verdict": "worth merging"
+  },
+  "inputs": {
+    "baseline_manifest": "11e836f50a6a7f5831bb700b6b49d0a95598f531cb58d6f3c53897631b04911c",
+    "candidate_manifest": "4ec4af0a776540f0a8c4e9b187565d1ed615d9ad8f3bec43905718d403ff96c0"
+  },
+  "schema_version": 1,
+  "task": "reduce-tracing-overhead",
+  "validation": {
+    "all_expected_cases_present_once_per_side": true,
+    "baseline_case_count": 1224,
+    "candidate_case_count": 1224,
+    "comparison_case_count": 1224,
+    "expected_case_count": 1224,
+    "measurements_hand_edited": false,
+    "unique_comparison_case_count": 1224
+  }
+}

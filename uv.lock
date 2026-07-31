@@ -866,6 +866,33 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-sdk"
+version = "1.41.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/d0/54ee30dab82fb0acda23d144502771ff76ef8728459c83c3e89ef9fb1825/opentelemetry_sdk-1.41.1.tar.gz", hash = "sha256:724b615e1215b5aeacda0abb8a6a8922c9a1853068948bd0bd225a56d0c792e6", size = 230180, upload-time = "2026-04-24T13:15:50.991Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b4/e7/a1420b698aad018e1cf60fdbaaccbe49021fb415e2a0d81c242f4c518f54/opentelemetry_sdk-1.41.1-py3-none-any.whl", hash = "sha256:edee379c126c1bce952b0c812b48fe8ff35b30df0eecf17e98afa4d598b7d85d", size = 180213, upload-time = "2026-04-24T13:15:33.767Z" },
+]
+
+[[package]]
+name = "opentelemetry-semantic-conventions"
+version = "0.62b1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9e/de/911ac9e309052aca1b20b2d5549d3db45d1011e1a610e552c6ccdd1b64f8/opentelemetry_semantic_conventions-0.62b1.tar.gz", hash = "sha256:c5cc6e04a7f8c7cdd30be2ed81499fa4e75bfbd52c9cb70d40af1f9cd3619802", size = 145750, upload-time = "2026-04-24T13:15:52.236Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/a6/83dc2ab6fa397ee66fba04fe2e74bdf7be3b3870005359ceb7689103c058/opentelemetry_semantic_conventions-0.62b1-py3-none-any.whl", hash = "sha256:cf506938103d331fbb78eded0d9788095f7fd59016f2bda813c3324e5a74a93c", size = 231620, upload-time = "2026-04-24T13:15:35.454Z" },
+]
+
+[[package]]
 name = "orjson"
 version = "3.11.9"
 source = { registry = "https://pypi.org/simple" }
@@ -1281,7 +1308,7 @@ wheels = [
 
 [[package]]
 name = "relayna"
-version = "1.4.31"
+version = "1.4.32"
 source = { editable = "." }
 dependencies = [
     { name = "aio-pika" },
@@ -1296,6 +1323,7 @@ dependencies = [
 
 [package.optional-dependencies]
 benchmark = [
+    { name = "opentelemetry-sdk" },
     { name = "orjson" },
 ]
 dev = [
@@ -1306,6 +1334,7 @@ dev = [
     { name = "mkdocs-material" },
     { name = "mkdocs-static-i18n" },
     { name = "mkdocstrings", extra = ["python"] },
+    { name = "opentelemetry-sdk" },
     { name = "pymdown-extensions" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -1329,6 +1358,8 @@ requires-dist = [
     { name = "mkdocs-static-i18n", marker = "extra == 'dev'" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "opentelemetry-api", specifier = ">=1.28.0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'benchmark'", specifier = "==1.41.1" },
+    { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = "==1.41.1" },
     { name = "orjson", marker = "extra == 'benchmark'", specifier = "==3.11.9" },
     { name = "prometheus-client", specifier = ">=0.21.0" },
     { name = "pydantic", specifier = ">=2.11.0" },

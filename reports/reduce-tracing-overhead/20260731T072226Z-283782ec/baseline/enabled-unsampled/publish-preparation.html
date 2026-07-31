@@ -1,0 +1,1180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relayna Publish Preparation Benchmark — candidate</title>
+  <style>
+    :root { color-scheme: light; --ink:#172033; --muted:#566078; --panel:#f4f6fb; --line:#d8deea; --accent:#3659c9; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:#fff; font:15px/1.5 system-ui,-apple-system,sans-serif; }
+    main { width:min(1500px,96vw); margin:36px auto 72px; }
+    h1 { margin-bottom:4px; font-size:clamp(28px,4vw,44px); }
+    h2 { margin-top:34px; }
+    .lede { color:var(--muted); max-width:900px; }
+    .summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin:24px 0; }
+    .summary div,.note { padding:14px 16px; background:var(--panel); border-left:4px solid var(--accent); }
+    .summary strong { display:block; font-size:22px; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); }
+    table { border-collapse:collapse; width:100%; }
+    th,td { border-bottom:1px solid var(--line); padding:8px 10px; text-align:left; white-space:nowrap; }
+    thead th { position:sticky; top:0; background:#e9edf8; }
+    .number { text-align:right; font-variant-numeric:tabular-nums; }
+    code { background:#edf0f7; border-radius:4px; padding:2px 5px; }
+    @media print { main { width:100%; margin:0; } thead th { position:static; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Relayna Publish Preparation Benchmark</h1>
+  <p class="lede">Run label: <strong>candidate</strong>. Complete local CPU-side
+  publishing from public input conversion through a deterministic no-op exchange boundary.</p>
+  <div class="summary">
+    <div><strong>72</strong>matrix cells</div>
+    <div><strong>341,100</strong>timed operations</div>
+    <div><strong>454,800</strong>task preparations</div>
+    <div><strong>454,800</strong>fake publications</div>
+  </div>
+  <h2>Methodology</h2>
+  <p>Deterministic fixtures use fixed identifiers and timestamps and are calibrated so each
+  emitted AMQP body is exactly 1,024, 16,384, 131,072, or 1,048,576 bytes. Individual mode
+  publishes two same-sized tasks per public operation with a concurrency limit of two;
+  batch mode publishes one envelope containing two tasks. Model, canonical mapping, and
+  configured-alias mapping inputs cover direct/shared task routing, task-type routing, and
+  workflow-stage routing where applicable.</p>
+  <p>Each timed operation includes alias normalization/input conversion, Pydantic validation
+  and dumping, topology routing, trace/header construction, Pydantic Core transport JSON,
+  <code>aio_pika.Message</code> construction, priority handling, metrics effects, and an
+  async no-op exchange publish. It excludes connection setup, event-loop startup, sockets,
+  broker work, and network latency. One event loop is reused for the entire run. Every cell
+  receives an untimed warm-up; garbage collection is disabled only within a timed sample;
+  case order rotates and reverses by repeat.</p>
+  <p>Dispersion is median absolute deviation. Throughput uses binary MiB and counts all AMQP
+  body bytes emitted per public operation. Allocation tracing is intentionally omitted from
+  canonical latency samples. No timing threshold is an acceptance criterion.</p>
+  <p class="note">The untimed public-path probe observed 2 real task preparation call(s) per 2-task individual operation. Exactly 2 means one preparation per input task.</p>
+  <h2>Before/after comparison</h2>
+  <p>No baseline report was supplied; this report is a standalone measurement.</p>
+  <h2>Results</h2>
+  <div class="table-wrap"><table>
+    <thead><tr>
+      <th>Message kind</th><th>Input</th><th>Topology</th><th>Target</th>
+      <th>Actual bytes/message</th><th>Iterations × repeats</th><th>Preparations/op</th>
+      <th>Published/op</th><th>Median µs/op</th><th>MAD µs</th><th>Operations/sec</th>
+      <th>MiB/sec</th><th>vs baseline</th>
+    </tr></thead>
+    <tbody><tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">143.964</td>
+          <td class="number">2.084</td>
+          <td class="number">6,946.2</td>
+          <td class="number">13.57</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">160.145</td>
+          <td class="number">1.833</td>
+          <td class="number">6,244.4</td>
+          <td class="number">195.14</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">252.822</td>
+          <td class="number">8.152</td>
+          <td class="number">3,955.4</td>
+          <td class="number">988.84</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">1004.050</td>
+          <td class="number">10.213</td>
+          <td class="number">996.0</td>
+          <td class="number">1,991.93</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">136.708</td>
+          <td class="number">2.890</td>
+          <td class="number">7,314.9</td>
+          <td class="number">14.29</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">150.638</td>
+          <td class="number">1.559</td>
+          <td class="number">6,638.4</td>
+          <td class="number">207.45</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">241.873</td>
+          <td class="number">2.419</td>
+          <td class="number">4,134.4</td>
+          <td class="number">1,033.60</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">989.071</td>
+          <td class="number">33.621</td>
+          <td class="number">1,011.0</td>
+          <td class="number">2,022.10</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">143.816</td>
+          <td class="number">2.972</td>
+          <td class="number">6,953.3</td>
+          <td class="number">13.58</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">152.900</td>
+          <td class="number">2.663</td>
+          <td class="number">6,540.2</td>
+          <td class="number">204.38</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">251.569</td>
+          <td class="number">1.515</td>
+          <td class="number">3,975.0</td>
+          <td class="number">993.76</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">982.496</td>
+          <td class="number">1.087</td>
+          <td class="number">1,017.8</td>
+          <td class="number">2,035.63</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">149.422</td>
+          <td class="number">3.298</td>
+          <td class="number">6,692.5</td>
+          <td class="number">13.07</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">154.842</td>
+          <td class="number">0.493</td>
+          <td class="number">6,458.2</td>
+          <td class="number">201.82</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">251.419</td>
+          <td class="number">5.716</td>
+          <td class="number">3,977.4</td>
+          <td class="number">994.36</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">1007.371</td>
+          <td class="number">7.938</td>
+          <td class="number">992.7</td>
+          <td class="number">1,985.37</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">142.542</td>
+          <td class="number">2.740</td>
+          <td class="number">7,015.5</td>
+          <td class="number">13.70</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">150.896</td>
+          <td class="number">4.831</td>
+          <td class="number">6,627.1</td>
+          <td class="number">207.10</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">243.306</td>
+          <td class="number">5.424</td>
+          <td class="number">4,110.0</td>
+          <td class="number">1,027.51</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">971.562</td>
+          <td class="number">33.854</td>
+          <td class="number">1,029.3</td>
+          <td class="number">2,058.54</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">140.815</td>
+          <td class="number">3.083</td>
+          <td class="number">7,101.5</td>
+          <td class="number">13.87</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">154.537</td>
+          <td class="number">4.936</td>
+          <td class="number">6,470.9</td>
+          <td class="number">202.22</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">250.854</td>
+          <td class="number">7.698</td>
+          <td class="number">3,986.4</td>
+          <td class="number">996.60</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>individual-task</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">2</td>
+          <td class="number">1005.717</td>
+          <td class="number">29.108</td>
+          <td class="number">994.3</td>
+          <td class="number">1,988.63</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">44.889</td>
+          <td class="number">0.880</td>
+          <td class="number">22,277.0</td>
+          <td class="number">21.75</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">53.105</td>
+          <td class="number">1.753</td>
+          <td class="number">18,830.5</td>
+          <td class="number">294.23</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">99.695</td>
+          <td class="number">1.469</td>
+          <td class="number">10,030.6</td>
+          <td class="number">1,253.82</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">492.467</td>
+          <td class="number">8.746</td>
+          <td class="number">2,030.6</td>
+          <td class="number">2,030.59</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">41.465</td>
+          <td class="number">0.280</td>
+          <td class="number">24,117.0</td>
+          <td class="number">23.55</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">48.367</td>
+          <td class="number">0.562</td>
+          <td class="number">20,675.2</td>
+          <td class="number">323.05</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">96.803</td>
+          <td class="number">2.986</td>
+          <td class="number">10,330.2</td>
+          <td class="number">1,291.28</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">497.712</td>
+          <td class="number">23.062</td>
+          <td class="number">2,009.2</td>
+          <td class="number">2,009.19</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">40.907</td>
+          <td class="number">0.157</td>
+          <td class="number">24,445.7</td>
+          <td class="number">23.87</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">47.795</td>
+          <td class="number">0.486</td>
+          <td class="number">20,922.8</td>
+          <td class="number">326.92</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">99.210</td>
+          <td class="number">5.413</td>
+          <td class="number">10,079.6</td>
+          <td class="number">1,259.95</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">489.954</td>
+          <td class="number">10.629</td>
+          <td class="number">2,041.0</td>
+          <td class="number">2,041.01</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">47.231</td>
+          <td class="number">0.758</td>
+          <td class="number">21,172.4</td>
+          <td class="number">20.68</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">54.351</td>
+          <td class="number">1.826</td>
+          <td class="number">18,398.9</td>
+          <td class="number">287.48</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">104.213</td>
+          <td class="number">3.986</td>
+          <td class="number">9,595.8</td>
+          <td class="number">1,199.47</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>model</td>
+          <td>task-type-routed</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">490.142</td>
+          <td class="number">2.683</td>
+          <td class="number">2,040.2</td>
+          <td class="number">2,040.23</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">42.649</td>
+          <td class="number">0.716</td>
+          <td class="number">23,447.2</td>
+          <td class="number">22.90</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">50.015</td>
+          <td class="number">0.898</td>
+          <td class="number">19,994.0</td>
+          <td class="number">312.41</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">100.406</td>
+          <td class="number">0.593</td>
+          <td class="number">9,959.5</td>
+          <td class="number">1,244.94</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>canonical-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">501.371</td>
+          <td class="number">4.658</td>
+          <td class="number">1,994.5</td>
+          <td class="number">1,994.53</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">43.296</td>
+          <td class="number">0.645</td>
+          <td class="number">23,097.1</td>
+          <td class="number">22.56</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">51.580</td>
+          <td class="number">1.128</td>
+          <td class="number">19,387.5</td>
+          <td class="number">302.93</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">100.054</td>
+          <td class="number">4.169</td>
+          <td class="number">9,994.6</td>
+          <td class="number">1,249.32</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>batch-envelope</td>
+          <td>alias-mapping</td>
+          <td>task-type-routed</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">2</td>
+          <td class="number">1</td>
+          <td class="number">488.883</td>
+          <td class="number">16.329</td>
+          <td class="number">2,045.5</td>
+          <td class="number">2,045.48</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>model</td>
+          <td>workflow-stage</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">35.830</td>
+          <td class="number">0.242</td>
+          <td class="number">27,909.5</td>
+          <td class="number">27.26</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>model</td>
+          <td>workflow-stage</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">43.450</td>
+          <td class="number">0.345</td>
+          <td class="number">23,014.9</td>
+          <td class="number">359.61</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>model</td>
+          <td>workflow-stage</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">90.486</td>
+          <td class="number">0.983</td>
+          <td class="number">11,051.4</td>
+          <td class="number">1,381.42</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>model</td>
+          <td>workflow-stage</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">473.887</td>
+          <td class="number">2.254</td>
+          <td class="number">2,110.2</td>
+          <td class="number">2,110.21</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>canonical-mapping</td>
+          <td>workflow-stage</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">35.993</td>
+          <td class="number">0.335</td>
+          <td class="number">27,783.2</td>
+          <td class="number">27.13</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>canonical-mapping</td>
+          <td>workflow-stage</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">45.361</td>
+          <td class="number">1.197</td>
+          <td class="number">22,045.4</td>
+          <td class="number">344.46</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>canonical-mapping</td>
+          <td>workflow-stage</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">91.624</td>
+          <td class="number">1.386</td>
+          <td class="number">10,914.2</td>
+          <td class="number">1,364.27</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>canonical-mapping</td>
+          <td>workflow-stage</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">484.283</td>
+          <td class="number">20.617</td>
+          <td class="number">2,064.9</td>
+          <td class="number">2,064.91</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>alias-mapping</td>
+          <td>workflow-stage</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">36.606</td>
+          <td class="number">0.478</td>
+          <td class="number">27,317.7</td>
+          <td class="number">26.68</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>alias-mapping</td>
+          <td>workflow-stage</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">43.509</td>
+          <td class="number">0.640</td>
+          <td class="number">22,983.8</td>
+          <td class="number">359.12</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>alias-mapping</td>
+          <td>workflow-stage</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">92.852</td>
+          <td class="number">2.618</td>
+          <td class="number">10,769.9</td>
+          <td class="number">1,346.23</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>workflow</td>
+          <td>alias-mapping</td>
+          <td>workflow-stage</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">466.100</td>
+          <td class="number">1.375</td>
+          <td class="number">2,145.5</td>
+          <td class="number">2,145.46</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">27.996</td>
+          <td class="number">0.352</td>
+          <td class="number">35,719.9</td>
+          <td class="number">34.88</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">33.932</td>
+          <td class="number">0.146</td>
+          <td class="number">29,471.0</td>
+          <td class="number">460.49</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">81.170</td>
+          <td class="number">1.347</td>
+          <td class="number">12,319.8</td>
+          <td class="number">1,539.97</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>model</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">460.646</td>
+          <td class="number">15.996</td>
+          <td class="number">2,170.9</td>
+          <td class="number">2,170.86</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">25.866</td>
+          <td class="number">0.307</td>
+          <td class="number">38,660.5</td>
+          <td class="number">37.75</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">32.319</td>
+          <td class="number">0.171</td>
+          <td class="number">30,941.1</td>
+          <td class="number">483.45</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">78.517</td>
+          <td class="number">0.138</td>
+          <td class="number">12,736.2</td>
+          <td class="number">1,592.02</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>canonical-mapping</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">459.604</td>
+          <td class="number">8.246</td>
+          <td class="number">2,175.8</td>
+          <td class="number">2,175.79</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">3000 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">26.101</td>
+          <td class="number">0.274</td>
+          <td class="number">38,312.8</td>
+          <td class="number">37.41</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">700 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">34.168</td>
+          <td class="number">1.342</td>
+          <td class="number">29,267.5</td>
+          <td class="number">457.31</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">80 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">81.037</td>
+          <td class="number">2.712</td>
+          <td class="number">12,340.0</td>
+          <td class="number">1,542.51</td>
+          <td class="number">—</td>
+        </tr>
+<tr>
+          <td>status</td>
+          <td>alias-mapping</td>
+          <td>direct-shared</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">10 × 5</td>
+          <td class="number">0</td>
+          <td class="number">1</td>
+          <td class="number">475.667</td>
+          <td class="number">25.133</td>
+          <td class="number">2,102.3</td>
+          <td class="number">2,102.31</td>
+          <td class="number">—</td>
+        </tr></tbody>
+  </table></div>
+  <h2>Actionable bottleneck conclusions</h2>
+  <p>Compare input shapes within the same message kind/topology/size to isolate conversion
+  and alias costs. Compare direct and routed task cases to expose routing overhead. Growth
+  by payload size reflects JSON encoding and memory-copy cost. The public-path preparation
+  count identifies redundant task validation independently of noisy timing.</p>
+  <h2>Environment and reproducibility</h2>
+  <table><tbody><tr><th>Timestamp (UTC)</th><td>2026-07-31T07:23:47.973570Z</td></tr>
+<tr><th>Python</th><td>3.13.2</td></tr>
+<tr><th>Python implementation</th><td>CPython</td></tr>
+<tr><th>Python executable</th><td>python3</td></tr>
+<tr><th>Platform</th><td>macOS-26.5.2-arm64-arm-64bit-Mach-O</td></tr>
+<tr><th>Architecture</th><td>arm64</td></tr>
+<tr><th>Processor</th><td>arm</td></tr>
+<tr><th>Package: relayna</th><td>1.4.31</td></tr>
+<tr><th>Package: pydantic</th><td>2.12.5</td></tr>
+<tr><th>Package: pydantic-core</th><td>2.41.5</td></tr>
+<tr><th>Package: aio-pika</th><td>9.6.1</td></tr>
+<tr><th>Package: prometheus-client</th><td>0.25.0</td></tr>
+<tr><th>Tracing mode</th><td>enabled-unsampled</td></tr>
+<tr><th>OpenTelemetry tracer provider</th><td>TracerProvider</td></tr>
+<tr><th>OpenTelemetry sampler</th><td>StaticSampler</td></tr>
+<tr><th>OpenTelemetry span processor</th><td>SimpleSpanProcessor</td></tr>
+<tr><th>OpenTelemetry exporter</th><td>CountingExporter (synchronous, non-retaining)</td></tr>
+<tr><th>OpenTelemetry propagator</th><td>CompositePropagator</td></tr>
+<tr><th>Benchmark</th><td>publish-preparation</td></tr>
+<tr><th>Run label</th><td>candidate</td></tr>
+<tr><th>Task preparation implementation</th><td>current runtime</td></tr>
+<tr><th>Event loop policy</th><td>_UnixDefaultEventLoopPolicy</td></tr>
+<tr><th>Tasks per individual/batch operation</th><td>2</td></tr>
+<tr><th>Network/broker</th><td>excluded; deterministic no-op exchange</td></tr></tbody></table>
+</main>
+<!-- relayna-publish-preparation-data:{&quot;results&quot;: [{&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 2048, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [142491.76366666667, 146910.875, 153642.77766666666, 143964.41666666666, 141880.73633333333], &quot;median_ns_per_operation&quot;: 143964.41666666666, &quot;median_absolute_deviation_ns&quot;: 2083.680333333323, &quot;operations_per_second&quot;: 6946.160885820745, &quot;throughput_mib_per_second&quot;: 13.56672048011864, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 30000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 32768, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [153916.48714285714, 154769.4642857143, 161135.83285714284, 161977.14285714287, 160144.64285714287], &quot;median_ns_per_operation&quot;: 160144.64285714287, &quot;median_absolute_deviation_ns&quot;: 1832.5, &quot;operations_per_second&quot;: 6244.354991581271, &quot;throughput_mib_per_second&quot;: 195.13609348691472, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 7000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 262144, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [244670.3125, 243007.2875, 253273.4375, 273653.65, 252821.875], &quot;median_ns_per_operation&quot;: 252821.875, &quot;median_absolute_deviation_ns&quot;: 8151.5625, &quot;operations_per_second&quot;: 3955.3539423754373, &quot;throughput_mib_per_second&quot;: 988.8384855938593, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 800, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 2097152, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [1004050.0, 993837.5, 982633.4, 1005487.5, 1024545.9], &quot;median_ns_per_operation&quot;: 1004050.0, &quot;median_absolute_deviation_ns&quot;: 10212.5, &quot;operations_per_second&quot;: 995.9663363378318, &quot;throughput_mib_per_second&quot;: 1991.9326726756635, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 100, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 2048, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [133828.94433333335, 136708.111, 139598.19433333335, 132637.361, 143015.79166666666], &quot;median_ns_per_operation&quot;: 136708.111, &quot;median_absolute_deviation_ns&quot;: 2890.083333333343, &quot;operations_per_second&quot;: 7314.854932053007, &quot;throughput_mib_per_second&quot;: 14.28682603916603, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 30000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 32768, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [147941.9042857143, 150734.4042857143, 149079.58285714284, 150638.2742857143, 173150.6542857143], &quot;median_ns_per_operation&quot;: 150638.2742857143, &quot;median_absolute_deviation_ns&quot;: 1558.6914285714447, &quot;operations_per_second&quot;: 6638.419118525673, &quot;throughput_mib_per_second&quot;: 207.4505974539273, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 7000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 262144, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [244292.7125, 241873.4375, 232435.9375, 248102.6, 239770.825], &quot;median_ns_per_operation&quot;: 241873.4375, &quot;median_absolute_deviation_ns&quot;: 2419.274999999994, &quot;operations_per_second&quot;: 4134.393633033805, &quot;throughput_mib_per_second&quot;: 1033.5984082584514, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 800, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 2097152, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [955912.5, 989070.9, 947145.8, 1092320.8, 1022691.7], &quot;median_ns_per_operation&quot;: 989070.9, &quot;median_absolute_deviation_ns&quot;: 33620.79999999993, &quot;operations_per_second&quot;: 1011.0498650804508, &quot;throughput_mib_per_second&quot;: 2022.0997301609016, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 100, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 2048, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [143815.72233333334, 146787.86133333333, 146180.222, 134749.15266666666, 138498.389], &quot;median_ns_per_operation&quot;: 143815.72233333334, &quot;median_absolute_deviation_ns&quot;: 2972.1389999999956, &quot;operations_per_second&quot;: 6953.342678919479, &quot;throughput_mib_per_second&quot;: 13.58074741976461, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 30000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 32768, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [158514.4057142857, 152545.29714285713, 155563.0957142857, 152900.17857142858, 144333.63], &quot;median_ns_per_operation&quot;: 152900.17857142858, &quot;median_absolute_deviation_ns&quot;: 2662.917142857128, &quot;operations_per_second&quot;: 6540.214729264308, &quot;throughput_mib_per_second&quot;: 204.38171028950958, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 7000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 262144, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [253084.375, 268103.6375, 250286.9875, 241963.5375, 251569.275], &quot;median_ns_per_operation&quot;: 251569.275, &quot;median_absolute_deviation_ns&quot;: 1515.1000000000058, &quot;operations_per_second&quot;: 3975.0482247881823, &quot;throughput_mib_per_second&quot;: 993.7620561970456, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 800, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 2097152, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [983583.3, 982495.9, 969404.2, 981887.5, 1107308.3], &quot;median_ns_per_operation&quot;: 982495.9, &quot;median_absolute_deviation_ns&quot;: 1087.4000000000233, &quot;operations_per_second&quot;: 1017.8159522090626, &quot;throughput_mib_per_second&quot;: 2035.6319044181253, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 100, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 2048, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [149421.97233333334, 152771.597, 145119.68066666665, 152267.02766666666, 146124.361], &quot;median_ns_per_operation&quot;: 149421.97233333334, &quot;median_absolute_deviation_ns&quot;: 3297.611333333334, &quot;operations_per_second&quot;: 6692.4561654773315, &quot;throughput_mib_per_second&quot;: 13.071203448197913, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 30000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 32768, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [157975.11857142858, 160273.0357142857, 154732.62, 154349.16714285716, 154842.0242857143], &quot;median_ns_per_operation&quot;: 154842.0242857143, &quot;median_absolute_deviation_ns&quot;: 492.8571428571304, &quot;operations_per_second&quot;: 6458.195083750658, &quot;throughput_mib_per_second&quot;: 201.81859636720807, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 7000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 262144, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [251418.75, 259406.25, 241641.15, 252340.625, 245703.125], &quot;median_ns_per_operation&quot;: 251418.75, &quot;median_absolute_deviation_ns&quot;: 5715.625, &quot;operations_per_second&quot;: 3977.42809555771, &quot;throughput_mib_per_second&quot;: 994.3570238894275, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 800, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 2097152, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [999433.3, 1020250.0, 952608.3, 1007370.8, 1007962.5], &quot;median_ns_per_operation&quot;: 1007370.8, &quot;median_absolute_deviation_ns&quot;: 7937.5, &quot;operations_per_second&quot;: 992.6831311767226, &quot;throughput_mib_per_second&quot;: 1985.366262353445, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 100, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 2048, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [142542.09733333334, 137423.56933333335, 139801.93033333332, 151698.27766666666, 143359.94466666668], &quot;median_ns_per_operation&quot;: 142542.09733333334, &quot;median_absolute_deviation_ns&quot;: 2740.167000000016, &quot;operations_per_second&quot;: 7015.471349923451, &quot;throughput_mib_per_second&quot;: 13.702092480319239, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 30000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 32768, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [152094.2857142857, 150895.7142857143, 143758.87, 146064.88142857142, 189331.9642857143], &quot;median_ns_per_operation&quot;: 150895.7142857143, &quot;median_absolute_deviation_ns&quot;: 4830.832857142872, &quot;operations_per_second&quot;: 6627.093451484942, &quot;throughput_mib_per_second&quot;: 207.09667035890442, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 7000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 262144, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [243306.25, 237881.775, 244319.7875, 230655.2, 308614.0625], &quot;median_ns_per_operation&quot;: 243306.25, &quot;median_absolute_deviation_ns&quot;: 5424.475000000006, &quot;operations_per_second&quot;: 4110.046494900974, &quot;throughput_mib_per_second&quot;: 1027.5116237252435, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 800, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 2097152, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [1016966.6, 971562.5, 937708.4, 965108.4, 1056554.2], &quot;median_ns_per_operation&quot;: 971562.5, &quot;median_absolute_deviation_ns&quot;: 33854.09999999998, &quot;operations_per_second&quot;: 1029.2698616918624, &quot;throughput_mib_per_second&quot;: 2058.539723383725, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 100, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 2048, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [143898.44433333335, 140126.34733333334, 140815.15266666666, 135077.5, 155221.04166666666], &quot;median_ns_per_operation&quot;: 140815.15266666666, &quot;median_absolute_deviation_ns&quot;: 3083.291666666686, &quot;operations_per_second&quot;: 7101.508474497553, &quot;throughput_mib_per_second&quot;: 13.870133739253033, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 30000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 32768, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [154537.0242857143, 160078.51285714286, 197923.45285714287, 149601.42857142858, 152786.8442857143], &quot;median_ns_per_operation&quot;: 154537.0242857143, &quot;median_absolute_deviation_ns&quot;: 4935.595714285708, &quot;operations_per_second&quot;: 6470.941216980856, &quot;throughput_mib_per_second&quot;: 202.21691303065174, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 7000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 262144, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [244759.375, 260100.0, 243155.725, 284927.0875, 250853.6375], &quot;median_ns_per_operation&quot;: 250853.6375, &quot;median_absolute_deviation_ns&quot;: 7697.912500000006, &quot;operations_per_second&quot;: 3986.388277905677, &quot;throughput_mib_per_second&quot;: 996.5970694764193, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 800, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;individual-task&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 2097152, &quot;publications_per_operation&quot;: 2, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [1005716.7, 1018041.7, 976608.4, 960325.0, 1204620.8], &quot;median_ns_per_operation&quot;: 1005716.7, &quot;median_absolute_deviation_ns&quot;: 29108.29999999993, &quot;operations_per_second&quot;: 994.3157948953219, &quot;throughput_mib_per_second&quot;: 1988.6315897906438, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 100, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [44490.09733333333, 46076.27766666667, 44009.013666666666, 44889.291666666664, 46297.736], &quot;median_ns_per_operation&quot;: 44889.291666666664, &quot;median_absolute_deviation_ns&quot;: 880.2779999999984, &quot;operations_per_second&quot;: 22277.027836074492, &quot;throughput_mib_per_second&quot;: 21.754909996166496, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [55533.98857142857, 51352.38, 55809.70142857143, 53105.41714285714, 51367.915714285715], &quot;median_ns_per_operation&quot;: 53105.41714285714, &quot;median_absolute_deviation_ns&quot;: 1753.0371428571452, &quot;operations_per_second&quot;: 18830.470671380524, &quot;throughput_mib_per_second&quot;: 294.2261042403207, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [99695.3125, 100244.275, 101164.5875, 97723.95, 97551.05], &quot;median_ns_per_operation&quot;: 99695.3125, &quot;median_absolute_deviation_ns&quot;: 1469.2749999999942, &quot;operations_per_second&quot;: 10030.561868192148, &quot;throughput_mib_per_second&quot;: 1253.8202335240185, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [501212.5, 492466.6, 493929.2, 473920.9, 473629.2], &quot;median_ns_per_operation&quot;: 492466.6, &quot;median_absolute_deviation_ns&quot;: 8745.900000000023, &quot;operations_per_second&quot;: 2030.5945621489864, &quot;throughput_mib_per_second&quot;: 2030.5945621489864, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [41636.472, 41744.458333333336, 41464.611, 40831.75, 40765.375], &quot;median_ns_per_operation&quot;: 41464.611, &quot;median_absolute_deviation_ns&quot;: 279.8473333333386, &quot;operations_per_second&quot;: 24116.95119966277, &quot;throughput_mib_per_second&quot;: 23.551710155920674, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [48528.868571428575, 62419.52428571429, 47804.70285714286, 46884.70285714286, 48367.20285714286], &quot;median_ns_per_operation&quot;: 48367.20285714286, &quot;median_absolute_deviation_ns&quot;: 562.5, &quot;operations_per_second&quot;: 20675.16707454833, &quot;throughput_mib_per_second&quot;: 323.0494855398177, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [101843.75, 104641.675, 95111.4625, 93817.1875, 96803.125], &quot;median_ns_per_operation&quot;: 96803.125, &quot;median_absolute_deviation_ns&quot;: 2985.9375, &quot;operations_per_second&quot;: 10330.24502049908, &quot;throughput_mib_per_second&quot;: 1291.280627562385, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [555837.5, 741841.6, 474650.0, 497712.5, 493700.0], &quot;median_ns_per_operation&quot;: 497712.5, &quot;median_absolute_deviation_ns&quot;: 23062.5, &quot;operations_per_second&quot;: 2009.192053645428, &quot;throughput_mib_per_second&quot;: 2009.1920536454277, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [41825.666666666664, 43277.19466666667, 40772.22233333333, 40907.06966666667, 40749.875], &quot;median_ns_per_operation&quot;: 40907.06966666667, &quot;median_absolute_deviation_ns&quot;: 157.19466666666995, &quot;operations_per_second&quot;: 24445.652258852828, &quot;throughput_mib_per_second&quot;: 23.872707284035965, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [48005.77285714286, 54776.78571428572, 47308.57142857143, 47794.82142857143, 46741.01285714286], &quot;median_ns_per_operation&quot;: 47794.82142857143, &quot;median_absolute_deviation_ns&quot;: 486.25, &quot;operations_per_second&quot;: 20922.768829557896, &quot;throughput_mib_per_second&quot;: 326.9182629618421, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [99210.425, 159669.275, 93208.3375, 99971.875, 93797.9125], &quot;median_ns_per_operation&quot;: 99210.425, &quot;median_absolute_deviation_ns&quot;: 5412.512499999997, &quot;operations_per_second&quot;: 10079.585890293283, &quot;throughput_mib_per_second&quot;: 1259.9482362866604, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [477016.7, 556070.8, 479325.0, 493283.3, 489954.2], &quot;median_ns_per_operation&quot;: 489954.2, &quot;median_absolute_deviation_ns&quot;: 10629.200000000012, &quot;operations_per_second&quot;: 2041.0070982144862, &quot;throughput_mib_per_second&quot;: 2041.0070982144862, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [47642.278, 45980.97233333333, 48078.69433333333, 46473.47233333333, 47231.19433333333], &quot;median_ns_per_operation&quot;: 47231.19433333333, &quot;median_absolute_deviation_ns&quot;: 757.7220000000016, &quot;operations_per_second&quot;: 21172.447872956956, &quot;throughput_mib_per_second&quot;: 20.676218625934528, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [59412.97571428571, 53001.131428571425, 54351.13, 52524.76285714286, 60968.392857142855], &quot;median_ns_per_operation&quot;: 54351.13, &quot;median_absolute_deviation_ns&quot;: 1826.3671428571397, &quot;operations_per_second&quot;: 18398.881495196147, &quot;throughput_mib_per_second&quot;: 287.4825233624398, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [108198.4375, 99591.675, 104212.5, 103307.2875, 108542.1875], &quot;median_ns_per_operation&quot;: 104212.5, &quot;median_absolute_deviation_ns&quot;: 3985.9375, &quot;operations_per_second&quot;: 9595.777857742592, &quot;throughput_mib_per_second&quot;: 1199.472232217824, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [487458.4, 488554.2, 490141.7, 494512.5, 508675.0], &quot;median_ns_per_operation&quot;: 490141.7, &quot;median_absolute_deviation_ns&quot;: 2683.2999999999884, &quot;operations_per_second&quot;: 2040.2263263868388, &quot;throughput_mib_per_second&quot;: 2040.2263263868385, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [42648.97233333333, 41933.19433333333, 42219.236, 43978.111333333334, 43625.138666666666], &quot;median_ns_per_operation&quot;: 42648.97233333333, &quot;median_absolute_deviation_ns&quot;: 715.7779999999984, &quot;operations_per_second&quot;: 23447.223820172236, &quot;throughput_mib_per_second&quot;: 22.89767951188695, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [50015.05857142857, 50956.25, 49553.631428571425, 49117.381428571425, 53201.368571428575], &quot;median_ns_per_operation&quot;: 50015.05857142857, &quot;median_absolute_deviation_ns&quot;: 897.6771428571446, &quot;operations_per_second&quot;: 19993.978384966973, &quot;throughput_mib_per_second&quot;: 312.40591226510895, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [108769.8, 97644.7875, 100081.7625, 100406.25, 100999.475], &quot;median_ns_per_operation&quot;: 100406.25, &quot;median_absolute_deviation_ns&quot;: 593.2250000000058, &quot;operations_per_second&quot;: 9959.539371304078, &quot;throughput_mib_per_second&quot;: 1244.9424214130097, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [522995.9, 496712.5, 481358.3, 501370.8, 502966.6], &quot;median_ns_per_operation&quot;: 501370.8, &quot;median_absolute_deviation_ns&quot;: 4658.299999999988, &quot;operations_per_second&quot;: 1994.5317916400397, &quot;throughput_mib_per_second&quot;: 1994.53179164004, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [44152.361333333334, 43144.208333333336, 42650.75, 45123.81933333333, 43295.541666666664], &quot;median_ns_per_operation&quot;: 43295.541666666664, &quot;median_absolute_deviation_ns&quot;: 644.7916666666642, &quot;operations_per_second&quot;: 23097.066383855923, &quot;throughput_mib_per_second&quot;: 22.5557288904843, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 30000, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [51579.642857142855, 52708.095714285715, 50057.08285714286, 54523.631428571425, 50542.67857142857], &quot;median_ns_per_operation&quot;: 51579.642857142855, &quot;median_absolute_deviation_ns&quot;: 1128.45285714286, &quot;operations_per_second&quot;: 19387.49368175429, &quot;throughput_mib_per_second&quot;: 302.9295887774108, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 7000, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [95884.9, 111238.0125, 98627.0875, 100054.1625, 107386.975], &quot;median_ns_per_operation&quot;: 100054.1625, &quot;median_absolute_deviation_ns&quot;: 4169.262500000012, &quot;operations_per_second&quot;: 9994.586681988367, &quot;throughput_mib_per_second&quot;: 1249.323335248546, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 800, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;batch-envelope&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;task-type-routed&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 2, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [505212.5, 488883.3, 469283.4, 481504.1, 517225.0], &quot;median_ns_per_operation&quot;: 488883.3, &quot;median_absolute_deviation_ns&quot;: 16329.200000000012, &quot;operations_per_second&quot;: 2045.4779289863245, &quot;throughput_mib_per_second&quot;: 2045.4779289863247, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 100, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [35588.40266666667, 35812.56933333333, 35830.15266666667, 37278.236, 36145.80566666667], &quot;median_ns_per_operation&quot;: 35830.15266666667, &quot;median_absolute_deviation_ns&quot;: 241.75, &quot;operations_per_second&quot;: 27909.454065215723, &quot;throughput_mib_per_second&quot;: 27.25532623556223, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [43496.96428571428, 43450.17857142857, 43094.584285714285, 43797.32142857143, 43105.47714285714], &quot;median_ns_per_operation&quot;: 43450.17857142857, &quot;median_absolute_deviation_ns&quot;: 344.7014285714322, &quot;operations_per_second&quot;: 23014.865137000095, &quot;throughput_mib_per_second&quot;: 359.6072677656265, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [89546.875, 94150.0, 104473.9625, 89503.125, 90486.45], &quot;median_ns_per_operation&quot;: 90486.45, &quot;median_absolute_deviation_ns&quot;: 983.3249999999971, &quot;operations_per_second&quot;: 11051.378410800733, &quot;throughput_mib_per_second&quot;: 1381.4223013500919, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [473887.5, 462591.7, 472945.8, 476141.7, 480291.7], &quot;median_ns_per_operation&quot;: 473887.5, &quot;median_absolute_deviation_ns&quot;: 2254.2000000000116, &quot;operations_per_second&quot;: 2110.2054812587376, &quot;throughput_mib_per_second&quot;: 2110.2054812587376, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [35992.958333333336, 35657.69433333333, 35440.0, 38687.264, 36151.75], &quot;median_ns_per_operation&quot;: 35992.958333333336, &quot;median_absolute_deviation_ns&quot;: 335.26400000000285, &quot;operations_per_second&quot;: 27783.212225539486, &quot;throughput_mib_per_second&quot;: 27.132043189003404, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [44163.51142857143, 42636.665714285715, 45360.892857142855, 49571.96428571428, 45627.44142857143], &quot;median_ns_per_operation&quot;: 45360.892857142855, &quot;median_absolute_deviation_ns&quot;: 1197.3814285714252, &quot;operations_per_second&quot;: 22045.421441534363, &quot;throughput_mib_per_second&quot;: 344.4597100239744, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [89472.3875, 93010.425, 90616.1375, 96031.25, 91623.9625], &quot;median_ns_per_operation&quot;: 91623.9625, &quot;median_absolute_deviation_ns&quot;: 1386.4625000000087, &quot;operations_per_second&quot;: 10914.17542654303, &quot;throughput_mib_per_second&quot;: 1364.2719283178787, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [484283.4, 463666.7, 530833.3, 489379.1, 459529.1], &quot;median_ns_per_operation&quot;: 484283.4, &quot;median_absolute_deviation_ns&quot;: 20616.70000000001, &quot;operations_per_second&quot;: 2064.9066228576075, &quot;throughput_mib_per_second&quot;: 2064.9066228576075, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [37123.25, 35478.166666666664, 36606.361, 36423.81966666667, 37084.27766666667], &quot;median_ns_per_operation&quot;: 36606.361, &quot;median_absolute_deviation_ns&quot;: 477.9166666666715, &quot;operations_per_second&quot;: 27317.656622574425, &quot;throughput_mib_per_second&quot;: 26.677399045482836, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [45557.32142857143, 44391.07142857143, 42868.51285714286, 43310.23857142857, 43508.92857142857], &quot;median_ns_per_operation&quot;: 43508.92857142857, &quot;median_absolute_deviation_ns&quot;: 640.4157142857148, &quot;operations_per_second&quot;: 22983.788220808536, &quot;throughput_mib_per_second&quot;: 359.12169095013337, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [90233.85, 89698.95, 114746.35, 92851.5625, 94490.1125], &quot;median_ns_per_operation&quot;: 92851.5625, &quot;median_absolute_deviation_ns&quot;: 2617.712499999994, &quot;operations_per_second&quot;: 10769.877997475809, &quot;throughput_mib_per_second&quot;: 1346.2347496844764, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;workflow&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;workflow-stage&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [466100.0, 464725.0, 536304.2, 449887.5, 466112.5], &quot;median_ns_per_operation&quot;: 466100.0, &quot;median_absolute_deviation_ns&quot;: 1375.0, &quot;operations_per_second&quot;: 2145.4623471358077, &quot;throughput_mib_per_second&quot;: 2145.4623471358077, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [26818.833333333332, 28076.305666666667, 27995.597333333335, 26747.888666666666, 28347.625], &quot;median_ns_per_operation&quot;: 27995.597333333335, &quot;median_absolute_deviation_ns&quot;: 352.027666666665, &quot;operations_per_second&quot;: 35719.902243676595, &quot;throughput_mib_per_second&quot;: 34.882717034840425, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [33931.607142857145, 35255.77428571429, 33785.118571428575, 34077.32142857143, 33753.45285714286], &quot;median_ns_per_operation&quot;: 33931.607142857145, &quot;median_absolute_deviation_ns&quot;: 146.48857142857014, &quot;operations_per_second&quot;: 29471.047327344393, &quot;throughput_mib_per_second&quot;: 460.48511448975614, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [95779.175, 81170.3125, 81978.6375, 79579.6875, 79823.4375], &quot;median_ns_per_operation&quot;: 81170.3125, &quot;median_absolute_deviation_ns&quot;: 1346.875, &quot;operations_per_second&quot;: 12319.775164103256, &quot;throughput_mib_per_second&quot;: 1539.971895512907, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;model&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [1079175.0, 441300.0, 444650.0, 469133.3, 460645.9], &quot;median_ns_per_operation&quot;: 460645.9, &quot;median_absolute_deviation_ns&quot;: 15995.900000000023, &quot;operations_per_second&quot;: 2170.86486605004, &quot;throughput_mib_per_second&quot;: 2170.86486605004, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [26322.222, 25775.125, 25866.166666666668, 26188.888666666666, 25558.875], &quot;median_ns_per_operation&quot;: 25866.166666666668, &quot;median_absolute_deviation_ns&quot;: 307.2916666666679, &quot;operations_per_second&quot;: 38660.54111870719, &quot;throughput_mib_per_second&quot;: 37.754434686237495, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [32182.5, 33378.27428571429, 32844.82142857143, 32319.464285714286, 32148.81], &quot;median_ns_per_operation&quot;: 32319.464285714286, &quot;median_absolute_deviation_ns&quot;: 170.65428571428492, &quot;operations_per_second&quot;: 30941.106918099995, &quot;throughput_mib_per_second&quot;: 483.4547955953124, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [78516.6625, 78009.9, 77950.0, 78654.175, 78598.4375], &quot;median_ns_per_operation&quot;: 78516.6625, &quot;median_absolute_deviation_ns&quot;: 137.5124999999971, &quot;operations_per_second&quot;: 12736.150113359696, &quot;throughput_mib_per_second&quot;: 1592.018764169962, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;canonical-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [479241.6, 459062.5, 451358.3, 474654.2, 459604.2], &quot;median_ns_per_operation&quot;: 459604.2, &quot;median_absolute_deviation_ns&quot;: 8245.900000000023, &quot;operations_per_second&quot;: 2175.7851647134644, &quot;throughput_mib_per_second&quot;: 2175.7851647134644, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;iterations&quot;: 3000, &quot;actual_message_bytes&quot;: 1024, &quot;bytes_per_operation&quot;: 1024, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [27230.486333333334, 26433.041666666668, 25826.986, 26100.944333333333, 25998.194333333333], &quot;median_ns_per_operation&quot;: 26100.944333333333, &quot;median_absolute_deviation_ns&quot;: 273.9583333333321, &quot;operations_per_second&quot;: 38312.79003660059, &quot;throughput_mib_per_second&quot;: 37.414834020117766, &quot;total_operations&quot;: 15000, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 15000, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;iterations&quot;: 700, &quot;actual_message_bytes&quot;: 16384, &quot;bytes_per_operation&quot;: 16384, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [33757.67857142857, 32825.47714285714, 34167.56, 35910.892857142855, 37823.334285714285], &quot;median_ns_per_operation&quot;: 34167.56, &quot;median_absolute_deviation_ns&quot;: 1342.0828571428574, &quot;operations_per_second&quot;: 29267.527444160485, &quot;throughput_mib_per_second&quot;: 457.3051163150076, &quot;total_operations&quot;: 3500, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 3500, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;iterations&quot;: 80, &quot;actual_message_bytes&quot;: 131072, &quot;bytes_per_operation&quot;: 131072, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [79752.6125, 90908.85, 96955.2125, 81036.975, 78325.0], &quot;median_ns_per_operation&quot;: 81036.975, &quot;median_absolute_deviation_ns&quot;: 2711.975000000006, &quot;operations_per_second&quot;: 12340.046009861548, &quot;throughput_mib_per_second&quot;: 1542.5057512326932, &quot;total_operations&quot;: 400, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 400, &quot;relative_speedup&quot;: null}, {&quot;message_kind&quot;: &quot;status&quot;, &quot;input_kind&quot;: &quot;alias-mapping&quot;, &quot;topology&quot;: &quot;direct-shared&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;iterations&quot;: 10, &quot;actual_message_bytes&quot;: 1048576, &quot;bytes_per_operation&quot;: 1048576, &quot;publications_per_operation&quot;: 1, &quot;preparations_per_operation&quot;: 0, &quot;repeats&quot;: 5, &quot;sample_ns_per_operation&quot;: [467308.3, 529991.7, 475666.7, 508037.5, 450533.3], &quot;median_ns_per_operation&quot;: 475666.7, &quot;median_absolute_deviation_ns&quot;: 25133.400000000023, &quot;operations_per_second&quot;: 2102.312396474254, &quot;throughput_mib_per_second&quot;: 2102.312396474254, &quot;total_operations&quot;: 50, &quot;total_prepared&quot;: 0, &quot;total_published&quot;: 50, &quot;relative_speedup&quot;: null}]}:end -->
+</body>
+</html>

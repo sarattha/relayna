@@ -1,6 +1,6 @@
 [project]
 name = "relayna"
-version = "1.4.31"
+version = "1.4.32"
 description = "Shared RabbitMQ/Redis infrastructure for Relayna."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -45,6 +45,7 @@ Repository = "https://github.com/sarattha/relayna"
 
 [project.optional-dependencies]
 benchmark = [
+    "opentelemetry-sdk==1.41.1",
     "orjson==3.11.9",
 ]
 dev = [
@@ -52,6 +53,7 @@ dev = [
     "coverage[toml]>=7.10.0",
     "cryptography>=48.0.1",
     "mkdocs>=1.6.1",
+    "opentelemetry-sdk==1.41.1",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "twine>=6.1.0",
