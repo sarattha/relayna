@@ -11,6 +11,10 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 _RUN_ROOT = _ROOT / "reports" / "reduce-tracing-overhead" / "20260731T072226Z-283782ec"
+pytestmark = pytest.mark.skipif(
+    not _RUN_ROOT.is_dir(),
+    reason="retained benchmark reports are local-only artifacts",
+)
 
 
 def _load_script(name: str) -> ModuleType:

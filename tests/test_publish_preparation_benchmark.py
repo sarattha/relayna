@@ -32,6 +32,10 @@ from benchmarks.reporting import collect_environment  # noqa: E402
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 _RETAINED_BASELINE = _REPOSITORY_ROOT / "reports" / "publish-preparation-baseline.html"
+_requires_retained_baseline = pytest.mark.skipif(
+    not _RETAINED_BASELINE.is_file(),
+    reason="retained benchmark reports are local-only artifacts",
+)
 
 
 def _case(
@@ -158,6 +162,7 @@ def test_minimal_run_reports_complete_statistics_counts_and_preparation_probe() 
     assert {result.total_prepared for result in individual} == {2}
 
 
+@_requires_retained_baseline
 def test_retained_baseline_schema_matrix_and_preparation_evidence() -> None:
     results = load_baseline_results(_RETAINED_BASELINE)
 
@@ -177,11 +182,14 @@ def _copy_retained_baseline(tmp_path: Path) -> Path:
     return report_path
 
 
-def test_baseline_loader_rejects_missing_report_and_metadata(tmp_path: Path) -> None:
+def test_baseline_loader_rejects_missing_report(tmp_path: Path) -> None:
     missing_report = tmp_path / "missing-baseline.html"
     with pytest.raises(FileNotFoundError, match="baseline report not found"):
         load_baseline_results(missing_report)
 
+
+@_requires_retained_baseline
+def test_baseline_loader_rejects_missing_metadata(tmp_path: Path) -> None:
     report_path = tmp_path / _RETAINED_BASELINE.name
     report_path.write_bytes(_RETAINED_BASELINE.read_bytes())
     with pytest.raises(FileNotFoundError, match="baseline metadata not found"):
@@ -196,6 +204,7 @@ def test_baseline_loader_rejects_missing_report_and_metadata(tmp_path: Path) -> 
         ({"report_sha256": "0" * 64}, "hash mismatch"),
     ],
 )
+@_requires_retained_baseline
 def test_baseline_loader_rejects_incompatible_metadata(
     tmp_path: Path,
     mutation: dict[str, object],
@@ -211,6 +220,7 @@ def test_baseline_loader_rejects_incompatible_metadata(
         load_baseline_results(report_path)
 
 
+@_requires_retained_baseline
 def test_baseline_loader_rejects_matrix_and_requested_configuration_mismatch(tmp_path: Path) -> None:
     report_path = _copy_retained_baseline(tmp_path)
     metadata_path = baseline_metadata_path(report_path)
@@ -230,6 +240,7 @@ def test_baseline_loader_rejects_matrix_and_requested_configuration_mismatch(tmp
         )
 
 
+@_requires_retained_baseline
 def test_retained_baseline_sidecar_hash_matches_immutable_html() -> None:
     metadata = json.loads(baseline_metadata_path(_RETAINED_BASELINE).read_text(encoding="utf-8"))
 
