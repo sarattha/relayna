@@ -76,11 +76,16 @@ per-message CPU path from full consumer-loop throughput.
 - [x] (2026-07-31 09:00Z) Stabilized the canonical consumer benchmark at five
   repeats and 8,192/2,048/256/64 loop messages by body size; 34 harness tests,
   formatting/lint, and a complete 40-cell candidate run pass.
-- [ ] Re-fetch `origin/main`, integrate any relevant merged work, and capture a
-  fresh final matched baseline/candidate pair if the base or environment moved.
-- [ ] Generate and validate complete-suite JSON/HTML comparison evidence,
-  update the next available patch version, changelog, benchmark/runtime docs,
-  and freeze/version notes.
+- [x] (2026-07-31 09:03Z) Captured the stabilized same-second final pair and
+  complete 1,224-case JSON/HTML comparison; the verdict remained inconclusive
+  with 5.39% control drift and a 0.39% disabled target regression, so the
+  runtime candidate was reverted exactly to `origin/main`.
+- [x] (2026-07-31 09:05Z) Decided not to bump version, changelog, or freeze
+  manifests because no runtime implementation or public behavior is retained;
+  retained benchmark/report documentation records the negative result and
+  reproducible commands without claiming a gain.
+- [x] (2026-07-31 09:05Z) Re-fetched unchanged `origin/main`; no consumer,
+  tracing, version, or benchmark integration was required.
 - [ ] Run the mandatory verification stack, applicable RabbitMQ integration
   coverage, artifact integrity checks, and a final diff/secret/path/semantic
   audit.
@@ -201,6 +206,20 @@ per-message CPU path from full consumer-loop throughput.
   unsampled -1.50% to -6.17%, and sampled/exported -1.97% to -4.26%, with
   655,360 sampled spans and exact behavior counts.
 
+- Observation: the stabilized canonical complete pair still does not support
+  retaining the runtime candidate.
+  Evidence: disabled concurrent-loop aggregate changed +0.39%, unsampled
+  -1.33%, and sampled/exported -1.86%, against maximum unchanged-control drift
+  of 5.39%. Target breakdown includes regressions of +3.46% disabled and +1.76%
+  sampled/exported. All 1,224 cases, 811,880 sampled spans, counts, hashes, and
+  checksums validate.
+
+- Observation: the reverted `src/relayna/_async.py` is byte-for-byte identical
+  to current `origin/main`.
+  Evidence: both SHA-256 values are
+  `6498426743598a37726a7db1b30bf5f4aa345bf785a55194439571c5b44cb293`;
+  `git diff origin/main -- src/relayna/_async.py` is empty.
+
 ## Decision Log
 
 - Decision: use exact refreshed base
@@ -290,11 +309,36 @@ per-message CPU path from full consumer-loop throughput.
   committed harness.
   Date/Author: 2026-07-31 / Codex.
 
+- Decision: reject and revert the capacity-counter runtime candidate.
+  Rationale: focused high-cardinality evidence was positive, but the
+  stabilized complete canonical suite still showed target regressions and did
+  not clear unchanged-control drift. Keeping the change would violate the
+  explicit requirement to retain only a reproducible improvement without
+  material regressions.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: keep package version `1.4.32` and do not edit changelog or freeze
+  manifests.
+  Rationale: the final source has no runtime/public behavior change. Benchmark
+  harness stabilization, report tooling, behavior tests, and immutable
+  investigation artifacts do not reserve a release version or cross the
+  production perimeter.
+  Date/Author: 2026-07-31 / Codex.
+
 ## Outcomes & Retrospective
 
-Work is in progress. This section will record the retained implementation,
-quantified complete-suite and consumer-loop outcome, compatibility impact,
-verification/CI/review status, and remaining risks.
+No runtime optimization was retained. A specialized capacity counter looked
+promising in focused 8,192-message runs but failed the stronger complete-suite
+bar after the canonical harness was stabilized. The final SDK scheduler is
+byte-for-byte identical to `origin/main`, so released behavior, compatibility,
+version `1.4.32`, and the production freeze perimeter are unchanged.
+
+The durable outcome is a stronger five-repeat/high-cardinality consumer
+benchmark, reusable source-provenance and scheduling-comparison tooling,
+deterministic cleanup/fairness/ContextVar/cancellation/exception tests, and
+immutable evidence showing why the candidate should not merge as a runtime
+change. Verification, publication, CI, and first-review results remain to be
+recorded.
 
 ## Context and Orientation
 

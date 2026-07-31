@@ -176,6 +176,21 @@ and resolved third-party packages before comparison. It derives improvement,
 regression, or inconclusive wording from both minimal target groups relative to
 the maximum unchanged-suite aggregate drift.
 
+### Consumer-loop scheduling investigation
+
+Performance item 4 tested lower-overhead bounded consumer scheduling after
+items 1–3 had merged. No runtime candidate was retained. Focused
+high-cardinality trials were positive, but the stabilized complete five-suite,
+three-tracing-mode comparison remained inconclusive and contained target
+regressions. Relayna therefore keeps the released semaphore/task scheduler
+unchanged.
+
+The immutable reports, complete methodology, reproducible commands, exact
+cardinalities, compatibility result, and limitations are documented in
+`reports/optimize-consumer-loop-scheduling/README.md`. The authoritative
+stabilized pair contains all 1,224 cases per side and records a 5.39% maximum
+control drift versus target aggregate changes of +0.39%, -1.33%, and -1.86%.
+
 The earlier `20260731T061143Z-44adab85` run is retained as non-authoritative
 drift evidence. Its candidate consumer-loop aggregate moved about `+8%` while a
 nearby focused pair moved in the opposite direction, so it is not used for the

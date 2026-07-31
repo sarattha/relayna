@@ -8,7 +8,6 @@ from typing import Any
 
 import pytest
 
-import relayna._async as async_helpers
 from relayna._async import map_bounded, run_bounded_iterator
 
 
@@ -148,9 +147,7 @@ async def test_run_bounded_iterator_propagates_handler_failure_and_cancellation(
 
 
 @pytest.mark.asyncio
-async def test_run_bounded_iterator_resolves_loop_once_and_cleans_high_cardinality_tasks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_run_bounded_iterator_cleans_high_cardinality_tasks() -> None:
     class Item:
         pass
 
@@ -159,13 +156,6 @@ async def test_run_bounded_iterator_resolves_loop_once_and_cleans_high_cardinali
     task_refs: list[weakref.ReferenceType[asyncio.Task[None]]] = []
     active = 0
     peak_active = 0
-    loop_lookups = 0
-    real_get_running_loop = asyncio.get_running_loop
-
-    def counted_get_running_loop() -> asyncio.AbstractEventLoop:
-        nonlocal loop_lookups
-        loop_lookups += 1
-        return real_get_running_loop()
 
     async def handler(item: Item) -> None:
         nonlocal active, peak_active
@@ -180,10 +170,8 @@ async def test_run_bounded_iterator_resolves_loop_once_and_cleans_high_cardinali
         finally:
             active -= 1
 
-    monkeypatch.setattr(async_helpers.asyncio, "get_running_loop", counted_get_running_loop)
     await run_bounded_iterator(_Iterator(items), concurrency=32, handler=handler)
 
-    assert loop_lookups == 1
     assert peak_active == 32
     assert active == 0
     items.clear()

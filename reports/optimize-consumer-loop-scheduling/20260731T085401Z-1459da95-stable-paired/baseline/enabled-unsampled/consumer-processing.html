@@ -1,0 +1,809 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Relayna Consumer Processing Benchmark</title>
+  <style>
+    :root { color-scheme:light; --ink:#172033; --muted:#566078; --panel:#f4f6fb;
+      --line:#d8deea; --accent:#3659c9; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:#fff;
+      font:15px/1.5 system-ui,-apple-system,sans-serif; }
+    main { width:min(1600px,96vw); margin:36px auto 72px; }
+    h1 { margin-bottom:4px; font-size:clamp(28px,4vw,44px); }
+    h2 { margin-top:34px; }
+    .lede { color:var(--muted); max-width:1000px; }
+    .summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+      gap:10px; margin:24px 0; }
+    .summary div,.note { padding:14px 16px; background:var(--panel);
+      border-left:4px solid var(--accent); }
+    .summary strong { display:block; font-size:22px; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); }
+    table { border-collapse:collapse; width:100%; }
+    th,td { border-bottom:1px solid var(--line); padding:8px 10px;
+      text-align:left; white-space:nowrap; }
+    thead th { position:sticky; top:0; background:#e9edf8; }
+    .number { text-align:right; font-variant-numeric:tabular-nums; }
+    code { background:#edf0f7; border-radius:4px; padding:2px 5px; }
+    @media print { main { width:100%; margin:0; } thead th { position:static; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Relayna Consumer Processing Benchmark</h1>
+  <p class="lede">Real inbound <code>TaskConsumer</code> processing after RabbitMQ delivery,
+  excluding broker/network latency and application business logic. Selected measurement:
+  <strong>all</strong>.</p>
+  <div class="summary">
+    <div><strong>40</strong>measurement cells</div>
+    <div><strong>16</strong>per-message cells</div>
+    <div><strong>24</strong>consumer-loop cells</div>
+    <div><strong>1 / 8 / 32</strong>loop prefetch values</div>
+  </div>
+
+  <h2>Methodology</h2>
+  <p><strong>Per-message</strong> calls the real
+  <code>TaskConsumer._handle_message()</code> operation once per sample operation. It includes
+  Pydantic Core transport JSON parsing, configured alias normalization,
+  <code>TaskEnvelope</code> validation, trace and header extraction, observation-event
+  construction and optional sink calls, <code>TaskContext</code> construction, a no-op async
+  handler invocation, resource samples, and the real acknowledgement decision. One event loop
+  and prepared fixtures are reused; fixture construction and <code>asyncio.run()</code> are not
+  timed. Dispersion is median absolute deviation.</p>
+  <p><strong>Consumer-loop</strong> calls public <code>TaskConsumer.run_forever()</code> over a
+  finite preloaded queue and channel. It includes iterator traversal, sequential or bounded
+  dispatch, asyncio task creation/scheduling, prefetch selection, the same real message path,
+  and acknowledgement. Each cell receives an untimed warm-up using separate fakes. Timed setup
+  objects are prepared before the clock starts. Iterator exhaustion calls <code>stop()</code>
+  synchronously, then in-flight tasks drain; there is no timeout polling or retry sleep.</p>
+  <p>All bodies are actual exact sizes of 1,024, 16,384, 131,072, and 1,048,576
+  bytes. Per-message covers canonical and configured-alias input. Loop timing uses canonical
+  input only because alias parsing is already isolated in per-message results and repeating it
+  at every prefetch would not add loop-dispatch information.</p>
+
+  <h2>Matrix and configuration</h2>
+  <p>The minimal profile has no observation sink. The observability-enabled profile uses a
+  deterministic in-memory no-op sink and retains no events. Both profiles keep Prometheus
+  metrics, lifecycle-status publishing, leases, retries, DLQ persistence, Redis, RabbitMQ
+  connections/sockets, queue-declaration latency, and handler work off. Trace/header extraction
+  and observation-event construction remain part of the real consumer path in both profiles.
+  The loop's no-op handler yields once, adding no business computation while making achieved
+  bounded scheduling concurrency directly observable.</p>
+
+  <h2>Measurement 1 — per-message</h2>
+  <div class="table-wrap"><table>
+        <thead><tr><th>Profile</th><th>Input</th><th>Target</th><th>Actual bytes</th>
+        <th>Iterations × repeats</th><th>Median µs/message</th><th>MAD µs</th>
+        <th>Messages/sec</th><th>MiB/sec</th><th>Handlers</th><th>Acks</th><th>Rejects</th>
+        <th>Observations</th>
+        </tr></thead><tbody><tr>
+          <td>minimal</td>
+          <td>canonical</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">1500 × 5</td>
+          <td class="number">18.163</td>
+          <td class="number">0.373</td>
+          <td class="number">55,058.0</td>
+          <td class="number">53.77</td>
+          <td class="number">7,500</td>
+          <td class="number">7,500</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>canonical</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">400 × 5</td>
+          <td class="number">20.275</td>
+          <td class="number">0.504</td>
+          <td class="number">49,322.8</td>
+          <td class="number">770.67</td>
+          <td class="number">2,000</td>
+          <td class="number">2,000</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>canonical</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">60 × 5</td>
+          <td class="number">28.998</td>
+          <td class="number">0.267</td>
+          <td class="number">34,485.2</td>
+          <td class="number">4,310.65</td>
+          <td class="number">300</td>
+          <td class="number">300</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>canonical</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">8 × 5</td>
+          <td class="number">105.729</td>
+          <td class="number">7.609</td>
+          <td class="number">9,458.1</td>
+          <td class="number">9,458.12</td>
+          <td class="number">40</td>
+          <td class="number">40</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>configured-alias</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">1500 × 5</td>
+          <td class="number">17.875</td>
+          <td class="number">0.088</td>
+          <td class="number">55,943.9</td>
+          <td class="number">54.63</td>
+          <td class="number">7,500</td>
+          <td class="number">7,500</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>configured-alias</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">400 × 5</td>
+          <td class="number">19.691</td>
+          <td class="number">0.424</td>
+          <td class="number">50,785.9</td>
+          <td class="number">793.53</td>
+          <td class="number">2,000</td>
+          <td class="number">2,000</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>configured-alias</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">60 × 5</td>
+          <td class="number">28.585</td>
+          <td class="number">0.570</td>
+          <td class="number">34,983.7</td>
+          <td class="number">4,372.96</td>
+          <td class="number">300</td>
+          <td class="number">300</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>configured-alias</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">8 × 5</td>
+          <td class="number">98.338</td>
+          <td class="number">6.662</td>
+          <td class="number">10,169.0</td>
+          <td class="number">10,168.96</td>
+          <td class="number">40</td>
+          <td class="number">40</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>canonical</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">1500 × 5</td>
+          <td class="number">24.644</td>
+          <td class="number">0.194</td>
+          <td class="number">40,577.2</td>
+          <td class="number">39.63</td>
+          <td class="number">7,500</td>
+          <td class="number">7,500</td>
+          <td class="number">0</td>
+          <td class="number">30,000</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>canonical</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">400 × 5</td>
+          <td class="number">26.049</td>
+          <td class="number">0.302</td>
+          <td class="number">38,388.9</td>
+          <td class="number">599.83</td>
+          <td class="number">2,000</td>
+          <td class="number">2,000</td>
+          <td class="number">0</td>
+          <td class="number">8,000</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>canonical</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">60 × 5</td>
+          <td class="number">34.349</td>
+          <td class="number">0.481</td>
+          <td class="number">29,113.3</td>
+          <td class="number">3,639.16</td>
+          <td class="number">300</td>
+          <td class="number">300</td>
+          <td class="number">0</td>
+          <td class="number">1,200</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>canonical</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">8 × 5</td>
+          <td class="number">104.552</td>
+          <td class="number">4.990</td>
+          <td class="number">9,564.6</td>
+          <td class="number">9,564.62</td>
+          <td class="number">40</td>
+          <td class="number">40</td>
+          <td class="number">0</td>
+          <td class="number">160</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>configured-alias</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">1500 × 5</td>
+          <td class="number">24.917</td>
+          <td class="number">0.369</td>
+          <td class="number">40,133.6</td>
+          <td class="number">39.19</td>
+          <td class="number">7,500</td>
+          <td class="number">7,500</td>
+          <td class="number">0</td>
+          <td class="number">30,000</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>configured-alias</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">400 × 5</td>
+          <td class="number">26.184</td>
+          <td class="number">0.075</td>
+          <td class="number">38,191.0</td>
+          <td class="number">596.73</td>
+          <td class="number">2,000</td>
+          <td class="number">2,000</td>
+          <td class="number">0</td>
+          <td class="number">8,000</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>configured-alias</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">60 × 5</td>
+          <td class="number">41.011</td>
+          <td class="number">3.676</td>
+          <td class="number">24,383.6</td>
+          <td class="number">3,047.95</td>
+          <td class="number">300</td>
+          <td class="number">300</td>
+          <td class="number">0</td>
+          <td class="number">1,200</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>configured-alias</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">8 × 5</td>
+          <td class="number">115.088</td>
+          <td class="number">8.328</td>
+          <td class="number">8,689.0</td>
+          <td class="number">8,688.97</td>
+          <td class="number">40</td>
+          <td class="number">40</td>
+          <td class="number">0</td>
+          <td class="number">160</td>
+        </tr></tbody></table></div>
+
+  <h2>Measurement 2 — consumer-loop</h2>
+  <div class="table-wrap"><table>
+        <thead><tr><th>Profile</th><th>Target</th><th>Actual bytes</th><th>Messages/sample</th>
+        <th>Total bytes/sample</th><th>Prefetch</th><th>Peak concurrency</th>
+        <th>Median total ms</th><th>Cumulative timed ms</th><th>µs/message</th>
+        <th>Messages/sec</th><th>MiB/sec</th><th>Handlers</th><th>Acks</th><th>Rejects</th>
+        <th>Observations</th>
+        </tr></thead><tbody><tr>
+          <td>minimal</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">8,192</td>
+          <td class="number">8,388,608</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">311.838</td>
+          <td class="number">1558.196</td>
+          <td class="number">38.066</td>
+          <td class="number">26,270.0</td>
+          <td class="number">25.65</td>
+          <td class="number">40,960</td>
+          <td class="number">40,960</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">8,192</td>
+          <td class="number">8,388,608</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">258.125</td>
+          <td class="number">1325.982</td>
+          <td class="number">31.509</td>
+          <td class="number">31,736.6</td>
+          <td class="number">30.99</td>
+          <td class="number">40,960</td>
+          <td class="number">40,960</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">8,192</td>
+          <td class="number">8,388,608</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">207.127</td>
+          <td class="number">1046.849</td>
+          <td class="number">25.284</td>
+          <td class="number">39,550.6</td>
+          <td class="number">38.62</td>
+          <td class="number">40,960</td>
+          <td class="number">40,960</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">2,048</td>
+          <td class="number">33,554,432</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">83.303</td>
+          <td class="number">422.385</td>
+          <td class="number">40.675</td>
+          <td class="number">24,585.0</td>
+          <td class="number">384.14</td>
+          <td class="number">10,240</td>
+          <td class="number">10,240</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">2,048</td>
+          <td class="number">33,554,432</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">66.762</td>
+          <td class="number">340.280</td>
+          <td class="number">32.599</td>
+          <td class="number">30,676.2</td>
+          <td class="number">479.32</td>
+          <td class="number">10,240</td>
+          <td class="number">10,240</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">2,048</td>
+          <td class="number">33,554,432</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">56.701</td>
+          <td class="number">308.863</td>
+          <td class="number">27.686</td>
+          <td class="number">36,119.0</td>
+          <td class="number">564.36</td>
+          <td class="number">10,240</td>
+          <td class="number">10,240</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">256</td>
+          <td class="number">33,554,432</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">14.778</td>
+          <td class="number">72.681</td>
+          <td class="number">57.728</td>
+          <td class="number">17,322.7</td>
+          <td class="number">2,165.33</td>
+          <td class="number">1,280</td>
+          <td class="number">1,280</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">256</td>
+          <td class="number">33,554,432</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">10.773</td>
+          <td class="number">55.459</td>
+          <td class="number">42.081</td>
+          <td class="number">23,763.8</td>
+          <td class="number">2,970.47</td>
+          <td class="number">1,280</td>
+          <td class="number">1,280</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">256</td>
+          <td class="number">33,554,432</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">8.830</td>
+          <td class="number">45.138</td>
+          <td class="number">34.493</td>
+          <td class="number">28,991.1</td>
+          <td class="number">3,623.89</td>
+          <td class="number">1,280</td>
+          <td class="number">1,280</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">64</td>
+          <td class="number">67,108,864</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">7.123</td>
+          <td class="number">36.456</td>
+          <td class="number">111.290</td>
+          <td class="number">8,985.6</td>
+          <td class="number">8,985.56</td>
+          <td class="number">320</td>
+          <td class="number">320</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">64</td>
+          <td class="number">67,108,864</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">6.933</td>
+          <td class="number">34.745</td>
+          <td class="number">108.334</td>
+          <td class="number">9,230.7</td>
+          <td class="number">9,230.71</td>
+          <td class="number">320</td>
+          <td class="number">320</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>minimal</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">64</td>
+          <td class="number">67,108,864</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">6.326</td>
+          <td class="number">33.140</td>
+          <td class="number">98.841</td>
+          <td class="number">10,117.2</td>
+          <td class="number">10,117.24</td>
+          <td class="number">320</td>
+          <td class="number">320</td>
+          <td class="number">0</td>
+          <td class="number">0</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">8,192</td>
+          <td class="number">8,388,608</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">375.419</td>
+          <td class="number">1931.906</td>
+          <td class="number">45.827</td>
+          <td class="number">21,821.0</td>
+          <td class="number">21.31</td>
+          <td class="number">40,960</td>
+          <td class="number">40,960</td>
+          <td class="number">0</td>
+          <td class="number">163,845</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">8,192</td>
+          <td class="number">8,388,608</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">330.610</td>
+          <td class="number">1672.811</td>
+          <td class="number">40.358</td>
+          <td class="number">24,778.4</td>
+          <td class="number">24.20</td>
+          <td class="number">40,960</td>
+          <td class="number">40,960</td>
+          <td class="number">0</td>
+          <td class="number">163,845</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>1 KB</td>
+          <td class="number">1,024</td>
+          <td class="number">8,192</td>
+          <td class="number">8,388,608</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">272.140</td>
+          <td class="number">1391.736</td>
+          <td class="number">33.220</td>
+          <td class="number">30,102.2</td>
+          <td class="number">29.40</td>
+          <td class="number">40,960</td>
+          <td class="number">40,960</td>
+          <td class="number">0</td>
+          <td class="number">163,845</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">2,048</td>
+          <td class="number">33,554,432</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">98.542</td>
+          <td class="number">511.616</td>
+          <td class="number">48.116</td>
+          <td class="number">20,783.0</td>
+          <td class="number">324.73</td>
+          <td class="number">10,240</td>
+          <td class="number">10,240</td>
+          <td class="number">0</td>
+          <td class="number">40,965</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">2,048</td>
+          <td class="number">33,554,432</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">84.927</td>
+          <td class="number">433.341</td>
+          <td class="number">41.468</td>
+          <td class="number">24,114.7</td>
+          <td class="number">376.79</td>
+          <td class="number">10,240</td>
+          <td class="number">10,240</td>
+          <td class="number">0</td>
+          <td class="number">40,965</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>16 KB</td>
+          <td class="number">16,384</td>
+          <td class="number">2,048</td>
+          <td class="number">33,554,432</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">72.580</td>
+          <td class="number">366.513</td>
+          <td class="number">35.440</td>
+          <td class="number">28,217.1</td>
+          <td class="number">440.89</td>
+          <td class="number">10,240</td>
+          <td class="number">10,240</td>
+          <td class="number">0</td>
+          <td class="number">40,965</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">256</td>
+          <td class="number">33,554,432</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">14.412</td>
+          <td class="number">73.802</td>
+          <td class="number">56.295</td>
+          <td class="number">17,763.6</td>
+          <td class="number">2,220.45</td>
+          <td class="number">1,280</td>
+          <td class="number">1,280</td>
+          <td class="number">0</td>
+          <td class="number">5,125</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">256</td>
+          <td class="number">33,554,432</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">12.905</td>
+          <td class="number">68.380</td>
+          <td class="number">50.409</td>
+          <td class="number">19,837.8</td>
+          <td class="number">2,479.72</td>
+          <td class="number">1,280</td>
+          <td class="number">1,280</td>
+          <td class="number">0</td>
+          <td class="number">5,125</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>128 KB</td>
+          <td class="number">131,072</td>
+          <td class="number">256</td>
+          <td class="number">33,554,432</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">11.383</td>
+          <td class="number">56.462</td>
+          <td class="number">44.463</td>
+          <td class="number">22,490.6</td>
+          <td class="number">2,811.32</td>
+          <td class="number">1,280</td>
+          <td class="number">1,280</td>
+          <td class="number">0</td>
+          <td class="number">5,125</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">64</td>
+          <td class="number">67,108,864</td>
+          <td class="number">1</td>
+          <td class="number">1</td>
+          <td class="number">8.164</td>
+          <td class="number">40.265</td>
+          <td class="number">127.557</td>
+          <td class="number">7,839.7</td>
+          <td class="number">7,839.65</td>
+          <td class="number">320</td>
+          <td class="number">320</td>
+          <td class="number">0</td>
+          <td class="number">1,285</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">64</td>
+          <td class="number">67,108,864</td>
+          <td class="number">8</td>
+          <td class="number">8</td>
+          <td class="number">7.446</td>
+          <td class="number">37.547</td>
+          <td class="number">116.344</td>
+          <td class="number">8,595.2</td>
+          <td class="number">8,595.17</td>
+          <td class="number">320</td>
+          <td class="number">320</td>
+          <td class="number">0</td>
+          <td class="number">1,285</td>
+        </tr>
+<tr>
+          <td>observability-enabled</td>
+          <td>1 MB</td>
+          <td class="number">1,048,576</td>
+          <td class="number">64</td>
+          <td class="number">67,108,864</td>
+          <td class="number">32</td>
+          <td class="number">32</td>
+          <td class="number">7.277</td>
+          <td class="number">37.392</td>
+          <td class="number">113.711</td>
+          <td class="number">8,794.2</td>
+          <td class="number">8,794.23</td>
+          <td class="number">320</td>
+          <td class="number">320</td>
+          <td class="number">0</td>
+          <td class="number">1,285</td>
+        </tr></tbody></table></div>
+
+  <h2>Bottleneck conclusions</h2>
+  <p>Across matched per-message cells, configured-alias latency is
+  <strong>0.995× canonical</strong>; in-memory observation delivery is
+  <strong>1.307× minimal</strong>. These small ratios can sit within run-to-run noise and
+  should not be treated as causal phase attribution. Payload-size growth makes transport JSON
+  parsing, normalization, envelope validation, and memory movement the likely large-message
+  optimization targets. The gap between direct per-message and loop cost makes iterator/task
+  scheduling the likely small-message loop target. Higher prefetch improves overlap for the
+  yielding no-op handler but is not evidence that unbounded concurrency will help real handlers.
+  Peak concurrency and exact handler/ack/reject counts provide behavioral evidence independently
+  of timing noise.</p>
+  <p class="note">Potential runtime optimizations are findings for a separate decision. This
+  benchmark neither adds handler lookup or middleware traversal nor changes
+  <code>src/relayna</code>.</p>
+
+  <h2>Environment and package metadata</h2>
+  <table><tbody><tr><th>Timestamp (UTC)</th><td>2026-07-31T08:55:03.806396Z</td></tr>
+<tr><th>Python</th><td>3.13.2</td></tr>
+<tr><th>Python implementation</th><td>CPython</td></tr>
+<tr><th>Python executable</th><td>python3</td></tr>
+<tr><th>Platform</th><td>macOS-26.5.2-arm64-arm-64bit-Mach-O</td></tr>
+<tr><th>Architecture</th><td>arm64</td></tr>
+<tr><th>Processor</th><td>arm</td></tr>
+<tr><th>Package: relayna</th><td>1.4.32</td></tr>
+<tr><th>Package: pydantic</th><td>2.12.5</td></tr>
+<tr><th>Package: pydantic-core</th><td>2.41.5</td></tr>
+<tr><th>Package: aio-pika</th><td>9.6.1</td></tr>
+<tr><th>Package: opentelemetry-api</th><td>1.41.1</td></tr>
+<tr><th>Package: prometheus-client</th><td>0.25.0</td></tr>
+<tr><th>Tracing mode</th><td>enabled-unsampled</td></tr>
+<tr><th>OpenTelemetry tracer provider</th><td>TracerProvider</td></tr>
+<tr><th>OpenTelemetry sampler</th><td>StaticSampler</td></tr>
+<tr><th>OpenTelemetry span processor</th><td>SimpleSpanProcessor</td></tr>
+<tr><th>OpenTelemetry exporter</th><td>CountingExporter (synchronous, non-retaining)</td></tr>
+<tr><th>OpenTelemetry propagator</th><td>CompositePropagator</td></tr>
+<tr><th>Benchmark</th><td>consumer-processing</td></tr>
+<tr><th>Measurement</th><td>all</td></tr>
+<tr><th>Event loop policy</th><td>_UnixDefaultEventLoopPolicy</td></tr>
+<tr><th>Network/broker</th><td>excluded; already-delivered messages and deterministic fakes</td></tr>
+<tr><th>Application handler</th><td>async no-op; loop mode yields once for scheduling</td></tr>
+<tr><th>Input shapes</th><td>canonical and configured alias per-message; canonical loop</td></tr>
+<tr><th>Profiles</th><td>minimal and observability-enabled in-memory sink</td></tr>
+<tr><th>Optional features disabled</th><td>metrics, lifecycle statuses, leases, retries, DLQ, Redis, RabbitMQ network</td></tr>
+<tr><th>Exact body targets</th><td>1 KB=1024, 16 KB=16384, 128 KB=131072, 1 MB=1048576</td></tr>
+<tr><th>Prefetch values</th><td>1, 8, 32</td></tr></tbody></table>
+</main>
+<!-- relayna-consumer-processing-data:{&quot;measurement&quot;: &quot;all&quot;, &quot;per_message_results&quot;: [{&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;iterations&quot;: 1500, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [18255.416666666668, 17758.694666666666, 19616.889333333333, 18162.666666666668, 17789.194], &quot;median_ns_per_message&quot;: 18162.666666666668, &quot;median_absolute_deviation_ns&quot;: 373.4726666666684, &quot;messages_per_second&quot;: 55057.994420789895, &quot;throughput_mib_per_second&quot;: 53.76757267655263, &quot;total_messages&quot;: 7500, &quot;handler_count&quot;: 7500, &quot;ack_count&quot;: 7500, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;iterations&quot;: 400, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [18844.6875, 20683.2275, 20778.125, 19059.27, 20274.5825], &quot;median_ns_per_message&quot;: 20274.5825, &quot;median_absolute_deviation_ns&quot;: 503.54249999999956, &quot;messages_per_second&quot;: 49322.84055664278, &quot;throughput_mib_per_second&quot;: 770.6693836975435, &quot;total_messages&quot;: 2000, &quot;handler_count&quot;: 2000, &quot;ack_count&quot;: 2000, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;iterations&quot;: 60, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [29248.616666666665, 26720.833333333332, 32392.366666666665, 28997.916666666668, 28730.55], &quot;median_ns_per_message&quot;: 28997.916666666668, &quot;median_absolute_deviation_ns&quot;: 267.3666666666686, &quot;messages_per_second&quot;: 34485.23600833393, &quot;throughput_mib_per_second&quot;: 4310.654501041741, &quot;total_messages&quot;: 300, &quot;handler_count&quot;: 300, &quot;ack_count&quot;: 300, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;iterations&quot;: 8, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [113338.5, 95468.75, 137000.0, 105729.25, 101838.625], &quot;median_ns_per_message&quot;: 105729.25, &quot;median_absolute_deviation_ns&quot;: 7609.25, &quot;messages_per_second&quot;: 9458.12062414138, &quot;throughput_mib_per_second&quot;: 9458.12062414138, &quot;total_messages&quot;: 40, &quot;handler_count&quot;: 40, &quot;ack_count&quot;: 40, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;iterations&quot;: 1500, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [17964.388666666666, 17875.055333333334, 18527.97266666667, 17821.361333333334, 17786.833333333332], &quot;median_ns_per_message&quot;: 17875.055333333334, &quot;median_absolute_deviation_ns&quot;: 88.22200000000157, &quot;messages_per_second&quot;: 55943.88276578948, &quot;throughput_mib_per_second&quot;: 54.63269801346629, &quot;total_messages&quot;: 7500, &quot;handler_count&quot;: 7500, &quot;ack_count&quot;: 7500, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;iterations&quot;: 400, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [19690.5225, 20272.3975, 20114.79, 19284.0625, 18594.895], &quot;median_ns_per_message&quot;: 19690.5225, &quot;median_absolute_deviation_ns&quot;: 424.26750000000175, &quot;messages_per_second&quot;: 50785.85395588157, &quot;throughput_mib_per_second&quot;: 793.5289680606495, &quot;total_messages&quot;: 2000, &quot;handler_count&quot;: 2000, &quot;ack_count&quot;: 2000, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;iterations&quot;: 60, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [29563.2, 28014.583333333332, 28584.733333333334, 27344.433333333334, 28987.5], &quot;median_ns_per_message&quot;: 28584.733333333334, &quot;median_absolute_deviation_ns&quot;: 570.1500000000015, &quot;messages_per_second&quot;: 34983.70925272465, &quot;throughput_mib_per_second&quot;: 4372.963656590581, &quot;total_messages&quot;: 300, &quot;handler_count&quot;: 300, &quot;ack_count&quot;: 300, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;iterations&quot;: 8, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [105000.0, 126005.125, 91151.0, 96390.625, 98338.5], &quot;median_ns_per_message&quot;: 98338.5, &quot;median_absolute_deviation_ns&quot;: 6661.5, &quot;messages_per_second&quot;: 10168.957224281436, &quot;throughput_mib_per_second&quot;: 10168.957224281436, &quot;total_messages&quot;: 40, &quot;handler_count&quot;: 40, &quot;ack_count&quot;: 40, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;iterations&quot;: 1500, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [24450.638666666666, 24637.778, 24864.833333333332, 24905.388666666666, 24644.389333333333], &quot;median_ns_per_message&quot;: 24644.389333333333, &quot;median_absolute_deviation_ns&quot;: 193.7506666666668, &quot;messages_per_second&quot;: 40577.1872240075, &quot;throughput_mib_per_second&quot;: 39.62615939844482, &quot;total_messages&quot;: 7500, &quot;handler_count&quot;: 7500, &quot;ack_count&quot;: 7500, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 30000}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;iterations&quot;: 400, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [26276.77, 25686.355, 27110.3125, 25747.6025, 26049.165], &quot;median_ns_per_message&quot;: 26049.165, &quot;median_absolute_deviation_ns&quot;: 301.5625, &quot;messages_per_second&quot;: 38388.94644031776, &quot;throughput_mib_per_second&quot;: 599.8272881299649, &quot;total_messages&quot;: 2000, &quot;handler_count&quot;: 2000, &quot;ack_count&quot;: 2000, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 8000}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;iterations&quot;: 60, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [34270.15, 36811.1, 35000.0, 33868.05, 34348.61666666667], &quot;median_ns_per_message&quot;: 34348.61666666667, &quot;median_absolute_deviation_ns&quot;: 480.5666666666657, &quot;messages_per_second&quot;: 29113.253954429023, &quot;throughput_mib_per_second&quot;: 3639.156744303628, &quot;total_messages&quot;: 300, &quot;handler_count&quot;: 300, &quot;ack_count&quot;: 300, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 1200}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;iterations&quot;: 8, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [102604.125, 109541.625, 104552.0, 109901.0, 97671.875], &quot;median_ns_per_message&quot;: 104552.0, &quot;median_absolute_deviation_ns&quot;: 4989.625, &quot;messages_per_second&quot;: 9564.618563011707, &quot;throughput_mib_per_second&quot;: 9564.618563011707, &quot;total_messages&quot;: 40, &quot;handler_count&quot;: 40, &quot;ack_count&quot;: 40, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 160}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;iterations&quot;: 1500, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [24548.083333333332, 24916.805333333334, 25754.0, 25246.222, 24548.111333333334], &quot;median_ns_per_message&quot;: 24916.805333333334, &quot;median_absolute_deviation_ns&quot;: 368.6939999999995, &quot;messages_per_second&quot;: 40133.55591225071, &quot;throughput_mib_per_second&quot;: 39.19292569555733, &quot;total_messages&quot;: 7500, &quot;handler_count&quot;: 7500, &quot;ack_count&quot;: 7500, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 30000}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;iterations&quot;: 400, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [25830.0, 26184.1675, 28147.9175, 26108.855, 26223.3325], &quot;median_ns_per_message&quot;: 26184.1675, &quot;median_absolute_deviation_ns&quot;: 75.3125, &quot;messages_per_second&quot;: 38191.01752996348, &quot;throughput_mib_per_second&quot;: 596.7346489056794, &quot;total_messages&quot;: 2000, &quot;handler_count&quot;: 2000, &quot;ack_count&quot;: 2000, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 8000}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;iterations&quot;: 60, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [41011.11666666667, 41875.7, 44687.5, 34710.416666666664, 35396.51666666667], &quot;median_ns_per_message&quot;: 41011.11666666667, &quot;median_absolute_deviation_ns&quot;: 3676.3833333333314, &quot;messages_per_second&quot;: 24383.63256791756, &quot;throughput_mib_per_second&quot;: 3047.954070989695, &quot;total_messages&quot;: 300, &quot;handler_count&quot;: 300, &quot;ack_count&quot;: 300, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 1200}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;configured-alias&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;iterations&quot;: 8, &quot;repeats&quot;: 5, &quot;sample_ns_per_message&quot;: [115088.5, 106760.5, 117057.375, 123671.875, 102182.375], &quot;median_ns_per_message&quot;: 115088.5, &quot;median_absolute_deviation_ns&quot;: 8328.0, &quot;messages_per_second&quot;: 8688.965448328894, &quot;throughput_mib_per_second&quot;: 8688.965448328894, &quot;total_messages&quot;: 40, &quot;handler_count&quot;: 40, &quot;ack_count&quot;: 40, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 160}], &quot;consumer_loop_results&quot;: [{&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 8192, &quot;total_bytes_per_sample&quot;: 8388608, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [311697708, 302676250, 316838375, 315145458, 311838125], &quot;median_total_duration_ns&quot;: 311838125, &quot;median_ns_per_message&quot;: 38066.17736816406, &quot;messages_per_second&quot;: 26270.039944602668, &quot;throughput_mib_per_second&quot;: 25.654335883401043, &quot;cumulative_timed_duration_ns&quot;: 1558195916, &quot;handler_count&quot;: 40960, &quot;ack_count&quot;: 40960, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 8192, &quot;total_bytes_per_sample&quot;: 8388608, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [252981750, 260782625, 299495834, 258124708, 254596833], &quot;median_total_duration_ns&quot;: 258124708, &quot;median_ns_per_message&quot;: 31509.36376953125, &quot;messages_per_second&quot;: 31736.597644887213, &quot;throughput_mib_per_second&quot;: 30.992771137585173, &quot;cumulative_timed_duration_ns&quot;: 1325981750, &quot;handler_count&quot;: 40960, &quot;ack_count&quot;: 40960, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 8192, &quot;total_bytes_per_sample&quot;: 8388608, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [201127000, 219067083, 207127333, 213908625, 205619458], &quot;median_total_duration_ns&quot;: 207127333, &quot;median_ns_per_message&quot;: 25284.098266601562, &quot;messages_per_second&quot;: 39550.55028879264, &quot;throughput_mib_per_second&quot;: 38.623584266399064, &quot;cumulative_timed_duration_ns&quot;: 1046849499, &quot;handler_count&quot;: 40960, &quot;ack_count&quot;: 40960, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 32}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 2048, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [74286875, 74615083, 104361667, 83302833, 85819042], &quot;median_total_duration_ns&quot;: 83302833, &quot;median_ns_per_message&quot;: 40675.21142578125, &quot;messages_per_second&quot;: 24584.998207684006, &quot;throughput_mib_per_second&quot;: 384.14059699506254, &quot;cumulative_timed_duration_ns&quot;: 422385500, &quot;handler_count&quot;: 10240, &quot;ack_count&quot;: 10240, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 2048, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [67368833, 66661542, 73698583, 65789250, 66761833], &quot;median_total_duration_ns&quot;: 66761833, &quot;median_ns_per_message&quot;: 32598.55126953125, &quot;messages_per_second&quot;: 30676.209863800475, &quot;throughput_mib_per_second&quot;: 479.3157791218824, &quot;cumulative_timed_duration_ns&quot;: 340280041, &quot;handler_count&quot;: 10240, &quot;ack_count&quot;: 10240, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 2048, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [59818958, 55516625, 82782042, 56701417, 54044167], &quot;median_total_duration_ns&quot;: 56701417, &quot;median_ns_per_message&quot;: 27686.23876953125, &quot;messages_per_second&quot;: 36119.02679610282, &quot;throughput_mib_per_second&quot;: 564.3597936891066, &quot;cumulative_timed_duration_ns&quot;: 308863209, &quot;handler_count&quot;: 10240, &quot;ack_count&quot;: 10240, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 32}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 256, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [13144958, 15904083, 14778333, 16882667, 11971458], &quot;median_total_duration_ns&quot;: 14778333, &quot;median_ns_per_message&quot;: 57727.86328125, &quot;messages_per_second&quot;: 17322.657433690256, &quot;throughput_mib_per_second&quot;: 2165.332179211282, &quot;cumulative_timed_duration_ns&quot;: 72681499, &quot;handler_count&quot;: 1280, &quot;ack_count&quot;: 1280, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 256, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [10911583, 10527708, 12508458, 10772708, 10738291], &quot;median_total_duration_ns&quot;: 10772708, &quot;median_ns_per_message&quot;: 42080.890625, &quot;messages_per_second&quot;: 23763.755594229417, &quot;throughput_mib_per_second&quot;: 2970.469449278677, &quot;cumulative_timed_duration_ns&quot;: 55458748, &quot;handler_count&quot;: 1280, &quot;ack_count&quot;: 1280, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 256, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [9023417, 8622459, 9931791, 8830292, 8730458], &quot;median_total_duration_ns&quot;: 8830292, &quot;median_ns_per_message&quot;: 34493.328125, &quot;messages_per_second&quot;: 28991.113770643144, &quot;throughput_mib_per_second&quot;: 3623.889221330393, &quot;cumulative_timed_duration_ns&quot;: 45138417, &quot;handler_count&quot;: 1280, &quot;ack_count&quot;: 1280, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 32}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 64, &quot;total_bytes_per_sample&quot;: 67108864, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [7122542, 7024000, 7812875, 7400625, 7096083], &quot;median_total_duration_ns&quot;: 7122542, &quot;median_ns_per_message&quot;: 111289.71875, &quot;messages_per_second&quot;: 8985.55599952938, &quot;throughput_mib_per_second&quot;: 8985.555999529382, &quot;cumulative_timed_duration_ns&quot;: 36456125, &quot;handler_count&quot;: 320, &quot;ack_count&quot;: 320, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 64, &quot;total_bytes_per_sample&quot;: 67108864, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [7581125, 6210833, 7209958, 6933375, 6809834], &quot;median_total_duration_ns&quot;: 6933375, &quot;median_ns_per_message&quot;: 108333.984375, &quot;messages_per_second&quot;: 9230.713757729822, &quot;throughput_mib_per_second&quot;: 9230.713757729822, &quot;cumulative_timed_duration_ns&quot;: 34745125, &quot;handler_count&quot;: 320, &quot;ack_count&quot;: 320, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;minimal&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 64, &quot;total_bytes_per_sample&quot;: 67108864, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [7306375, 6215208, 7052958, 6325833, 6240000], &quot;median_total_duration_ns&quot;: 6325833, &quot;median_ns_per_message&quot;: 98841.140625, &quot;messages_per_second&quot;: 10117.244637978903, &quot;throughput_mib_per_second&quot;: 10117.244637978903, &quot;cumulative_timed_duration_ns&quot;: 33140374, &quot;handler_count&quot;: 320, &quot;ack_count&quot;: 320, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 0, &quot;peak_concurrency&quot;: 32}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 8192, &quot;total_bytes_per_sample&quot;: 8388608, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [368204833, 375418667, 436525417, 372996708, 378760375], &quot;median_total_duration_ns&quot;: 375418667, &quot;median_ns_per_message&quot;: 45827.47399902344, &quot;messages_per_second&quot;: 21820.971411632017, &quot;throughput_mib_per_second&quot;: 21.309542394171892, &quot;cumulative_timed_duration_ns&quot;: 1931906000, &quot;handler_count&quot;: 40960, &quot;ack_count&quot;: 40960, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 163845, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 8192, &quot;total_bytes_per_sample&quot;: 8388608, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [334788709, 326720250, 353759833, 330610167, 326932375], &quot;median_total_duration_ns&quot;: 330610167, &quot;median_ns_per_message&quot;: 40357.68640136719, &quot;messages_per_second&quot;: 24778.427337354085, &quot;throughput_mib_per_second&quot;: 24.19768294663485, &quot;cumulative_timed_duration_ns&quot;: 1672811334, &quot;handler_count&quot;: 40960, &quot;ack_count&quot;: 40960, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 163845, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 KB&quot;, &quot;target_bytes&quot;: 1024, &quot;actual_message_bytes&quot;: 1024, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 8192, &quot;total_bytes_per_sample&quot;: 8388608, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [280693583, 272019375, 299857042, 272139958, 267026167], &quot;median_total_duration_ns&quot;: 272139958, &quot;median_ns_per_message&quot;: 33220.209716796875, &quot;messages_per_second&quot;: 30102.1579491829, &quot;throughput_mib_per_second&quot;: 29.396638622248922, &quot;cumulative_timed_duration_ns&quot;: 1391736125, &quot;handler_count&quot;: 40960, &quot;ack_count&quot;: 40960, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 163845, &quot;peak_concurrency&quot;: 32}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 2048, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [97970042, 120459083, 98542250, 100053250, 94591125], &quot;median_total_duration_ns&quot;: 98542250, &quot;median_ns_per_message&quot;: 48116.3330078125, &quot;messages_per_second&quot;: 20782.963652646453, &quot;throughput_mib_per_second&quot;: 324.7338070726008, &quot;cumulative_timed_duration_ns&quot;: 511615750, &quot;handler_count&quot;: 10240, &quot;ack_count&quot;: 10240, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 40965, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 2048, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [83180875, 84927459, 87553417, 82548791, 95130750], &quot;median_total_duration_ns&quot;: 84927459, &quot;median_ns_per_message&quot;: 41468.48583984375, &quot;messages_per_second&quot;: 24114.697697478503, &quot;throughput_mib_per_second&quot;: 376.7921515231016, &quot;cumulative_timed_duration_ns&quot;: 433341292, &quot;handler_count&quot;: 10240, &quot;ack_count&quot;: 10240, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 40965, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;16 KB&quot;, &quot;target_bytes&quot;: 16384, &quot;actual_message_bytes&quot;: 16384, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 2048, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [70332000, 72580167, 78247042, 71881084, 73472791], &quot;median_total_duration_ns&quot;: 72580167, &quot;median_ns_per_message&quot;: 35439.53466796875, &quot;messages_per_second&quot;: 28217.074782977557, &quot;throughput_mib_per_second&quot;: 440.89179348402433, &quot;cumulative_timed_duration_ns&quot;: 366513084, &quot;handler_count&quot;: 10240, &quot;ack_count&quot;: 10240, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 40965, &quot;peak_concurrency&quot;: 32}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 256, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [13796416, 14506167, 17372792, 14411500, 13715084], &quot;median_total_duration_ns&quot;: 14411500, &quot;median_ns_per_message&quot;: 56294.921875, &quot;messages_per_second&quot;: 17763.591576171806, &quot;throughput_mib_per_second&quot;: 2220.4489470214758, &quot;cumulative_timed_duration_ns&quot;: 73801959, &quot;handler_count&quot;: 1280, &quot;ack_count&quot;: 1280, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 5125, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 256, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [12904667, 13971500, 16579750, 12467542, 12457000], &quot;median_total_duration_ns&quot;: 12904667, &quot;median_ns_per_message&quot;: 50408.85546875, &quot;messages_per_second&quot;: 19837.784268280615, &quot;throughput_mib_per_second&quot;: 2479.723033535077, &quot;cumulative_timed_duration_ns&quot;: 68380459, &quot;handler_count&quot;: 1280, &quot;ack_count&quot;: 1280, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 5125, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;128 KB&quot;, &quot;target_bytes&quot;: 131072, &quot;actual_message_bytes&quot;: 131072, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 256, &quot;total_bytes_per_sample&quot;: 33554432, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [10751250, 11908166, 11650625, 11382542, 10769792], &quot;median_total_duration_ns&quot;: 11382542, &quot;median_ns_per_message&quot;: 44463.0546875, &quot;messages_per_second&quot;: 22490.58250784403, &quot;throughput_mib_per_second&quot;: 2811.3228134805036, &quot;cumulative_timed_duration_ns&quot;: 56462375, &quot;handler_count&quot;: 1280, &quot;ack_count&quot;: 1280, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 5125, &quot;peak_concurrency&quot;: 32}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;prefetch&quot;: 1, &quot;message_count&quot;: 64, &quot;total_bytes_per_sample&quot;: 67108864, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [7764542, 7882042, 8163625, 8241292, 8213375], &quot;median_total_duration_ns&quot;: 8163625, &quot;median_ns_per_message&quot;: 127556.640625, &quot;messages_per_second&quot;: 7839.65456522072, &quot;throughput_mib_per_second&quot;: 7839.65456522072, &quot;cumulative_timed_duration_ns&quot;: 40264876, &quot;handler_count&quot;: 320, &quot;ack_count&quot;: 320, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 1285, &quot;peak_concurrency&quot;: 1}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;prefetch&quot;: 8, &quot;message_count&quot;: 64, &quot;total_bytes_per_sample&quot;: 67108864, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [7259250, 7314041, 7893750, 7633958, 7446042], &quot;median_total_duration_ns&quot;: 7446042, &quot;median_ns_per_message&quot;: 116344.40625, &quot;messages_per_second&quot;: 8595.170427456627, &quot;throughput_mib_per_second&quot;: 8595.170427456627, &quot;cumulative_timed_duration_ns&quot;: 37547041, &quot;handler_count&quot;: 320, &quot;ack_count&quot;: 320, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 1285, &quot;peak_concurrency&quot;: 8}, {&quot;profile&quot;: &quot;observability-enabled&quot;, &quot;input_kind&quot;: &quot;canonical&quot;, &quot;target_label&quot;: &quot;1 MB&quot;, &quot;target_bytes&quot;: 1048576, &quot;actual_message_bytes&quot;: 1048576, &quot;prefetch&quot;: 32, &quot;message_count&quot;: 64, &quot;total_bytes_per_sample&quot;: 67108864, &quot;repeats&quot;: 5, &quot;sample_duration_ns&quot;: [7249208, 6862959, 8228917, 7277500, 7773833], &quot;median_total_duration_ns&quot;: 7277500, &quot;median_ns_per_message&quot;: 113710.9375, &quot;messages_per_second&quot;: 8794.228787358295, &quot;throughput_mib_per_second&quot;: 8794.228787358295, &quot;cumulative_timed_duration_ns&quot;: 37392417, &quot;handler_count&quot;: 320, &quot;ack_count&quot;: 320, &quot;reject_count&quot;: 0, &quot;observation_count&quot;: 1285, &quot;peak_concurrency&quot;: 32}]}:end -->
+</body>
+</html>
