@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import gc
+import weakref
 from typing import Any
 
 import pytest
 
+import relayna._async as async_helpers
 from relayna._async import map_bounded, run_bounded_iterator
 
 
@@ -141,6 +145,132 @@ async def test_run_bounded_iterator_propagates_handler_failure_and_cancellation(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_run_bounded_iterator_resolves_loop_once_and_cleans_high_cardinality_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Item:
+        pass
+
+    items = [Item() for _ in range(2_048)]
+    item_refs = [weakref.ref(item) for item in items]
+    task_refs: list[weakref.ReferenceType[asyncio.Task[None]]] = []
+    active = 0
+    peak_active = 0
+    loop_lookups = 0
+    real_get_running_loop = asyncio.get_running_loop
+
+    def counted_get_running_loop() -> asyncio.AbstractEventLoop:
+        nonlocal loop_lookups
+        loop_lookups += 1
+        return real_get_running_loop()
+
+    async def handler(item: Item) -> None:
+        nonlocal active, peak_active
+        del item
+        task = asyncio.current_task()
+        assert task is not None
+        task_refs.append(weakref.ref(task))
+        active += 1
+        peak_active = max(peak_active, active)
+        try:
+            await asyncio.sleep(0)
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(async_helpers.asyncio, "get_running_loop", counted_get_running_loop)
+    await run_bounded_iterator(_Iterator(items), concurrency=32, handler=handler)
+
+    assert loop_lookups == 1
+    assert peak_active == 32
+    assert active == 0
+    items.clear()
+    await asyncio.sleep(0)
+    gc.collect()
+    assert all(reference() is None for reference in item_refs)
+    assert all(reference() is None for reference in task_refs)
+
+
+@pytest.mark.asyncio
+async def test_run_bounded_iterator_preserves_fairness_and_context_isolation() -> None:
+    message_context = contextvars.ContextVar("message_context", default="outside")
+    fairness_ticks = 0
+    handled: list[tuple[int, str]] = []
+
+    class ContextIterator(_Iterator):
+        async def __anext__(self) -> Any:
+            value = await super().__anext__()
+            message_context.set(f"message-{value}")
+            return value
+
+    async def fairness_probe() -> None:
+        nonlocal fairness_ticks
+        for _ in range(20):
+            await asyncio.sleep(0)
+            fairness_ticks += 1
+
+    async def handler(value: int) -> None:
+        initial = message_context.get()
+        message_context.set(f"handler-{value}")
+        await asyncio.sleep(0)
+        handled.append((value, initial))
+
+    await asyncio.gather(
+        run_bounded_iterator(ContextIterator(list(range(128))), concurrency=8, handler=handler),
+        fairness_probe(),
+    )
+
+    assert fairness_ticks == 20
+    assert handled == [(value, f"message-{value}") for value in range(128)]
+    assert message_context.get() == "outside"
+
+
+@pytest.mark.asyncio
+async def test_run_bounded_iterator_cancellation_while_waiting_for_capacity_cleans_child() -> None:
+    first_started = asyncio.Event()
+    child_cancelled = asyncio.Event()
+    iterator = _Iterator([1, 2])
+
+    async def handler(value: int) -> None:
+        assert value == 1
+        first_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            child_cancelled.set()
+
+    dispatch = asyncio.create_task(run_bounded_iterator(iterator, concurrency=1, handler=handler))
+    await first_started.wait()
+    dispatch.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch
+    assert child_cancelled.is_set()
+    assert iterator.items == [2]
+
+
+@pytest.mark.asyncio
+async def test_run_bounded_iterator_retrieves_child_exception() -> None:
+    loop = asyncio.get_running_loop()
+    unobserved: list[dict[str, Any]] = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unobserved.append(context))
+
+    async def handler(value: int) -> None:
+        if value == 7:
+            raise RuntimeError("expected child failure")
+        await asyncio.sleep(0)
+
+    try:
+        with pytest.raises(RuntimeError, match="expected child failure"):
+            await run_bounded_iterator(_Iterator(list(range(32))), concurrency=8, handler=handler)
+        await asyncio.sleep(0)
+        gc.collect()
+        assert unobserved == []
+    finally:
+        loop.set_exception_handler(previous_handler)
 
 
 async def _identity(value: int) -> int:

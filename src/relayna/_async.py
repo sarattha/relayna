@@ -54,21 +54,28 @@ async def run_bounded_iterator(
     if concurrency < 1:
         raise ValueError("concurrency must be at least 1")
 
-    semaphore = asyncio.Semaphore(concurrency)
+    loop = asyncio.get_running_loop()
+    create_task = loop.create_task
+    available_capacity = concurrency
+    capacity_waiter: asyncio.Future[None] | None = None
     in_flight: set[asyncio.Task[None]] = set()
     first_error: BaseException | None = None
+
+    def release_capacity() -> None:
+        nonlocal available_capacity
+        available_capacity += 1
+        if capacity_waiter is not None and not capacity_waiter.done():
+            capacity_waiter.set_result(None)
 
     async def run_item(item: Any) -> None:
         try:
             await handler(item)
         finally:
-            semaphore.release()
+            release_capacity()
 
     def record_completion(task: asyncio.Task[None]) -> None:
         nonlocal first_error
         in_flight.discard(task)
-        if task.cancelled():
-            return
         try:
             exc = task.exception()
         except asyncio.CancelledError:
@@ -76,36 +83,39 @@ async def run_bounded_iterator(
         if exc is not None and first_error is None:
             first_error = exc
 
-    def stopped() -> bool:
-        return stop_event is not None and stop_event.is_set()
-
     try:
-        while not stopped():
-            await semaphore.acquire()
+        while True:
+            if available_capacity == 0:
+                capacity_waiter = loop.create_future()
+                await capacity_waiter
+                capacity_waiter = None
+            available_capacity -= 1
             if first_error is not None:
-                semaphore.release()
+                release_capacity()
                 raise first_error
-            if stopped():
-                semaphore.release()
+            if stop_event is not None and stop_event.is_set():
+                release_capacity()
                 break
             try:
                 item = await anext(iterator)
             except StopAsyncIteration:
-                semaphore.release()
+                release_capacity()
                 break
             except TimeoutError:
-                semaphore.release()
+                release_capacity()
                 if in_flight:
                     await asyncio.sleep(0)
                     continue
                 raise
             except BaseException:
-                semaphore.release()
+                release_capacity()
                 raise
-            task = asyncio.create_task(run_item(item))
+            task = create_task(run_item(item))
             in_flight.add(task)
             task.add_done_callback(record_completion)
     except asyncio.CancelledError:
+        if capacity_waiter is not None:
+            capacity_waiter.cancel()
         for task in in_flight:
             task.cancel()
         if in_flight:

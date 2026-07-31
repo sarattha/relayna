@@ -52,10 +52,15 @@ per-message CPU path from full consumer-loop throughput.
   8,192 real 1 KB `TaskConsumer` deliveries and compared direct-task,
   capacity-event, cached-state, pre-bound-handler, and batched-wait prototypes
   in memory before any runtime edit.
-- [ ] Implement the smallest measured private scheduling optimization and add
-  deterministic correctness and regression coverage.
-- [ ] Run focused candidate experiments, reject regressions honestly, and
-  retain only a reproducible behavior-preserving improvement.
+- [x] (2026-07-31 08:34Z) Implemented the measured private capacity-counter
+  scheduler using only public loop futures/tasks and added deterministic
+  high-cardinality cleanup, concurrency, fairness, ContextVar, cancellation,
+  loop-resolution, and unobserved-exception coverage; 166 focused async,
+  consumer, status, lease, tracing, workflow, and benchmark tests pass.
+- [x] (2026-07-31 08:34Z) Rejected five non-improving exploratory designs and
+  retained only the capacity-counter prototype, which improved every tested
+  real concurrent cell by 1.8–2.8% across 15 alternating 8,192-message trials
+  with exact behavior counts.
 - [ ] Re-fetch `origin/main`, integrate any relevant merged work, and capture a
   fresh final matched baseline/candidate pair if the base or environment moved.
 - [ ] Generate and validate complete-suite JSON/HTML comparison evidence,
@@ -146,6 +151,15 @@ per-message CPU path from full consumer-loop throughput.
   deliberately narrow source trial followed by the canonical matched suite,
   not a throughput claim from exploratory data.
 
+- Observation: a specialized integer capacity counter plus one public
+  loop-created waiter only when capacity reaches zero improves the real
+  concurrent loop consistently while retaining the existing wrapper release
+  point.
+  Evidence: across 15 alternating 8,192-message samples, minimal prefetch 8/32
+  improved 2.83%/2.21% and observation-enabled prefetch 8/32 improved
+  2.39%/1.83%. Every sample preserved exact handler/ack counts, zero rejects,
+  and peak concurrency equal to prefetch.
+
 ## Decision Log
 
 - Decision: use exact refreshed base
@@ -200,15 +214,17 @@ per-message CPU path from full consumer-loop throughput.
   path.
   Date/Author: 2026-07-31 / Codex.
 
-- Decision: trial only semantics-identical scheduling-state reuse inside
-  `run_bounded_iterator`.
-  Rationale: a running-loop lookup occurs for every `asyncio.create_task`, and
-  the completion callback redundantly checks `task.cancelled()` before calling
-  `task.exception()`, whose documented cancellation behavior is already
-  handled. Resolving the public loop/task factory and immutable bound methods
-  once per iterator preserves custom loop/task-factory behavior, ContextVar
-  copying per task, semaphore timing, done-callback cleanup, exception
-  retrieval, hard capacity, and shutdown drain.
+- Decision: retain the specialized capacity counter and reject the smaller
+  scheduling-state-only trial.
+  Rationale: the state-only trial measured essentially zero aggregate movement
+  (+0.08% across six nearby pairs). The retained design removes all measured
+  per-delivery semaphore coroutine/method operations while preserving the
+  release point inside the handler wrapper. `available_capacity` is decremented
+  before intake and incremented exactly once in `finally`; a single public
+  future wakes intake only when all capacity was occupied. Per-message
+  `loop.create_task` still honors custom task factories and copies ContextVars;
+  in-flight set/callback exception retrieval, stop timing, cancellation, and
+  final drain remain in place.
   Date/Author: 2026-07-31 / Codex.
 
 ## Outcomes & Retrospective
