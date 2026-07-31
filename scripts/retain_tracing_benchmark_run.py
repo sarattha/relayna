@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import html
 import importlib.metadata
@@ -189,6 +190,18 @@ def _cpu_name() -> str:
     return platform.processor() or platform.machine() or "unknown"
 
 
+def _event_loop_details() -> dict[str, str]:
+    policy = asyncio.get_event_loop_policy()
+    loop = asyncio.new_event_loop()
+    try:
+        return {
+            "implementation": f"{type(loop).__module__}.{type(loop).__qualname__}",
+            "policy": f"{type(policy).__module__}.{type(policy).__qualname__}",
+        }
+    finally:
+        loop.close()
+
+
 def _raw_report(benchmark: str, html_path: Path) -> dict[str, Any]:
     if benchmark == "consumer-processing":
         return {
@@ -224,6 +237,9 @@ def main() -> int:
     parser.add_argument("--started-at", required=True)
     parser.add_argument("--finished-at", required=True)
     parser.add_argument("--source-clean-before-run", action="store_true")
+    parser.add_argument("--task", default="reduce-tracing-overhead")
+    parser.add_argument("--runtime-content-path", action="append")
+    parser.add_argument("--uv-sync-command", default="uv sync --extra benchmark --frozen")
     args = parser.parse_args()
 
     if args.output_dir.exists():
@@ -278,9 +294,15 @@ def main() -> int:
 
     lock_files = ("pyproject.toml", "uv.lock")
     source_commit = _git(args.source_root, "rev-parse", "HEAD")
+    runtime_content_paths = args.runtime_content_path or [
+        "src/relayna/observability/tracing.py",
+        "src/relayna/rabbitmq/client.py",
+        "src/relayna/consumer/task_consumer.py",
+        "src/relayna/consumer/workflow_consumer.py",
+    ]
     manifest = {
         "schema_version": 1,
-        "task": "reduce-tracing-overhead",
+        "task": args.task,
         "run_id": args.run_id,
         "run_kind": args.run_kind,
         "immutable": True,
@@ -292,15 +314,7 @@ def main() -> int:
             "branch_under_test": args.branch_under_test,
             "clean_before_run": args.source_clean_before_run,
             "status": _git(args.source_root, "status", "--short", "--branch"),
-            "runtime_content_sha256": {
-                name: _sha256(args.source_root / name)
-                for name in (
-                    "src/relayna/observability/tracing.py",
-                    "src/relayna/rabbitmq/client.py",
-                    "src/relayna/consumer/task_consumer.py",
-                    "src/relayna/consumer/workflow_consumer.py",
-                )
-            },
+            "runtime_content_sha256": {name: _sha256(args.source_root / name) for name in runtime_content_paths},
         },
         "execution": {
             "canonical_command": (
@@ -326,9 +340,10 @@ def main() -> int:
             "kernel": f"{platform.system()} {platform.release()} {platform.machine()}",
             "architecture": platform.machine(),
             "cpu": _cpu_name(),
+            "event_loop": _event_loop_details(),
         },
         "dependency_state": {
-            "uv_sync_command": "uv sync --extra benchmark --frozen",
+            "uv_sync_command": args.uv_sync_command,
             "lock_sha256": {name: _sha256(args.source_root / name) for name in lock_files},
         },
         "packages": {

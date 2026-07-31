@@ -40,6 +40,10 @@ per-message CPU path from full consumer-loop throughput.
   registry, three-mode runner, 1,224-case expectation, environment, commands,
   and existing 16-case per-message plus 24-case consumer-loop coverage; 38
   focused benchmark/harness tests pass.
+- [x] (2026-07-31 08:18Z) Generalized the retained-suite tooling before
+  baseline so this task records its own identity, `_async.py` runtime hash
+  inventory, exact dependency-sync command, and event-loop implementation and
+  policy; formatting/lint and 11 artifact/suite tests pass.
 - [ ] Capture and retain the definitive untouched-runtime baseline for every
   benchmark and tracing mode with standalone HTML, raw JSON, checksums, and
   exact uniqueness validation.
@@ -90,6 +94,13 @@ per-message CPU path from full consumer-loop throughput.
   Evidence: the first validation command could enumerate benchmarks but failed
   to spawn pytest. `uv sync --extra benchmark --extra dev --frozen` changed no
   tracked dependency files, and the same 38-test command then passed.
+
+- Observation: item 3's otherwise complete retention manifest hard-coded the
+  preceding task name, omitted `src/relayna/_async.py` from runtime provenance,
+  and did not record event-loop implementation/policy.
+  Evidence: `scripts/retain_tracing_benchmark_run.py` before the tooling-only
+  generalization. Legacy defaults remain intact, while this task can supply its
+  own task, runtime-path inventory, and sync command.
 
 ## Decision Log
 

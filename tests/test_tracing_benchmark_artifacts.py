@@ -149,3 +149,12 @@ def test_comparison_generator_is_deterministic_and_rejects_package_mismatch(
     candidate["source"]["runtime_content_sha256"]["src/relayna/rabbitmq/client.py"] = "0" * 64
     with pytest.raises(ValueError, match="Non-target runtime content differs.*rabbitmq/client.py"):
         comparison_script._validate_pair(baseline, candidate)
+
+
+def test_retention_tool_records_public_event_loop_identity() -> None:
+    retention_script = _load_script("retain_tracing_benchmark_run")
+
+    details = retention_script._event_loop_details()
+
+    assert details["implementation"].startswith("asyncio.")
+    assert details["policy"].startswith("asyncio.")
