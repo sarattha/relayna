@@ -62,9 +62,10 @@ without selecting favorable runs.
   benchmark artifact regeneration/integrity, standalone HTML parsing, runtime
   source-hash, freeze version-only, script lint/type, secret/path, and final-diff
   validation.
-- [ ] Use `$pr-draft-summary`, commit and push intentional changes, open a
-  ready-for-review PR, and babysit CI and the first Codex review until green
-  with no unresolved actionable findings.
+- [x] (2026-07-31 06:59Z) Used `$pr-draft-summary`, committed and pushed the
+  intentional changes, opened ready PR #117, requested the first Codex review,
+  fixed all three actionable findings with tests, replied and resolved every
+  thread, and reached fully green post-fix CI.
 
 ## Surprises & Discoveries
 
@@ -216,13 +217,16 @@ The earlier drifted complete run remains immutable but explicitly
 non-authoritative.
 
 The first Codex review produced three actionable benchmark-tooling findings.
-All three are fixed with six focused regression tests. The mandatory stack then
-passed again with 667 SDK tests passed and 1 skipped plus 244 Studio backend
-tests. `comparison-reviewed/` regenerated all 408 cases and retained the same
+All three were fixed in `3266d45` with six focused regression tests, evidence
+replies, and resolved threads. The mandatory stack passed again with 667 SDK
+tests passed and 1 skipped plus 244 Studio backend tests.
+`comparison-reviewed/` regenerated all 408 cases and retained the same
 meaningful-improvement assessment through derived, neutral-capable logic.
 
-Remaining work is commit/push of the review fixes, thread replies/resolution,
-and the resulting CI terminal state. The PR stays open and unmerged.
+Ready PR #117 is open and unmerged. Both post-fix GitHub Actions runs reached
+terminal success for SDK Python 3.13/3.14, security hardening, Studio backend,
+and Studio frontend. The branch contains implementation commit `4562e6e` and
+review-fix commit `3266d45`. No actionable first-review threads remain.
 
 ## Context and Orientation
 
@@ -384,8 +388,8 @@ Expected retained structure:
       baseline/*.html
       candidate/manifest.json
       candidate/*.html
-      comparison/comparison.json
-      comparison/comparison.html
+      comparison-reviewed/comparison.json
+      comparison-reviewed/comparison.html
 
 Exact run IDs, case counts, checksums, commands, and results will be recorded
 after execution.
@@ -396,7 +400,8 @@ non-authoritative drift evidence. The authoritative back-to-back run is
 standalone HTML reports, five machine-readable raw-result sidecars,
 `manifest.json`, and `checksums.sha256`. Its comparison directory has complete
 JSON and standalone HTML covering all 408 unique cases, plus its own manifest
-and checksum index.
+and checksum index. The original `comparison/` remains immutable and is
+superseded by `comparison-reviewed/`.
 
 ## Interfaces and Dependencies
 
