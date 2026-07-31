@@ -44,12 +44,14 @@ per-message CPU path from full consumer-loop throughput.
   baseline so this task records its own identity, `_async.py` runtime hash
   inventory, exact dependency-sync command, and event-loop implementation and
   policy; formatting/lint and 11 artifact/suite tests pass.
-- [ ] Capture and retain the definitive untouched-runtime baseline for every
-  benchmark and tracing mode with standalone HTML, raw JSON, checksums, and
-  exact uniqueness validation.
-- [ ] Profile the actual delivery-to-handler scheduling path and record
-  allocation, task/context, semaphore, callback, cleanup, exception, fairness,
-  and shutdown evidence before runtime edits.
+- [x] (2026-07-31 08:18Z) Captured and independently validated definitive
+  untouched-runtime baseline `20260731T081626Z-1459da95`: 1,224 unique
+  measurements, 15 standalone HTML reports, 15 raw JSON reports, 35 checksummed
+  artifacts, three tracing modes, and exact case/prefetch/cardinality counts.
+- [x] (2026-07-31 08:31Z) Profiled the actual delivery-to-handler path over
+  8,192 real 1 KB `TaskConsumer` deliveries and compared direct-task,
+  capacity-event, cached-state, pre-bound-handler, and batched-wait prototypes
+  in memory before any runtime edit.
 - [ ] Implement the smallest measured private scheduling optimization and add
   deterministic correctness and regression coverage.
 - [ ] Run focused candidate experiments, reject regressions honestly, and
@@ -102,6 +104,48 @@ per-message CPU path from full consumer-loop throughput.
   generalization. Legacy defaults remain intact, while this task can supply its
   own task, runtime-path inventory, and sync command.
 
+- Observation: the validated untouched-runtime baseline contains all expected
+  matrices once and records CPython 3.13.2, uv 0.11.26, Apple M1 Pro,
+  `asyncio.unix_events._UnixSelectorEventLoop`, the default Unix event-loop
+  policy, exact lock digests, three tracing configurations, and 504,104 sampled
+  exported spans.
+  Evidence:
+  `reports/optimize-consumer-loop-scheduling/20260731T081626Z-1459da95/baseline/manifest.json`,
+  its `checksums.sha256`, and independent checksum/HTML/raw-matrix validation.
+
+- Observation: at 1 KB the public consumer loop adds 32–45% over the same real
+  per-message operation at prefetch 32, and 55–123% at lower prefetch depending
+  on tracing/observation configuration.
+  Evidence: unrounded baseline `consumer-processing.raw.json` data across
+  disabled, enabled-unsampled, and enabled-sampled-exported modes.
+
+- Observation: an 8,192-delivery cProfile run at prefetch 32 records exactly
+  8,192 scheduled tasks, wrapper coroutines, completion callbacks, and
+  exception retrievals plus 8,193 semaphore acquire/release pairs (the extra
+  pair handles iterator exhaustion). Handler/ack counts remain 8,192/8,192,
+  peak concurrency is 32, and no rejects occur.
+  Evidence: exploratory in-memory instrumentation of
+  `benchmarks.consumer_processing._run_loop_sample`; the run is profiling
+  evidence, not final benchmark data.
+
+- Observation: removing the wrapper and releasing capacity from completion
+  callbacks regressed the tested real loop by roughly 0–8%; replacing the
+  semaphore with an event regressed roughly 1–6%; pre-binding the real handler
+  ranged from a 0.7% improvement to a 2.7% regression; batched
+  `asyncio.wait(FIRST_COMPLETED)` ranged from a 2.8% improvement to an 8.4%
+  regression with higher variance.
+  Evidence: separate alternating-order exploratory runs of 4,096 or 8,192 real
+  1 KB deliveries across minimal/observable profiles and prefetch 8/32. These
+  rejected runs are excluded from release claims.
+
+- Observation: resolving the running loop once and using its bound
+  `create_task` method was the only consistently plausible micro-optimization,
+  but isolated gains were small and noisy (about 0–2%). Repeated stable-method
+  binding sometimes helped and sometimes regressed.
+  Evidence: nine- and fifteen-repeat exploratory comparisons. This supports a
+  deliberately narrow source trial followed by the canonical matched suite,
+  not a throughput claim from exploratory data.
+
 ## Decision Log
 
 - Decision: use exact refreshed base
@@ -146,6 +190,25 @@ per-message CPU path from full consumer-loop throughput.
   Larger bodies, both instrumentation profiles, three repeats, and three
   tracing modes retain realistic variance and regression coverage without
   changing work between baseline and candidate.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: reject direct-task, capacity-event, pre-bound-handler, and
+  batched-wait scheduler rewrites.
+  Rationale: none produced a repeatable improvement, and each would alter more
+  task/capacity/error timing than the existing semaphore architecture. The task
+  explicitly forbids retaining a clever but regressive or semantically weaker
+  path.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: trial only semantics-identical scheduling-state reuse inside
+  `run_bounded_iterator`.
+  Rationale: a running-loop lookup occurs for every `asyncio.create_task`, and
+  the completion callback redundantly checks `task.cancelled()` before calling
+  `task.exception()`, whose documented cancellation behavior is already
+  handled. Resolving the public loop/task factory and immutable bound methods
+  once per iterator preserves custom loop/task-factory behavior, ContextVar
+  copying per task, semaphore timing, done-callback cleanup, exception
+  retrieval, hard capacity, and shutdown drain.
   Date/Author: 2026-07-31 / Codex.
 
 ## Outcomes & Retrospective
