@@ -35,11 +35,11 @@ from .context import (
     WorkflowContext,
     WorkflowHandler,
     _coerce_task_id,
+    _extract_message_metadata,
     _failure_message,
-    _message_headers,
+    _MessageMetadata,
     _normalize_payload,
     _persist_dlq_record,
-    _retry_attempt,
     _retry_headers,
     _retry_priority,
 )
@@ -208,20 +208,22 @@ class WorkflowConsumer:
         retry_infrastructure: RetryInfrastructure | None,
         retry_policy: RetryPolicy | None,
     ) -> bool:
+        metadata = _extract_message_metadata(message)
         with relayna_span(
             "relayna.consumer.workflow_message",
-            headers=_message_headers(message),
+            headers=metadata.headers,
             attributes={
                 "messaging.system": "rabbitmq",
                 "messaging.source.name": source_queue_name,
                 "relayna.consumer_name": self._consumer_name,
                 "relayna.stage": stage,
-                "relayna.retry_attempt": _retry_attempt(message),
+                "relayna.retry_attempt": metadata.retry_attempt,
             },
             kind=SpanKind.CONSUMER,
         ):
             return await self._handle_message_impl(
                 message,
+                metadata=metadata,
                 stage=stage,
                 source_queue_name=source_queue_name,
                 retry_infrastructure=retry_infrastructure,
@@ -232,6 +234,7 @@ class WorkflowConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         stage: str,
         source_queue_name: str,
         retry_infrastructure: RetryInfrastructure | None,
@@ -245,10 +248,11 @@ class WorkflowConsumer:
             else:
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=None,
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="malformed_json",
                     exception_type=None,
                     retry_policy=retry_policy,
@@ -265,10 +269,11 @@ class WorkflowConsumer:
             else:
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=_coerce_task_id(normalized_payload),
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="invalid_envelope",
                     exception_type="ValidationError",
                     retry_policy=retry_policy,
@@ -289,10 +294,11 @@ class WorkflowConsumer:
                 return False
             await self._publish_dead_letter(
                 message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=workflow_message.task_id,
-                retry_attempt=_retry_attempt(message),
+                retry_attempt=metadata.retry_attempt,
                 reason=exc.reason,
                 exception_type=type(exc).__name__,
                 retry_policy=retry_policy,
@@ -309,9 +315,9 @@ class WorkflowConsumer:
                 task_id=workflow_message.task_id,
                 message_id=workflow_message.message_id,
                 origin_stage=workflow_message.origin_stage,
-                correlation_id=workflow_message.correlation_id or getattr(message, "correlation_id", None),
-                delivery_tag=getattr(message, "delivery_tag", None),
-                redelivered=bool(getattr(message, "redelivered", False)),
+                correlation_id=workflow_message.correlation_id or metadata.correlation_id,
+                delivery_tag=metadata.delivery_tag,
+                redelivered=metadata.redelivered,
             ),
         )
 
@@ -320,16 +326,16 @@ class WorkflowConsumer:
             consumer_name=self._consumer_name,
             stage=stage,
             raw_payload=workflow_message.model_dump(mode="json", exclude_none=True),
-            correlation_id=workflow_message.correlation_id or getattr(message, "correlation_id", None),
-            delivery_tag=getattr(message, "delivery_tag", None),
-            redelivered=bool(getattr(message, "redelivered", False)),
+            correlation_id=workflow_message.correlation_id or metadata.correlation_id,
+            delivery_tag=metadata.delivery_tag,
+            redelivered=metadata.redelivered,
             _task_id=workflow_message.task_id,
             _message_id=workflow_message.message_id,
             origin_stage=workflow_message.origin_stage,
-            retry_attempt=_retry_attempt(message),
+            retry_attempt=metadata.retry_attempt,
             max_retries=retry_policy.max_retries if retry_policy is not None else None,
             source_queue_name=source_queue_name,
-            headers=_message_headers(message),
+            headers=dict(metadata.headers),
             observation_sink=self._observation_sink,
         )
 
@@ -351,10 +357,11 @@ class WorkflowConsumer:
                     return False
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=workflow_message.task_id,
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="dedup_conflict",
                     exception_type="WorkflowContractError",
                     retry_policy=retry_policy,
@@ -481,6 +488,7 @@ class WorkflowConsumer:
                     self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=workflow_message.task_id,
@@ -500,6 +508,7 @@ class WorkflowConsumer:
                 self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
                 message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=workflow_message.task_id,
@@ -555,6 +564,7 @@ class WorkflowConsumer:
                     self._metrics.record_task_retry(stage=stage, queue=source_queue_name, worker_type="workflow")
                 await self._publish_retry(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=workflow_message.task_id,
@@ -575,6 +585,7 @@ class WorkflowConsumer:
                 self._metrics.record_task_dlq(stage=stage, queue=source_queue_name, worker_type="workflow")
             await self._publish_dead_letter(
                 message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=workflow_message.task_id,
@@ -687,6 +698,7 @@ class WorkflowConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
@@ -699,7 +711,7 @@ class WorkflowConsumer:
         if retry_infrastructure is None:
             raise RuntimeError("Retry infrastructure is not initialized")
         headers = _retry_headers(
-            message,
+            metadata.headers,
             source_queue_name=source_queue_name,
             retry_attempt=retry_attempt,
             max_retries=max_retries,
@@ -709,10 +721,10 @@ class WorkflowConsumer:
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.retry_queue_name,
             message.body,
-            correlation_id=getattr(message, "correlation_id", None),
+            correlation_id=metadata.correlation_id,
             headers=headers,
             priority=_retry_priority(retry_policy, retry_attempt=retry_attempt),
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
         )
         await emit_observation(
             self._observation_sink,
@@ -721,7 +733,7 @@ class WorkflowConsumer:
                 task_id=task_id,
                 queue_name=retry_infrastructure.retry_queue_name,
                 source_queue_name=source_queue_name,
-                correlation_id=getattr(message, "correlation_id", None),
+                correlation_id=metadata.correlation_id,
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
                 reason=reason,
@@ -732,6 +744,7 @@ class WorkflowConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
@@ -743,7 +756,7 @@ class WorkflowConsumer:
         if retry_infrastructure is None:
             raise RuntimeError("Retry infrastructure is not initialized")
         headers = _retry_headers(
-            message,
+            metadata.headers,
             source_queue_name=source_queue_name,
             retry_attempt=retry_attempt,
             max_retries=retry_policy.max_retries,
@@ -753,9 +766,9 @@ class WorkflowConsumer:
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.dead_letter_queue_name,
             message.body,
-            correlation_id=getattr(message, "correlation_id", None),
+            correlation_id=metadata.correlation_id,
             headers=headers,
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
         )
         await emit_observation(
             self._observation_sink,
@@ -764,7 +777,7 @@ class WorkflowConsumer:
                 task_id=task_id,
                 queue_name=retry_infrastructure.dead_letter_queue_name,
                 source_queue_name=source_queue_name,
-                correlation_id=getattr(message, "correlation_id", None),
+                correlation_id=metadata.correlation_id,
                 retry_attempt=retry_attempt,
                 max_retries=retry_policy.max_retries,
                 reason=reason,
@@ -777,13 +790,13 @@ class WorkflowConsumer:
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
             task_id=task_id,
-            correlation_id=getattr(message, "correlation_id", None),
+            correlation_id=metadata.correlation_id,
             reason=reason,
             exception_type=exception_type,
             retry_attempt=retry_attempt,
             max_retries=retry_policy.max_retries,
             headers=headers,
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
             body=message.body,
             observation_sink=self._observation_sink,
         )

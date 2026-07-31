@@ -1,0 +1,174 @@
+{
+  "dependency_state": {
+    "lock_sha256": {
+      "apps/studio/package-lock.json": "90d429bc8c825e7cd31ae8fdce5eb5ec9325c2b0ab15c90635572380ec3407bb",
+      "pyproject.toml": "eeabcad4521118dd2363aa7ad5beeee83040e733e5ead9c4ee264345f2b61db7",
+      "studio/backend/uv.lock": "34314d7ce38a2402114abbde87b9b5b6c78e5ea1370c725a5b08912b2ba39004",
+      "uv.lock": "439ff0c9138f164543be09df309ce35b49bb701ca7172b52500492bfa05f064b"
+    },
+    "uv_sync_command": "uv sync --extra benchmark --frozen"
+  },
+  "environment": {
+    "architecture": "arm64",
+    "cpu": "Apple M1 Pro",
+    "kernel": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "os": "macOS 26.5.2 (25F84)",
+    "python": "CPython 3.13.2",
+    "uv": "0.11.26 (Homebrew 2026-06-30 aarch64-apple-darwin)"
+  },
+  "execution": {
+    "canonical_command": "uv run --extra benchmark python -m benchmarks run-all",
+    "environment_controls": {
+      "LANG": "C",
+      "LC_ALL": "C",
+      "PYTHONHASHSEED": "0",
+      "TZ": "UTC"
+    },
+    "finished_at_utc": "2026-07-31T06:36:33Z",
+    "make_equivalent": "make benchmark-all",
+    "repetitions": "harness canonical defaults recorded per raw result/table",
+    "started_at_utc": "2026-07-31T06:35:54Z",
+    "warmups": "harness canonical defaults; consumer-loop one untimed warm-up per cell; JSON-engine one warm-up call per operation"
+  },
+  "immutable": true,
+  "notes": [
+    "HTML reports are exact harness outputs.",
+    "Consumer and publish raw sidecars preserve embedded unrounded samples; the other three harnesses expose rounded standalone result tables and those tables are preserved losslessly as machine-readable JSON."
+  ],
+  "packages": {
+    "aio-pika": "9.6.1",
+    "orjson": "3.11.9",
+    "pydantic": "2.12.5",
+    "pydantic-core": "2.41.5",
+    "relayna": "1.4.30"
+  },
+  "reports": [
+    {
+      "artifacts": [
+        {
+          "bytes": 62870,
+          "file": "consumer-processing.html",
+          "sha256": "b2be3c9ae0f206c471b2c46070280040361152d9301e6f8b961acbcde4a03e5a"
+        },
+        {
+          "bytes": 31149,
+          "file": "consumer-processing.raw.json",
+          "sha256": "dc0e0f5b296dd26b97ba82d5f28ca4483828a9436120289da7cea934ccc5460d"
+        }
+      ],
+      "benchmark": "consumer-processing",
+      "html_file": "consumer-processing.html",
+      "measurement_count": 40,
+      "raw_file": "consumer-processing.raw.json",
+      "unique_case_count": 40
+    },
+    {
+      "artifacts": [
+        {
+          "bytes": 13821,
+          "file": "envelope-microbenchmarks.html",
+          "sha256": "509271ea151712321f5cc0bb92b7a7231347feb35729f4549a40e05c45e529d7"
+        },
+        {
+          "bytes": 11237,
+          "file": "envelope-serialization.raw.json",
+          "sha256": "d5827d79f233b95e3368bab1fd0a27b113f076e4fcaff542afbfabff07169be0"
+        }
+      ],
+      "benchmark": "envelope-serialization",
+      "html_file": "envelope-microbenchmarks.html",
+      "measurement_count": 32,
+      "raw_file": "envelope-serialization.raw.json",
+      "unique_case_count": 32
+    },
+    {
+      "artifacts": [
+        {
+          "bytes": 101979,
+          "file": "json-engine-evaluation.html",
+          "sha256": "2ae43e3216763689e7dccf2ba016ad0228e409d7f2f8898e28e263002510b3a0"
+        },
+        {
+          "bytes": 89589,
+          "file": "json-engine-evaluation.raw.json",
+          "sha256": "eb899ea87e1f1a26354ca9310def981448695a9fc3bb455db41aa6b6c90964a0"
+        }
+      ],
+      "benchmark": "json-engine-evaluation",
+      "html_file": "json-engine-evaluation.html",
+      "measurement_count": 192,
+      "raw_file": "json-engine-evaluation.raw.json",
+      "unique_case_count": 192
+    },
+    {
+      "artifacts": [
+        {
+          "bytes": 108546,
+          "file": "publish-preparation.html",
+          "sha256": "92ae58e79021689c0dc3b5e97cb7dca02809a4366b1cdc535cdb2292418a398b"
+        },
+        {
+          "bytes": 66401,
+          "file": "publish-preparation.raw.json",
+          "sha256": "c39910c4bae8df7a694db98acc45d8ff613e9d2fdfcb01314d7b70505d4940e0"
+        }
+      ],
+      "benchmark": "publish-preparation",
+      "html_file": "publish-preparation.html",
+      "measurement_count": 72,
+      "raw_file": "publish-preparation.raw.json",
+      "unique_case_count": 72
+    },
+    {
+      "artifacts": [
+        {
+          "bytes": 26279,
+          "file": "redis-storage-cpu-microbenchmarks.html",
+          "sha256": "c0143410c201ba1b49f79019858834a84865add0a2344519745d9c7262bdf5d2"
+        },
+        {
+          "bytes": 27263,
+          "file": "redis-storage-cpu.raw.json",
+          "sha256": "5581ee642d47863fff7a4d9037d3b9359993673ba0735716fa5b20bf0f9642c9"
+        }
+      ],
+      "benchmark": "redis-storage-cpu",
+      "html_file": "redis-storage-cpu-microbenchmarks.html",
+      "measurement_count": 72,
+      "raw_file": "redis-storage-cpu.raw.json",
+      "unique_case_count": 72
+    }
+  ],
+  "run_id": "20260731T063554Z-44adab85-paired",
+  "run_kind": "baseline",
+  "schema_version": 1,
+  "source": {
+    "branch_under_test": "codex/extract-message-metadata-once",
+    "clean_before_run": false,
+    "commit": "44adab85adbd7e8355e66742748c5b75178b0656",
+    "commit_subject": "[codex] Improve disabled consumer instrumentation (#116)",
+    "content_sha256": {
+      "src/relayna/consumer/context.py": "8a23fc36ab4df26508dfc0dceb1fce11624ae3b404c2c60c9e1841035552986c",
+      "src/relayna/consumer/task_consumer.py": "7da4692b42c619c443df2f79397bccb8db26bfe2fa173dcf319247342288b509",
+      "src/relayna/consumer/workflow_consumer.py": "44462d165f18f100e54c7c6ba48768600374bdea52d45d7968addade19744ed2"
+    },
+    "ref": "detached fetched origin/main; prior report outputs dirty only",
+    "repository": "sarattha/relayna",
+    "state_note": "Runtime and lock sources are exact base commit; only reports from the earlier baseline run were modified before this paired rerun."
+  },
+  "task": "extract-message-metadata-once",
+  "validation": {
+    "all_expected_cases_present_once": true,
+    "benchmark_count": 5,
+    "expected_benchmarks": [
+      "consumer-processing",
+      "envelope-serialization",
+      "json-engine-evaluation",
+      "publish-preparation",
+      "redis-storage-cpu"
+    ],
+    "expected_total_measurements": 408,
+    "observed_total_measurements": 408,
+    "raw_measurements_hand_edited": false
+  }
+}

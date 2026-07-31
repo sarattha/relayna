@@ -47,17 +47,18 @@ from .context import (
     TaskContext,
     TaskHandler,
     _coerce_task_id,
+    _extract_message_metadata,
     _failure_message,
+    _header_int,
     _header_string,
     _manual_retry_count,
     _manual_retry_meta_from_status,
     _ManualRetryRequested,
     _merge_batch_retry_headers,
-    _message_headers,
+    _MessageMetadata,
     _normalize_batch_payload,
     _normalize_payload,
     _persist_dlq_record,
-    _retry_attempt,
     _retry_headers,
     _retry_priority,
     _to_json_bytes,
@@ -231,25 +232,32 @@ class TaskConsumer:
     async def _handle_message(
         self, message: Any, *, source_queue_name: str, retry_infrastructure: RetryInfrastructure | None
     ) -> None:
+        metadata = _extract_message_metadata(message)
         with relayna_span(
             "relayna.consumer.task_message",
-            headers=_message_headers(message),
+            headers=metadata.headers,
             attributes={
                 "messaging.system": "rabbitmq",
                 "messaging.source.name": source_queue_name,
                 "relayna.consumer_name": self._consumer_name,
-                "relayna.retry_attempt": _retry_attempt(message),
+                "relayna.retry_attempt": metadata.retry_attempt,
             },
             kind=SpanKind.CONSUMER,
         ):
             await self._handle_message_impl(
                 message,
+                metadata=metadata,
                 source_queue_name=source_queue_name,
                 retry_infrastructure=retry_infrastructure,
             )
 
     async def _handle_message_impl(
-        self, message: Any, *, source_queue_name: str, retry_infrastructure: RetryInfrastructure | None
+        self,
+        message: Any,
+        *,
+        metadata: _MessageMetadata,
+        source_queue_name: str,
+        retry_infrastructure: RetryInfrastructure | None,
     ) -> None:
         try:
             payload = parse_transport_json(message.body)
@@ -262,8 +270,8 @@ class TaskConsumer:
                         consumer_name=self._consumer_name,
                         queue_name=source_queue_name,
                         task_id=None,
-                        correlation_id=getattr(message, "correlation_id", None),
-                        retry_attempt=_retry_attempt(message),
+                        correlation_id=metadata.correlation_id,
+                        retry_attempt=metadata.retry_attempt,
                         requeue=False,
                         reason="malformed_json",
                     ),
@@ -271,10 +279,11 @@ class TaskConsumer:
             else:
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=None,
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="malformed_json",
                     exception_type=None,
                 )
@@ -289,11 +298,11 @@ class TaskConsumer:
                     consumer_name=self._consumer_name,
                     queue_name=source_queue_name,
                     task_id=_coerce_task_id(normalized_payload),
-                    correlation_id=getattr(message, "correlation_id", None),
-                    retry_attempt=_retry_attempt(message),
+                    correlation_id=metadata.correlation_id,
+                    retry_attempt=metadata.retry_attempt,
                     task_type=_coerce_task_type(normalized_payload),
-                    delivery_tag=getattr(message, "delivery_tag", None),
-                    redelivered=bool(getattr(message, "redelivered", False)),
+                    delivery_tag=metadata.delivery_tag,
+                    redelivered=metadata.redelivered,
                 ),
             )
 
@@ -306,8 +315,8 @@ class TaskConsumer:
                         consumer_name=self._consumer_name,
                         queue_name=source_queue_name,
                         task_id=None,
-                        correlation_id=getattr(message, "correlation_id", None),
-                        retry_attempt=_retry_attempt(message),
+                        correlation_id=metadata.correlation_id,
+                        retry_attempt=metadata.retry_attempt,
                         requeue=False,
                         reason="unsupported_batch_envelope",
                     ),
@@ -315,6 +324,7 @@ class TaskConsumer:
                 return
             await self._handle_batch_message(
                 message,
+                metadata=metadata,
                 payload=normalized_payload,
                 source_queue_name=source_queue_name,
                 retry_infrastructure=retry_infrastructure,
@@ -332,8 +342,8 @@ class TaskConsumer:
                         consumer_name=self._consumer_name,
                         queue_name=source_queue_name,
                         task_id=_coerce_task_id(normalized_payload),
-                        correlation_id=getattr(message, "correlation_id", None),
-                        retry_attempt=_retry_attempt(message),
+                        correlation_id=metadata.correlation_id,
+                        retry_attempt=metadata.retry_attempt,
                         task_type=_coerce_task_type(normalized_payload),
                         requeue=False,
                         reason="invalid_envelope",
@@ -342,10 +352,11 @@ class TaskConsumer:
             else:
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=_coerce_task_id(normalized_payload),
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="invalid_envelope",
                     exception_type="ValidationError",
                 )
@@ -353,12 +364,16 @@ class TaskConsumer:
             return
 
         context = self._make_task_context(
-            task=task, raw_payload=dict(normalized_payload), message=message, source_queue_name=source_queue_name
+            task=task,
+            raw_payload=dict(normalized_payload),
+            metadata=metadata,
+            source_queue_name=source_queue_name,
         )
         success = await self._process_task_with_lease(
             task=task,
             context=context,
             message=message,
+            metadata=metadata,
             retry_infrastructure=retry_infrastructure,
             source_queue_name=source_queue_name,
         )
@@ -381,6 +396,7 @@ class TaskConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         payload: Mapping[str, Any],
         source_queue_name: str,
         retry_infrastructure: RetryInfrastructure | None,
@@ -390,10 +406,11 @@ class TaskConsumer:
         except ValidationError:
             await self._publish_dead_letter(
                 message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=None,
-                retry_attempt=_retry_attempt(message),
+                retry_attempt=metadata.retry_attempt,
                 reason="invalid_envelope",
                 exception_type="ValidationError",
             )
@@ -406,10 +423,11 @@ class TaskConsumer:
             if len(task_types) > 1:
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=None,
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="mixed_task_type_batch",
                     exception_type="ValueError",
                 )
@@ -429,7 +447,7 @@ class TaskConsumer:
                     "batch_index": index,
                     "batch_size": batch_size,
                 },
-                content_type=getattr(message, "content_type", "application/json"),
+                content_type=metadata.content_type,
             )
 
         await map_bounded(
@@ -446,7 +464,7 @@ class TaskConsumer:
                     consumer_name=self._consumer_name,
                     queue_name=source_queue_name,
                     task_id=None,
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                 ),
             )
 
@@ -455,30 +473,28 @@ class TaskConsumer:
         *,
         task: TaskEnvelope,
         raw_payload: dict[str, Any],
-        message: Any,
+        metadata: _MessageMetadata,
         source_queue_name: str,
         batch_id: str | None = None,
         batch_index: int | None = None,
         batch_size: int | None = None,
     ) -> TaskContext:
-        from .context import _header_int
-
-        headers = _message_headers(message)
+        headers = metadata.headers
         return TaskContext(
             rabbitmq=self._rabbitmq,
             consumer_name=self._consumer_name,
             raw_payload=dict(raw_payload),
-            correlation_id=task.correlation_id or getattr(message, "correlation_id", None),
-            delivery_tag=getattr(message, "delivery_tag", None),
-            redelivered=bool(getattr(message, "redelivered", False)),
+            correlation_id=task.correlation_id or metadata.correlation_id,
+            delivery_tag=metadata.delivery_tag,
+            redelivered=metadata.redelivered,
             _task_id=task.task_id,
-            retry_attempt=_retry_attempt(message),
+            retry_attempt=metadata.retry_attempt,
             max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
             source_queue_name=source_queue_name,
             batch_id=batch_id if batch_id is not None else _header_string(headers, "batch_id"),
             batch_index=batch_index if batch_index is not None else _header_int(headers, "batch_index"),
             batch_size=batch_size if batch_size is not None else _header_int(headers, "batch_size"),
-            headers=headers,
+            headers=dict(headers),
             manual_retry_count=_manual_retry_count(headers),
             manual_retry_previous_task_type=_header_string(headers, "x-relayna-manual-retry-from-task-type"),
             manual_retry_source_consumer=_header_string(headers, "x-relayna-manual-retry-source-consumer"),
@@ -491,6 +507,7 @@ class TaskConsumer:
         task: TaskEnvelope,
         context: TaskContext,
         message: Any,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         ack_message: bool = True,
@@ -600,6 +617,7 @@ class TaskConsumer:
                     )
                 await self._publish_retry(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=task.task_id,
@@ -622,6 +640,7 @@ class TaskConsumer:
                 self._metrics.record_task_dlq(stage=task.task_type, queue=source_queue_name, worker_type="task")
             await self._publish_dead_letter(
                 message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=task.task_id,
@@ -657,6 +676,7 @@ class TaskConsumer:
         task: TaskEnvelope,
         context: TaskContext,
         message: Any,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         ack_message: bool = True,
@@ -669,6 +689,7 @@ class TaskConsumer:
                 task=task,
                 context=context,
                 message=message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 ack_message=ack_message,
@@ -702,6 +723,7 @@ class TaskConsumer:
                 task=task,
                 context=context,
                 message=message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 ack_message=ack_message,
@@ -848,6 +870,7 @@ class TaskConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
@@ -862,7 +885,7 @@ class TaskConsumer:
         if retry_infrastructure is None:
             raise RuntimeError("Retry infrastructure is not initialized")
         headers = _retry_headers(
-            message,
+            metadata.headers,
             source_queue_name=source_queue_name,
             retry_attempt=retry_attempt,
             max_retries=max_retries,
@@ -873,10 +896,10 @@ class TaskConsumer:
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.retry_queue_name,
             body or message.body,
-            correlation_id=correlation_id or getattr(message, "correlation_id", None),
+            correlation_id=correlation_id or metadata.correlation_id,
             headers=headers,
             priority=_retry_priority(self._retry_policy, retry_attempt=retry_attempt),
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
         )
         await emit_observation(
             self._observation_sink,
@@ -885,7 +908,7 @@ class TaskConsumer:
                 task_id=task_id,
                 queue_name=retry_infrastructure.retry_queue_name,
                 source_queue_name=source_queue_name,
-                correlation_id=correlation_id or getattr(message, "correlation_id", None),
+                correlation_id=correlation_id or metadata.correlation_id,
                 task_type=_task_type_from_body(body or message.body, alias_config=self._alias_config),
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
@@ -897,6 +920,7 @@ class TaskConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
@@ -911,7 +935,7 @@ class TaskConsumer:
         if retry_infrastructure is None or self._retry_policy is None:
             raise RuntimeError("Retry infrastructure is not initialized")
         headers = _retry_headers(
-            message,
+            metadata.headers,
             source_queue_name=source_queue_name,
             retry_attempt=retry_attempt,
             max_retries=self._retry_policy.max_retries,
@@ -922,9 +946,9 @@ class TaskConsumer:
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.dead_letter_queue_name,
             body or message.body,
-            correlation_id=correlation_id or getattr(message, "correlation_id", None),
+            correlation_id=correlation_id or metadata.correlation_id,
             headers=headers,
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
         )
         await emit_observation(
             self._observation_sink,
@@ -933,7 +957,7 @@ class TaskConsumer:
                 task_id=task_id,
                 queue_name=retry_infrastructure.dead_letter_queue_name,
                 source_queue_name=source_queue_name,
-                correlation_id=correlation_id or getattr(message, "correlation_id", None),
+                correlation_id=correlation_id or metadata.correlation_id,
                 task_type=_task_type_from_body(body or message.body, alias_config=self._alias_config),
                 retry_attempt=retry_attempt,
                 max_retries=self._retry_policy.max_retries,
@@ -947,14 +971,14 @@ class TaskConsumer:
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
             task_id=task_id,
-            correlation_id=correlation_id or getattr(message, "correlation_id", None),
+            correlation_id=correlation_id or metadata.correlation_id,
             reason=reason,
             exception_type=exception_type,
             exception_message=exception_message,
             retry_attempt=retry_attempt,
             max_retries=self._retry_policy.max_retries,
             headers=headers,
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
             body=body or message.body,
             observation_sink=self._observation_sink,
         )
@@ -1076,6 +1100,7 @@ class AggregationConsumer:
         source_queue_name: str,
         retry_infrastructure: RetryInfrastructure | None,
     ) -> None:
+        metadata = _extract_message_metadata(message)
         payload: Any = None
         try:
             payload = parse_transport_json(message.body)
@@ -1085,10 +1110,11 @@ class AggregationConsumer:
             else:
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=None,
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="malformed_json",
                     exception_type=None,
                 )
@@ -1104,17 +1130,18 @@ class AggregationConsumer:
             else:
                 await self._publish_dead_letter(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=_coerce_task_id(payload),
-                    retry_attempt=_retry_attempt(message),
+                    retry_attempt=metadata.retry_attempt,
                     reason="invalid_envelope",
                     exception_type="ValidationError",
                 )
                 await message.ack()
             return
 
-        current_retry_attempt = _retry_attempt(message)
+        current_retry_attempt = metadata.retry_attempt
         aggregation_started_at = time.perf_counter()
         aggregation_outcome: str | None = None
         if self._metrics is not None:
@@ -1124,8 +1151,8 @@ class AggregationConsumer:
                 worker_type="aggregation",
                 retry_attempt=current_retry_attempt,
             )
-        headers = _message_headers(message)
         manual_retry_meta = _manual_retry_meta_from_status(event.meta)
+        headers = metadata.headers
         await emit_observation(
             self._observation_sink,
             AggregationMessageReceived(
@@ -1133,24 +1160,24 @@ class AggregationConsumer:
                 queue_name=source_queue_name,
                 task_id=event.task_id,
                 parent_task_id=_parent_task_id_from_meta(event.meta),
-                correlation_id=event.correlation_id or getattr(message, "correlation_id", None),
+                correlation_id=event.correlation_id or metadata.correlation_id,
                 retry_attempt=current_retry_attempt,
-                delivery_tag=getattr(message, "delivery_tag", None),
-                redelivered=bool(getattr(message, "redelivered", False)),
+                delivery_tag=metadata.delivery_tag,
+                redelivered=metadata.redelivered,
             ),
         )
         context = TaskContext(
             rabbitmq=self._rabbitmq,
             consumer_name=self._consumer_name,
             raw_payload=dict(payload),
-            correlation_id=event.correlation_id or getattr(message, "correlation_id", None),
-            delivery_tag=getattr(message, "delivery_tag", None),
-            redelivered=bool(getattr(message, "redelivered", False)),
+            correlation_id=event.correlation_id or metadata.correlation_id,
+            delivery_tag=metadata.delivery_tag,
+            redelivered=metadata.redelivered,
             _task_id=event.task_id,
             retry_attempt=current_retry_attempt,
             max_retries=self._retry_policy.max_retries if self._retry_policy is not None else None,
             source_queue_name=source_queue_name,
-            headers=headers,
+            headers=dict(headers),
             is_task_context=False,
             manual_retry_count=_manual_retry_count(headers) or manual_retry_meta["count"],
             manual_retry_previous_task_type=_header_string(headers, "x-relayna-manual-retry-from-task-type")
@@ -1191,6 +1218,7 @@ class AggregationConsumer:
                     )
                 await self._publish_retry(
                     message,
+                    metadata=metadata,
                     retry_infrastructure=retry_infrastructure,
                     source_queue_name=source_queue_name,
                     task_id=event.task_id,
@@ -1209,6 +1237,7 @@ class AggregationConsumer:
                 self._metrics.record_task_dlq(stage="aggregation", queue=source_queue_name, worker_type="aggregation")
             await self._publish_dead_letter(
                 message,
+                metadata=metadata,
                 retry_infrastructure=retry_infrastructure,
                 source_queue_name=source_queue_name,
                 task_id=event.task_id,
@@ -1280,6 +1309,7 @@ class AggregationConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
@@ -1294,9 +1324,9 @@ class AggregationConsumer:
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.retry_queue_name,
             message.body,
-            correlation_id=getattr(message, "correlation_id", None),
+            correlation_id=metadata.correlation_id,
             headers=_retry_headers(
-                message,
+                metadata.headers,
                 source_queue_name=source_queue_name,
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
@@ -1304,7 +1334,7 @@ class AggregationConsumer:
                 exception_type=exception_type,
             ),
             priority=_retry_priority(self._retry_policy, retry_attempt=retry_attempt),
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
         )
         await emit_observation(
             self._observation_sink,
@@ -1314,7 +1344,7 @@ class AggregationConsumer:
                 parent_task_id=parent_task_id,
                 queue_name=retry_infrastructure.retry_queue_name,
                 source_queue_name=source_queue_name,
-                correlation_id=getattr(message, "correlation_id", None),
+                correlation_id=metadata.correlation_id,
                 retry_attempt=retry_attempt,
                 max_retries=max_retries,
                 reason=reason,
@@ -1325,6 +1355,7 @@ class AggregationConsumer:
         self,
         message: Any,
         *,
+        metadata: _MessageMetadata,
         retry_infrastructure: RetryInfrastructure | None,
         source_queue_name: str,
         task_id: str | None,
@@ -1337,7 +1368,7 @@ class AggregationConsumer:
         if retry_infrastructure is None or self._retry_policy is None:
             raise RuntimeError("Retry infrastructure is not initialized")
         headers = _retry_headers(
-            message,
+            metadata.headers,
             source_queue_name=source_queue_name,
             retry_attempt=retry_attempt,
             max_retries=self._retry_policy.max_retries,
@@ -1347,9 +1378,9 @@ class AggregationConsumer:
         await self._rabbitmq.publish_raw_to_queue(
             retry_infrastructure.dead_letter_queue_name,
             message.body,
-            correlation_id=getattr(message, "correlation_id", None),
+            correlation_id=metadata.correlation_id,
             headers=headers,
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
         )
         await emit_observation(
             self._observation_sink,
@@ -1359,7 +1390,7 @@ class AggregationConsumer:
                 parent_task_id=parent_task_id,
                 queue_name=retry_infrastructure.dead_letter_queue_name,
                 source_queue_name=source_queue_name,
-                correlation_id=getattr(message, "correlation_id", None),
+                correlation_id=metadata.correlation_id,
                 retry_attempt=retry_attempt,
                 max_retries=self._retry_policy.max_retries,
                 reason=reason,
@@ -1372,14 +1403,14 @@ class AggregationConsumer:
             source_queue_name=source_queue_name,
             retry_queue_name=retry_infrastructure.retry_queue_name,
             task_id=task_id,
-            correlation_id=getattr(message, "correlation_id", None),
+            correlation_id=metadata.correlation_id,
             reason=reason,
             exception_type=exception_type,
             exception_message=exception_message,
             retry_attempt=retry_attempt,
             max_retries=self._retry_policy.max_retries,
             headers=headers,
-            content_type=getattr(message, "content_type", "application/json"),
+            content_type=metadata.content_type,
             body=message.body,
             observation_sink=self._observation_sink,
         )

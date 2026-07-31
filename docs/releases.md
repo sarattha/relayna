@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.30/relayna-1.4.30-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.31/relayna-1.4.31-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.30/relayna-1.4.30.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.4.31/relayna-1.4.31.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.4.30.tar.gz`
-- `dist/relayna-1.4.30-py3-none-any.whl`
+- `dist/relayna-1.4.31.tar.gz`
+- `dist/relayna-1.4.31-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,19 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.4.31
+
+No data, wire-format, configuration, or public-API migration is required.
+Relayna `1.4.31` snapshots delivered AMQP metadata once per task, workflow, or
+aggregation message and reuses that internal immutable value for tracing,
+contexts, retries, dead-letter publication, metrics, and observations. Header
+precedence and defaults, handler and middleware-visible context values,
+acknowledgement/rejection/requeue behavior, and task/status/workflow semantics
+remain unchanged.
+
+Upgrade the SDK, Studio backend, and Studio frontend together to keep the
+shared release line aligned.
 
 ### Upgrading to 1.4.30
 
