@@ -304,7 +304,7 @@ def main() -> int:
         },
         "execution": {
             "canonical_command": (
-                f"uv run --extra benchmark python -m benchmarks.tracing_suite --output-root {args.suite_dir}"
+                "uv run --extra benchmark python -m benchmarks.tracing_suite --output-root <unique-suite-dir>"
             ),
             "environment_controls": {
                 "PYTHONHASHSEED": "0",
