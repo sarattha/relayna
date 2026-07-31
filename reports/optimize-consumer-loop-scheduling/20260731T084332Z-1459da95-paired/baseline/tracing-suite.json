@@ -1,0 +1,275 @@
+{
+  "canonical": true,
+  "commands": [
+    {
+      "command": [
+        "python3",
+        "-m",
+        "benchmarks.tracing_suite",
+        "--worker-mode",
+        "disabled",
+        "--output-root",
+        "<output-root>/disabled"
+      ],
+      "returncode": 0,
+      "tracing_mode": "disabled"
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "benchmarks.tracing_suite",
+        "--worker-mode",
+        "enabled-unsampled",
+        "--output-root",
+        "<output-root>/enabled-unsampled"
+      ],
+      "returncode": 0,
+      "tracing_mode": "enabled-unsampled"
+    },
+    {
+      "command": [
+        "python3",
+        "-m",
+        "benchmarks.tracing_suite",
+        "--worker-mode",
+        "enabled-sampled-exported",
+        "--output-root",
+        "<output-root>/enabled-sampled-exported"
+      ],
+      "returncode": 0,
+      "tracing_mode": "enabled-sampled-exported"
+    }
+  ],
+  "schema_version": 1,
+  "tracing_modes": [
+    "disabled",
+    "enabled-unsampled",
+    "enabled-sampled-exported"
+  ],
+  "validation": {
+    "all_workers_succeeded": true,
+    "sampled_consumer_spans_exported": true,
+    "sampled_producer_spans_exported": true,
+    "unsampled_export_count": 0,
+    "worker_count": 3
+  },
+  "workers": [
+    {
+      "canonical": true,
+      "configuration": {
+        "REL_BENCHMARK_EXPORTER": "none",
+        "REL_BENCHMARK_PROPAGATOR": "CompositePropagator",
+        "REL_BENCHMARK_SAMPLER": "none; OpenTelemetry API no-op provider",
+        "REL_BENCHMARK_SPAN_PROCESSOR": "none",
+        "REL_BENCHMARK_TRACER_PROVIDER": "ProxyTracerProvider",
+        "REL_BENCHMARK_TRACING_MODE": "disabled"
+      },
+      "exported_spans": {
+        "count": 0,
+        "kinds": {},
+        "names": {},
+        "statuses": {}
+      },
+      "reports": [
+        {
+          "artifacts": [
+            "consumer-processing.html"
+          ],
+          "benchmark": "consumer-processing",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 40
+        },
+        {
+          "artifacts": [
+            "envelope-microbenchmarks.html"
+          ],
+          "benchmark": "envelope-serialization",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 32
+        },
+        {
+          "artifacts": [
+            "json-engine-evaluation.html"
+          ],
+          "benchmark": "json-engine-evaluation",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 192
+        },
+        {
+          "artifacts": [
+            "publish-preparation.html"
+          ],
+          "benchmark": "publish-preparation",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 72
+        },
+        {
+          "artifacts": [
+            "redis-storage-cpu-microbenchmarks.html"
+          ],
+          "benchmark": "redis-storage-cpu",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 72
+        }
+      ],
+      "schema_version": 1,
+      "tracing_mode": "disabled"
+    },
+    {
+      "canonical": true,
+      "configuration": {
+        "REL_BENCHMARK_EXPORTER": "CountingExporter (synchronous, non-retaining)",
+        "REL_BENCHMARK_PROPAGATOR": "CompositePropagator",
+        "REL_BENCHMARK_SAMPLER": "StaticSampler",
+        "REL_BENCHMARK_SPAN_PROCESSOR": "SimpleSpanProcessor",
+        "REL_BENCHMARK_TRACER_PROVIDER": "TracerProvider",
+        "REL_BENCHMARK_TRACING_MODE": "enabled-unsampled"
+      },
+      "exported_spans": {
+        "count": 0,
+        "kinds": {},
+        "names": {},
+        "statuses": {}
+      },
+      "reports": [
+        {
+          "artifacts": [
+            "consumer-processing.html"
+          ],
+          "benchmark": "consumer-processing",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 40
+        },
+        {
+          "artifacts": [
+            "envelope-microbenchmarks.html"
+          ],
+          "benchmark": "envelope-serialization",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 32
+        },
+        {
+          "artifacts": [
+            "json-engine-evaluation.html"
+          ],
+          "benchmark": "json-engine-evaluation",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 192
+        },
+        {
+          "artifacts": [
+            "publish-preparation.html"
+          ],
+          "benchmark": "publish-preparation",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 72
+        },
+        {
+          "artifacts": [
+            "redis-storage-cpu-microbenchmarks.html"
+          ],
+          "benchmark": "redis-storage-cpu",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 72
+        }
+      ],
+      "schema_version": 1,
+      "tracing_mode": "enabled-unsampled"
+    },
+    {
+      "canonical": true,
+      "configuration": {
+        "REL_BENCHMARK_EXPORTER": "CountingExporter (synchronous, non-retaining)",
+        "REL_BENCHMARK_PROPAGATOR": "CompositePropagator",
+        "REL_BENCHMARK_SAMPLER": "StaticSampler",
+        "REL_BENCHMARK_SPAN_PROCESSOR": "SimpleSpanProcessor",
+        "REL_BENCHMARK_TRACER_PROVIDER": "TracerProvider",
+        "REL_BENCHMARK_TRACING_MODE": "enabled-sampled-exported"
+      },
+      "exported_spans": {
+        "count": 504104,
+        "kinds": {
+          "CONSUMER": 48728,
+          "PRODUCER": 455376
+        },
+        "names": {
+          "relayna.consumer.task_message": 48728,
+          "relayna.rabbitmq.publish_batch": 113844,
+          "relayna.rabbitmq.publish_status": 56922,
+          "relayna.rabbitmq.publish_task": 227688,
+          "relayna.rabbitmq.publish_workflow": 56922
+        },
+        "statuses": {
+          "UNSET": 504104
+        }
+      },
+      "reports": [
+        {
+          "artifacts": [
+            "consumer-processing.html"
+          ],
+          "benchmark": "consumer-processing",
+          "exported_span_count": 48728,
+          "exported_span_names": {
+            "relayna.consumer.task_message": 48728
+          },
+          "measurement_count": 40
+        },
+        {
+          "artifacts": [
+            "envelope-microbenchmarks.html"
+          ],
+          "benchmark": "envelope-serialization",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 32
+        },
+        {
+          "artifacts": [
+            "json-engine-evaluation.html"
+          ],
+          "benchmark": "json-engine-evaluation",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 192
+        },
+        {
+          "artifacts": [
+            "publish-preparation.html"
+          ],
+          "benchmark": "publish-preparation",
+          "exported_span_count": 455376,
+          "exported_span_names": {
+            "relayna.rabbitmq.publish_batch": 113844,
+            "relayna.rabbitmq.publish_status": 56922,
+            "relayna.rabbitmq.publish_task": 227688,
+            "relayna.rabbitmq.publish_workflow": 56922
+          },
+          "measurement_count": 72
+        },
+        {
+          "artifacts": [
+            "redis-storage-cpu-microbenchmarks.html"
+          ],
+          "benchmark": "redis-storage-cpu",
+          "exported_span_count": 0,
+          "exported_span_names": {},
+          "measurement_count": 72
+        }
+      ],
+      "schema_version": 1,
+      "tracing_mode": "enabled-sampled-exported"
+    }
+  ]
+}

@@ -65,6 +65,14 @@ per-message CPU path from full consumer-loop throughput.
   validated the first complete candidate, rejected its non-adjacent comparison
   as environmentally drifted, and extended retention/comparison tooling for a
   fresh back-to-back archived-baseline/current-candidate pair.
+- [x] (2026-07-31 08:54Z) Captured a same-second back-to-back complete pair,
+  retained all 1,224 cases per side, generated complete JSON/HTML comparison,
+  and conservatively classified it inconclusive because control drift reached
+  12.94%.
+- [x] (2026-07-31 08:56Z) Repeated the real 8,192-message alternating
+  comparison under all three tracing modes; all 12 profile/prefetch cells
+  improved 1.50–6.17%, proving the implementation signal is reproducible and
+  the short canonical loop samples are insufficient for final attribution.
 - [ ] Re-fetch `origin/main`, integrate any relevant merged work, and capture a
   fresh final matched baseline/candidate pair if the base or environment moved.
 - [ ] Generate and validate complete-suite JSON/HTML comparison evidence,
@@ -174,6 +182,22 @@ per-message CPU path from full consumer-loop throughput.
   reports, exact runtime hashes, matching dependencies/event-loop/tracing
   configuration, and identical 504,104-span sampled inventories.
 
+- Observation: even a same-second complete pair remains too noisy at the
+  canonical loop's lowest cardinalities.
+  Evidence: the pair contains exact matching source/dependency/event-loop/
+  tracing inventories and a zero-second inter-run gap, but sampled prefetch-1
+  control moved -12.94%; unsampled concurrent-loop aggregate moved +0.78% and
+  individual loop cells ranged from -25.95% to +35.86%. The comparison verdict
+  is correctly `inconclusive`.
+
+- Observation: increasing only the real 1 KB loop to 8,192 messages and
+  alternating source states ten times makes the scheduling signal consistent
+  across instrumentation.
+  Evidence: all 12 minimal/observable × prefetch 8/32 × disabled/unsampled/
+  sampled-exported aggregates improved. Disabled cells moved -1.81% to -3.76%,
+  unsampled -1.50% to -6.17%, and sampled/exported -1.97% to -4.26%, with
+  655,360 sampled spans and exact behavior counts.
+
 ## Decision Log
 
 - Decision: use exact refreshed base
@@ -249,6 +273,18 @@ per-message CPU path from full consumer-loop throughput.
   `PYTHONPATH`, immediately followed by the current candidate. Both processes
   use the same committed current benchmark harness; no extra worktree is
   created and no source file is switched or overwritten.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: treat the original and first back-to-back complete pairs as
+  non-authoritative and stabilize the canonical consumer harness before the
+  final pair.
+  Rationale: retaining an implementation requires a repeatable improvement, but
+  the current 32/64/256-message loop cells cannot distinguish a 2–4% scheduler
+  effect from local variance. Increase deterministic loop cardinalities and
+  consumer repeats only, retain the same real `_handle_message` operation,
+  no-op handler, profiles, body sizes, prefetch values, tracing modes, and all
+  five benchmark families, then run both runtime states through that identical
+  committed harness.
   Date/Author: 2026-07-31 / Codex.
 
 ## Outcomes & Retrospective

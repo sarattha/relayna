@@ -1,0 +1,34 @@
+{
+  "artifacts": {
+    "comparison.html": {
+      "bytes": 2751737,
+      "sha256": "74594fb23c488ac859478c579cb222131a41d167609743300c7b7e64c88488f6"
+    },
+    "comparison.json": {
+      "bytes": 1772542,
+      "sha256": "3f911b5c80ac911dd9f5aad572e23de18bd8eb4d40c53c3aef70e5c40ebe1464"
+    }
+  },
+  "assessment": {
+    "all_target_summaries_exceed_control_drift": false,
+    "maximum_absolute_control_drift_percent": 12.941828859751014,
+    "rationale": "Concurrent consumer-loop movement is not consistently larger than unchanged-control drift.",
+    "target_summary_count": 3,
+    "verdict": "inconclusive"
+  },
+  "inputs": {
+    "baseline_manifest": "884d54ee347dc90682c2c51cd810bd8a5aa893548538f2d33b578abd82072d25",
+    "candidate_manifest": "242edce226fcdefc90133a835ea0be3071f4cea5d45801119eb62fcd4736a456"
+  },
+  "schema_version": 1,
+  "task": "optimize-consumer-loop-scheduling",
+  "validation": {
+    "all_expected_cases_present_once_per_side": true,
+    "baseline_case_count": 1224,
+    "candidate_case_count": 1224,
+    "comparison_case_count": 1224,
+    "expected_case_count": 1224,
+    "measurements_hand_edited": false,
+    "unique_comparison_case_count": 1224
+  }
+}
