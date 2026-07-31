@@ -93,6 +93,55 @@ body sizes. Loop timing keeps canonical input, uses both profiles, and tests
 prefetch 1, 8, and 32 with size-aware message cardinality. The report states
 all optional-feature settings and exact counts.
 
+### Disabled instrumentation comparison
+
+Relayna `1.4.30` avoids successful-path consumer instrumentation work only when
+no configured receiver could observe it. With neither an observation sink nor
+metrics, `TaskConsumer` skips receive/resource/ack event construction, both task
+CPU/RSS samples, and the metrics-only duration clock. Metrics-only consumers
+still sample and record resource metrics. Observation-only and combined
+configurations retain the same successful event types, fields, timestamps,
+order, counts, and start/end samples. OpenTelemetry tracing remains active.
+
+The retained evidence is under
+`reports/consumer-disabled-instrumentation/`. The initial `baseline/` and
+`candidate/` pair remains immutable for auditability. Because one unchanged
+observation-enabled loop profile showed material single-cell drift, a second
+complete pair was run sequentially and is authoritative:
+
+- `baseline-authoritative/`: executable `1491705c2031` historical source,
+  five HTML reports, and a checksum-bound manifest;
+- `candidate-authoritative/`: final executable fast-path source before release
+  edits, five HTML reports, and a matching manifest;
+- `comparison.html`: self-contained methodology, links and checksums, geometric
+  means, every consumer cell, control drift, decision, and limitations;
+- `comparison.json`: the same evidence in machine-readable form.
+
+Recreate the comparison from retained reports:
+
+    uv run python scripts/compare_consumer_instrumentation.py \
+      --baseline-dir reports/consumer-disabled-instrumentation/baseline-authoritative \
+      --candidate-dir reports/consumer-disabled-instrumentation/candidate-authoritative \
+      --output-html reports/consumer-disabled-instrumentation/comparison.html \
+      --output-json reports/consumer-disabled-instrumentation/comparison.json
+
+The authoritative minimal per-message geometric mean improved from 41.857 to
+32.627 microseconds/message (`-22.1%`), and minimal consumer-loop improved from
+58.089 to 47.452 microseconds/message (`-18.3%`). The minimal 1 KB group moved
+from 25.533 to 18.781 microseconds/message (`-26.4%`); 16 KB moved from 27.491
+to 20.537 (`-25.3%`). Observation-enabled per-message and loop groups changed
+`+1.9%` and `-3.3%`; the four unchanged control benchmark aggregates ranged
+from `-1.7%` to `+1.0%`.
+
+Run the canonical five-benchmark suite used for both source states with:
+
+    uv run python -m benchmarks run-all
+
+No timing threshold is enforced. The report includes every cell and treats
+unchanged benchmarks as drift evidence. The consumer benchmark starts after
+RabbitMQ delivery and uses a no-op handler; it does not represent broker,
+network, business-handler, or application end-to-end latency.
+
 ## Publish preparation benchmark
 
 `publish-preparation` measures the complete local CPU-side public publish path
