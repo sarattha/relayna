@@ -52,18 +52,19 @@ cell without a timing pass/fail gate or favorable-cell selection.
   `$code-change-verification` script from the beginning, frontend tests/build,
   benchmark smoke tests and `run-all`, builds, `git diff --check`, and freeze
   manifest comparison.
-- [ ] Prepare the `$pr-draft-summary`, intentionally stage in-scope files,
-  commit, push, and open a ready-for-review pull request using the authorized
+- [x] (2026-07-31 04:10Z) Prepared the `$pr-draft-summary`, intentionally staged in-scope files,
+  committed, pushed, and opened a ready-for-review pull request using the authorized
   `$yeet` flow.
-- [ ] Monitor required checks and the first Codex code review, fix and verify
-  actionable findings, reply to exact threads, resolve addressed threads, and
-  leave the pull request unmerged.
+- [x] (2026-07-31 04:18Z) Monitored required checks and the first Codex code review, fixed and verified
+  actionable findings, replied to exact threads, resolved addressed threads,
+  and left the pull request unmerged.
 - [x] (2026-07-31 04:17Z) Received the first Codex review with two actionable
   P2 findings, guarded disabled batch acknowledgements, added deterministic
   batch coverage, corrected the authoritative-pair label, passed 10 focused
   tests, and reran the full verification stack (657 SDK tests passed, 1
-  skipped; 244 backend tests passed). Commit, replies, and thread resolution
-  remain.
+  skipped; 244 backend tests passed). Pushed `e91ad14`, replied to both exact
+  threads with evidence, resolved both threads, and observed both post-fix CI
+  runs green.
 
 ## Surprises & Discoveries
 
@@ -161,9 +162,31 @@ cell without a timing pass/fail gate or favorable-cell selection.
 
 ## Outcomes & Retrospective
 
-Work is in progress. This section will record the full benchmark evidence,
-verification results, compatibility outcome, release publication, CI state,
-and first Codex review outcome.
+Relayna `1.4.30` now avoids successful-task observation construction when no
+sink can receive it, avoids task resource sampling and the metrics duration
+clock when both observations and metrics are disabled, and preserves the
+metrics-only, observation-only, combined, OpenTelemetry, handler, lifecycle,
+retry, DLQ, cancellation, and acknowledgement/rejection paths. Deterministic
+tests include individual and batch success, exact four-event order/data,
+metrics-only sampling, combined instrumentation, and representative failure
+behavior.
+
+The authoritative sequential rerun shows `-22.1%` minimal per-message and
+`-18.3%` minimal loop geometric-mean deltas, including `-26.4%` at 1 KB and
+`-25.3%` at 16 KB. All five baseline and candidate reports, provenance,
+checksums, every consumer/control cell, methodology, and limitations are
+retained under `reports/consumer-disabled-instrumentation/`. The original pair
+also remains immutable because its unchanged observation-loop drift triggered
+the authoritative rerun.
+
+The SDK/backend mandatory verification stack passed after the final runtime
+review fix (657 SDK tests passed, 1 skipped; 244 backend tests passed). The
+frontend passed 92 tests and its production build, 198 benchmark regression
+tests and the final canonical `run-all` passed, and SDK/backend `1.4.30`
+artifacts were built and inspected. Freeze manifests changed only their version
+field. PR #116 is ready for review; both first Codex P2 findings were fixed in
+`e91ad14`, replied to, and resolved, and all post-fix CI checks are green. The
+PR remains open and unmerged.
 
 ## Context and Orientation
 
