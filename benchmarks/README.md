@@ -273,12 +273,20 @@ For a quick development run:
       --iterations "1 MB=1" \
       --output /tmp/publish-preparation.html
 
-The corrected pre-optimization baseline is retained immutably as
-`reports/publish-preparation-baseline.html`, with hash-bound revision,
-methodology, matrix, and environment provenance in
-`reports/publish-preparation-baseline.json`. The benchmark contains no
-executable copy of the old publishing algorithm. Generate a current-runtime
-comparison against that retained artifact with:
+Publish-preparation baselines are local-only artifacts and are not present in a
+fresh checkout. The last repository-retained pre-optimization baseline remains
+available from the immutable `v1.4.32` tag. Hydrate its hash-bound HTML and JSON
+provenance sidecar into the ignored local `reports/` directory with:
+
+    git restore --source=v1.4.32 --worktree -- \
+      reports/publish-preparation-baseline.html \
+      reports/publish-preparation-baseline.json
+
+To use a different baseline, replace `v1.4.32` with the trusted tag or commit
+that contains both files. Keep the pair together: the JSON records the source
+revision, methodology, canonical matrix, environment, and SHA-256 of the HTML.
+The benchmark contains no executable copy of the old publishing algorithm.
+Generate a current-runtime comparison against the hydrated local artifact with:
 
     uv run python -m benchmarks run publish-preparation \
       --run-label candidate \
@@ -286,8 +294,9 @@ comparison against that retained artifact with:
       --output reports/publish-preparation.html
 
 Baseline comparison requires the canonical repeats and iteration matrix. The
-command fails clearly if the HTML or provenance sidecar is missing, modified,
-or incompatible with the current canonical matrix.
+command fails clearly if the local HTML or provenance sidecar is missing,
+modified, or incompatible with the current canonical matrix. Do not add the
+hydrated files back to Git; `reports/` is intentionally ignored.
 
 ## JSON engine decision benchmark
 

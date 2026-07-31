@@ -15,7 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from benchmarks.cli import main  # noqa: E402
 from benchmarks.publish_preparation import (  # noqa: E402
+    BASELINE_SCHEMA_VERSION,
+    DEFAULT_ITERATIONS,
+    DEFAULT_REPEATS,
     TARGET_SIZES,
+    TASKS_PER_OPERATION,
     BenchmarkCase,
     BenchmarkResult,
     NoOpExchange,
@@ -29,13 +33,6 @@ from benchmarks.publish_preparation import (  # noqa: E402
     write_html_report,
 )
 from benchmarks.reporting import collect_environment  # noqa: E402
-
-_REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-_RETAINED_BASELINE = _REPOSITORY_ROOT / "reports" / "publish-preparation-baseline.html"
-_requires_retained_baseline = pytest.mark.skipif(
-    not _RETAINED_BASELINE.is_file(),
-    reason="retained benchmark reports are local-only artifacts",
-)
 
 
 def _case(
@@ -53,6 +50,67 @@ def _case(
         target_bytes=target_bytes,
         iterations=1,
     )
+
+
+def _synthetic_baseline_result(case: BenchmarkCase) -> BenchmarkResult:
+    publications = TASKS_PER_OPERATION if case.message_kind == "individual-task" else 1
+    preparations = TASKS_PER_OPERATION * 2 if case.message_kind == "individual-task" else 1
+    samples = tuple(float(10_000 + offset) for offset in range(DEFAULT_REPEATS))
+    total_operations = case.iterations * DEFAULT_REPEATS
+    return BenchmarkResult(
+        case=case,
+        actual_message_bytes=case.target_bytes,
+        bytes_per_operation=case.target_bytes * publications,
+        publications_per_operation=publications,
+        preparations_per_operation=preparations,
+        repeats=DEFAULT_REPEATS,
+        sample_ns_per_operation=samples,
+        median_ns_per_operation=samples[DEFAULT_REPEATS // 2],
+        median_absolute_deviation_ns=1.0,
+        operations_per_second=100_000.0,
+        throughput_mib_per_second=100.0,
+        total_operations=total_operations,
+        total_prepared=total_operations * preparations,
+        total_published=total_operations * publications,
+    )
+
+
+@pytest.fixture
+def baseline_report(tmp_path: Path) -> Path:
+    results = [_synthetic_baseline_result(case) for case in build_matrix()]
+    report_path = write_html_report(
+        tmp_path / "fixture" / "publish-preparation-baseline.html",
+        results,
+        {"Fixture": "synthetic baseline-loader coverage"},
+        run_label="synthetic baseline",
+    )
+    metadata = {
+        "schema_version": BASELINE_SCHEMA_VERSION,
+        "benchmark": "publish-preparation",
+        "report": report_path.name,
+        "report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+        "provenance": {
+            "source_branch": "test-fixture",
+            "base_revision": "test-base",
+            "baseline_runtime_revision": "test-runtime",
+            "artifact_revision": "test-artifact",
+        },
+        "methodology": {
+            "fixed_clock_utc": "2025-01-01T00:00:00Z",
+            "exact_message_sizes_bytes": TARGET_SIZES,
+            "tasks_per_operation": TASKS_PER_OPERATION,
+            "individual_preparations_per_operation": TASKS_PER_OPERATION * 2,
+            "iterations_by_size": DEFAULT_ITERATIONS,
+            "repeats": DEFAULT_REPEATS,
+            "matrix_case_count": len(results),
+        },
+        "environment": {"fixture": "synthetic"},
+    }
+    baseline_metadata_path(report_path).write_text(
+        json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report_path
 
 
 @pytest.mark.parametrize(("target_label", "target_bytes"), TARGET_SIZES.items())
@@ -162,9 +220,8 @@ def test_minimal_run_reports_complete_statistics_counts_and_preparation_probe() 
     assert {result.total_prepared for result in individual} == {2}
 
 
-@_requires_retained_baseline
-def test_retained_baseline_schema_matrix_and_preparation_evidence() -> None:
-    results = load_baseline_results(_RETAINED_BASELINE)
+def test_baseline_schema_matrix_and_preparation_evidence(baseline_report: Path) -> None:
+    results = load_baseline_results(baseline_report)
 
     assert len(results) == 72
     assert {result.case for result in results} == set(build_matrix())
@@ -174,11 +231,11 @@ def test_retained_baseline_schema_matrix_and_preparation_evidence() -> None:
     assert all(result.actual_message_bytes == result.case.target_bytes for result in results)
 
 
-def _copy_retained_baseline(tmp_path: Path) -> Path:
-    report_path = tmp_path / _RETAINED_BASELINE.name
-    report_path.write_bytes(_RETAINED_BASELINE.read_bytes())
+def _copy_baseline(tmp_path: Path, baseline_report: Path) -> Path:
+    report_path = tmp_path / baseline_report.name
+    report_path.write_bytes(baseline_report.read_bytes())
     metadata_path = baseline_metadata_path(report_path)
-    metadata_path.write_bytes(baseline_metadata_path(_RETAINED_BASELINE).read_bytes())
+    metadata_path.write_bytes(baseline_metadata_path(baseline_report).read_bytes())
     return report_path
 
 
@@ -188,10 +245,9 @@ def test_baseline_loader_rejects_missing_report(tmp_path: Path) -> None:
         load_baseline_results(missing_report)
 
 
-@_requires_retained_baseline
-def test_baseline_loader_rejects_missing_metadata(tmp_path: Path) -> None:
-    report_path = tmp_path / _RETAINED_BASELINE.name
-    report_path.write_bytes(_RETAINED_BASELINE.read_bytes())
+def test_baseline_loader_rejects_missing_metadata(tmp_path: Path, baseline_report: Path) -> None:
+    report_path = tmp_path / baseline_report.name
+    report_path.write_bytes(baseline_report.read_bytes())
     with pytest.raises(FileNotFoundError, match="baseline metadata not found"):
         load_baseline_results(report_path)
 
@@ -204,13 +260,13 @@ def test_baseline_loader_rejects_missing_metadata(tmp_path: Path) -> None:
         ({"report_sha256": "0" * 64}, "hash mismatch"),
     ],
 )
-@_requires_retained_baseline
 def test_baseline_loader_rejects_incompatible_metadata(
     tmp_path: Path,
+    baseline_report: Path,
     mutation: dict[str, object],
     error_match: str,
 ) -> None:
-    report_path = _copy_retained_baseline(tmp_path)
+    report_path = _copy_baseline(tmp_path, baseline_report)
     metadata_path = baseline_metadata_path(report_path)
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     metadata.update(mutation)
@@ -220,9 +276,11 @@ def test_baseline_loader_rejects_incompatible_metadata(
         load_baseline_results(report_path)
 
 
-@_requires_retained_baseline
-def test_baseline_loader_rejects_matrix_and_requested_configuration_mismatch(tmp_path: Path) -> None:
-    report_path = _copy_retained_baseline(tmp_path)
+def test_baseline_loader_rejects_matrix_and_requested_configuration_mismatch(
+    tmp_path: Path,
+    baseline_report: Path,
+) -> None:
+    report_path = _copy_baseline(tmp_path, baseline_report)
     metadata_path = baseline_metadata_path(report_path)
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     metadata["methodology"]["matrix_case_count"] = 71
@@ -231,7 +289,7 @@ def test_baseline_loader_rejects_matrix_and_requested_configuration_mismatch(tmp
     with pytest.raises(ValueError, match="baseline matrix"):
         load_baseline_results(report_path)
 
-    baseline_results = load_baseline_results(_RETAINED_BASELINE)
+    baseline_results = load_baseline_results(baseline_report)
     with pytest.raises(ValueError, match="Baseline matrix is incompatible"):
         run_benchmarks(
             repeats=1,
@@ -240,11 +298,10 @@ def test_baseline_loader_rejects_matrix_and_requested_configuration_mismatch(tmp
         )
 
 
-@_requires_retained_baseline
-def test_retained_baseline_sidecar_hash_matches_immutable_html() -> None:
-    metadata = json.loads(baseline_metadata_path(_RETAINED_BASELINE).read_text(encoding="utf-8"))
+def test_baseline_sidecar_hash_matches_html(baseline_report: Path) -> None:
+    metadata = json.loads(baseline_metadata_path(baseline_report).read_text(encoding="utf-8"))
 
-    assert metadata["report_sha256"] == hashlib.sha256(_RETAINED_BASELINE.read_bytes()).hexdigest()
+    assert metadata["report_sha256"] == hashlib.sha256(baseline_report.read_bytes()).hexdigest()
 
 
 def test_html_round_trip_contains_methodology_counts_comparison_and_metadata(tmp_path: Path) -> None:
