@@ -75,12 +75,18 @@ Run the complete three-mode suite:
       uv run --no-sync python -m benchmarks.tracing_suite \
       --output-root /tmp/consumer-loop-scheduling-suite
 
-The authoritative baseline used a read-only `git archive` of pre-runtime commit
-`6988fc61a803f77207f88054d87084dcfc875c2d` for `src/relayna`, while benchmark
-modules came from harness commit
-`a9e8c305869bac89561a508889778480c05c0336`. The candidate used that same
-harness commit directly. `scripts/retain_tracing_benchmark_run.py --help`
-documents the source and runtime provenance arguments.
+The retained manifests record the exact intermediate branch commits used for
+the original measurement: `6988fc61a803f77207f88054d87084dcfc875c2d`
+for the archived baseline source and
+`a9e8c305869bac89561a508889778480c05c0336` for the shared benchmark harness.
+Those identifiers are historical provenance and may no longer be reachable
+after a squash merge. To reproduce from durable merged history, archive
+`src/relayna` from runtime base
+`1459da95ddcbb2819de87eefc991711a51c24338`, whose runtime tree is byte-identical
+to the measured baseline, and use the benchmark modules from the final merged
+tree containing this report. The candidate used that same harness directly.
+`scripts/retain_tracing_benchmark_run.py --help` documents the source and
+runtime provenance arguments.
 
 Regenerate the derived comparison without changing raw data:
 
@@ -95,7 +101,8 @@ The comparator refuses overwrite; validates task/run identity, clean source
 states, runtime and benchmark hashes, harness commit, lock and package versions,
 host/interpreter/event-loop/tracing parity, same-second launch, sampled span
 inventory, expected counts, and unique IDs; and derives its verdict from all
-concurrent-loop tracing-mode aggregates against every unchanged control.
+concurrent-loop tracing-mode aggregates and profile/prefetch subgroups against
+every unchanged control.
 
 ## Compatibility and Limitations
 

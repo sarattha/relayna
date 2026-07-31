@@ -1,18 +1,20 @@
 {
   "artifacts": {
     "comparison.html": {
-      "bytes": 2760161,
-      "sha256": "afa4789fa888623aae311b97007437e49a7c10216c0315a2b04953eb268f17b0"
+      "bytes": 2760397,
+      "sha256": "dabd8f451795c984bb73da909db725f9ead555002dff72119ac326bc207a65b0"
     },
     "comparison.json": {
-      "bytes": 1786332,
-      "sha256": "d8a6a772dcc369b8fa2de31a4fc43a3ced28aedd28d527ef906714593eb684c0"
+      "bytes": 1786463,
+      "sha256": "b2c9b2c71b1de6ee91fa9897edc44e15383f88ae6a526c0ee8b0e446f44b8be0"
     }
   },
   "assessment": {
     "all_target_summaries_exceed_control_drift": false,
     "maximum_absolute_control_drift_percent": 5.389043617686873,
+    "maximum_target_breakdown_regression_percent": 3.4615896687640424,
     "rationale": "Concurrent consumer-loop movement is not consistently larger than unchanged-control drift.",
+    "target_breakdown_regressions_beyond_control_drift": 0,
     "target_summary_count": 3,
     "verdict": "inconclusive"
   },

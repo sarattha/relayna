@@ -95,6 +95,11 @@ per-message CPU path from full consumer-loop throughput.
   machine-path audits. The repository has no live-broker RabbitMQ integration
   target; the complete deterministic SDK suite covers the available consumer
   lifecycle boundary.
+- [x] (2026-07-31 09:12Z) Opened ready PR #119, observed all ten initial CI
+  checks pass, requested the repository's first Codex review, and addressed
+  both P2 findings by making target subgroup regressions verdict-blocking and
+  documenting durable post-squash reproduction refs. Focused tests and the
+  complete SDK/Studio verification stack pass after the fixes.
 - [ ] Commit only intentional files, push the requested branch, open a ready
   PR, monitor all CI, request the first Codex review, and resolve every
   actionable review finding.
@@ -331,6 +336,22 @@ per-message CPU path from full consumer-loop throughput.
   production perimeter.
   Date/Author: 2026-07-31 / Codex.
 
+- Decision: reject a `worth merging` assessment when any profile/prefetch
+  target subgroup regresses by more than the maximum absolute unchanged-control
+  drift, even if all tracing-mode target aggregates improve.
+  Rationale: an aggregate can hide a material regression in a supported
+  workload. The same conservative control-noise bound keeps this decision
+  deterministic without treating every noisy individual cell as material.
+  Date/Author: 2026-07-31 / Codex, after first Codex review.
+
+- Decision: preserve intermediate commit identifiers as immutable manifest
+  provenance but use `1459da95` plus the final merged benchmark tree in
+  reproduction instructions.
+  Rationale: branch-only intermediate objects may become unreachable after a
+  squash merge. The durable base runtime is byte-identical to the measured
+  baseline, while the final merged tree retains the exact stabilized harness.
+  Date/Author: 2026-07-31 / Codex, after first Codex review.
+
 ## Outcomes & Retrospective
 
 No runtime optimization was retained. A specialized capacity counter looked
@@ -343,8 +364,10 @@ The durable outcome is a stronger five-repeat/high-cardinality consumer
 benchmark, reusable source-provenance and scheduling-comparison tooling,
 deterministic cleanup/fairness/ContextVar/cancellation/exception tests, and
 immutable evidence showing why the candidate should not merge as a runtime
-change. The mandatory SDK and Studio verification stacks pass. Publication,
-CI, and first-review results remain to be recorded.
+change. The mandatory SDK and Studio verification stacks pass. Ready PR #119
+is published; its initial CI was fully green, and both first-review findings
+were fixed and locally reverified. Final post-fix CI and thread resolution
+remain to be recorded.
 
 ## Context and Orientation
 

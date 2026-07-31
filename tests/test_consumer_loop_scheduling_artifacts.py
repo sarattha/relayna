@@ -86,6 +86,8 @@ def test_stabilized_comparison_is_complete_and_inconclusive() -> None:
     assert len({cell["id"] for cell in data["cells"]}) == 1224
     assert data["assessment"]["verdict"] == "inconclusive"
     assert data["assessment"]["maximum_absolute_control_drift_percent"] == pytest.approx(5.3890436177)
+    assert data["assessment"]["maximum_target_breakdown_regression_percent"] == pytest.approx(3.4615896688)
+    assert data["assessment"]["target_breakdown_regressions_beyond_control_drift"] == 0
     targets = {summary["tracing_mode"]: summary["latency_percent"] for summary in data["target_summaries"]}
     assert targets == pytest.approx(
         {
@@ -97,6 +99,26 @@ def test_stabilized_comparison_is_complete_and_inconclusive() -> None:
     assert data["export_validation"]["baseline_sampled_span_count"] == 811_880
     assert data["export_validation"]["candidate_sampled_span_count"] == 811_880
     assert data["export_validation"]["identical_names_kinds_statuses"] is True
+
+
+def test_assessment_rejects_material_target_subgroup_regression() -> None:
+    comparison_script = _load_script("compare_consumer_loop_scheduling")
+    targets = [
+        {"latency_percent": -8.0},
+        {"latency_percent": -9.0},
+        {"latency_percent": -10.0},
+    ]
+    controls = [{"latency_percent": 2.0}, {"latency_percent": -1.5}]
+    breakdown = [
+        {"latency_percent": -12.0},
+        {"latency_percent": 3.0},
+    ]
+
+    assessment = comparison_script._assessment(targets, breakdown, controls)
+
+    assert assessment["verdict"] == "not worth merging"
+    assert assessment["target_breakdown_regressions_beyond_control_drift"] == 1
+    assert "profile/prefetch subgroup" in assessment["rationale"]
 
 
 def test_scheduling_comparison_generator_is_deterministic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

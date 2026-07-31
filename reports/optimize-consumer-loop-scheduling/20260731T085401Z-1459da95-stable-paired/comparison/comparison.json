@@ -2,7 +2,9 @@
   "assessment": {
     "all_target_summaries_exceed_control_drift": false,
     "maximum_absolute_control_drift_percent": 5.389043617686873,
+    "maximum_target_breakdown_regression_percent": 3.4615896687640424,
     "rationale": "Concurrent consumer-loop movement is not consistently larger than unchanged-control drift.",
+    "target_breakdown_regressions_beyond_control_drift": 0,
     "target_summary_count": 3,
     "verdict": "inconclusive"
   },

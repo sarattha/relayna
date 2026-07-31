@@ -155,14 +155,27 @@ def _summaries(
     return benchmark_summaries, target_summaries, target_breakdown, control_summaries
 
 
-def _assessment(targets: list[dict[str, Any]], controls: list[dict[str, Any]]) -> dict[str, Any]:
+def _assessment(
+    targets: list[dict[str, Any]],
+    target_breakdown: list[dict[str, Any]],
+    controls: list[dict[str, Any]],
+) -> dict[str, Any]:
     control_noise = max(abs(summary["latency_percent"]) for summary in controls)
     all_targets_exceed_noise = all(summary["latency_percent"] < -control_noise for summary in targets)
-    if all_targets_exceed_noise:
+    regressing_breakdowns = [summary for summary in target_breakdown if summary["latency_percent"] > control_noise]
+    maximum_breakdown_regression = max(
+        (summary["latency_percent"] for summary in target_breakdown),
+        default=0.0,
+    )
+    if regressing_breakdowns:
+        verdict = "not worth merging"
+        rationale = "At least one consumer-loop profile/prefetch subgroup regresses beyond unchanged-control drift."
+    elif all_targets_exceed_noise:
         verdict = "worth merging"
         rationale = (
             "Concurrent consumer-loop latency improves in every tracing mode by more than the "
-            "largest absolute unchanged-control aggregate drift."
+            "largest absolute unchanged-control aggregate drift, with no profile/prefetch "
+            "subgroup regression beyond that drift."
         )
     elif any(summary["latency_percent"] > control_noise for summary in targets):
         verdict = "not worth merging"
@@ -174,8 +187,10 @@ def _assessment(targets: list[dict[str, Any]], controls: list[dict[str, Any]]) -
         "verdict": verdict,
         "rationale": rationale,
         "maximum_absolute_control_drift_percent": control_noise,
+        "maximum_target_breakdown_regression_percent": maximum_breakdown_regression,
         "target_summary_count": len(targets),
         "all_target_summaries_exceed_control_drift": all_targets_exceed_noise,
+        "target_breakdown_regressions_beyond_control_drift": len(regressing_breakdowns),
     }
 
 
@@ -297,7 +312,8 @@ def _render_html(data: dict[str, Any]) -> str:
   <ul>{notes}</ul>
   <p>No timing was edited or selected for favorability. Geometric means include every matched
   cell. The assessment requires every tracing-mode target aggregate to improve by more than
-  the largest absolute control aggregate movement.</p>
+  the largest absolute control aggregate movement and rejects any profile/prefetch subgroup
+  regression beyond that same conservative noise bound.</p>
   <h2>Tracing and behavior invariants</h2>
   <p>Both sides exported exactly {data["export_validation"]["baseline_sampled_span_count"]:,}
   sampled spans with identical names, kinds, and status counts. Disabled and unsampled modes
@@ -378,7 +394,7 @@ def main() -> int:
         "target_summaries": target_summaries,
         "target_breakdown": target_breakdown,
         "control_summaries": control_summaries,
-        "assessment": _assessment(target_summaries, control_summaries),
+        "assessment": _assessment(target_summaries, target_breakdown, control_summaries),
         "cells": cells,
         "validation": validation,
     }
