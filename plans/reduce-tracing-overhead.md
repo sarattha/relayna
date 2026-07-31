@@ -39,14 +39,19 @@ the matched evidence.
   tracing configuration dimension without changing production runtime code;
   the final inventory is 1,224 qualified cases across three tracing modes,
   five suites, and 15 standalone reports.
-- [ ] Capture the definitive complete-suite pre-runtime-change baseline with
-  immutable HTML, raw JSON, provenance, checksums, and uniqueness proof.
-- [ ] Profile the actual producer and consumer tracing paths and record
-  repeatable evidence for every retained optimization.
-- [ ] Implement the narrow behavior-preserving internal optimization and
-  focused tracing equivalence/call-count tests.
+- [x] (2026-07-31 07:25Z) Captured the definitive complete-suite
+  pre-runtime-change baseline with 15 immutable standalone HTML reports, 15 raw
+  sidecars, full provenance, checksums, and exactly 1,224/1,224 unique
+  qualified cases.
+- [x] (2026-07-31 07:31Z) Profiled the actual producer and consumer tracing
+  paths and recorded repeatable lookup, context-manager, propagation, and SDK
+  processing evidence.
+- [x] (2026-07-31 07:34Z) Implemented the narrow behavior-preserving internal
+  optimization and added focused tracing equivalence/call-count tests.
 - [ ] Run exploratory focused benchmarks, retain only reproducible changes, and
-  refresh `origin/main` before the final matched pair.
+  refresh `origin/main` before the final matched pair. Completed: rejected the
+  noisy one-iteration suite and completed a stable seven-repeat real-consumer
+  pair. Remaining: refresh and reconcile `origin/main`.
 - [ ] Generate and validate complete immutable candidate and comparison
   artifacts against a freshly matched final-base baseline if required.
 - [ ] Select the next unused patch version and update every authoritative
@@ -106,6 +111,63 @@ the matched evidence.
   Evidence:
   `/tmp/relayna-tracing-harness.EjLmLu/suite/tracing-suite.json`.
 
+- Observation: the canonical sampled baseline delivered 504,104 spans through
+  the synchronous exporter: 48,728 consumer spans and 455,376 producer spans.
+  Disabled and enabled-unsampled modes exported zero while still executing
+  Relayna instrumentation and, for unsampled mode, configured SDK sampling and
+  propagation.
+  Evidence:
+  `reports/reduce-tracing-overhead/20260731T072226Z-283782ec/baseline/manifest.json`
+  and the per-mode `tracing-suite.json` files.
+
+- Observation: the definitive baseline contains 1,224 qualified cases exactly
+  once across three tracing modes and five benchmark families.
+  Evidence: the baseline `manifest.json` reports 15 reports,
+  `observed_total_measurements=1224`,
+  `unique_qualified_case_count=1224`, and
+  `all_expected_cases_present_once=true`; every artifact passes
+  `shasum -a 256 -c checksums.sha256`.
+
+- Observation: configured SDK `trace.get_tracer("relayna")` is not a constant
+  lookup. `TracerProvider.get_tracer` rebuilds instrumentation scope values and
+  enters a locked registry on every call before returning the existing tracer.
+  Evidence: installed OpenTelemetry 1.41.1 source plus `cProfile` over 3,216
+  real consumer spans. Provider/tracer lookup consumed about 70 ms unsampled
+  and 73 ms sampled; Relayna's complete span wrapper consumed 199 ms and
+  328 ms respectively.
+
+- Observation: OpenTelemetry's `ProxyTracer` is explicitly designed for
+  module-level instrumentation. Before application configuration it delegates
+  to no-op tracing; after the one supported global provider installation it
+  resolves and retains the real tracer. Global provider replacement is
+  explicitly unsupported by the API.
+  Evidence: installed `ProxyTracer`, `ProxyTracerProvider`,
+  `set_tracer_provider`, and `get_tracer_provider` implementations.
+
+- Observation: a matched direct micro-prototype reduced per-span wrapper cost
+  from 13.7–14.0 to 7.1–7.4 microseconds for unsampled spans and from
+  21.9–22.1 to 15.1–15.5 microseconds for sampled/exported spans.
+  Evidence: three alternating function-order samples in isolated tracing
+  workers. Caching the tracer was the dominant improvement; returning the SDK
+  context manager directly contributed another roughly 0.5–1.0 microsecond.
+
+- Observation: the one-iteration complete exploratory suite was too noisy and
+  contradictory for decision use, including a sampled consumer result at
+  `+9.41%` and sampled publish at `+16.20%`.
+  Evidence:
+  `/tmp/reduce-tracing-overhead-exploratory.ZupVeR/candidate` compared with
+  `/tmp/relayna-tracing-harness.EjLmLu/suite`. It remains explicitly excluded
+  from release claims.
+
+- Observation: a seven-repeat focused pair using the exact baseline harness
+  commit and current runtime showed real consumer per-message/loop changes of
+  `-22.92%/-19.58%` unsampled and `-22.76%/-17.15%` sampled/exported. The
+  tracing-disabled control changed `-7.52%/-8.48%`, consistent with removing
+  the wrapper and adapter allocations that also exist with the API no-op
+  tracer.
+  Evidence: `/tmp/reduce-tracing-overhead-focused/baseline` and
+  `/tmp/reduce-tracing-overhead-focused/candidate`.
+
 ## Decision Log
 
 - Decision: use exact base `283782ec95955f50e187e5fde82d12f03691834a`
@@ -145,6 +207,24 @@ the matched evidence.
   consumer and publish paths become direct tracing targets, while envelope,
   JSON-engine, and Redis-storage suites provide matched controls. Qualified
   case IDs prefix mode and benchmark, giving 1,224 unique comparison cells.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: cache only the OpenTelemetry tracer using the library's standard
+  module-level `ProxyTracer` pattern; do not cache the global propagator.
+  Rationale: it removes the measured locked provider lookup while remaining
+  correct when applications configure the one supported provider after Relayna
+  import. `propagate.extract` and `propagate.inject` continue to resolve the
+  current global propagator on every call, preserving supported dynamic custom
+  propagator replacement.
+  Date/Author: 2026-07-31 / Codex.
+
+- Decision: reuse the stateless `_Getter` and `_Setter` adapters and return the
+  OpenTelemetry context manager directly, without changing carrier snapshots,
+  attribute values, span arguments, exception settings, or context extraction.
+  Rationale: these remove measured Relayna-owned allocations while keeping
+  extraction/injection, filtering of `None` attributes, span activation,
+  exception/status recording, and exporter delivery delegated to the same
+  installed OpenTelemetry APIs.
   Date/Author: 2026-07-31 / Codex.
 
 ## Outcomes & Retrospective
