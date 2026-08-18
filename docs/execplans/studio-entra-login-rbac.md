@@ -48,6 +48,12 @@ can inspect data but cannot mutate it.
   mutable Python slim base contained nine fixable util-linux findings.
   Evidence: CI run 677 reported PYSEC-2026-3552 and CVE-2026-53615; the patched
   dependency audits and CI-equivalent image scan report no fixable findings.
+- Observation: CI run 681 surfaced a later nanoid advisory after all runtime,
+  backend-image, SDK, backend, and frontend build jobs passed.
+  Evidence: refreshing the frontend lock selected nanoid 3.3.18 and React
+  Router 7.18.2; the repository audit then reported no unexcepted high or
+  critical frontend vulnerabilities, and all 104 frontend tests and the
+  production build passed.
 
 ## Decision Log
 

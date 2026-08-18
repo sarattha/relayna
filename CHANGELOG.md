@@ -64,8 +64,9 @@ All notable changes to this project will be documented in this file.
   lines. The Studio frontend production build also passed.
 - Built the Studio backend and frontend Docker images, passed strict MkDocs
   validation, and validated synchronized release metadata for `v1.5.0`.
-- Passed SDK and Studio backend dependency audits and the CI-equivalent Studio
-  backend image scan with no fixed high or critical vulnerabilities.
+- Passed SDK, Studio backend, and Studio frontend dependency audits and the
+  CI-equivalent Studio backend image scan with no fixed high or critical
+  vulnerabilities.
 - Exercised the real Studio UI in Chrome against the Gateway development OIDC
   issuer, including bootstrap login, pending-user activation, readonly UI,
   admin mutation, immediate blocking, and local-only logout.
