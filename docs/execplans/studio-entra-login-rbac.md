@@ -23,6 +23,7 @@ can inspect data but cannot mutate it.
 - [x] (2026-08-18 16:40Z) Reused the Gateway development OIDC issuer and added deployment documentation, synchronized v1.5.0 metadata, and intentional freeze manifests.
 - [x] (2026-08-18 16:44Z) Completed real-browser Computer Use QA with the Gateway issuer.
 - [x] (2026-08-18 16:52Z) Passed the mandatory repository verification, coverage targets, frontend build, strict docs build, release validator, and Studio Docker image builds.
+- [x] (2026-08-18 16:55Z) Cleared the first CI run's dependency and backend-image security findings by locking cryptography 50.0.0 and applying current Debian security updates during the runtime image build.
 - [ ] Open the ready PR, request Codex review, address every review thread, and leave checks green.
 
 ## Surprises & Discoveries
@@ -40,6 +41,11 @@ can inspect data but cannot mutate it.
   tenant so persisted identity is explicitly tenant plus immutable object ID.
   Evidence: the UI mutation log used the encoded ID
   `tenant-id:object-id`, while display email remained mutable metadata.
+- Observation: Security advisory data changed between local verification and
+  the first CI run: the root lock still selected cryptography 49.0.0 and the
+  mutable Python slim base contained nine fixable util-linux findings.
+  Evidence: CI run 677 reported PYSEC-2026-3552 and CVE-2026-53615; the patched
+  dependency audits and CI-equivalent image scan report no fixable findings.
 
 ## Decision Log
 

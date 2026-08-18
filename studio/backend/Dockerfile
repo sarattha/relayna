@@ -30,7 +30,10 @@ ENV UV_SYSTEM_PYTHON=1
 
 COPY --from=build /dist /dist
 
-RUN uv pip install --system /dist/relayna-*.whl /dist/relayna_studio-*.whl \
+RUN apt-get update \
+    && apt-get upgrade --yes \
+    && rm -rf /var/lib/apt/lists/* \
+    && uv pip install --system /dist/relayna-*.whl /dist/relayna_studio-*.whl \
     && rm -rf /usr/local/bin/pip* \
     && rm -rf /usr/local/lib/python3.13/site-packages/pip \
     && rm -rf /usr/local/lib/python3.13/site-packages/pip-*.dist-info \

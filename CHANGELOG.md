@@ -31,6 +31,8 @@ All notable changes to this project will be documented in this file.
   instead of browser-supplied identity fields.
 - Bumped the SDK, Studio backend, Studio frontend, lockfiles, backend SDK
   dependency floor, and production-freeze manifests to `1.5.0`.
+- Raised the development cryptography floor to `50.0.0` and upgraded Debian
+  security packages while building the Studio backend runtime image.
 
 ### Migration
 
@@ -62,6 +64,8 @@ All notable changes to this project will be documented in this file.
   lines. The Studio frontend production build also passed.
 - Built the Studio backend and frontend Docker images, passed strict MkDocs
   validation, and validated synchronized release metadata for `v1.5.0`.
+- Passed SDK and Studio backend dependency audits and the CI-equivalent Studio
+  backend image scan with no fixed high or critical vulnerabilities.
 - Exercised the real Studio UI in Chrome against the Gateway development OIDC
   issuer, including bootstrap login, pending-user activation, readonly UI,
   admin mutation, immediate blocking, and local-only logout.
