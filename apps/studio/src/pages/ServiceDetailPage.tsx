@@ -2,6 +2,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { fetchServiceEvents, fetchServiceLogs, fetchServiceMetrics, requestJson } from "../api";
+import { useStudioAuth } from "../auth-context";
 import { useStudioServices } from "../services-context";
 import {
   ConfirmationDialog,
@@ -540,6 +541,7 @@ function MetricLineChart({ series, podLabel }: { series: StudioMetricSeries[]; p
 }
 
 export function ServiceDetailPage() {
+  const { isAdmin } = useStudioAuth();
   const navigate = useNavigate();
   const { serviceId = "" } = useParams();
   const servicesState = useStudioServices();
@@ -1034,7 +1036,7 @@ export function ServiceDetailPage() {
             <StudioIcon name="tasks" />
             Task Search
           </Link>
-          <button type="button" onClick={() => void handleRefreshService()} style={secondaryButtonStyle} disabled={refreshingService}>
+          {isAdmin ? <><button type="button" onClick={() => void handleRefreshService()} style={secondaryButtonStyle} disabled={refreshingService}>
             <StudioIcon name="refresh" />
             {refreshingService ? "Refreshing..." : "Refresh"}
           </button>
@@ -1062,7 +1064,7 @@ export function ServiceDetailPage() {
                 Delete
               </button>
             </div>
-          </details>
+          </details></> : null}
         </div>
 
         <div id="service-overview" className="studio-detail-grid">

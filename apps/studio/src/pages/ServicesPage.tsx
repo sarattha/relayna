@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { searchServices } from "../api";
+import { useStudioAuth } from "../auth-context";
 import { useStudioServices } from "../services-context";
 import {
   ConfirmationDialog,
@@ -34,6 +35,7 @@ type ConfirmationRequest = {
 export function ServicesPage() {
   const navigate = useNavigate();
   const servicesState = useStudioServices();
+  const { isAdmin } = useStudioAuth();
   const [showEditor, setShowEditor] = useState(false);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServiceDraft>(servicesState.emptyDraft);
@@ -303,7 +305,7 @@ export function ServicesPage() {
         ) : null}
       </SectionCard>
 
-      {showEditor ? (
+      {isAdmin && showEditor ? (
         <div ref={editorRef}>
           <SectionCard
             title={editingServiceId ? "Edit Service" : "Register Service"}
@@ -797,12 +799,12 @@ export function ServicesPage() {
         title="Registered Services"
         subtitle="Choose a service to open the routed detail view, topology page, or DLQ explorer."
         className="studio-section-card--featured"
-        action={
+        action={isAdmin ? (
           <button type="button" onClick={startCreate} style={secondaryButtonStyle}>
             <StudioIcon name="add" />
             New Service
           </button>
-        }
+        ) : null}
       >
         {servicesState.loading ? <p style={mutedTextStyle}>Loading services...</p> : null}
         {!servicesState.loading && servicesState.services.length === 0 ? (
@@ -848,10 +850,10 @@ export function ServicesPage() {
                             <StudioIcon name="open" />
                             View
                           </Link>
-                          <button type="button" onClick={() => startEdit(service)} style={secondaryButtonStyle}>
+                          {isAdmin ? <button type="button" onClick={() => startEdit(service)} style={secondaryButtonStyle}>
                             <StudioIcon name="edit" />
                             Edit
-                          </button>
+                          </button> : null}
                         </div>
                       </td>
                     </tr>
@@ -886,7 +888,7 @@ export function ServicesPage() {
                       <StudioIcon name="open" />
                       View
                     </Link>
-                    <button
+                    {isAdmin ? <button
                       type="button"
                       onClick={() => startEdit(service)}
                       aria-label={`Edit ${service.service_id}`}
@@ -894,7 +896,7 @@ export function ServicesPage() {
                     >
                       <StudioIcon name="edit" />
                       Edit
-                    </button>
+                    </button> : null}
                   </div>
                 </article>
               ))}

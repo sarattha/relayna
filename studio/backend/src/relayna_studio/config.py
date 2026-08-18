@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import TypedDict
 
+from .auth import StudioEntraConfig
+
 
 class StudioAppKwargs(TypedDict):
     redis_url: str
@@ -35,6 +37,7 @@ class StudioAppKwargs(TypedDict):
     failed_task_email_dedupe_ttl_seconds: int
     failed_task_email_title_prefix: str
     failed_task_email_batch_wait_seconds: int
+    entra_config: StudioEntraConfig
 
 
 def _env_required(name: str) -> str:
@@ -145,8 +148,25 @@ class StudioBackendSettings:
     failed_task_email_dedupe_ttl_seconds: int = 604800
     failed_task_email_title_prefix: str = "[Relayna] Failed task"
     failed_task_email_batch_wait_seconds: int = 0
+    entra_application_id: str = ""
+    entra_tenant_id: str = ""
+    entra_issuer: str = ""
+    entra_oidc_discovery_url: str = ""
+    entra_oidc_redirect_uri: str = ""
+    entra_oidc_private_key_path: str = ""
+    entra_oidc_certificate_path: str = ""
+    entra_admin_emails: tuple[str, ...] = ()
+    entra_admin_object_ids: tuple[str, ...] = ()
+    session_ttl_seconds: int = 28_800
+    login_ttl_seconds: int = 600
+    session_cookie_secure: bool = True
 
     def __post_init__(self) -> None:
+        if bool(self.entra_admin_emails) != bool(self.entra_admin_object_ids):
+            raise RuntimeError(
+                "RELAYNA_STUDIO_ENTRA_ADMIN_EMAILS and RELAYNA_STUDIO_ENTRA_ADMIN_OBJECT_IDS "
+                "must be configured together."
+            )
         if not self.failed_task_email_enabled:
             return
         if not self.failed_task_email_service_url:
@@ -211,6 +231,18 @@ class StudioBackendSettings:
                 "[Relayna] Failed task",
             ),
             failed_task_email_batch_wait_seconds=_env_int("RELAYNA_STUDIO_FAILED_TASK_EMAIL_BATCH_WAIT_SECONDS", 0),
+            entra_application_id=_env_required("RELAYNA_STUDIO_ENTRA_APPLICATION_ID"),
+            entra_tenant_id=_env_required("RELAYNA_STUDIO_ENTRA_TENANT_ID"),
+            entra_issuer=_env_required("RELAYNA_STUDIO_ENTRA_ISSUER"),
+            entra_oidc_discovery_url=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL"),
+            entra_oidc_redirect_uri=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI"),
+            entra_oidc_private_key_path=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH"),
+            entra_oidc_certificate_path=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH"),
+            entra_admin_emails=_env_csv("RELAYNA_STUDIO_ENTRA_ADMIN_EMAILS") or (),
+            entra_admin_object_ids=_env_csv("RELAYNA_STUDIO_ENTRA_ADMIN_OBJECT_IDS") or (),
+            session_ttl_seconds=_env_int("RELAYNA_STUDIO_SESSION_TTL_SECONDS", 28_800),
+            login_ttl_seconds=_env_int("RELAYNA_STUDIO_LOGIN_TTL_SECONDS", 600),
+            session_cookie_secure=_env_bool("RELAYNA_STUDIO_SESSION_COOKIE_SECURE", True),
         )
 
     def to_app_kwargs(self) -> StudioAppKwargs:
@@ -244,6 +276,20 @@ class StudioBackendSettings:
             "failed_task_email_dedupe_ttl_seconds": self.failed_task_email_dedupe_ttl_seconds,
             "failed_task_email_title_prefix": self.failed_task_email_title_prefix,
             "failed_task_email_batch_wait_seconds": self.failed_task_email_batch_wait_seconds,
+            "entra_config": StudioEntraConfig(
+                application_id=self.entra_application_id,
+                tenant_id=self.entra_tenant_id,
+                issuer=self.entra_issuer,
+                discovery_url=self.entra_oidc_discovery_url,
+                redirect_uri=self.entra_oidc_redirect_uri,
+                private_key_path=self.entra_oidc_private_key_path,
+                certificate_path=self.entra_oidc_certificate_path,
+                admin_emails=self.entra_admin_emails,
+                admin_object_ids=self.entra_admin_object_ids,
+                session_ttl_seconds=self.session_ttl_seconds,
+                login_ttl_seconds=self.login_ttl_seconds,
+                session_cookie_secure=self.session_cookie_secure,
+            ),
         }
 
 

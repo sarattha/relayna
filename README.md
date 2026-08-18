@@ -34,13 +34,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.32/relayna-1.4.32-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.5.0/relayna-1.5.0-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.32/relayna-1.4.32.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.5.0/relayna-1.5.0.tar.gz
 ```
 
 For local development in this repository:
@@ -117,6 +117,13 @@ Relayna observations, not metric labels.
 
 The practical boundary is simple: your service integrates `relayna`; operators
 deploy Studio separately when they want a centralized control plane.
+
+Studio `1.5.0` requires Microsoft Entra login for every human-facing route.
+Active `readonly` members can inspect operational data, while `admin` members
+can mutate data and manage access. Machine-facing catalog export, event ingest,
+metrics, and probes remain network-only. See
+[Studio Entra authentication](docs/studio-entra-auth.md) before upgrading or
+deploying Studio.
 
 ## Execution Graphs
 
@@ -232,7 +239,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.4.32`, and the backend requires `relayna>=1.4.32`.
+release version is `1.5.0`, and the backend requires `relayna>=1.5.0`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).

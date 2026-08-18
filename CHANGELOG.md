@@ -4,6 +4,68 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.5.0 - 2026-08-18
+
+### Added
+
+- Added mandatory Microsoft Entra authorization-code login for Studio with
+  PKCE, state, nonce, OIDC discovery, JWKS validation, PS256
+  `private_key_jwt`, hashed opaque Redis sessions, and session-bound CSRF.
+- Added persisted Studio members with `admin` and `readonly` roles plus
+  `pending`, `active`, and `blocked` lifecycle states. New identities start
+  pending and readonly; administrators can approve, assign, or block them from
+  the new Access view.
+- Added Studio-specific Entra, certificate, bootstrap-admin, session, and login
+  configuration. Studio uses the existing Entra application registration but
+  requires a separate certificate/private key.
+
+### Changed
+
+- Human-facing Studio routes now require an active session. Readonly members
+  may use GET, HEAD, and SSE APIs; all mutations and `/studio/admin/*` require
+  an administrator and unsafe requests require the session CSRF token.
+- `GET /studio/gateway/services`, `POST /studio/ingest/events`, metrics, and
+  operational probes remain network-only so existing machine clients do not
+  acquire a browser-session requirement.
+- Failed-task mutation actors are derived from the authenticated administrator
+  instead of browser-supplied identity fields.
+- Bumped the SDK, Studio backend, Studio frontend, lockfiles, backend SDK
+  dependency floor, and production-freeze manifests to `1.5.0`.
+
+### Migration
+
+- Operators must register the Studio callback URI on the shared Entra
+  application, mount a Studio-specific RSA certificate and private key, set
+  the documented `RELAYNA_STUDIO_ENTRA_*` variables, and configure matching
+  bootstrap email/object-ID allowlists before the first startup.
+- Both bootstrap allowlists can be removed after an active administrator is
+  persisted. Existing Studio service/event/search data is unchanged; new
+  member, login-transaction, and session records use the `studio:auth` Redis
+  namespace.
+
+### Compatibility
+
+- This release intentionally breaks the v1.4.30 production freeze for the
+  approved mandatory Studio login and RBAC perimeter. The backend route and
+  public-surface manifests and frontend API/type manifest were intentionally
+  regenerated for the authentication, session, and access-management
+  contracts. SDK route and public-surface entries are unchanged apart from the
+  synchronized freeze version.
+
+### Verification
+
+- Passed SDK formatting, linting, and type checking with 678 tests passed and
+  7 skipped; passed Studio backend formatting, linting, and type checking with
+  251 tests passed.
+- Passed Studio backend coverage at 98% and Studio frontend coverage with 104
+  tests at 98.09% statements, 89.12% branches, 98.46% functions, and 98.01%
+  lines. The Studio frontend production build also passed.
+- Built the Studio backend and frontend Docker images, passed strict MkDocs
+  validation, and validated synchronized release metadata for `v1.5.0`.
+- Exercised the real Studio UI in Chrome against the Gateway development OIDC
+  issuer, including bootstrap login, pending-user activation, readonly UI,
+  admin mutation, immediate blocking, and local-only logout.
+
 ## 1.4.32 - 2026-07-31
 
 ### Changed

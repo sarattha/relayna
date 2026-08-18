@@ -25,15 +25,66 @@ import type {
   StudioTaskSearchQuery,
   StudioTaskSearchResponse,
   WorkflowTopologyResponse,
+  StudioMember,
+  StudioMemberStatus,
+  StudioRole,
+  StudioSession,
+  StudioUserListResponse,
 } from "./types";
 
+let csrfToken: string | null = null;
+
+export class StudioApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+export function setStudioCsrfToken(value: string | null) {
+  csrfToken = value;
+}
+
 export async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const method = (init?.method || "GET").toUpperCase();
+  let resolvedInit = init;
+  if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
+    const headers = new Headers(init?.headers);
+    headers.set("X-CSRF-Token", csrfToken);
+    resolvedInit = { ...init, headers };
+  }
+  const response = await fetch(input, resolvedInit);
   const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
   if (!response.ok) {
-    throw new Error(payload?.detail || `Request failed with status ${response.status}.`);
+    const message = payload?.detail || `Request failed with status ${response.status}.`;
+    window.dispatchEvent(
+      new CustomEvent("relayna:api-error", { detail: { status: response.status, input, message } }),
+    );
+    throw new StudioApiError(message, response.status);
   }
   return payload as T;
+}
+
+export async function fetchStudioSession() {
+  return requestJson<StudioSession>("/studio/auth/session");
+}
+
+export async function logoutStudio() {
+  await requestJson<null>("/studio/auth/logout", { method: "POST" });
+}
+
+export async function listStudioUsers() {
+  return requestJson<StudioUserListResponse>("/studio/admin/users");
+}
+
+export async function updateStudioUser(
+  userId: string,
+  update: { role?: StudioRole; status?: StudioMemberStatus },
+) {
+  return requestJson<StudioMember>(`/studio/admin/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
 }
 
 export function parseLabelPairs(value: string) {

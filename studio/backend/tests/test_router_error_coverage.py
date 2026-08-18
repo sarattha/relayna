@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -229,6 +230,7 @@ def test_federation_router_translates_every_service_failure() -> None:
         code="upstream_error",
     )
     router = federation.create_federation_router(federation_service=service)
+    request = SimpleNamespace(state=SimpleNamespace())
     calls = [
         ("service_status", "get_service_status", ("svc", "task"), {}),
         (
@@ -282,11 +284,11 @@ def test_federation_router_translates_every_service_failure() -> None:
         (
             "mark_failed_task_investigated",
             "mark_failed_task_investigated",
-            ("svc", "failure"),
+            (request, "svc", "failure"),
             {"payload": {}},
         ),
         ("mark_failed_task_uninvestigated", "mark_failed_task_uninvestigated", ("svc", "failure"), {}),
-        ("retry_failed_task", "retry_failed_task", ("svc", "failure"), {"payload": {}}),
+        ("retry_failed_task", "retry_failed_task", (request, "svc", "failure"), {"payload": {}}),
         ("delete_failed_task", "delete_failed_task", ("svc", "failure"), {}),
         ("service_execution_graph", "get_service_execution_graph", ("svc", "task"), {}),
         ("service_runtime_backpressure", "get_service_runtime_backpressure", ("svc",), {}),

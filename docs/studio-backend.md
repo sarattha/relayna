@@ -14,6 +14,7 @@ control-plane operations.
 
 It owns:
 
+- Microsoft Entra BFF authentication, Redis sessions, and member authorization
 - a Redis-backed service registry
 - Redis-backed event, health, and task-search stores
 - a federated read layer that proxies registered Relayna services
@@ -59,6 +60,17 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RELAYNA_STUDIO_REDIS_URL` | none | Required Redis connection for registry, events, health, and search state. |
+| `RELAYNA_STUDIO_ENTRA_APPLICATION_ID` | none | Existing Entra application/client ID shared with Gateway. |
+| `RELAYNA_STUDIO_ENTRA_TENANT_ID` | none | Accepted Entra tenant ID. |
+| `RELAYNA_STUDIO_ENTRA_ISSUER` | none | Exact accepted token issuer. |
+| `RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL` | none | OIDC discovery document URL. |
+| `RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI` | none | Registered Studio callback URI. |
+| `RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH` | none | Studio-only RSA private key. |
+| `RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH` | none | Matching Studio public certificate. |
+
+Studio 1.5.0 has no unauthenticated human compatibility mode. See
+[Studio Entra Authentication](studio-entra-auth.md) for bootstrap variables,
+session settings, route policy, and deployment guidance.
 
 ### Optional network and process settings
 
@@ -125,6 +137,8 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 
 Redis is mandatory for the Studio backend. It stores:
 
+- members, single-use login transactions, and hashed opaque sessions under
+  `studio:auth`
 - service registry records
 - retained event envelopes
 - service health snapshots
@@ -136,6 +150,7 @@ Important prefixes:
 - events: `studio:events`
 - health: `studio:health`
 - task search: `studio:search`
+- authentication: `studio:auth`
 
 TTL behavior:
 
@@ -157,14 +172,19 @@ uv sync --extra dev
 From `studio/backend/`, run the packaged backend target:
 
 ```bash
-make run RELAYNA_STUDIO_REDIS_URL=redis://localhost:6379/0
+set -a
+source ../../.env.studio.example
+set +a
+make run
 ```
 
-Or run directly from source:
+Or return to the repository root and run directly from source:
 
 ```bash
+set -a
+source .env.studio.example
+set +a
 PYTHONPATH=src:studio/backend/src \
-RELAYNA_STUDIO_REDIS_URL=redis://localhost:6379/0 \
 uv run python -m relayna_studio
 ```
 
@@ -188,6 +208,7 @@ Run:
 
 ```bash
 docker run --rm -p 8000:8000 \
+  --env-file .env.studio.example \
   -e RELAYNA_STUDIO_REDIS_URL=redis://host.docker.internal:6379/0 \
   -e RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS=.svc.local,.cluster.local \
   relayna-studio-backend
@@ -197,6 +218,10 @@ The container defaults to:
 
 - host: `0.0.0.0`
 - port: `8000`
+
+For production, place frontend and backend behind one dedicated internal Studio
+hostname, register `/studio/auth/callback` on the shared Entra application, and
+mount a Studio-specific certificate secret read-only into the backend.
 
 ## Service Registration And Backend Expectations
 

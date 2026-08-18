@@ -23,6 +23,48 @@
   --studio-danger-soft: rgba(168, 60, 40, 0.1);
 }
 
+.studio-auth-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at top, rgba(222, 124, 61, 0.18), transparent 42%), var(--studio-bg-mid);
+}
+
+.studio-auth-card {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 40px;
+  border: 1px solid var(--studio-border);
+  border-radius: 24px;
+  background: var(--studio-surface);
+  box-shadow: var(--studio-shadow);
+  text-align: center;
+}
+
+.studio-auth-card img { width: 56px; margin: 0 auto; }
+.studio-auth-card h1, .studio-auth-card p { margin: 0; }
+.studio-auth-card p { color: var(--studio-text-muted); line-height: 1.6; }
+.studio-auth-eyebrow { color: var(--studio-primary-strong); font-size: 12px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+.studio-auth-button { display: inline-flex; justify-content: center; border: 0; border-radius: 14px; padding: 12px 16px; background: var(--studio-primary); color: var(--studio-primary-contrast); font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
+.studio-permission-banner { align-items: center; background: #fff3e8; border-bottom: 1px solid #e2b383; color: #713f12; display: flex; gap: 16px; justify-content: space-between; padding: 10px 24px; }
+.studio-permission-banner button { background: transparent; border: 1px solid currentColor; border-radius: 999px; color: inherit; cursor: pointer; padding: 4px 10px; }
+
+.studio-user-menu { display: flex; align-items: center; gap: 10px; }
+.studio-user-menu span { display: grid; font-size: 12px; }
+.studio-user-menu small { color: var(--studio-text-muted); }
+.studio-user-menu button { border: 1px solid var(--studio-border); border-radius: 10px; padding: 7px 10px; background: var(--studio-surface); color: var(--studio-text); cursor: pointer; }
+
+.studio-access-user { display: grid; grid-template-columns: minmax(220px, 1fr) 180px 180px auto; gap: 14px; align-items: end; padding: 16px; }
+.studio-access-user > div, .studio-access-user label { display: grid; gap: 5px; }
+.studio-access-user span, .studio-access-user small, .studio-access-user label { color: var(--studio-text-muted); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .studio-access-user { grid-template-columns: 1fr; align-items: stretch; }
+  .studio-user-menu { width: 100%; justify-content: space-between; }
+}
+
 *,
 *::before,
 *::after {
