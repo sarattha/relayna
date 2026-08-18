@@ -26,7 +26,7 @@ can inspect data but cannot mutate it.
 - [x] (2026-08-18 16:55Z) Cleared the first CI run's dependency and backend-image security findings by locking cryptography 50.0.0 and applying current Debian security updates during the runtime image build.
 - [x] (2026-08-18 16:55Z) Opened ready PR #121, posted the single Codex review request, and received its two actionable threads.
 - [x] (2026-08-18 16:58Z) Fixed the active-admin identifier mismatch and local Docker OIDC example with focused regression coverage; the full verification stack passes.
-- [ ] Push the review fixes, reply to and resolve both threads, and leave required checks green.
+- [x] (2026-08-18 17:04Z) Pushed all fixes, replied inline with verification evidence, resolved both first-review threads, and reached green CI in run 683 without requesting another review.
 
 ## Surprises & Discoveries
 
@@ -91,11 +91,12 @@ backend tests, 98% backend coverage, and 104 Studio frontend tests. Frontend
 coverage reached 98.09% statements, 89.12% branches, 98.46% functions, and
 98.01% lines. Formatting, linting, type checking, frontend production build,
 strict MkDocs, both Studio Docker images, and `v1.5.0` release metadata also
-passed. The first Codex review identified two actionable issues; both now have
-verified local fixes and regression coverage. The remaining work is pushing
-those review fixes, resolving their threads, and waiting for CI. Production
-Entra registration, certificate-secret installation, and deployment remain
-documented operator actions.
+passed. The first Codex review identified two actionable issues; both were
+fixed with regression coverage, answered inline with verification evidence,
+and resolved. CI run 683 passed after the dependency and image-security updates.
+PR #121 remains open and ready for human approval, with no second Codex review
+requested. Production Entra registration, certificate-secret installation, and
+deployment remain documented operator actions.
 
 ## Context and Orientation
 
