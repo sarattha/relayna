@@ -19,7 +19,15 @@ from cryptography.x509.oid import NameOID
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from relayna_studio.app import create_studio_app
-from relayna_studio.auth import SESSION_COOKIE, StudioAuthService, StudioAuthStore, StudioEntraConfig
+from relayna_studio.auth import (
+    SESSION_COOKIE,
+    StudioAuthService,
+    StudioAuthStore,
+    StudioEntraConfig,
+    StudioMemberStatus,
+    StudioRole,
+    StudioUserUpdate,
+)
 
 
 def _b64(value: int) -> str:
@@ -334,6 +342,45 @@ def test_fresh_install_requires_bootstrap(monkeypatch: pytest.MonkeyPatch, tmp_p
     with pytest.raises(RuntimeError, match="no active administrator"):
         with TestClient(app):
             pass
+
+
+@pytest.mark.asyncio
+async def test_active_admin_set_uses_composite_user_ids_for_atomic_last_admin_guard(tmp_path: Path) -> None:
+    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    store = StudioAuthStore(fake_redis, prefix="studio:auth")
+    config = _config(
+        tmp_path,
+        admin_emails=("first@example.test", "second@example.test"),
+        admin_object_ids=("first-oid", "second-oid"),
+    )
+    first = await store.upsert_login(
+        {"tid": "tenant-1", "oid": "first-oid", "email": "first@example.test", "name": "First Admin"},
+        config,
+    )
+    second = await store.upsert_login(
+        {"tid": "tenant-1", "oid": "second-oid", "email": "second@example.test", "name": "Second Admin"},
+        config,
+    )
+
+    await store.update_member(
+        second.user_id,
+        StudioUserUpdate(role=StudioRole.ADMIN, status=StudioMemberStatus.ACTIVE),
+        actor_user_id=first.user_id,
+    )
+    assert await fake_redis.smembers("studio:auth:active-admins") == {first.user_id, second.user_id}
+
+    await store.update_member(
+        second.user_id,
+        StudioUserUpdate(role=StudioRole.READONLY),
+        actor_user_id=first.user_id,
+    )
+    assert await fake_redis.smembers("studio:auth:active-admins") == {first.user_id}
+    with pytest.raises(ValueError, match="At least one active administrator"):
+        await store.update_member(
+            first.user_id,
+            StudioUserUpdate(status=StudioMemberStatus.BLOCKED),
+            actor_user_id="tenant-1:operator-oid",
+        )
 
 
 @pytest.mark.asyncio

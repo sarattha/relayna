@@ -190,8 +190,8 @@ if current_admin and not next_admin and redis.call('SCARD', KEYS[2]) <= 1 then
   return 'LAST_ADMIN'
 end
 redis.call('SET', KEYS[1], ARGV[1])
-if next_admin then redis.call('SADD', KEYS[2], next['object_id'])
-else redis.call('SREM', KEYS[2], next['object_id']) end
+if next_admin then redis.call('SADD', KEYS[2], next['user_id'])
+else redis.call('SREM', KEYS[2], next['user_id']) end
 return 'OK'
 """
 

@@ -24,7 +24,9 @@ can inspect data but cannot mutate it.
 - [x] (2026-08-18 16:44Z) Completed real-browser Computer Use QA with the Gateway issuer.
 - [x] (2026-08-18 16:52Z) Passed the mandatory repository verification, coverage targets, frontend build, strict docs build, release validator, and Studio Docker image builds.
 - [x] (2026-08-18 16:55Z) Cleared the first CI run's dependency and backend-image security findings by locking cryptography 50.0.0 and applying current Debian security updates during the runtime image build.
-- [ ] Open the ready PR, request Codex review, address every review thread, and leave checks green.
+- [x] (2026-08-18 16:55Z) Opened ready PR #121, posted the single Codex review request, and received its two actionable threads.
+- [x] (2026-08-18 16:58Z) Fixed the active-admin identifier mismatch and local Docker OIDC example with focused regression coverage; the full verification stack passes.
+- [ ] Push the review fixes, reply to and resolve both threads, and leave required checks green.
 
 ## Surprises & Discoveries
 
@@ -78,14 +80,16 @@ network-only machine routes, and exposes access administration only to active
 administrators. The frontend covers signed-out, pending, blocked, expired, and
 authorization-error states while preserving read pages for readonly users.
 
-Repository verification passed with 678 SDK tests (7 skipped), 251 Studio
+Repository verification passed with 678 SDK tests (7 skipped), 253 Studio
 backend tests, 98% backend coverage, and 104 Studio frontend tests. Frontend
 coverage reached 98.09% statements, 89.12% branches, 98.46% functions, and
 98.01% lines. Formatting, linting, type checking, frontend production build,
 strict MkDocs, both Studio Docker images, and `v1.5.0` release metadata also
-passed. The remaining work is the ready PR, its first Codex review, and CI;
-production Entra registration, certificate-secret installation, and deployment
-remain documented operator actions.
+passed. The first Codex review identified two actionable issues; both now have
+verified local fixes and regression coverage. The remaining work is pushing
+those review fixes, resolving their threads, and waiting for CI. Production
+Entra registration, certificate-secret installation, and deployment remain
+documented operator actions.
 
 ## Context and Orientation
 

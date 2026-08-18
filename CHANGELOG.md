@@ -58,7 +58,7 @@ All notable changes to this project will be documented in this file.
 
 - Passed SDK formatting, linting, and type checking with 678 tests passed and
   7 skipped; passed Studio backend formatting, linting, and type checking with
-  251 tests passed.
+  253 tests passed.
 - Passed Studio backend coverage at 98% and Studio frontend coverage with 104
   tests at 98.09% statements, 89.12% branches, 98.46% functions, and 98.01%
   lines. The Studio frontend production build also passed.

@@ -204,15 +204,24 @@ Tag releases publish the backend image to GHCR as:
 ghcr.io/sarattha/relayna-studio-backend
 ```
 
-Run:
+For the local Gateway development issuer, enable Docker host networking so the
+container's `127.0.0.1` reaches the host issuer, Redis, and Vite callback. Mount
+the Studio certificate and private key at the paths overridden below:
 
 ```bash
-docker run --rm -p 8000:8000 \
+docker run --rm --network host \
   --env-file .env.studio.example \
-  -e RELAYNA_STUDIO_REDIS_URL=redis://host.docker.internal:6379/0 \
+  --mount type=bind,src=/tmp/relayna-studio-oidc/portal-private-key.pem,dst=/run/secrets/relayna-studio-private-key.pem,readonly \
+  --mount type=bind,src=/tmp/relayna-studio-oidc/portal-certificate.pem,dst=/run/secrets/relayna-studio-certificate.pem,readonly \
+  -e RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH=/run/secrets/relayna-studio-private-key.pem \
+  -e RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH=/run/secrets/relayna-studio-certificate.pem \
   -e RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS=.svc.local,.cluster.local \
   relayna-studio-backend
 ```
+
+Docker Desktop requires host networking to be enabled for this development
+command. Production must instead use its HTTPS Entra endpoints, internal Redis
+address, and orchestrator-managed read-only certificate mounts.
 
 The container defaults to:
 
