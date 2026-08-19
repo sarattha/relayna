@@ -29,6 +29,10 @@ ENV UV_LINK_MODE=copy
 ENV UV_SYSTEM_PYTHON=1
 
 COPY --from=build /dist /dist
+COPY --from=build /app/studio/backend/alembic.ini /app/studio-backend/alembic.ini
+COPY --from=build /app/studio/backend/src /app/studio-backend/src
+
+ENV ALEMBIC_CONFIG=/app/studio-backend/alembic.ini
 
 RUN apt-get update \
     && apt-get upgrade --yes \

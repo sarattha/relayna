@@ -1285,6 +1285,7 @@ async def test_search_service_filter_expiry_and_fallback_edges() -> None:
     assert search._earlier_iso(None, "2026-01-01T00:00:00Z") == "2026-01-01T00:00:00Z"
     redis_store = search.RedisStudioSearchStore(FakeRedis())
     assert await redis_store.list_service_document_ids_for_filter("status", "healthy") == set()
+    await redis_store.delete_task_documents(["missing"])
 
     registry_service = AsyncMock()
     event_store = AsyncMock()
@@ -1305,7 +1306,7 @@ async def test_search_service_filter_expiry_and_fallback_edges() -> None:
         base_url="https://svc.example.test",
         auth_mode="internal_network",
     )
-    store.get_service_document.side_effect = lambda service_id: document if service_id == "svc" else None
+    store.get_service_documents.return_value = {"svc": document}
     store.list_service_document_ids.return_value = {"svc", "missing"}
     store.list_service_document_ids_for_token.return_value = {"svc", "missing"}
     response = await service.search_services(
@@ -1323,10 +1324,10 @@ async def test_search_service_filter_expiry_and_fallback_edges() -> None:
         detail_path="/task",
         expires_at="2020-01-01T00:00:00Z",
     )
-    store.get_task_document.return_value = expired
+    store.get_task_documents.return_value = {expired.document_id: expired}
     loaded = await service._load_task_documents([expired.document_id, "missing"])
     assert loaded == []
-    assert any(call.args == (expired.document_id,) for call in store.delete_task_document.await_args_list)
+    store.delete_task_documents.assert_awaited_once_with([expired.document_id])
 
     registry_service.list_services.return_value = [make_event_record(service_id="svc")]
     fallback = search.StudioSearchService(

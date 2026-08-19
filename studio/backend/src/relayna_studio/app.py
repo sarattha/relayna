@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
+from typing import Any, cast
 
 import httpx
 from fastapi import FastAPI
@@ -17,6 +18,21 @@ from .auth import (
     StudioAuthStore,
     StudioEntraConfig,
     create_studio_auth_router,
+)
+from .database import (
+    HybridStudioAuthStore,
+    PostgresAdvisoryCoordinator,
+    PostgresFailedTaskEmailSettingsStore,
+    PostgresNotificationHistoryStore,
+    PostgresOutboxRelay,
+    PostgresServiceRegistryStore,
+    PostgresStudioEventStore,
+    PostgresStudioHealthStore,
+    PostgresStudioSearchStore,
+    StudioDatabase,
+    StudioMutationAuditMiddleware,
+    create_studio_audit_router,
+    create_studio_probe_router,
 )
 from .events import (
     RedisStudioEventStore,
@@ -66,14 +82,14 @@ from .traces import StudioTraceQueryService, TempoTraceProvider, create_studio_t
 @dataclass(slots=True)
 class StudioRuntime:
     redis: Redis
-    registry_store: RedisServiceRegistryStore
+    registry_store: Any
     registry_service: ServiceRegistryService
     http_client: httpx.AsyncClient
     federation_service: StudioFederationService
-    event_store: RedisStudioEventStore
+    event_store: Any
     event_ingest_service: StudioEventIngestService
     event_stream: StudioEventStream
-    health_store: RedisStudioHealthStore
+    health_store: Any
     health_service: StudioHealthRefreshService
     log_query_service: StudioLogQueryService
     metrics_query_service: StudioMetricsQueryService
@@ -81,7 +97,7 @@ class StudioRuntime:
     metrics: RelaynaMetrics
     outbound_policy: StudioOutboundUrlPolicy
     auth_service: StudioAuthService | None
-    search_store: RedisStudioSearchStore
+    search_store: Any
     search_service: StudioSearchService
     pull_sync_worker: StudioPullSyncWorker | None = None
     pull_sync_task: asyncio.Task[None] | None = None
@@ -89,11 +105,15 @@ class StudioRuntime:
     health_refresh_task: asyncio.Task[None] | None = None
     retention_worker: StudioRetentionWorker | None = None
     retention_task: asyncio.Task[None] | None = None
-    failed_task_email_settings_store: RedisFailedTaskEmailSettingsStore | None = None
+    failed_task_email_settings_store: Any | None = None
     failed_task_email_configured: bool = False
     failed_task_email_receivers: tuple[str, ...] = ()
     failed_task_email_worker: FailedTaskEmailNotificationWorker | None = None
     failed_task_email_task: asyncio.Task[None] | None = None
+    database: StudioDatabase | None = None
+    outbox_relay: PostgresOutboxRelay | None = None
+    outbox_relay_task: asyncio.Task[None] | None = None
+    coordinator: PostgresAdvisoryCoordinator | None = None
 
 
 class _StudioLifespan:
@@ -101,6 +121,10 @@ class _StudioLifespan:
         self,
         *,
         redis_url: str,
+        database_url: str | None,
+        database_pool_size: int,
+        database_pool_max_overflow: int,
+        outbox_relay_interval_seconds: float,
         app_state_key: str,
         registry_prefix: str,
         capability_fetcher: CapabilityFetcher | None,
@@ -133,6 +157,10 @@ class _StudioLifespan:
         entra_config: StudioEntraConfig | None,
     ) -> None:
         self._redis_url = redis_url
+        self._database_url = database_url
+        self._database_pool_size = database_pool_size
+        self._database_pool_max_overflow = database_pool_max_overflow
+        self._outbox_relay_interval_seconds = outbox_relay_interval_seconds
         self._app_state_key = app_state_key
         self._registry_prefix = registry_prefix
         self._capability_fetcher = capability_fetcher
@@ -173,8 +201,26 @@ class _StudioLifespan:
         if self._runtime is None:
             redis = Redis.from_url(self._redis_url)
             metrics = RelaynaMetrics(service="relayna-studio")
-            registry_store = RedisServiceRegistryStore(redis, prefix=self._registry_prefix)
-            search_store = RedisStudioSearchStore(redis, prefix=self._task_search_index_prefix)
+            database = (
+                StudioDatabase(
+                    self._database_url,
+                    pool_size=self._database_pool_size,
+                    pool_max_overflow=self._database_pool_max_overflow,
+                )
+                if self._database_url
+                else None
+            )
+            coordinator = PostgresAdvisoryCoordinator(database) if database is not None else None
+            registry_store = (
+                PostgresServiceRegistryStore(database)
+                if database is not None
+                else RedisServiceRegistryStore(redis, prefix=self._registry_prefix)
+            )
+            search_store = (
+                PostgresStudioSearchStore(database)
+                if database is not None
+                else RedisStudioSearchStore(redis, prefix=self._task_search_index_prefix)
+            )
             outbound_policy = StudioOutboundUrlPolicy(
                 allowed_hosts=self._capability_refresh_allowed_hosts,
                 allowed_networks=self._capability_refresh_allowed_networks,
@@ -188,19 +234,38 @@ class _StudioLifespan:
             auth_service = (
                 StudioAuthService(
                     config=self._entra_config,
-                    store=StudioAuthStore(redis, prefix=self._entra_config.redis_prefix),
+                    store=(
+                        HybridStudioAuthStore(database, redis, prefix=self._entra_config.redis_prefix)
+                        if database is not None
+                        else StudioAuthStore(redis, prefix=self._entra_config.redis_prefix)
+                    ),
                     http_client=http_client,
                 )
                 if self._entra_config is not None
                 else None
             )
-            event_store = RedisStudioEventStore(
-                redis,
-                prefix=self._event_store_prefix,
-                ttl_seconds=self._event_store_ttl_seconds,
-                history_maxlen=self._event_history_maxlen,
+            event_store = (
+                PostgresStudioEventStore(
+                    database,
+                    redis,
+                    prefix=self._event_store_prefix,
+                    ttl_seconds=self._event_store_ttl_seconds,
+                    history_maxlen=self._event_history_maxlen,
+                    task_index_ttl_seconds=self._task_index_ttl_seconds,
+                )
+                if database is not None
+                else RedisStudioEventStore(
+                    redis,
+                    prefix=self._event_store_prefix,
+                    ttl_seconds=self._event_store_ttl_seconds,
+                    history_maxlen=self._event_history_maxlen,
+                )
             )
-            health_store = RedisStudioHealthStore(redis, prefix=self._health_store_prefix)
+            health_store = (
+                PostgresStudioHealthStore(database)
+                if database is not None
+                else RedisStudioHealthStore(redis, prefix=self._health_store_prefix)
+            )
             search_service = StudioSearchService(
                 registry_service=registry_service,
                 event_store=event_store,
@@ -208,7 +273,10 @@ class _StudioLifespan:
                 task_index_ttl_seconds=self._task_index_ttl_seconds,
                 backfill_event_limit=max(1, self._event_history_maxlen),
             )
-            registry_service.set_search_indexer(search_service)
+            # PostgreSQL registry mutations own both service projections and
+            # task service metadata in the same transaction. Redis retains the
+            # legacy post-write indexer path.
+            registry_service.set_search_indexer(None if database is not None else search_service)
             federation_service = StudioFederationService(
                 registry_service=registry_service,
                 http_client=http_client,
@@ -219,7 +287,10 @@ class _StudioLifespan:
                 health_store=health_store,
                 activity_reader=event_store,
                 http_client=http_client,
-                search_indexer=search_service,
+                # PostgreSQL health persistence updates the service projection
+                # transactionally; a second write after commit can race with a
+                # newer registry or health mutation.
+                search_indexer=None if database is not None else search_service,
                 outbound_policy=outbound_policy,
                 capability_stale_after_seconds=self._capability_stale_after_seconds,
                 observation_stale_after_seconds=self._observation_stale_after_seconds,
@@ -241,7 +312,10 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 event_store=event_store,
                 http_client=http_client,
-                search_indexer=search_service,
+                # PostgreSQL event insertion updates the task projection in
+                # the same serialized transaction. Running the generic indexer
+                # again after commit would reintroduce a stale-write race.
+                search_indexer=None if database is not None else search_service,
                 outbound_policy=outbound_policy,
             )
             trace_query_service = StudioTraceQueryService(
@@ -256,6 +330,7 @@ class _StudioLifespan:
                 StudioPullSyncWorker(
                     ingest_service=event_ingest_service,
                     interval_seconds=self._pull_sync_interval_seconds,
+                    coordinator=coordinator,
                 )
                 if self._pull_sync_interval_seconds is not None
                 else None
@@ -264,6 +339,7 @@ class _StudioLifespan:
                 StudioHealthRefreshWorker(
                     health_service=health_service,
                     interval_seconds=self._health_refresh_interval_seconds,
+                    coordinator=coordinator,
                 )
                 if self._health_refresh_interval_seconds is not None
                 else None
@@ -272,14 +348,31 @@ class _StudioLifespan:
                 StudioRetentionWorker(
                     search_service=search_service,
                     interval_seconds=self._retention_prune_interval_seconds,
+                    coordinator=coordinator,
+                    event_store=event_store,
                 )
                 if self._retention_prune_interval_seconds is not None
                 else None
             )
-            failed_task_email_settings_store = RedisFailedTaskEmailSettingsStore(
-                redis,
-                default_enabled=self._failed_task_email_enabled,
-                default_batch_wait_seconds=self._failed_task_email_batch_wait_seconds,
+            failed_task_email_settings_store = (
+                PostgresFailedTaskEmailSettingsStore(
+                    database,
+                    default_enabled=self._failed_task_email_enabled,
+                    default_batch_wait_seconds=self._failed_task_email_batch_wait_seconds,
+                )
+                if database is not None
+                else RedisFailedTaskEmailSettingsStore(
+                    redis,
+                    default_enabled=self._failed_task_email_enabled,
+                    default_batch_wait_seconds=self._failed_task_email_batch_wait_seconds,
+                )
+            )
+            notification_history_store = (
+                PostgresNotificationHistoryStore(
+                    database, dedupe_ttl_seconds=self._failed_task_email_dedupe_ttl_seconds
+                )
+                if database is not None
+                else None
             )
             failed_task_email_configured = self._failed_task_email_configured()
             failed_task_email_worker = self._build_failed_task_email_worker(
@@ -288,6 +381,17 @@ class _StudioLifespan:
                 federation_service=federation_service,
                 outbound_policy=outbound_policy,
                 settings_store=failed_task_email_settings_store,
+                history_store=notification_history_store,
+                coordinator=coordinator,
+            )
+            outbox_relay = (
+                PostgresOutboxRelay(
+                    database,
+                    redis,
+                    interval_seconds=self._outbox_relay_interval_seconds,
+                )
+                if database is not None
+                else None
             )
             self._runtime = StudioRuntime(
                 redis=redis,
@@ -315,6 +419,9 @@ class _StudioLifespan:
                 failed_task_email_configured=failed_task_email_configured,
                 failed_task_email_receivers=self._failed_task_email_receivers,
                 failed_task_email_worker=failed_task_email_worker,
+                database=database,
+                outbox_relay=outbox_relay,
+                coordinator=coordinator,
             )
         return self._runtime
 
@@ -332,7 +439,9 @@ class _StudioLifespan:
         http_client: httpx.AsyncClient,
         federation_service: StudioFederationService,
         outbound_policy: StudioOutboundUrlPolicy,
-        settings_store: RedisFailedTaskEmailSettingsStore,
+        settings_store: Any,
+        history_store: PostgresNotificationHistoryStore | None,
+        coordinator: PostgresAdvisoryCoordinator | None,
     ) -> FailedTaskEmailNotificationWorker | None:
         configured = self._failed_task_email_configured()
         if self._failed_task_email_enabled and not self._failed_task_email_service_url:
@@ -369,10 +478,12 @@ class _StudioLifespan:
             email_client=email_client,
             config=config,
             settings_store=settings_store,
+            history_store=history_store,
         )
         return FailedTaskEmailNotificationWorker(
             notification_service=notification_service,
             interval_seconds=config.interval_seconds,
+            coordinator=coordinator,
         )
 
     def __call__(self, app: FastAPI):
@@ -381,7 +492,16 @@ class _StudioLifespan:
             runtime = self.ensure_runtime()
             setattr(app.state, self._app_state_key, runtime)
             try:
-                await runtime.search_service.initialize()
+                if runtime.database is not None:
+                    await runtime.database.check_ready()
+                    await runtime.database.check_schema()
+                    await cast(Awaitable[bool], runtime.redis.ping())
+                # PostgreSQL projections are created transactionally and by
+                # the explicit Redis backfill. Rebuilding them through the
+                # legacy post-write indexer would introduce stale-write races
+                # between replicas.
+                if runtime.database is None:
+                    await runtime.search_service.initialize()
                 if runtime.auth_service is not None:
                     await runtime.auth_service.initialize()
                 if runtime.pull_sync_worker is not None:
@@ -404,6 +524,11 @@ class _StudioLifespan:
                         runtime.failed_task_email_worker.run_forever(),
                         name="studio-failed-task-email-notifications",
                     )
+                if runtime.outbox_relay is not None:
+                    runtime.outbox_relay_task = asyncio.create_task(
+                        runtime.outbox_relay.run_forever(),
+                        name="studio-postgres-outbox-relay",
+                    )
                 yield
             finally:
                 if runtime.pull_sync_worker is not None:
@@ -414,6 +539,8 @@ class _StudioLifespan:
                     runtime.retention_worker.stop()
                 if runtime.failed_task_email_worker is not None:
                     runtime.failed_task_email_worker.stop()
+                if runtime.outbox_relay is not None:
+                    runtime.outbox_relay.stop()
                 if runtime.pull_sync_task is not None:
                     try:
                         await asyncio.wait_for(asyncio.shield(runtime.pull_sync_task), timeout=5.0)
@@ -450,8 +577,19 @@ class _StudioLifespan:
                             await runtime.failed_task_email_task
                     finally:
                         runtime.failed_task_email_task = None
+                if runtime.outbox_relay_task is not None:
+                    try:
+                        await asyncio.wait_for(asyncio.shield(runtime.outbox_relay_task), timeout=5.0)
+                    except TimeoutError:
+                        runtime.outbox_relay_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await runtime.outbox_relay_task
+                    finally:
+                        runtime.outbox_relay_task = None
                 await runtime.http_client.aclose()
                 await runtime.redis.aclose()
+                if runtime.database is not None:
+                    await runtime.database.dispose()
                 if hasattr(app.state, self._app_state_key):
                     delattr(app.state, self._app_state_key)
 
@@ -461,6 +599,10 @@ class _StudioLifespan:
 def create_studio_app(
     *,
     redis_url: str,
+    database_url: str | None = None,
+    database_pool_size: int = 10,
+    database_pool_max_overflow: int = 20,
+    outbox_relay_interval_seconds: float = 0.25,
     title: str = "Relayna Studio Backend",
     app_state_key: str = "studio",
     registry_prefix: str = "studio:services",
@@ -499,6 +641,10 @@ def create_studio_app(
     )
     lifespan_factory = _StudioLifespan(
         redis_url=redis_url,
+        database_url=database_url,
+        database_pool_size=database_pool_size,
+        database_pool_max_overflow=database_pool_max_overflow,
+        outbox_relay_interval_seconds=outbox_relay_interval_seconds,
         app_state_key=app_state_key,
         registry_prefix=registry_prefix,
         capability_fetcher=resolved_capability_fetcher,
@@ -558,7 +704,12 @@ def create_studio_app(
                 settings_store=runtime.failed_task_email_settings_store,
             )
         )
+    if runtime.database is not None:
+        app.include_router(create_studio_audit_router(runtime.database))
+    app.include_router(create_studio_probe_router(runtime.database, runtime.redis))
     app.include_router(create_metrics_router(runtime.metrics))
+    if runtime.database is not None:
+        app.add_middleware(StudioMutationAuditMiddleware, database=runtime.database)
     if runtime.auth_service is not None:
         app.add_middleware(StudioAuthMiddleware, service=runtime.auth_service)
     return app

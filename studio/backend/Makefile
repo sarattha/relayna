@@ -11,6 +11,7 @@ LINE_LENGTH     := 120
 RUFF_FLAGS      := --line-length $(LINE_LENGTH)
 PY_PATHS        := src tests
 IMAGE_NAME      := relayna-studio-backend
+ALEMBIC         := $(RUN) alembic -c alembic.ini
 
 .DEFAULT_GOAL := help
 
@@ -39,6 +40,34 @@ fix: ## Lint + safe auto-fixes for the Studio backend package
 test: ## Run the Studio backend test suite
 	$(PYTEST) tests
 
+.PHONY: integration
+integration: ## Run real PostgreSQL and Redis integration tests
+	@test -n "$${RELAYNA_STUDIO_TEST_DATABASE_URL}" || (echo "Set RELAYNA_STUDIO_TEST_DATABASE_URL" >&2; exit 2)
+	@test -n "$${RELAYNA_STUDIO_TEST_REDIS_URL}" || (echo "Set RELAYNA_STUDIO_TEST_REDIS_URL" >&2; exit 2)
+	$(PYTEST) tests/test_postgres_persistence_integration.py
+
+.PHONY: db-upgrade
+db-upgrade: ## Upgrade the configured Studio PostgreSQL database to head
+	@test -n "$${RELAYNA_STUDIO_DATABASE_URL}" || (echo "Set RELAYNA_STUDIO_DATABASE_URL" >&2; exit 2)
+	$(ALEMBIC) upgrade head
+
+.PHONY: db-downgrade
+db-downgrade: ## Downgrade the configured Studio PostgreSQL database by one revision
+	@test -n "$${RELAYNA_STUDIO_DATABASE_URL}" || (echo "Set RELAYNA_STUDIO_DATABASE_URL" >&2; exit 2)
+	$(ALEMBIC) downgrade -1
+
+.PHONY: db-current
+db-current: ## Show the configured Studio PostgreSQL schema revision
+	@test -n "$${RELAYNA_STUDIO_DATABASE_URL}" || (echo "Set RELAYNA_STUDIO_DATABASE_URL" >&2; exit 2)
+	$(ALEMBIC) current
+
+.PHONY: db-migration-cycle
+db-migration-cycle: ## Destructively verify upgrade/downgrade/upgrade on a disposable database
+	@test -n "$${RELAYNA_STUDIO_DATABASE_URL}" || (echo "Set RELAYNA_STUDIO_DATABASE_URL" >&2; exit 2)
+	$(ALEMBIC) upgrade head
+	$(ALEMBIC) downgrade base
+	$(ALEMBIC) upgrade head
+
 .PHONY: coverage
 coverage: ## Run whole-package backend coverage gate
 	$(UV) run --extra dev pytest --cov=relayna_studio --cov-report=term-missing tests
@@ -52,8 +81,8 @@ build: ## Build the Studio backend wheel
 	$(BUILD) --wheel
 
 .PHONY: run
-run: ## Run the Studio backend from source (requires RELAYNA_STUDIO_REDIS_URL)
-	RELAYNA_STUDIO_REDIS_URL=$${RELAYNA_STUDIO_REDIS_URL:?Set RELAYNA_STUDIO_REDIS_URL} $(RUN) relayna-studio
+run: ## Run the Studio backend from source (requires PostgreSQL, Redis, and Entra settings)
+	$(RUN) relayna-studio
 
 .PHONY: docker-build
 docker-build: ## Build the Studio backend Docker image

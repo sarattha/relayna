@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.5.0/relayna-1.5.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.6.0/relayna-1.6.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.5.0/relayna-1.5.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.6.0/relayna-1.6.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.5.0.tar.gz`
-- `dist/relayna-1.5.0-py3-none-any.whl`
+- `dist/relayna-1.6.0.tar.gz`
+- `dist/relayna-1.6.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,21 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.6.0
+
+Studio now requires PostgreSQL in addition to Redis. Use a maintenance window:
+stop all old Studio writers, back up both stores, upgrade the Alembic schema,
+validate and import the retained `studio:*` Redis state, then start only 1.6.0
+replicas. Mixed old and new Studio versions are unsupported. Existing HTTP and
+frontend response shapes remain stable, while `/livez`, `/healthz`, `/readyz`,
+and the administrator audit route are additive.
+
+The Relayna SDK and deployed service runtimes remain Redis-only and do not need
+PostgreSQL. Upgrade the SDK, Studio backend, and Studio frontend together to
+keep the shared release line aligned. See
+[Studio PostgreSQL and Redis persistence](studio-persistence.md) for exact
+migration, backup, validation, and rollback commands.
 
 ### Upgrading to 1.5.0
 

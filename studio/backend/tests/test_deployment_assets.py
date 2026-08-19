@@ -18,6 +18,26 @@ def test_dockerfiles_exist_for_backend_and_frontend_images() -> None:
     assert (REPO_ROOT / "apps/studio/Dockerfile").is_file()
 
 
+def test_backend_image_and_compose_ship_migrations_and_hybrid_dependencies() -> None:
+    dockerfile = (REPO_ROOT / "studio/backend/Dockerfile").read_text()
+    compose = (REPO_ROOT / "studio/compose.yaml").read_text()
+    assert "ALEMBIC_CONFIG=/app/studio-backend/alembic.ini" in dockerfile
+    assert "COPY --from=build /app/studio/backend/src /app/studio-backend/src" in dockerfile
+    assert "postgres:16-alpine" in compose
+    assert "redis:7-alpine" in compose
+    assert 'command: ["alembic", "upgrade", "head"]' in compose
+    assert "condition: service_completed_successfully" in compose
+    assert "http://127.0.0.1:8000/readyz" in compose
+
+
+def test_postgresql_dependencies_remain_studio_backend_only() -> None:
+    sdk_project = (REPO_ROOT / "pyproject.toml").read_text().lower()
+    backend_project = (REPO_ROOT / "studio/backend/pyproject.toml").read_text().lower()
+    for dependency in ("asyncpg", "sqlalchemy", "alembic"):
+        assert dependency not in sdk_project
+        assert dependency in backend_project
+
+
 def test_backend_docker_documentation_mounts_local_oidc_credentials() -> None:
     documentation = (REPO_ROOT / "docs/studio-backend.md").read_text()
 

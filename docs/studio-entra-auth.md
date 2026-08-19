@@ -1,6 +1,6 @@
 # Studio Entra Authentication
 
-Relayna Studio 1.5.0 requires Microsoft Entra authentication for every human
+Relayna Studio 1.6.0 requires Microsoft Entra authentication for every human
 user. Authentication is implemented as a backend-for-frontend flow: the Studio
 backend performs the authorization-code exchange and the browser receives only
 an opaque Studio session cookie. Entra tokens never enter frontend storage.
@@ -57,7 +57,7 @@ origin. Keep the default secure cookie setting enabled behind HTTPS.
 
 Bootstrap email and object-ID allowlists must either both be set or both be
 absent. A bootstrap identity is accepted only when tenant, normalized email,
-and object ID all match. On a fresh Redis namespace, startup fails unless the
+and object ID all match. On a fresh PostgreSQL database, startup fails unless the
 allowlists are present or an active administrator already exists. After the
 first administrator is persisted, remove both bootstrap lists if desired.
 Bootstrap configuration never reactivates a blocked member.
@@ -124,7 +124,8 @@ Owner` exercises approval and readonly assignment. Local HTTP requires
 
 ## Operational Security Notes
 
-- Redis stores only SHA-256 hashes of random 256-bit session and login tokens.
+- Redis stores only SHA-256 hashes of random 256-bit session and login tokens;
+  durable member/RBAC records are stored transactionally in PostgreSQL.
 - Sessions expire after a fixed eight hours by default and are not refreshed by
   activity.
 - Discovery and JWKS are cached, while ID tokens are validated for signature,
@@ -132,9 +133,9 @@ Owner` exercises approval and readonly assignment. Local HTTP requires
 - The token endpoint authenticates Studio using a PS256 `private_key_jwt` with
   the certificate's `x5t#S256` thumbprint.
 - Self-blocking, self-demotion, and changes that would leave zero active
-  administrators are rejected atomically in Redis.
+  administrators are rejected under a PostgreSQL transaction lock.
 
 Certificate-secret installation and Entra application changes are operator
-actions. Rolling back the application to 1.4.32 does not require a service-data
-migration; the new `studio:auth` keys can remain dormant or be removed under a
-controlled maintenance procedure.
+actions. Rolling back from 1.6.0 requires the maintenance-window procedure in
+[Studio persistence](studio-persistence.md); old versions cannot read members
+or other durable Studio writes from PostgreSQL.

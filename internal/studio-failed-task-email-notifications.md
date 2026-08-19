@@ -57,8 +57,9 @@ Failed Tasks page control for runtime enablement and batch wait period.
 
 Implemented automatic failed-task email notifications as a disabled-by-default
 Studio backend worker. The feature uses env-owned email service configuration,
-Redis-backed runtime settings, Redis lock/notified keys to prevent duplicate
-sends, and retries later after email-service failures.
+PostgreSQL-backed runtime settings, pending/delivery/dedupe history, and
+multi-replica advisory-lock coordination. Redis remains only in the legacy
+compatibility path. Failed sends remain pending for a later retry.
 
 ## Context and Orientation
 
@@ -78,7 +79,7 @@ intentional review item.
 
 Add notification settings to `StudioBackendSettings` and pass them through
 `create_studio_app`. Add a new internal failed-task notification module with an
-email client, Redis-backed runtime settings, dedupe store, and background
+email client, durable runtime settings, dedupe store, and background
 worker. Wire the worker into `StudioRuntime` and the lifespan lifecycle. Add
 Failed Tasks page controls for enablement and wait period. Add focused tests for
 config, send behavior, batching, dedupe, retry after failure, UI controls, and
@@ -102,15 +103,15 @@ Acceptance criteria:
 - A positive wait sends one email containing all newly discovered failures in
   the batch window.
 - Failed email sends are retried later and do not create a notified marker.
-- Duplicate scans and multiple Studio replicas are protected by Redis lock and
-  notified keys.
+- Duplicate scans and multiple Studio replicas are protected by PostgreSQL
+  advisory coordination and unique delivery records.
 - Existing failed-task listing remains unaffected.
 
 ## Idempotence and Recovery
 
-The worker is safe to restart. Redis notified markers prevent duplicate emails
-after successful sends, and short lock keys prevent concurrent sends while
-allowing retry after lock expiry.
+The worker is safe to restart. PostgreSQL delivery records prevent duplicate
+emails after successful sends, and advisory locks serialize each scan while
+allowing retry after a connection loss.
 
 ## Artifacts and Notes
 

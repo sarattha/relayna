@@ -28,7 +28,7 @@ backend instead of in the browser.
 ## Studio Operator Tour
 
 The screenshots in this guide come from the production Nginx frontend and
-Studio backend running with Redis, RabbitMQ, and mock Relayna services. Values
+Studio backend running with PostgreSQL, Redis, RabbitMQ, and mock Relayna services. Values
 such as `mock`, `orders-api`, and `host.docker.internal` are examples; use the
 addresses and environment names that are reachable from your Studio backend.
 
@@ -770,5 +770,5 @@ Checks:
 
 - [Getting Started](getting-started.md) for making a downstream service
   Studio-compatible
-- [Studio Backend](studio-backend.md) for backend runtime, Redis, and route
+- [Studio Backend](studio-backend.md) for backend runtime, PostgreSQL, Redis, and route
   behavior

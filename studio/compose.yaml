@@ -1,0 +1,90 @@
+name: relayna-studio
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: relayna_studio
+      POSTGRES_USER: relayna
+      POSTGRES_PASSWORD: ${RELAYNA_STUDIO_POSTGRES_PASSWORD:?Set RELAYNA_STUDIO_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relayna -d relayna_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - studio-postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - studio-redis:/data
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: studio/backend/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment: &backend-environment
+      RELAYNA_STUDIO_DATABASE_URL: postgresql+asyncpg://relayna:${RELAYNA_STUDIO_POSTGRES_PASSWORD}@postgres:5432/relayna_studio
+      RELAYNA_STUDIO_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: ..
+      dockerfile: studio/backend/Dockerfile
+    environment:
+      <<: *backend-environment
+      RELAYNA_STUDIO_ENTRA_APPLICATION_ID: ${RELAYNA_STUDIO_ENTRA_APPLICATION_ID:?Set RELAYNA_STUDIO_ENTRA_APPLICATION_ID}
+      RELAYNA_STUDIO_ENTRA_TENANT_ID: ${RELAYNA_STUDIO_ENTRA_TENANT_ID:?Set RELAYNA_STUDIO_ENTRA_TENANT_ID}
+      RELAYNA_STUDIO_ENTRA_ISSUER: ${RELAYNA_STUDIO_ENTRA_ISSUER:?Set RELAYNA_STUDIO_ENTRA_ISSUER}
+      RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL: ${RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL:?Set RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL}
+      RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI: ${RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI:?Set RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI}
+      RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH: /run/secrets/relayna-studio-private-key.pem
+      RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH: /run/secrets/relayna-studio-certificate.pem
+      RELAYNA_STUDIO_ENTRA_ADMIN_EMAILS: ${RELAYNA_STUDIO_ENTRA_ADMIN_EMAILS:-}
+      RELAYNA_STUDIO_ENTRA_ADMIN_OBJECT_IDS: ${RELAYNA_STUDIO_ENTRA_ADMIN_OBJECT_IDS:-}
+      RELAYNA_STUDIO_SESSION_COOKIE_SECURE: ${RELAYNA_STUDIO_SESSION_COOKIE_SECURE:-true}
+    volumes:
+      - ${RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH:?Set RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH}:/run/secrets/relayna-studio-private-key.pem:ro
+      - ${RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH:?Set RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH}:/run/secrets/relayna-studio-certificate.pem:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: apps/studio/Dockerfile
+    environment:
+      STUDIO_BACKEND_UPSTREAM: backend:8000
+    ports:
+      - ${RELAYNA_STUDIO_PORT:-8080}:80
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  studio-postgres:
+  studio-redis:

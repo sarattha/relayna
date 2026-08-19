@@ -559,6 +559,7 @@ class StudioEventIngestService:
 class StudioPullSyncWorker:
     ingest_service: StudioEventIngestService
     interval_seconds: float = 5.0
+    coordinator: Any | None = None
     _stopped: asyncio.Event = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -570,7 +571,12 @@ class StudioPullSyncWorker:
     async def run_forever(self) -> None:
         while not self._stopped.is_set():
             try:
-                await self.ingest_service.sync_registered_services()
+                if self.coordinator is None:
+                    await self.ingest_service.sync_registered_services()
+                else:
+                    async with self.coordinator.try_lock("studio-pull-sync") as acquired:
+                        if acquired:
+                            await self.ingest_service.sync_registered_services()
             except Exception:
                 LOGGER.exception("Studio pull-sync iteration failed.")
             try:
@@ -580,7 +586,7 @@ class StudioPullSyncWorker:
 
 
 class StudioEventStream:
-    def __init__(self, *, event_store: RedisStudioEventStore, keepalive_interval_seconds: float | None = 15.0) -> None:
+    def __init__(self, *, event_store: Any, keepalive_interval_seconds: float | None = 15.0) -> None:
         self._event_store = event_store
         self._keepalive_interval_seconds = keepalive_interval_seconds
 

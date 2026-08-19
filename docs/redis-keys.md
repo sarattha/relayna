@@ -131,10 +131,26 @@ so the next scan can retry recovery.
 
 ## Studio Backend Keys
 
-The Studio backend requires Redis. It owns control-plane state for service
-registry records, ingested events, health snapshots, and search indexes.
+Studio 1.6.0 requires Redis for OIDC login transactions, browser sessions,
+pub/sub live delivery, caches, and ephemeral coordination. PostgreSQL is the
+authority for registry, members/RBAC, settings, events, cursors, health,
+search, notification history, outbox, and audit data.
 
-### Registry
+The durable key families below describe the pre-1.6.0 source consumed by
+`relayna-studio-migrate-redis`; new Studio replicas do not write them. Keep them
+through the cutover rollback window. SDK runtime keys in the preceding sections
+remain Redis-only and are neither scanned nor migrated.
+
+Current Redis-owned Studio keys are:
+
+| Key | Type | Purpose |
+| --- | --- | --- |
+| `studio:auth:login:{digest}` | string with TTL | Single-use OIDC transaction. |
+| `studio:auth:session:{digest}` | string with TTL | Hashed opaque browser session. |
+| `studio:events:channel:service:{service_id}` | pub/sub channel | Live service event delivery from the PostgreSQL outbox. |
+| `studio:events:channel:task:{service_id}:{task_id}` | pub/sub channel | Live task event delivery from the PostgreSQL outbox. |
+
+### Legacy registry backfill source
 
 Default prefix: `studio:services`.
 
@@ -146,7 +162,7 @@ Configuration: `RELAYNA_STUDIO_REGISTRY_PREFIX`.
 | `{prefix}:all` | set | All registered service ids. |
 | `{prefix}:by-env-url:{environment}:{normalized_base_url}` | string | Uniqueness index from environment and normalized base URL to service id. |
 
-### Event Store
+### Legacy event backfill source and current live channels
 
 Default prefix: `studio:events`.
 
@@ -170,7 +186,7 @@ Configuration:
 | `{prefix}:channel:service:{service_id}` | pubsub channel | Realtime Studio event fanout for one service. |
 | `{prefix}:channel:task:{service_id}:{task_id}` | pubsub channel | Realtime Studio event fanout for one service task. |
 
-### Health Store
+### Legacy health backfill source
 
 Default prefix: `studio:health`.
 
@@ -186,7 +202,7 @@ Configuration:
 | --- | --- | --- |
 | `{prefix}:{service_id}` | string | Serialized health document for one registered service. |
 
-### Search Index
+### Legacy search backfill source
 
 Default prefix: `studio:search`.
 
@@ -209,10 +225,9 @@ Configuration:
 
 ## Studio Frontend
 
-The Studio frontend does not connect to Redis and should not be configured with
-Redis credentials. It reads Redis-backed state only through Studio backend
-`/studio/*` APIs. Redis network access, prefix selection, TTLs, and retention
-policy are backend and SDK runtime concerns.
+The Studio frontend does not connect to PostgreSQL or Redis and should not be
+configured with either credential. It reads control-plane state only through
+Studio backend `/studio/*` APIs.
 
 ## Prefix And Retention Guidance
 

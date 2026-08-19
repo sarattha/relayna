@@ -9,6 +9,10 @@ from .auth import StudioEntraConfig
 
 class StudioAppKwargs(TypedDict):
     redis_url: str
+    database_url: str | None
+    database_pool_size: int
+    database_pool_max_overflow: int
+    outbox_relay_interval_seconds: float
     title: str
     app_state_key: str
     registry_prefix: str
@@ -118,6 +122,10 @@ def _env_csv(name: str) -> tuple[str, ...] | None:
 @dataclass(slots=True, frozen=True)
 class StudioBackendSettings:
     redis_url: str
+    database_url: str = ""
+    database_pool_size: int = 10
+    database_pool_max_overflow: int = 20
+    outbox_relay_interval_seconds: float = 0.25
     title: str = "Relayna Studio Backend"
     host: str = "0.0.0.0"
     port: int = 8000
@@ -162,6 +170,12 @@ class StudioBackendSettings:
     session_cookie_secure: bool = True
 
     def __post_init__(self) -> None:
+        if self.database_pool_size <= 0:
+            raise RuntimeError("RELAYNA_STUDIO_DATABASE_POOL_SIZE must be positive.")
+        if self.database_pool_max_overflow < 0:
+            raise RuntimeError("RELAYNA_STUDIO_DATABASE_POOL_MAX_OVERFLOW must not be negative.")
+        if self.outbox_relay_interval_seconds <= 0:
+            raise RuntimeError("RELAYNA_STUDIO_OUTBOX_RELAY_INTERVAL_SECONDS must be positive.")
         if bool(self.entra_admin_emails) != bool(self.entra_admin_object_ids):
             raise RuntimeError(
                 "RELAYNA_STUDIO_ENTRA_ADMIN_EMAILS and RELAYNA_STUDIO_ENTRA_ADMIN_OBJECT_IDS "
@@ -186,6 +200,10 @@ class StudioBackendSettings:
     def from_env(cls) -> StudioBackendSettings:
         return cls(
             redis_url=_env_required("RELAYNA_STUDIO_REDIS_URL"),
+            database_url=_env_required("RELAYNA_STUDIO_DATABASE_URL"),
+            database_pool_size=_env_int("RELAYNA_STUDIO_DATABASE_POOL_SIZE", 10),
+            database_pool_max_overflow=_env_int("RELAYNA_STUDIO_DATABASE_POOL_MAX_OVERFLOW", 20),
+            outbox_relay_interval_seconds=_env_float("RELAYNA_STUDIO_OUTBOX_RELAY_INTERVAL_SECONDS", 0.25),
             title=_env_str("RELAYNA_STUDIO_TITLE", "Relayna Studio Backend"),
             host=_env_str("RELAYNA_STUDIO_HOST", "0.0.0.0"),
             port=_env_int("RELAYNA_STUDIO_PORT", 8000),
@@ -248,6 +266,10 @@ class StudioBackendSettings:
     def to_app_kwargs(self) -> StudioAppKwargs:
         return {
             "redis_url": self.redis_url,
+            "database_url": self.database_url or None,
+            "database_pool_size": self.database_pool_size,
+            "database_pool_max_overflow": self.database_pool_max_overflow,
+            "outbox_relay_interval_seconds": self.outbox_relay_interval_seconds,
             "title": self.title,
             "app_state_key": self.app_state_key,
             "registry_prefix": self.registry_prefix,

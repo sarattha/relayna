@@ -18,6 +18,7 @@ from relayna_studio.factory import create_app
 def studio_entra_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     values = {
         "RELAYNA_STUDIO_REDIS_URL": "redis://studio-test/0",
+        "RELAYNA_STUDIO_DATABASE_URL": "postgresql+asyncpg://studio:studio@database/studio",
         "RELAYNA_STUDIO_ENTRA_APPLICATION_ID": "studio-client",
         "RELAYNA_STUDIO_ENTRA_TENANT_ID": "tenant-1",
         "RELAYNA_STUDIO_ENTRA_ISSUER": "http://127.0.0.1:19091/tenant-1/v2.0",
@@ -42,6 +43,27 @@ def test_settings_require_redis_url(monkeypatch: pytest.MonkeyPatch) -> None:
         StudioBackendSettings.from_env()
 
 
+def test_settings_require_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RELAYNA_STUDIO_DATABASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="RELAYNA_STUDIO_DATABASE_URL"):
+        StudioBackendSettings.from_env()
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"database_pool_size": 0}, "POOL_SIZE"),
+        ({"database_pool_max_overflow": -1}, "MAX_OVERFLOW"),
+        ({"outbox_relay_interval_seconds": 0}, "OUTBOX_RELAY_INTERVAL"),
+        ({"entra_admin_emails": ("admin@example.test",)}, "configured together"),
+    ],
+)
+def test_settings_reject_invalid_database_and_bootstrap_values(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(RuntimeError, match=message):
+        StudioBackendSettings(redis_url="redis://studio-test/0", **kwargs)  # type: ignore[arg-type]
+
+
 def test_settings_require_entra_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RELAYNA_STUDIO_ENTRA_APPLICATION_ID")
 
@@ -59,6 +81,7 @@ def test_settings_parse_optional_values(monkeypatch: pytest.MonkeyPatch) -> None
     settings = StudioBackendSettings.from_env()
 
     assert settings.redis_url == "redis://studio-test/0"
+    assert settings.database_url == "postgresql+asyncpg://studio:studio@database/studio"
     assert settings.event_store_ttl_seconds is None
     assert settings.pull_sync_interval_seconds == 15.0
     assert settings.push_ingest_enabled is True
