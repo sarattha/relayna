@@ -26,8 +26,8 @@ use Redis only and do not acquire a PostgreSQL dependency.
 - [x] (2026-08-19 15:42+07:00) Added checksummed idempotent Redis backfill tooling with deleted-service tombstones, validation, and maintenance-window cutover/backup/rollback documentation.
 - [x] (2026-08-19 19:15+07:00) Added unit and real-PostgreSQL integration/migration/concurrency/failure-recovery coverage, intentional freeze manifests, synchronized 1.6.0 versions, changelog, Compose topology, and operator documentation.
 - [x] (2026-08-19 19:50+07:00) Ran the initial full backend/frontend coverage, migration-cycle, strict-docs, release-metadata, Docker-image, and built-stack Computer Use validation; restart persistence and Redis live delivery passed. A clean final verification pass remains before publication.
-- [x] (2026-08-19 20:09+07:00) Opened draft PR #122 with three focused commits; all ten initial CI checks passed. The first Codex review raised four actionable threads, all fixed locally with real-database assertions and full verification in progress before replies/resolution.
-- [ ] Push the review-fix commit, reply to and resolve all four Codex threads, confirm replacement CI, and close the plan.
+- [x] (2026-08-19 20:09+07:00) Opened draft PR #122 with three focused commits; all ten initial CI checks passed. The first Codex review raised four actionable threads.
+- [x] (2026-08-19 20:15+07:00) Pushed review-fix commit `28ba080`, replied to and resolved all four Codex threads with concrete evidence, reran the full verification stack, and confirmed all ten replacement CI checks passed.
 
 ## Surprises & Discoveries
 
@@ -144,8 +144,23 @@ Computer Use validated the built frontend with the real backend, PostgreSQL,
 Redis, development OIDC issuer, and mock service: admin sign-in, registration,
 capability/health refresh, SSE delivery, task and tagged-service search, access
 and notification settings views, and backend restart persistence all passed.
-Publication and the first Codex review remain outstanding; PR/review evidence
-and the final residual-risk statement will be appended before handoff.
+
+Draft PR #122 is published with four focused implementation, test,
+documentation, and review-fix commits. Both the initial and replacement CI runs
+passed all ten checks. The first Codex review raised four actionable findings:
+duplicate projection writes, lost Redis event expiry during backfill,
+unenforced PostgreSQL history limits, and a 255-character service identifier
+ceiling. Each was fixed with regression coverage, answered with verification
+evidence, and resolved; the final thread audit found no unresolved comments.
+
+Residual operational risks are explicit rather than hidden: outbox delivery is
+at least once across the Redis publish/mark boundary, so live consumers must
+deduplicate by event key while PostgreSQL REST history remains authoritative;
+an email provider without idempotency support can duplicate delivery after a
+crash immediately following send; and rolling back after post-cutover
+PostgreSQL writes crosses a documented data-loss boundary. Mixed old and new
+Studio replicas are unsupported, so operators must use the documented short
+maintenance-window cutover.
 
 ## Context and Orientation
 
