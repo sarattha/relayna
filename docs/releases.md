@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.32/relayna-1.4.32-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.5.0/relayna-1.5.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.4.32/relayna-1.4.32.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.5.0/relayna-1.5.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.4.32.tar.gz`
-- `dist/relayna-1.4.32-py3-none-any.whl`
+- `dist/relayna-1.5.0.tar.gz`
+- `dist/relayna-1.5.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,20 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.5.0
+
+Studio now requires Microsoft Entra login. Before upgrading the control plane,
+register its callback URI on the existing Entra application, create and mount a
+Studio-specific certificate/private key, and configure a bootstrap
+administrator using matching email and object-ID allowlists. Active readonly
+members can inspect Studio data; only administrators can mutate data or manage
+access. Existing service data is not migrated. See
+[Studio Entra authentication](studio-entra-auth.md) for the complete rollout,
+bootstrap, route-policy, and rollback considerations.
+
+Upgrade the SDK, Studio backend, and Studio frontend together to keep the
+shared release line aligned.
 
 ### Upgrading to 1.4.32
 

@@ -101,6 +101,24 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+function adminSessionResponse() {
+  return jsonResponse({
+    user: {
+      user_id: "admin-oid",
+      tenant_id: "tenant-1",
+      object_id: "admin-oid",
+      email: "admin@example.test",
+      display_name: "Studio Admin",
+      role: "admin",
+      status: "active",
+      created_at: "2026-08-18T00:00:00Z",
+      updated_at: "2026-08-18T00:00:00Z",
+      last_sign_in_at: "2026-08-18T00:00:00Z",
+    },
+    csrf_token: "csrf-test-token",
+  });
+}
+
 function isoToLocalDateTime(value: string) {
   const date = new Date(value);
   const offsetMs = date.getTimezoneOffset() * 60 * 1000;
@@ -482,6 +500,23 @@ describe("App", () => {
       const url = String(input);
       const method = init?.method || "GET";
 
+      if (url === "/studio/auth/session" && method === "GET") {
+        return adminSessionResponse();
+      }
+      if (url === "/studio/admin/users" && method === "GET") {
+        return jsonResponse({ count: 1, users: [(await adminSessionResponse().json()).user] });
+      }
+      if (url === "/studio/admin/users/reader-oid" && method === "PATCH") {
+        return jsonResponse({
+          ...(await adminSessionResponse().json()).user,
+          user_id: "reader-oid",
+          object_id: "reader-oid",
+          email: "reader@example.test",
+          display_name: "Read Only User",
+          role: "readonly",
+          status: "active",
+        });
+      }
       if (url === "/studio/services" && method === "GET") {
         return serviceListResponse(services);
       }
@@ -959,6 +994,32 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Search tasks" }));
     await waitFor(() => expect(window.location.pathname).toBe("/tasks/search"));
     expect(window.location.search).toBe("?task_id=task-123");
+  });
+
+  it("hides administrative navigation and service mutations for readonly users", async () => {
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/studio/auth/session") {
+        const payload = await adminSessionResponse().json();
+        return jsonResponse({ ...payload, user: { ...payload.user, role: "readonly" } });
+      }
+      return await baseImpl!(input, init);
+    });
+    window.history.replaceState({}, "", "/services");
+    render(<App />);
+    expect(await screen.findByText("Registered Services")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Access" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New Service" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
+  });
+
+  it("renders the administrator access-management route", async () => {
+    window.history.replaceState({}, "", "/access");
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Studio Access" })).toBeInTheDocument();
+    expect(screen.getByText("admin@example.test")).toBeInTheDocument();
+    expect(screen.getAllByRole("combobox").length).toBeGreaterThanOrEqual(2);
   });
 
   it("polls the registered services list silently and stops after unmount", async () => {
@@ -2005,7 +2066,10 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
 
     expect(await screen.findByText("Refreshed 'payments-api'.")).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/refresh", { method: "POST" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/studio/services/payments-api/refresh",
+      expect.objectContaining({ method: "POST" }),
+    ));
     expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
   });
 
@@ -2913,6 +2977,9 @@ describe("App", () => {
     let calls = 0;
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
+      if (url === "/studio/auth/session") {
+        return adminSessionResponse();
+      }
       if (url === "/studio/services") {
         return serviceListResponse(services);
       }
@@ -3102,6 +3169,9 @@ describe("App", () => {
     first.unmount();
 
     fetchMock.mockImplementation(async (input) => {
+      if (String(input) === "/studio/auth/session") {
+        return adminSessionResponse();
+      }
       if (String(input) === "/studio/services") {
         return serviceListResponse(services);
       }

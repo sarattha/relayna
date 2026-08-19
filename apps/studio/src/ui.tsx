@@ -21,6 +21,7 @@ import type {
   WorkflowTopologyGraph,
 } from "./types";
 import { useStudioServices } from "./services-context";
+import { useStudioAuth } from "./auth-context";
 
 export const frameStyle = {
   border: "1px solid var(--studio-border)",
@@ -935,6 +936,7 @@ export function AppChrome({ children }: { children: ReactNode }) {
 export function AppHeader() {
   const navigate = useNavigate();
   const servicesState = useStudioServices();
+  const auth = useStudioAuth();
   const [globalQuery, setGlobalQuery] = useState("");
   const environments = Array.from(new Set(servicesState.services.map((service) => service.environment))).sort();
   const alertCount = servicesState.services.filter((service) =>
@@ -966,6 +968,7 @@ export function AppHeader() {
           Failed Tasks
           {alertCount ? <span className="studio-alert-count" aria-label={`${alertCount} service alerts`}>{alertCount}</span> : null}
         </NavLink>
+        {auth.isAdmin ? <NavLink to="/access">Access</NavLink> : null}
       </nav>
       <div className="studio-header__tools">
         <label className="studio-environment-scope">
@@ -997,6 +1000,10 @@ export function AppHeader() {
             </button>
           </div>
         </form>
+        <div className="studio-user-menu">
+          <span><strong>{auth.user.display_name}</strong><small>{auth.user.role === "admin" ? "Admin" : "Read-only"}</small></span>
+          <button type="button" onClick={() => void auth.signOut()}>Sign out</button>
+        </div>
       </div>
     </header>
   );

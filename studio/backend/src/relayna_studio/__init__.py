@@ -1,4 +1,14 @@
 from .app import StudioRuntime, create_studio_app, get_studio_runtime
+from .auth import (
+    StudioEntraConfig,
+    StudioMember,
+    StudioMemberStatus,
+    StudioRole,
+    StudioSessionResponse,
+    StudioUserListResponse,
+    StudioUserUpdate,
+    create_studio_auth_router,
+)
 from .config import StudioBackendSettings
 from .dlq_view import build_dlq_view
 from .events import (
@@ -132,6 +142,13 @@ __all__ = [
     "ServiceListResponse",
     "ServiceRecord",
     "StudioBackendSettings",
+    "StudioEntraConfig",
+    "StudioMember",
+    "StudioMemberStatus",
+    "StudioRole",
+    "StudioSessionResponse",
+    "StudioUserListResponse",
+    "StudioUserUpdate",
     "StudioOutboundUrlPolicy",
     "StudioHealthRefreshService",
     "StudioHealthRefreshWorker",
@@ -194,6 +211,7 @@ __all__ = [
     "build_stage_view",
     "build_topology_view",
     "create_app",
+    "create_studio_auth_router",
     "create_federation_router",
     "create_service_registry_router",
     "gateway_service_export_from_record",

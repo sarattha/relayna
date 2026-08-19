@@ -5,6 +5,32 @@ export type CapabilityHealthState = "fresh" | "stale" | "missing" | "error";
 export type ObservationFreshnessState = "fresh" | "stale" | "missing";
 export type WorkerHealthState = "healthy" | "stale" | "unhealthy" | "unsupported" | "unknown";
 
+export type StudioRole = "admin" | "readonly";
+export type StudioMemberStatus = "pending" | "active" | "blocked";
+
+export type StudioMember = {
+  user_id: string;
+  tenant_id: string;
+  object_id: string;
+  email: string;
+  display_name: string;
+  role: StudioRole;
+  status: StudioMemberStatus;
+  created_at: string;
+  updated_at: string;
+  last_sign_in_at?: string | null;
+};
+
+export type StudioSession = {
+  user: StudioMember;
+  csrf_token: string;
+};
+
+export type StudioUserListResponse = {
+  count: number;
+  users: StudioMember[];
+};
+
 export type HttpStatusSummary = {
   state: HttpReachability;
   checked_at?: string | null;

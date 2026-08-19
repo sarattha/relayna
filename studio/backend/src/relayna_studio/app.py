@@ -11,6 +11,13 @@ from redis.asyncio import Redis
 
 from relayna.metrics import RelaynaMetrics, create_metrics_router
 
+from .auth import (
+    StudioAuthMiddleware,
+    StudioAuthService,
+    StudioAuthStore,
+    StudioEntraConfig,
+    create_studio_auth_router,
+)
 from .events import (
     RedisStudioEventStore,
     StudioEventIngestService,
@@ -73,6 +80,7 @@ class StudioRuntime:
     trace_query_service: StudioTraceQueryService
     metrics: RelaynaMetrics
     outbound_policy: StudioOutboundUrlPolicy
+    auth_service: StudioAuthService | None
     search_store: RedisStudioSearchStore
     search_service: StudioSearchService
     pull_sync_worker: StudioPullSyncWorker | None = None
@@ -122,6 +130,7 @@ class _StudioLifespan:
         failed_task_email_dedupe_ttl_seconds: int,
         failed_task_email_title_prefix: str,
         failed_task_email_batch_wait_seconds: int,
+        entra_config: StudioEntraConfig | None,
     ) -> None:
         self._redis_url = redis_url
         self._app_state_key = app_state_key
@@ -153,6 +162,7 @@ class _StudioLifespan:
         self._failed_task_email_dedupe_ttl_seconds = failed_task_email_dedupe_ttl_seconds
         self._failed_task_email_title_prefix = failed_task_email_title_prefix
         self._failed_task_email_batch_wait_seconds = failed_task_email_batch_wait_seconds
+        self._entra_config = entra_config
         self._runtime: StudioRuntime | None = None
 
     @property
@@ -175,6 +185,15 @@ class _StudioLifespan:
                 outbound_policy=outbound_policy,
             )
             http_client = self._federation_client_factory(self._federation_timeout_seconds)
+            auth_service = (
+                StudioAuthService(
+                    config=self._entra_config,
+                    store=StudioAuthStore(redis, prefix=self._entra_config.redis_prefix),
+                    http_client=http_client,
+                )
+                if self._entra_config is not None
+                else None
+            )
             event_store = RedisStudioEventStore(
                 redis,
                 prefix=self._event_store_prefix,
@@ -286,6 +305,7 @@ class _StudioLifespan:
                 trace_query_service=trace_query_service,
                 metrics=metrics,
                 outbound_policy=outbound_policy,
+                auth_service=auth_service,
                 search_store=search_store,
                 search_service=search_service,
                 pull_sync_worker=pull_sync_worker,
@@ -362,6 +382,8 @@ class _StudioLifespan:
             setattr(app.state, self._app_state_key, runtime)
             try:
                 await runtime.search_service.initialize()
+                if runtime.auth_service is not None:
+                    await runtime.auth_service.initialize()
                 if runtime.pull_sync_worker is not None:
                     runtime.pull_sync_task = asyncio.create_task(
                         runtime.pull_sync_worker.run_forever(),
@@ -469,6 +491,7 @@ def create_studio_app(
     failed_task_email_dedupe_ttl_seconds: int = 604800,
     failed_task_email_title_prefix: str = "[Relayna] Failed task",
     failed_task_email_batch_wait_seconds: int = 0,
+    entra_config: StudioEntraConfig | None = None,
 ) -> FastAPI:
     resolved_capability_fetcher = capability_fetcher or HttpCapabilityFetcher(
         allowed_hosts=capability_refresh_allowed_hosts,
@@ -505,9 +528,12 @@ def create_studio_app(
         failed_task_email_dedupe_ttl_seconds=failed_task_email_dedupe_ttl_seconds,
         failed_task_email_title_prefix=failed_task_email_title_prefix,
         failed_task_email_batch_wait_seconds=failed_task_email_batch_wait_seconds,
+        entra_config=entra_config,
     )
     runtime = lifespan_factory.ensure_runtime()
     app = FastAPI(title=title, lifespan=lifespan_factory)
+    if runtime.auth_service is not None:
+        app.include_router(create_studio_auth_router(runtime.auth_service))
     app.include_router(create_studio_search_router(search_service=runtime.search_service))
     app.include_router(
         create_service_registry_router(service_registry=runtime.registry_service, health_service=runtime.health_service)
@@ -533,6 +559,8 @@ def create_studio_app(
             )
         )
     app.include_router(create_metrics_router(runtime.metrics))
+    if runtime.auth_service is not None:
+        app.add_middleware(StudioAuthMiddleware, service=runtime.auth_service)
     return app
 
 

@@ -1,6 +1,13 @@
 {
-  "freeze_version": "v1.4.32",
+  "freeze_version": "v1.5.0",
   "route_declarations": [
+    {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/config'"},
+    {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/login'"},
+    {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/callback'"},
+    {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/session'"},
+    {"file": "studio/backend/src/relayna_studio/auth.py", "method": "post", "path_expression": "f'{prefix}/auth/logout'"},
+    {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/admin/users'"},
+    {"file": "studio/backend/src/relayna_studio/auth.py", "method": "patch", "path_expression": "f'{prefix}/admin/users/{{user_id}}'"},
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "post", "path_expression": "f'{prefix}/ingest/events'"},
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/services/{{service_id}}/events'"},
     {"file": "studio/backend/src/relayna_studio/events.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/events'"},

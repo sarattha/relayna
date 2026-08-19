@@ -7,15 +7,45 @@ from types import SimpleNamespace
 
 import pytest
 import relayna_studio.__main__ as studio_main
+from cryptography.hazmat.primitives.asymmetric import rsa
 from relayna_studio.app import create_studio_app, get_studio_runtime
+from relayna_studio.auth import StudioAuthService
 from relayna_studio.config import StudioBackendSettings
 from relayna_studio.factory import create_app
+
+
+@pytest.fixture(autouse=True)
+def studio_entra_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "RELAYNA_STUDIO_REDIS_URL": "redis://studio-test/0",
+        "RELAYNA_STUDIO_ENTRA_APPLICATION_ID": "studio-client",
+        "RELAYNA_STUDIO_ENTRA_TENANT_ID": "tenant-1",
+        "RELAYNA_STUDIO_ENTRA_ISSUER": "http://127.0.0.1:19091/tenant-1/v2.0",
+        "RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL": "http://127.0.0.1:19091/.well-known/openid-configuration",
+        "RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI": "http://127.0.0.1:5173/studio/auth/callback",
+        "RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH": "/tmp/studio-test-private-key.pem",
+        "RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH": "/tmp/studio-test-certificate.pem",
+        "RELAYNA_STUDIO_ENTRA_ADMIN_EMAILS": "admin@example.test",
+        "RELAYNA_STUDIO_ENTRA_ADMIN_OBJECT_IDS": "admin-oid",
+        "RELAYNA_STUDIO_SESSION_COOKIE_SECURE": "false",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr(StudioAuthService, "_load_credentials", lambda *_args: (private_key, "test-thumbprint"))
 
 
 def test_settings_require_redis_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RELAYNA_STUDIO_REDIS_URL", raising=False)
 
     with pytest.raises(RuntimeError, match="RELAYNA_STUDIO_REDIS_URL"):
+        StudioBackendSettings.from_env()
+
+
+def test_settings_require_entra_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("RELAYNA_STUDIO_ENTRA_APPLICATION_ID")
+
+    with pytest.raises(RuntimeError, match="RELAYNA_STUDIO_ENTRA_APPLICATION_ID"):
         StudioBackendSettings.from_env()
 
 
@@ -96,7 +126,7 @@ def test_settings_require_failed_task_email_configuration_when_enabled(monkeypat
 
 
 def test_create_app_uses_env_backed_settings() -> None:
-    settings = StudioBackendSettings(redis_url="redis://studio-test/0", pull_sync_interval_seconds=None)
+    settings = StudioBackendSettings.from_env()
 
     app = create_app(settings=settings)
 

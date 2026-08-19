@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
@@ -31,6 +31,7 @@ from relayna.api import (
     CapabilityDocument,
 )
 
+from .auth import StudioMember
 from .identity import (
     JoinKind,
     JoinMode,
@@ -1527,10 +1528,14 @@ def create_federation_router(
 
     @router.post(f"{prefix}/failed-tasks/{{service_id}}/{{failure_id}}/mark-investigated")
     async def mark_failed_task_investigated(
+        request: Request,
         service_id: str,
         failure_id: str,
         payload: dict[str, Any] = JSON_BODY,
     ):
+        actor = getattr(request.state, "studio_member", None)
+        if isinstance(actor, StudioMember):
+            payload = {**payload, "investigated_by": actor.email}
         try:
             result = await federation_service.mark_failed_task_investigated(service_id, failure_id, payload)
         except StudioFederationError as exc:
@@ -1547,10 +1552,14 @@ def create_federation_router(
 
     @router.post(f"{prefix}/failed-tasks/{{service_id}}/{{failure_id}}/retry")
     async def retry_failed_task(
+        request: Request,
         service_id: str,
         failure_id: str,
         payload: dict[str, Any] = JSON_BODY,
     ):
+        actor = getattr(request.state, "studio_member", None)
+        if isinstance(actor, StudioMember):
+            payload = {**payload, "retried_by": actor.email}
         try:
             result = await federation_service.retry_failed_task(service_id, failure_id, payload)
         except StudioFederationError as exc:

@@ -17,6 +17,11 @@ Its contract is:
 - frontend fetches `/studio/*`
 - backend federates calls to registered Relayna services
 
+The application first inspects the backend Studio session. Signed-out,
+pending, blocked, expired, and authorization-error states are rendered before
+the operational pages. Active readonly members see data pages without mutation
+controls; active administrators also see Access management and write controls.
+
 That boundary keeps service discovery, normalization, and error handling in the
 backend instead of in the browser.
 
@@ -41,6 +46,12 @@ The header is available on every page:
 | **Environment** | Scopes service and task views. `All environments` removes the scope. |
 | **Find task** | Accepts a task ID and sends it to Task Search in the selected environment. |
 | Magnifying-glass button | Runs the global task-ID search. |
+| **Access** | Admin-only member approval, role assignment, and blocking. |
+| User/role badge | Shows the current member and role; **Sign out** revokes only the local Studio session. |
+
+Frontend role visibility is a usability control, not the security boundary.
+The backend independently enforces the same policy and requires the current
+session's CSRF token for unsafe calls.
 
 ## Register A Service Step By Step
 

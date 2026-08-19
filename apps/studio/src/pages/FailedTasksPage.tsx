@@ -11,6 +11,7 @@ import {
   retryFailedTask,
   updateFailedTaskEmailSettings,
 } from "../api";
+import { useStudioAuth } from "../auth-context";
 import {
   InlineCodeBox,
   NoticeBanner,
@@ -57,6 +58,7 @@ export function formatBatchWait(seconds: number) {
 }
 
 export function FailedTasksPage() {
+  const { isAdmin } = useStudioAuth();
   const [query, setQuery] = useState<FailedTaskQueryState>(initialQuery);
   const [items, setItems] = useState<FailedTaskSummary[]>([]);
   const [selected, setSelected] = useState<FailedTaskDetail | null>(null);
@@ -237,7 +239,7 @@ export function FailedTasksPage() {
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
       {notice ? <NoticeBanner>{notice}</NoticeBanner> : null}
 
-      <SectionCard title="Email Notifications" subtitle="Failed-task alert delivery.">
+      {isAdmin ? <SectionCard title="Email Notifications" subtitle="Failed-task alert delivery.">
         {emailSettingsLoading ? <p style={mutedTextStyle}>Loading email settings...</p> : null}
         {emailSettings ? (
           <div className="studio-stack-sm">
@@ -284,7 +286,7 @@ export function FailedTasksPage() {
             </form>
           </div>
         ) : null}
-      </SectionCard>
+      </SectionCard> : null}
 
       <SectionCard title="Failed Tasks" subtitle="Cross-service terminal failure registry backed by Relayna DLQ snapshots.">
         <form onSubmit={(event) => void submitFilters(event)} className="studio-form-grid studio-form-grid--triple">
@@ -371,13 +373,13 @@ export function FailedTasksPage() {
               <StudioIcon name="save" />
               Download JSON
             </button>
-            <button type="button" style={secondaryButtonStyle} onClick={() => void remove()}>
+            {isAdmin ? <button type="button" style={secondaryButtonStyle} onClick={() => void remove()}>
               <StudioIcon name="delete" />
               Delete
-            </button>
+            </button> : null}
           </div>
 
-          <div className="studio-form-grid studio-form-grid--triple">
+          {isAdmin ? <><div className="studio-form-grid studio-form-grid--triple">
             <input value={operator} onChange={(event) => setOperator(event.target.value)} placeholder="Operator" style={inputStyle} />
             <input value={investigationNote} onChange={(event) => setInvestigationNote(event.target.value)} placeholder="Investigation note" style={inputStyle} />
             <button type="button" style={primaryButtonStyle} onClick={() => void investigate()}>Mark Investigated</button>
@@ -392,7 +394,7 @@ export function FailedTasksPage() {
               Retry
             </button>
           </div>
-          <textarea value={overridePayload} onChange={(event) => setOverridePayload(event.target.value)} placeholder="Optional JSON payload override" style={{ ...inputStyle, minHeight: 96, fontFamily: "'SFMono-Regular', Menlo, monospace" }} />
+          <textarea value={overridePayload} onChange={(event) => setOverridePayload(event.target.value)} placeholder="Optional JSON payload override" style={{ ...inputStyle, minHeight: 96, fontFamily: "'SFMono-Regular', Menlo, monospace" }} /></> : null}
 
           <div className="studio-detail-grid">
             <InlineCodeBox value={JSON.stringify(selected.input_preview ?? selected.body ?? null, null, 2)} minHeight={160} />
