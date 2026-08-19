@@ -159,6 +159,33 @@ jobs:
   studio-backend:
     name: studio-backend
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: relayna_studio_test
+          POSTGRES_USER: relayna
+          POSTGRES_PASSWORD: relayna
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relayna -d relayna_studio_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      RELAYNA_STUDIO_DATABASE_URL: postgresql+asyncpg://relayna:relayna@127.0.0.1:5432/relayna_studio_test
+      RELAYNA_STUDIO_TEST_DATABASE_URL: postgresql+asyncpg://relayna:relayna@127.0.0.1:5432/relayna_studio_test
+      RELAYNA_STUDIO_TEST_REDIS_URL: redis://127.0.0.1:6379/0
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -175,6 +202,9 @@ jobs:
 
       - name: Sync Studio backend dependencies
         run: make -C studio/backend sync
+
+      - name: Verify Alembic upgrade, downgrade, and re-upgrade
+        run: make -C studio/backend db-migration-cycle
 
       - name: Run Studio backend format check
         run: make -C studio/backend format
@@ -196,6 +226,9 @@ jobs:
 
       - name: Run Studio backend tests
         run: make -C studio/backend test
+
+      - name: Enforce Studio backend coverage
+        run: make -C studio/backend coverage
 
       - name: Build Studio backend wheel
         run: make -C studio/backend build

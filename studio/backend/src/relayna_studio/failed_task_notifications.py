@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -72,6 +72,26 @@ class FailedTaskEmailSettingsUpdate(BaseModel):
 class FailedTaskEmailRuntimeSettings:
     enabled: bool
     batch_wait_seconds: int
+
+
+class FailedTaskEmailSettingsStore(Protocol):
+    async def get(self) -> FailedTaskEmailRuntimeSettings: ...
+
+    async def update(
+        self, *, enabled: bool | None = None, batch_wait_seconds: int | None = None
+    ) -> FailedTaskEmailRuntimeSettings: ...
+
+
+class FailedTaskNotificationHistoryStore(Protocol):
+    async def is_notified(self, service_id: str, failure_id: str) -> bool: ...
+
+    async def mark_notified(self, service_id: str, failure_id: str, payload: dict[str, Any]) -> None: ...
+
+    async def load_pending(self) -> dict[str, Any]: ...
+
+    async def save_pending(self, pending: dict[str, Any]) -> None: ...
+
+    async def clear_pending(self) -> None: ...
 
 
 class RedisFailedTaskEmailSettingsStore:
@@ -172,12 +192,18 @@ class FailedTaskEmailNotificationService:
     redis: Any
     email_client: FailedTaskEmailClient
     config: FailedTaskEmailNotificationConfig
-    settings_store: RedisFailedTaskEmailSettingsStore
+    settings_store: FailedTaskEmailSettingsStore
+    history_store: FailedTaskNotificationHistoryStore | None = None
 
     async def notify_new_failed_tasks(self) -> int:
         settings = await self.settings_store.get()
         if not settings.enabled:
             return 0
+        # PostgreSQL-backed history is invoked by a database-coordinated worker.
+        # Keep the legacy Redis lock only for the Redis-only compatibility path;
+        # it cannot provide ownership-safe unlocks after a lease expires.
+        if self.history_store is not None:
+            return await self._notify_new_failed_tasks(settings)
         lock_key = f"{self.config.redis_prefix}:batch:lock"
         lock_ttl = max(1, int(self.config.timeout_seconds + 30))
         acquired = await self.redis.set(lock_key, _utc_now(), nx=True, ex=lock_ttl)
@@ -235,7 +261,7 @@ class FailedTaskEmailNotificationService:
                 LOGGER.exception("Failed-task email notification send failed.")
                 remaining.append(item)
                 continue
-            await self._mark_notified(service_id, failure_id)
+            await self._mark_notified(service_id, failure_id, item)
             sent += 1
         if remaining:
             await self._save_pending_batch({"started_at": _utc_now(), "items": remaining})
@@ -264,7 +290,7 @@ class FailedTaskEmailNotificationService:
             service_id = _string_field(item, "service_id")
             failure_id = _string_field(item, "failure_id")
             if service_id and failure_id:
-                await self._mark_notified(service_id, failure_id)
+                await self._mark_notified(service_id, failure_id, item)
         await self._clear_pending_batch()
         return len(valid_items)
 
@@ -285,7 +311,10 @@ class FailedTaskEmailNotificationService:
             seen_cursors.add(next_cursor)
             cursor = next_cursor
 
-    async def _mark_notified(self, service_id: str, failure_id: str) -> None:
+    async def _mark_notified(self, service_id: str, failure_id: str, payload: dict[str, Any] | None = None) -> None:
+        if self.history_store is not None:
+            await self.history_store.mark_notified(service_id, failure_id, payload or {})
+            return
         await self.redis.set(
             self._notified_key(service_id, failure_id),
             _utc_now(),
@@ -293,12 +322,16 @@ class FailedTaskEmailNotificationService:
         )
 
     async def _is_notified(self, service_id: str, failure_id: str) -> bool:
+        if self.history_store is not None:
+            return await self.history_store.is_notified(service_id, failure_id)
         return bool(await self.redis.get(self._notified_key(service_id, failure_id)))
 
     def _notified_key(self, service_id: str, failure_id: str) -> str:
         return f"{self.config.redis_prefix}:notified:{service_id}:{failure_id}"
 
     async def _load_pending_batch(self) -> dict[str, Any]:
+        if self.history_store is not None:
+            return await self.history_store.load_pending()
         payload = await self.redis.get(self._pending_key())
         if not payload:
             return {"started_at": _utc_now(), "items": []}
@@ -310,6 +343,9 @@ class FailedTaskEmailNotificationService:
         return {"started_at": str(data.get("started_at") or _utc_now()), "items": items}
 
     async def _save_pending_batch(self, pending: dict[str, Any]) -> None:
+        if self.history_store is not None:
+            await self.history_store.save_pending(pending)
+            return
         await self.redis.set(
             self._pending_key(),
             json.dumps({"started_at": pending["started_at"], "items": pending["items"]}),
@@ -317,6 +353,9 @@ class FailedTaskEmailNotificationService:
         )
 
     async def _clear_pending_batch(self) -> None:
+        if self.history_store is not None:
+            await self.history_store.clear_pending()
+            return
         await self.redis.delete(self._pending_key())
 
     def _pending_key(self) -> str:
@@ -327,6 +366,7 @@ class FailedTaskEmailNotificationService:
 class FailedTaskEmailNotificationWorker:
     notification_service: FailedTaskEmailNotificationService
     interval_seconds: float = 30.0
+    coordinator: Any | None = None
     _stopped: asyncio.Event = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -338,7 +378,12 @@ class FailedTaskEmailNotificationWorker:
     async def run_forever(self) -> None:
         while not self._stopped.is_set():
             try:
-                await self.notification_service.notify_new_failed_tasks()
+                if self.coordinator is None:
+                    await self.notification_service.notify_new_failed_tasks()
+                else:
+                    async with self.coordinator.try_lock("studio-failed-task-email") as acquired:
+                        if acquired:
+                            await self.notification_service.notify_new_failed_tasks()
             except Exception:
                 LOGGER.exception("Failed-task email notification iteration failed.")
             try:
@@ -387,7 +432,7 @@ def create_failed_task_email_settings_router(
     *,
     configured: bool,
     receivers: tuple[str, ...],
-    settings_store: RedisFailedTaskEmailSettingsStore,
+    settings_store: FailedTaskEmailSettingsStore,
     prefix: str = "/studio",
 ) -> APIRouter:
     router = APIRouter()

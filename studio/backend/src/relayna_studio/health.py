@@ -529,6 +529,7 @@ class StudioHealthRefreshService:
 class StudioHealthRefreshWorker:
     health_service: StudioHealthRefreshService
     interval_seconds: float = 60.0
+    coordinator: Any | None = None
     _stopped: asyncio.Event = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -539,7 +540,12 @@ class StudioHealthRefreshWorker:
 
     async def run_forever(self) -> None:
         while not self._stopped.is_set():
-            await self.health_service.refresh_all_services()
+            if self.coordinator is None:
+                await self.health_service.refresh_all_services()
+            else:
+                async with self.coordinator.try_lock("studio-health-refresh") as acquired:
+                    if acquired:
+                        await self.health_service.refresh_all_services()
             try:
                 await asyncio.wait_for(self._stopped.wait(), timeout=self.interval_seconds)
             except TimeoutError:

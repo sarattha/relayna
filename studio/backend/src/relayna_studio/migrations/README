@@ -1,0 +1,9 @@
+Alembic migrations for the Relayna Studio PostgreSQL control-plane database.
+
+Create future revisions from studio/backend with:
+
+    RELAYNA_STUDIO_DATABASE_URL=postgresql+asyncpg://... uv run alembic revision --autogenerate -m "description"
+
+Review every generated operation before committing it. Deployments run
+`alembic upgrade head` as a separate maintenance step before starting the new
+Studio backend image; the application never mutates its schema at startup.

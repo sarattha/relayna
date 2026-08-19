@@ -26,6 +26,8 @@ from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from .audit_context import reset_actor_user_id, set_actor_user_id
+
 SESSION_COOKIE = "relayna_studio_session"
 LOGIN_COOKIE = "relayna_studio_login"
 CSRF_HEADER = "x-csrf-token"
@@ -333,7 +335,7 @@ class StudioAuthService:
         self,
         *,
         config: StudioEntraConfig,
-        store: StudioAuthStore,
+        store: Any,
         http_client: httpx.AsyncClient,
     ) -> None:
         self.config = config
@@ -574,7 +576,11 @@ class StudioAuthMiddleware:
                     scope, receive, send
                 )
                 return
-        await self.app(scope, receive, send)
+        actor_token = set_actor_user_id(member.user_id)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_actor_user_id(actor_token)
 
 
 def _set_session_cookie(response: Response, config: StudioEntraConfig, token: str) -> None:

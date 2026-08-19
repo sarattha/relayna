@@ -754,6 +754,8 @@ class StudioSearchService(StudioSearchIndexer):
 class StudioRetentionWorker:
     search_service: StudioSearchService
     interval_seconds: float = 60.0
+    coordinator: Any | None = None
+    event_store: Any | None = None
     _stopped: asyncio.Event = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -764,11 +766,22 @@ class StudioRetentionWorker:
 
     async def run_forever(self) -> None:
         while not self._stopped.is_set():
-            await self.search_service.prune_expired_task_documents()
+            if self.coordinator is None:
+                await self._prune_once()
+            else:
+                async with self.coordinator.try_lock("studio-retention") as acquired:
+                    if acquired:
+                        await self._prune_once()
             try:
                 await asyncio.wait_for(self._stopped.wait(), timeout=self.interval_seconds)
             except TimeoutError:
                 continue
+
+    async def _prune_once(self) -> None:
+        await self.search_service.prune_expired_task_documents()
+        prune_events = getattr(self.event_store, "prune_expired", None)
+        if callable(prune_events):
+            await prune_events()
 
 
 def create_studio_search_router(
