@@ -210,7 +210,7 @@ def upgrade() -> None:
         sa.Column("ingested_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("dedupe_key", sa.Text(), nullable=False),
         sa.Column("out_of_order", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column("task_id", sa.String(length=255), nullable=False),
+        sa.Column("task_id", sa.Text(), nullable=False),
         sa.Column("event_type", sa.String(length=128), nullable=False),
         sa.Column("source_kind", sa.String(length=64), nullable=False),
         sa.Column("component", sa.String(length=255), nullable=True),
@@ -218,7 +218,7 @@ def upgrade() -> None:
         sa.Column("event_timestamp_text", sa.Text(), nullable=True),
         sa.Column("event_id", sa.String(length=255), nullable=True),
         sa.Column("correlation_id", sa.String(length=255), nullable=True),
-        sa.Column("parent_task_id", sa.String(length=255), nullable=True),
+        sa.Column("parent_task_id", sa.Text(), nullable=True),
         sa.Column("status", sa.String(length=128), nullable=True),
         sa.Column("stage", sa.String(length=128), nullable=True),
         sa.Column(
@@ -397,7 +397,7 @@ def upgrade() -> None:
     op.create_table(
         "studio_task_search_projections",
         sa.Column("service_id", sa.Text(), nullable=False),
-        sa.Column("task_id", sa.String(length=255), nullable=False),
+        sa.Column("task_id", sa.Text(), nullable=False),
         sa.Column("service_name", sa.String(length=255), nullable=False),
         sa.Column("environment", sa.String(length=128), nullable=False),
         sa.Column("correlation_id", sa.String(length=255), nullable=True),

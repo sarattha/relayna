@@ -58,6 +58,21 @@ def _safe_source_identity(redis_url: str) -> str:
     return f"{parsed.scheme}://{host}:{port}/{database}"
 
 
+def _split_notification_identity(identity: str, known_service_ids: set[str]) -> tuple[str, str] | None:
+    """Resolve the legacy colon-delimited key using known snapshot identities.
+
+    Both service and failure identifiers were historically unconstrained, so a
+    blind split cannot distinguish ``team:payments:failure``. Prefer the
+    longest known service prefix; an unknown identity is reported as invalid
+    rather than silently importing a dedupe record for the wrong service.
+    """
+    for _, service_id in sorted(((len(item), item) for item in known_service_ids), reverse=True):
+        prefix = f"{service_id}:"
+        if identity.startswith(prefix) and len(identity) > len(prefix):
+            return service_id, identity.removeprefix(prefix)
+    return None
+
+
 @dataclass(slots=True, frozen=True)
 class BackfillPrefixes:
     registry: str = "studio:services"
@@ -90,6 +105,7 @@ class RedisBackfillSnapshot:
             | set(self.pull_cursors)
             | set(self.health)
             | {item.service_id for item in self.task_projections}
+            | {service_id for service_id, _, _ in self.notification_deliveries}
         )
         return referenced - active
 
@@ -207,14 +223,23 @@ class RedisStudioBackfill:
         settings = await self._json_value(f"{self.prefixes.notifications}:settings", invalid)
         pending = await self._json_value(f"{self.prefixes.notifications}:pending", invalid)
         notified_prefix = f"{self.prefixes.notifications}:notified:"
+        known_service_ids = (
+            {item.service_id for item in service_items}
+            | {item.service_id for item in event_items}
+            | set(cursors)
+            | set(health_items)
+            | {item.service_id for item in task_items}
+            | {item.service_id for item in service_projection_items}
+        )
         deliveries: list[tuple[str, str, str]] = []
         async for raw_key in self.redis.scan_iter(match=f"{notified_prefix}*"):
             key = _decode(raw_key)
             identity = key.removeprefix(notified_prefix)
-            if ":" not in identity:
+            parsed_identity = _split_notification_identity(identity, known_service_ids)
+            if parsed_identity is None:
                 invalid.append(key)
                 continue
-            service_id, failure_id = identity.split(":", 1)
+            service_id, failure_id = parsed_identity
             value = await self.redis.get(key)
             deliveries.append((service_id, failure_id, _decode(value) if value else _utcnow().isoformat()))
 

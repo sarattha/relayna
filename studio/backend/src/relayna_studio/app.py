@@ -273,7 +273,10 @@ class _StudioLifespan:
                 task_index_ttl_seconds=self._task_index_ttl_seconds,
                 backfill_event_limit=max(1, self._event_history_maxlen),
             )
-            registry_service.set_search_indexer(search_service)
+            # PostgreSQL registry mutations own both service projections and
+            # task service metadata in the same transaction. Redis retains the
+            # legacy post-write indexer path.
+            registry_service.set_search_indexer(None if database is not None else search_service)
             federation_service = StudioFederationService(
                 registry_service=registry_service,
                 http_client=http_client,
@@ -284,7 +287,10 @@ class _StudioLifespan:
                 health_store=health_store,
                 activity_reader=event_store,
                 http_client=http_client,
-                search_indexer=search_service,
+                # PostgreSQL health persistence updates the service projection
+                # transactionally; a second write after commit can race with a
+                # newer registry or health mutation.
+                search_indexer=None if database is not None else search_service,
                 outbound_policy=outbound_policy,
                 capability_stale_after_seconds=self._capability_stale_after_seconds,
                 observation_stale_after_seconds=self._observation_stale_after_seconds,
@@ -490,7 +496,12 @@ class _StudioLifespan:
                     await runtime.database.check_ready()
                     await runtime.database.check_schema()
                     await cast(Awaitable[bool], runtime.redis.ping())
-                await runtime.search_service.initialize()
+                # PostgreSQL projections are created transactionally and by
+                # the explicit Redis backfill. Rebuilding them through the
+                # legacy post-write indexer would introduce stale-write races
+                # between replicas.
+                if runtime.database is None:
+                    await runtime.search_service.initialize()
                 if runtime.auth_service is not None:
                     await runtime.auth_service.initialize()
                 if runtime.pull_sync_worker is not None:

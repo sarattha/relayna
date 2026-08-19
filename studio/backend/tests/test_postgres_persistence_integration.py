@@ -44,6 +44,7 @@ from relayna_studio.database import (
     events,
     health_history,
     metadata,
+    notification_deliveries,
     outbox,
     services,
     task_projections,
@@ -64,8 +65,14 @@ from relayna_studio.health import (
     WorkerHealthSummary,
 )
 from relayna_studio.registry import DuplicateServiceError, LokiLogConfig, ServiceNotFoundError, ServiceRecord
-from relayna_studio.search import StudioRetentionWorker, StudioServiceSearchDocument, StudioTaskSearchDocument
+from relayna_studio.search import (
+    StudioRetentionWorker,
+    StudioSearchService,
+    StudioServiceSearchDocument,
+    StudioTaskSearchDocument,
+)
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from relayna.observability import (
@@ -120,7 +127,7 @@ def event_envelope(
     *,
     cursor: str = "1-0",
     event_id: str | None = "event-1",
-    timestamp: str = "2026-08-19T12:00:00Z",
+    timestamp: str | None = "2026-08-19T12:00:00Z",
     task_id: str = "task-1",
 ) -> StudioEventEnvelope:
     return StudioEventEnvelope(
@@ -212,6 +219,23 @@ async def test_registry_constraints_soft_delete_projection_and_audit(database: S
     assert await store.create(long_service) == long_service
     assert await store.get(long_service.service_id) == long_service
 
+    task = StudioTaskSearchDocument(
+        service_id=record.service_id,
+        service_name=updated.name,
+        environment=updated.environment,
+        task_id="task-registry-metadata",
+        detail_path=f"/studio/tasks/{record.service_id}/task-registry-metadata",
+    )
+    await projection.set_task_document(task)
+    await PostgresStudioHealthStore(database).set_health(record.service_id, health_document())
+    metadata_update = updated.model_copy(update={"name": "Payments v3", "environment": "staging"})
+    await store.update(record.service_id, metadata_update)
+    service_projection = await projection.get_service_document(record.service_id)
+    task_projection = await projection.get_task_document(task.document_id)
+    assert service_projection is not None and service_projection.health_status == "healthy"
+    assert task_projection is not None
+    assert (task_projection.service_name, task_projection.environment) == ("Payments v3", "staging")
+
 
 @pytest.mark.asyncio
 async def test_event_transactional_projection_dedupe_queries_retention_and_outbox(
@@ -296,6 +320,77 @@ async def test_event_transactional_projection_dedupe_queries_retention_and_outbo
 
 
 @pytest.mark.asyncio
+async def test_event_ordering_and_long_task_identifiers_preserve_redis_contract(
+    database: StudioDatabase, redis: Redis
+) -> None:
+    await PostgresServiceRegistryStore(database).create(service_record())
+    store = PostgresStudioEventStore(database, redis, ttl_seconds=60, task_index_ttl_seconds=60)
+    valid = event_envelope(cursor="valid", event_id="valid", timestamp="2020-01-01T00:00:00Z")
+    timestamp_less = event_envelope(cursor="missing", event_id="missing", timestamp=None)
+    assert await store.insert_event(valid)
+    assert await store.insert_event(timestamp_less)
+
+    page = await store.list_task_events("payments-api", "task-1", limit=1)
+    assert [item.event_id for item in page.items] == ["valid"]
+    assert page.next_cursor == page.items[0].dedupe_key
+    next_page = await store.list_task_events("payments-api", "task-1", before=page.next_cursor, limit=1)
+    assert [item.event_id for item in next_page.items] == ["missing"]
+
+    long_task_id = "task-" + "x" * 300
+    long_parent_id = "parent-" + "y" * 300
+    long_task = event_envelope(cursor="long", event_id="long", task_id=long_task_id)
+    long_task.event.parent_task_id = long_parent_id
+    assert await store.insert_event(long_task)
+    search = PostgresStudioSearchStore(database)
+    document_ids = await search.list_task_document_ids_for_filter("task_id", long_task_id)
+    assert len(document_ids) == 1
+    document = await search.get_task_document(next(iter(document_ids)))
+    assert document is not None and document.task_id == long_task_id
+    async with database.sessions() as session:
+        parent_task_id = await session.scalar(select(events.c.parent_task_id).where(events.c.event_id == "long"))
+    assert parent_task_id == long_parent_id
+
+
+@pytest.mark.asyncio
+async def test_postgres_search_bulk_loads_and_deletes_task_projections(database: StudioDatabase) -> None:
+    await PostgresServiceRegistryStore(database).create(service_record())
+    store = PostgresStudioSearchStore(database)
+    documents = [
+        StudioTaskSearchDocument(
+            service_id="payments-api",
+            service_name="Payments",
+            environment="production",
+            task_id=f"task-{index}",
+            detail_path=f"/studio/tasks/payments-api/task-{index}",
+        )
+        for index in range(3)
+    ]
+    for document in documents:
+        await store.set_task_document(document)
+    service = StudioSearchService(
+        registry_service=cast(Any, None),
+        event_store=cast(Any, None),
+        store=store,
+    )
+    statements: list[str] = []
+
+    def record_statement(_conn: Any, _cursor: Any, statement: str, *args: Any) -> None:
+        statements.append(statement)
+
+    sqlalchemy_event.listen(database.engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        loaded = await service._load_task_documents([*[document.document_id for document in documents], "invalid"])
+    finally:
+        sqlalchemy_event.remove(database.engine.sync_engine, "before_cursor_execute", record_statement)
+    assert {document.task_id for document in loaded} == {document.task_id for document in documents}
+    assert sum(statement.lstrip().upper().startswith("SELECT") for statement in statements) == 1
+
+    await store.delete_task_documents(["invalid"])
+    await store.delete_task_documents([document.document_id for document in documents])
+    assert await store.list_task_document_ids() == set()
+
+
+@pytest.mark.asyncio
 async def test_search_health_members_settings_notifications_and_coordination(
     database: StudioDatabase, redis: Redis
 ) -> None:
@@ -315,6 +410,8 @@ async def test_search_health_members_settings_notifications_and_coordination(
     )
     await search.set_service_document(service_doc)
     assert await search.get_service_document("payments-api") == service_doc
+    assert await search.get_service_documents([]) == {}
+    assert await search.get_service_documents(["payments-api", "missing"]) == {"payments-api": service_doc}
     assert await search.list_service_document_ids() == {"payments-api"}
     assert await search.list_service_document_ids_for_filter("environment", "production") == {"payments-api"}
     assert await search.list_service_document_ids_for_filter("tag", "critical") == {"payments-api"}
@@ -569,6 +666,9 @@ async def test_redis_backfill_is_idempotent_validated_and_detects_source_changes
     record = service_record()
     await redis.sadd("studio:services:all", record.service_id)
     await redis.set(f"studio:services:by-id:{record.service_id}", record.model_dump_json())
+    colon_record = service_record("team:payments", base_url="https://team-payments.example.test")
+    await redis.sadd("studio:services:all", colon_record.service_id)
+    await redis.set(f"studio:services:by-id:{colon_record.service_id}", colon_record.model_dump_json())
     member = {
         "user_id": "tenant:admin-1",
         "tenant_id": "tenant",
@@ -626,12 +726,18 @@ async def test_redis_backfill_is_idempotent_validated_and_detects_source_changes
     await redis.set("studio:failed_task_email:settings", json.dumps({"enabled": True, "batch_wait_seconds": 30}))
     await redis.set("studio:failed_task_email:notified:payments-api:failure-1", "2026-08-19T12:00:00Z")
     await redis.set(
+        "studio:failed_task_email:notified:team:payments:failure:2",
+        "2026-08-19T12:00:00Z",
+    )
+    await redis.set(
         "studio:failed_task_email:pending",
         json.dumps({"started_at": "2026-08-19T12:00:00Z", "items": [{"failure_id": "failure-2"}]}),
     )
     await redis.set("relayna:history:sdk-task", "sdk-runtime-state")
 
     backfill = RedisStudioBackfill(redis=redis, database=database, redis_url=REDIS_URL)
+    snapshot = await backfill.snapshot()
+    assert ("team:payments", "failure:2", "2026-08-19T12:00:00Z") in snapshot.notification_deliveries
     validation = await backfill.run(validate_only=True)
     assert validation["status"] == "validated" and validation["counts"]["invalid"] == 0
     imported = await backfill.run()
@@ -643,6 +749,14 @@ async def test_redis_backfill_is_idempotent_validated_and_detects_source_changes
         imported_expiry = await session.scalar(
             select(events.c.expires_at).where(events.c.dedupe_key == control["dedupe_key"])
         )
+        colon_delivery = (
+            await session.execute(
+                select(notification_deliveries.c.service_id, notification_deliveries.c.failure_id).where(
+                    notification_deliveries.c.service_id == "team:payments"
+                )
+            )
+        ).one()
+    assert colon_delivery == ("team:payments", "failure:2")
     assert imported_expiry is not None
     remaining_expiry = imported_expiry - datetime.now(UTC)
     assert timedelta(seconds=250) < remaining_expiry <= timedelta(seconds=300)
@@ -792,7 +906,10 @@ def test_real_app_lifecycle_probes_audit_and_restart_persistence() -> None:
     from fastapi.testclient import TestClient
 
     with TestClient(app) as client:
-        assert get_studio_runtime(app).event_ingest_service.search_indexer is None
+        runtime = get_studio_runtime(app)
+        assert runtime.event_ingest_service.search_indexer is None
+        assert runtime.registry_service._search_indexer is None
+        assert runtime.health_service.search_indexer is None
         assert client.get("/livez").json() == {"status": "ok"}
         assert client.get("/healthz").status_code == 200
         assert client.get("/readyz").json() == {"status": "ready"}
@@ -898,6 +1015,22 @@ async def test_schema_has_required_constraints_indexes_and_audit_trigger(databas
                 "AND table_name = 'studio_services' AND column_name = 'service_id'"
             )
         )
+        task_id_types = set(
+            await connection.scalars(
+                text(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND column_name = 'task_id' "
+                    "AND table_name IN ('studio_events', 'studio_task_search_projections')"
+                )
+            )
+        )
+        parent_task_id_type = await connection.scalar(
+            text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = 'studio_events' AND column_name = 'parent_task_id'"
+            )
+        )
     assert {
         "uq_studio_services_active_environment_base_url",
         "uq_studio_events_service_source_event_id",
@@ -922,6 +1055,8 @@ async def test_schema_has_required_constraints_indexes_and_audit_trigger(databas
     } <= constraints
     assert trigger_count == 1
     assert service_id_type == "text"
+    assert task_id_types == {"text"}
+    assert parent_task_id_type == "text"
 
 
 @pytest.mark.asyncio

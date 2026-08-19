@@ -28,6 +28,8 @@ use Redis only and do not acquire a PostgreSQL dependency.
 - [x] (2026-08-19 19:50+07:00) Ran the initial full backend/frontend coverage, migration-cycle, strict-docs, release-metadata, Docker-image, and built-stack Computer Use validation; restart persistence and Redis live delivery passed. A clean final verification pass remains before publication.
 - [x] (2026-08-19 20:09+07:00) Opened draft PR #122 with three focused commits; all ten initial CI checks passed. The first Codex review raised four actionable threads.
 - [x] (2026-08-19 20:15+07:00) Pushed review-fix commit `28ba080`, replied to and resolved all four Codex threads with concrete evidence, reran the full verification stack, and confirmed all ten replacement CI checks passed.
+- [x] (2026-08-19 21:40+07:00) Analyzed the latest Codex review and fixed all five actionable findings: PostgreSQL service-projection ownership, bulk task/service projection loading and pruning, timestamp-less event ordering, unbounded task identifiers, and colon-safe notification backfill parsing. Fourteen real integration tests, Alembic migration cycling/drift detection, 98.01% backend coverage, and the mandatory repository verification passed.
+- [ ] Push the latest review-fix commit, reply with evidence, resolve all four inline threads, and confirm replacement CI.
 
 ## Surprises & Discoveries
 
@@ -82,6 +84,15 @@ use Redis only and do not acquire a PostgreSQL dependency.
   the exact legacy per-history insertion cap before filtering/sorting; and all
   relational service-ID columns use PostgreSQL text. Targeted real-database
   assertions cover each fix.
+- Observation: the latest Codex review exposed a second family of issues where
+  legacy post-write indexing and delimiter assumptions did not scale to the
+  PostgreSQL ownership boundary.
+  Evidence: PR review `4972963090` identified one top-level projection race and
+  four inline performance/compatibility findings. PostgreSQL mode now disables
+  every legacy service projection writer, updates task service metadata inside
+  the registry transaction, bulk-loads/deletes projections, preserves Redis's
+  valid-timestamp ordering discriminator, stores task identifiers as text, and
+  resolves notification keys against the longest known service prefix.
 
 ## Decision Log
 
@@ -92,6 +103,13 @@ use Redis only and do not acquire a PostgreSQL dependency.
   Rationale: the requested durable system-of-record boundary is intentionally
   incompatible with Redis-only Studio deployment, but no SDK behavior needs to
   change.
+  Date/Author: 2026-08-19 / Codex.
+- Decision: Treat the latest review fixes as compatibility repairs within the
+  already approved v1.6.0 perimeter. Do not change routes, response models,
+  Redis key formats, SDK dependencies, or freeze manifests.
+  Rationale: the changes restore Redis-era accepted identifiers and ordering,
+  remove unsafe duplicate writers, and optimize internal PostgreSQL access
+  without expanding the public surface.
   Date/Author: 2026-08-19 / Codex.
 - Decision: Treat `v1.4.32` as the latest released compatibility comparison and
   `v1.4.30` as the strict freeze manifest boundary. Add PostgreSQL as a required
@@ -128,7 +146,7 @@ owns all requested durable Studio control-plane records; Redis owns only
 sessions/login transactions, live publication, and explicitly ephemeral
 coordination, while SDK/runtime packages remain Redis-only. The fail-fast
 repository verification passed with 678 SDK tests (7 environment-dependent
-skips) and 272 Studio backend tests, including 12 real PostgreSQL/Redis
+skips) and 274 Studio backend tests, including 14 real PostgreSQL/Redis
 integration tests. SDK coverage is 98%; affected Studio backend coverage is
 98.01%. The frontend passed 104 tests and coverage at 98.09% statements,
 89.12% branches, 98.46% functions, and 98.01% lines.

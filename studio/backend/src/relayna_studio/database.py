@@ -32,6 +32,7 @@ from sqlalchemy import (
     delete,
     func,
     insert,
+    literal,
     or_,
     select,
     text,
@@ -158,7 +159,7 @@ events = Table(
     Column("ingested_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("dedupe_key", Text, nullable=False, unique=True),
     Column("out_of_order", Boolean, nullable=False, server_default=text("false")),
-    Column("task_id", String(255), nullable=False),
+    Column("task_id", Text, nullable=False),
     Column("event_type", String(128), nullable=False),
     Column("source_kind", String(64), nullable=False),
     Column("component", String(255)),
@@ -166,7 +167,7 @@ events = Table(
     Column("event_timestamp_text", Text),
     Column("event_id", String(255)),
     Column("correlation_id", String(255)),
-    Column("parent_task_id", String(255)),
+    Column("parent_task_id", Text),
     Column("status", String(128)),
     Column("stage", String(128)),
     Column("payload", json_type, nullable=False),
@@ -203,7 +204,7 @@ task_projections = Table(
     "studio_task_search_projections",
     metadata,
     Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
-    Column("task_id", String(255), primary_key=True),
+    Column("task_id", Text, primary_key=True),
     Column("service_name", String(255), nullable=False),
     Column("environment", String(128), nullable=False),
     Column("correlation_id", String(255)),
@@ -497,16 +498,13 @@ def _service_from_row(row: RowMapping) -> ServiceRecord:
 
 
 async def _upsert_service_projection(session: AsyncSession, record: ServiceRecord) -> None:
-    current_health = await session.scalar(
-        select(service_projections.c.health_status).where(service_projections.c.service_id == record.service_id)
-    )
     values = {
         "service_id": record.service_id,
         "name": record.name,
         "environment": record.environment,
         "tags": list(record.tags),
         "status": str(record.status),
-        "health_status": current_health,
+        "health_status": None,
         "base_url": record.base_url,
         "auth_mode": record.auth_mode,
         "last_seen_at": record.last_seen_at,
@@ -514,7 +512,18 @@ async def _upsert_service_projection(session: AsyncSession, record: ServiceRecor
     await session.execute(
         pg_insert(service_projections)
         .values(**values)
-        .on_conflict_do_update(index_elements=[service_projections.c.service_id], set_=values)
+        .on_conflict_do_update(
+            index_elements=[service_projections.c.service_id],
+            # Health owns this column in its own transaction. Omitting it from
+            # registry updates prevents a stale pre-lock read from overwriting
+            # a newer health refresh.
+            set_={key: value for key, value in values.items() if key != "health_status"},
+        )
+    )
+    await session.execute(
+        update(task_projections)
+        .where(task_projections.c.service_id == record.service_id)
+        .values(service_name=record.name, environment=record.environment)
     )
 
 
@@ -693,7 +702,13 @@ async def _upsert_task_projection(
     await session.execute(
         pg_insert(task_projections)
         .values(**values)
-        .on_conflict_do_update(index_elements=[task_projections.c.service_id, task_projections.c.task_id], set_=values)
+        .on_conflict_do_update(
+            index_elements=[task_projections.c.service_id, task_projections.c.task_id],
+            # Registry mutations update service metadata on every task row in
+            # the same transaction as the service record. An event based on an
+            # older service snapshot must not write those fields back.
+            set_={key: value for key, value in values.items() if key not in {"service_name", "environment"}},
+        )
     )
 
 
@@ -842,11 +857,11 @@ class PostgresStudioEventStore:
             filters.append(events.c.source_kind == str(source_kind))
         if event_type is not None:
             filters.append(events.c.event_type == event_type)
-        event_time = func.coalesce(events.c.event_timestamp, events.c.ingested_at)
+        event_filter_time = func.coalesce(events.c.event_timestamp, events.c.ingested_at)
         if from_time:
-            filters.append(event_time >= cast(datetime, _parse_timestamp(from_time)))
+            filters.append(event_filter_time >= cast(datetime, _parse_timestamp(from_time)))
         if to_time:
-            filters.append(event_time <= cast(datetime, _parse_timestamp(to_time)))
+            filters.append(event_filter_time <= cast(datetime, _parse_timestamp(to_time)))
         return await self._list(filters, before=before, limit=limit)
 
     async def list_task_events(
@@ -873,14 +888,22 @@ class PostgresStudioEventStore:
         before: str | None,
         limit: int,
     ) -> StudioEventListResponse:
-        event_time = func.coalesce(events.c.event_timestamp, events.c.ingested_at)
+        # Redis orders events with a valid timestamp ahead of every event with
+        # a missing/invalid timestamp, then uses ingestion time as the next
+        # tiebreaker. A minimum sentinel preserves that discriminator while
+        # the separate filter expression above retains ingestion-time range
+        # filtering for timestamp-less events.
+        event_order_time = func.coalesce(
+            events.c.event_timestamp,
+            literal(datetime.min.replace(tzinfo=UTC), type_=DateTime(timezone=True)),
+        )
         async with self.database.sessions() as session:
             if before:
                 anchor = (
                     (
                         await session.execute(
                             select(
-                                event_time.label("event_time"),
+                                event_order_time.label("event_order_time"),
                                 events.c.ingested_at,
                                 events.c.dedupe_key,
                             ).where(*filters, events.c.dedupe_key == before)
@@ -893,15 +916,19 @@ class PostgresStudioEventStore:
                 # first page instead of returning an empty result.
                 if anchor is not None:
                     filters.append(
-                        tuple_(event_time, events.c.ingested_at, events.c.dedupe_key)
-                        < tuple_(anchor["event_time"], anchor["ingested_at"], anchor["dedupe_key"])
+                        tuple_(event_order_time, events.c.ingested_at, events.c.dedupe_key)
+                        < tuple_(anchor["event_order_time"], anchor["ingested_at"], anchor["dedupe_key"])
                     )
             rows = (
                 (
                     await session.execute(
                         select(events)
                         .where(*filters)
-                        .order_by(event_time.desc(), events.c.ingested_at.desc(), events.c.dedupe_key.desc())
+                        .order_by(
+                            event_order_time.desc(),
+                            events.c.ingested_at.desc(),
+                            events.c.dedupe_key.desc(),
+                        )
                         .limit(limit + 1)
                     )
                 )
@@ -968,6 +995,8 @@ class PostgresStudioEventStore:
 
 
 class PostgresStudioSearchStore:
+    _bulk_fetch_size = 1000
+
     def __init__(self, database: StudioDatabase) -> None:
         self.database = database
 
@@ -997,6 +1026,38 @@ class PostgresStudioSearchStore:
             )
         return _task_from_row(row) if row else None
 
+    async def get_task_documents(self, document_ids: list[str]) -> dict[str, StudioTaskSearchDocument]:
+        from .search import _decode_cursor, _task_document_id
+
+        identities: list[tuple[str, str]] = []
+        for document_id in document_ids:
+            try:
+                identity = _decode_cursor(document_id)
+            except ValueError:
+                continue
+            service_id = identity.get("service_id")
+            task_id = identity.get("task_id")
+            if service_id is not None and task_id is not None:
+                identities.append((service_id, task_id))
+        documents: dict[str, StudioTaskSearchDocument] = {}
+        async with self.database.sessions() as session:
+            for offset in range(0, len(identities), self._bulk_fetch_size):
+                chunk = identities[offset : offset + self._bulk_fetch_size]
+                rows = (
+                    (
+                        await session.execute(
+                            select(task_projections).where(
+                                tuple_(task_projections.c.service_id, task_projections.c.task_id).in_(chunk)
+                            )
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                for row in rows:
+                    documents[_task_document_id(row["service_id"], row["task_id"])] = _task_from_row(row)
+        return documents
+
     async def set_task_document(self, document: StudioTaskSearchDocument) -> None:
         values = _task_values(document)
         async with self.database.transaction() as session:
@@ -1019,6 +1080,30 @@ class PostgresStudioSearchStore:
                     task_projections.c.task_id == document.task_id,
                 )
             )
+
+    async def delete_task_documents(self, document_ids: list[str]) -> None:
+        from .search import _decode_cursor
+
+        identities: list[tuple[str, str]] = []
+        for document_id in document_ids:
+            try:
+                identity = _decode_cursor(document_id)
+            except ValueError:
+                continue
+            service_id = identity.get("service_id")
+            task_id = identity.get("task_id")
+            if service_id is not None and task_id is not None:
+                identities.append((service_id, task_id))
+        if not identities:
+            return
+        async with self.database.transaction() as session:
+            for offset in range(0, len(identities), self._bulk_fetch_size):
+                chunk = identities[offset : offset + self._bulk_fetch_size]
+                await session.execute(
+                    delete(task_projections).where(
+                        tuple_(task_projections.c.service_id, task_projections.c.task_id).in_(chunk)
+                    )
+                )
 
     async def list_task_document_ids(self) -> set[str]:
         return await self._task_ids()
@@ -1058,6 +1143,26 @@ class PostgresStudioSearchStore:
                 .one_or_none()
             )
         return _service_projection_from_row(row) if row else None
+
+    async def get_service_documents(self, service_ids: list[str]) -> dict[str, StudioServiceSearchDocument]:
+        if not service_ids:
+            return {}
+        documents: dict[str, StudioServiceSearchDocument] = {}
+        async with self.database.sessions() as session:
+            for offset in range(0, len(service_ids), self._bulk_fetch_size):
+                chunk = service_ids[offset : offset + self._bulk_fetch_size]
+                rows = (
+                    (
+                        await session.execute(
+                            select(service_projections).where(service_projections.c.service_id.in_(chunk))
+                        )
+                    )
+                    .mappings()
+                    .all()
+                )
+                for row in rows:
+                    documents[row["service_id"]] = _service_projection_from_row(row)
+        return documents
 
     async def set_service_document(self, document: StudioServiceSearchDocument) -> None:
         values = _service_projection_values(document)
