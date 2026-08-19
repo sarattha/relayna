@@ -26,7 +26,8 @@ use Redis only and do not acquire a PostgreSQL dependency.
 - [x] (2026-08-19 15:42+07:00) Added checksummed idempotent Redis backfill tooling with deleted-service tombstones, validation, and maintenance-window cutover/backup/rollback documentation.
 - [x] (2026-08-19 19:15+07:00) Added unit and real-PostgreSQL integration/migration/concurrency/failure-recovery coverage, intentional freeze manifests, synchronized 1.6.0 versions, changelog, Compose topology, and operator documentation.
 - [x] (2026-08-19 19:50+07:00) Ran the initial full backend/frontend coverage, migration-cycle, strict-docs, release-metadata, Docker-image, and built-stack Computer Use validation; restart persistence and Redis live delivery passed. A clean final verification pass remains before publication.
-- [ ] Commit focused changes, open a draft PR, wait for the first Codex review, address every actionable thread, rerun verification, and resolve addressed threads.
+- [x] (2026-08-19 20:09+07:00) Opened draft PR #122 with three focused commits; all ten initial CI checks passed. The first Codex review raised four actionable threads, all fixed locally with real-database assertions and full verification in progress before replies/resolution.
+- [ ] Push the review-fix commit, reply to and resolve all four Codex threads, confirm replacement CI, and close the plan.
 
 ## Surprises & Discoveries
 
@@ -71,6 +72,16 @@ use Redis only and do not acquire a PostgreSQL dependency.
   key, while an unknown `before` cursor restarts at page one. The PostgreSQL
   query now uses matching keyset pagination and the real-database test asserts
   both cases.
+- Observation: the first Codex review found four compatibility/concurrency
+  edges that broad happy-path testing had not isolated: a redundant
+  post-commit projection write, dropped source TTLs during backfill, an unused
+  history-length setting, and a new 255-character service-ID ceiling.
+  Evidence: PR #122 review threads. PostgreSQL ingestion now updates task
+  projections only inside the event transaction; the importer carries each
+  Redis event key's remaining expiry; service and task history queries apply
+  the exact legacy per-history insertion cap before filtering/sorting; and all
+  relational service-ID columns use PostgreSQL text. Targeted real-database
+  assertions cover each fix.
 
 ## Decision Log
 
@@ -119,7 +130,7 @@ coordination, while SDK/runtime packages remain Redis-only. The fail-fast
 repository verification passed with 678 SDK tests (7 environment-dependent
 skips) and 272 Studio backend tests, including 12 real PostgreSQL/Redis
 integration tests. SDK coverage is 98%; affected Studio backend coverage is
-98.02%. The frontend passed 104 tests and coverage at 98.09% statements,
+98.01%. The frontend passed 104 tests and coverage at 98.09% statements,
 89.12% branches, 98.46% functions, and 98.01% lines.
 
 Real PostgreSQL passed Alembic upgrade, downgrade-to-base, re-upgrade, and

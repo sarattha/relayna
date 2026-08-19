@@ -92,9 +92,9 @@ json_type = JSON().with_variant(JSONB(), "postgresql")
 services = Table(
     "studio_services",
     metadata,
-    # Stable external identifier, not a generated database identity.
-    # Text lengths are intentionally bounded for index safety.
-    Column("service_id", String(255), primary_key=True),
+    # Stable external identifier, not a generated database identity. Keep it
+    # unbounded to preserve service IDs accepted by the Redis-backed API.
+    Column("service_id", Text, primary_key=True),
     Column("name", String(255), nullable=False),
     Column("base_url", Text, nullable=False),
     Column("environment", String(128), nullable=False),
@@ -153,7 +153,7 @@ events = Table(
     "studio_events",
     metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("service_id", String(255), ForeignKey("studio_services.service_id", ondelete="CASCADE"), nullable=False),
+    Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), nullable=False),
     Column("ingest_method", String(32), nullable=False),
     Column("ingested_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("dedupe_key", Text, nullable=False, unique=True),
@@ -202,7 +202,7 @@ Index(
 task_projections = Table(
     "studio_task_search_projections",
     metadata,
-    Column("service_id", String(255), ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
+    Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
     Column("task_id", String(255), primary_key=True),
     Column("service_name", String(255), nullable=False),
     Column("environment", String(128), nullable=False),
@@ -236,7 +236,7 @@ Index(
 service_projections = Table(
     "studio_service_search_projections",
     metadata,
-    Column("service_id", String(255), ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
+    Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
     Column("name", String(255), nullable=False),
     Column("environment", String(128), nullable=False),
     Column("tags", json_type, nullable=False),
@@ -257,7 +257,7 @@ Index("ix_studio_service_search_tags_gin", service_projections.c.tags, postgresq
 pull_cursors = Table(
     "studio_pull_ingestion_cursors",
     metadata,
-    Column("service_id", String(255), ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
+    Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
     Column("cursor", Text, nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
 )
@@ -265,7 +265,7 @@ pull_cursors = Table(
 health_current = Table(
     "studio_service_health_current",
     metadata,
-    Column("service_id", String(255), ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
+    Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
     Column("overall_status", String(32), nullable=False),
     Column("last_checked_at", DateTime(timezone=True)),
     Column("document", json_type, nullable=False),
@@ -277,7 +277,7 @@ health_history = Table(
     "studio_service_health_history",
     metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("service_id", String(255), ForeignKey("studio_services.service_id", ondelete="CASCADE"), nullable=False),
+    Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), nullable=False),
     Column("overall_status", String(32), nullable=False),
     Column("checked_at", DateTime(timezone=True), nullable=False),
     Column("document", json_type, nullable=False),
@@ -290,7 +290,7 @@ notification_deliveries = Table(
     "studio_notification_deliveries",
     metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("service_id", String(255), nullable=False),
+    Column("service_id", Text, nullable=False),
     Column("failure_id", String(255), nullable=False),
     Column("state", String(32), nullable=False),
     Column("payload", json_type),
@@ -831,7 +831,11 @@ class PostgresStudioEventStore:
         before: str | None = None,
         limit: int = 100,
     ) -> StudioEventListResponse:
-        filters: list[Any] = [events.c.service_id == service_id]
+        service_filter = events.c.service_id == service_id
+        history_ids = (
+            select(events.c.id).where(service_filter).order_by(events.c.id.desc()).limit(max(1, self.history_maxlen))
+        )
+        filters: list[Any] = [service_filter, events.c.id.in_(history_ids)]
         if task_id is not None:
             filters.append(events.c.task_id == task_id)
         if source_kind is not None:
@@ -848,7 +852,19 @@ class PostgresStudioEventStore:
     async def list_task_events(
         self, service_id: str, task_id: str, *, before: str | None = None, limit: int = 100
     ) -> StudioEventListResponse:
-        return await self.list_service_events(service_id, task_id=task_id, before=before, limit=limit)
+        service_filter = events.c.service_id == service_id
+        task_filter = events.c.task_id == task_id
+        history_ids = (
+            select(events.c.id)
+            .where(service_filter, task_filter)
+            .order_by(events.c.id.desc())
+            .limit(max(1, self.history_maxlen))
+        )
+        return await self._list(
+            [service_filter, task_filter, events.c.id.in_(history_ids)],
+            before=before,
+            limit=limit,
+        )
 
     async def _list(
         self,
@@ -867,7 +883,7 @@ class PostgresStudioEventStore:
                                 event_time.label("event_time"),
                                 events.c.ingested_at,
                                 events.c.dedupe_key,
-                            ).where(events.c.dedupe_key == before)
+                            ).where(*filters, events.c.dedupe_key == before)
                         )
                     )
                     .mappings()

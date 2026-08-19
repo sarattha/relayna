@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -205,6 +205,12 @@ async def test_registry_constraints_soft_delete_projection_and_audit(database: S
     assert _optional_text(None) is None
     async with database.sessions() as session:
         assert await session.scalar(select(func.count()).select_from(audit_log)) == 6
+    long_service = service_record(
+        "service-" + "x" * 300,
+        base_url="https://long-service.example.test",
+    )
+    assert await store.create(long_service) == long_service
+    assert await store.get(long_service.service_id) == long_service
 
 
 @pytest.mark.asyncio
@@ -243,6 +249,17 @@ async def test_event_transactional_projection_dedupe_queries_retention_and_outbo
     assert next_page.items[0].out_of_order is True
     unknown_cursor_page = await store.list_task_events("payments-api", "task-1", before="unknown-dedupe-key", limit=1)
     assert unknown_cursor_page.items == page.items
+    capped_store = PostgresStudioEventStore(
+        database,
+        redis,
+        ttl_seconds=60,
+        history_maxlen=1,
+        task_index_ttl_seconds=60,
+    )
+    capped_service_page = await capped_store.list_service_events("payments-api", limit=10)
+    capped_task_page = await capped_store.list_task_events("payments-api", "task-1", limit=10)
+    assert [item.dedupe_key for item in capped_service_page.items] == [next_page.items[0].dedupe_key]
+    assert capped_task_page.items == capped_service_page.items
     snapshot = await store.get_service_activity_snapshot("payments-api")
     assert snapshot.latest_status_event_at == "2026-08-19T12:00:00Z"
     assert snapshot.latest_ingested_at is not None
@@ -581,7 +598,8 @@ async def test_redis_backfill_is_idempotent_validated_and_detects_source_changes
         "correlation_id": event.correlation_id,
         "payload": event.payload,
     }
-    await redis.set("studio:events:event:payments-api:status:event-1", json.dumps(control))
+    event_key = "studio:events:event:payments-api:status:event-1"
+    await redis.set(event_key, json.dumps(control), ex=300)
     await redis.rpush("studio:events:service:payments-api:history", "payments-api:status:event-1")
     await redis.set("studio:events:pull-cursor:payments-api", "cursor-1")
     task = StudioTaskSearchDocument(
@@ -621,6 +639,13 @@ async def test_redis_backfill_is_idempotent_validated_and_detects_source_changes
     assert (await backfill.run())["status"] == "already_imported"
     assert await redis.exists("studio:services:by-id:payments-api")
     assert await redis.get("relayna:history:sdk-task") == b"sdk-runtime-state"
+    async with database.sessions() as session:
+        imported_expiry = await session.scalar(
+            select(events.c.expires_at).where(events.c.dedupe_key == control["dedupe_key"])
+        )
+    assert imported_expiry is not None
+    remaining_expiry = imported_expiry - datetime.now(UTC)
+    assert timedelta(seconds=250) < remaining_expiry <= timedelta(seconds=300)
 
     await redis.set("studio:events:pull-cursor:payments-api", "changed-after-import")
     with pytest.raises(RuntimeError, match="source changed"):
@@ -629,19 +654,39 @@ async def test_redis_backfill_is_idempotent_validated_and_detects_source_changes
 
 @pytest.mark.asyncio
 async def test_redis_backfill_rejects_invalid_and_retains_deleted_service_history(
-    database: StudioDatabase, redis: Redis
+    database: StudioDatabase, redis: Redis, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     await redis.sadd("studio:services:all", "missing-service")
+    duplicate_service = service_record("duplicate-service", base_url="https://duplicate.example.test")
+    await redis.sadd("studio:services:all", "duplicate-a", "duplicate-b")
+    await redis.set("studio:services:by-id:duplicate-a", duplicate_service.model_dump_json())
+    await redis.set("studio:services:by-id:duplicate-b", duplicate_service.model_dump_json())
     await redis.sadd("studio:auth:members", "tenant:broken")
     await redis.set("studio:auth:member:tenant:broken", "not-json")
     await redis.set("studio:events:event:broken", "not-json")
+    valid_event = {
+        "service_id": "missing-service",
+        "ingest_method": "push",
+        "ingested_at": "2026-08-19T12:00:00Z",
+        "dedupe_key": "missing:status:valid",
+        "out_of_order": False,
+        **event_envelope().model_dump(mode="json")["event"],
+    }
+    await redis.set("studio:events:event:valid", json.dumps(valid_event))
     await redis.rpush("studio:events:service:broken:history", "missing-dedupe")
     await redis.set("studio:health:broken", "not-json")
     await redis.set("studio:failed_task_email:notified:broken", "now")
     await redis.set("studio:failed_task_email:settings", "not-json")
     await redis.set("studio:failed_task_email:pending", "[]")
     backfill = RedisStudioBackfill(redis=redis, database=database, redis_url=REDIS_URL)
+    original_ttl = redis.ttl
+
+    async def expired_during_snapshot(_key: str) -> int:
+        return -2
+
+    monkeypatch.setattr(redis, "ttl", expired_during_snapshot)
     snapshot = await backfill.snapshot()
+    monkeypatch.setattr(redis, "ttl", original_ttl)
     assert len(snapshot.invalid) >= 7
     with pytest.raises(RuntimeError, match="malformed records"):
         await backfill.run()
@@ -747,6 +792,7 @@ def test_real_app_lifecycle_probes_audit_and_restart_persistence() -> None:
     from fastapi.testclient import TestClient
 
     with TestClient(app) as client:
+        assert get_studio_runtime(app).event_ingest_service.search_indexer is None
         assert client.get("/livez").json() == {"status": "ok"}
         assert client.get("/healthz").status_code == 200
         assert client.get("/readyz").json() == {"status": "ready"}
@@ -845,6 +891,13 @@ async def test_schema_has_required_constraints_indexes_and_audit_trigger(databas
                 "AND NOT tgisinternal"
             )
         )
+        service_id_type = await connection.scalar(
+            text(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_schema = current_schema() "
+                "AND table_name = 'studio_services' AND column_name = 'service_id'"
+            )
+        )
     assert {
         "uq_studio_services_active_environment_base_url",
         "uq_studio_events_service_source_event_id",
@@ -868,6 +921,7 @@ async def test_schema_has_required_constraints_indexes_and_audit_trigger(databas
         "ck_studio_members_member_status",
     } <= constraints
     assert trigger_count == 1
+    assert service_id_type == "text"
 
 
 @pytest.mark.asyncio

@@ -306,7 +306,10 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 event_store=event_store,
                 http_client=http_client,
-                search_indexer=search_service,
+                # PostgreSQL event insertion updates the task projection in
+                # the same serialized transaction. Running the generic indexer
+                # again after commit would reintroduce a stale-write race.
+                search_indexer=None if database is not None else search_service,
                 outbound_policy=outbound_policy,
             )
             trace_query_service = StudioTraceQueryService(

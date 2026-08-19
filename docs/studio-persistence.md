@@ -131,7 +131,8 @@ window.
 The importer is transactional and idempotent. It preserves event and task
 history for deleted services by creating non-visible service tombstones. If
 the Redis source changes after a completed import, a rerun fails rather than
-silently combining snapshots.
+silently combining snapshots. Backfilled event rows preserve each Redis event
+key's remaining expiry; keys configured without expiry remain unbounded.
 
 ## Backup, restore, and rollback
 

@@ -51,7 +51,7 @@ def upgrade() -> None:
     op.create_table(
         "studio_notification_deliveries",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("failure_id", sa.String(length=255), nullable=False),
         sa.Column("state", sa.String(length=32), nullable=False),
         sa.Column(
@@ -161,7 +161,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "studio_services",
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("base_url", sa.Text(), nullable=False),
         sa.Column("environment", sa.String(length=128), nullable=False),
@@ -205,7 +205,7 @@ def upgrade() -> None:
     op.create_table(
         "studio_events",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("ingest_method", sa.String(length=32), nullable=False),
         sa.Column("ingested_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("dedupe_key", sa.Text(), nullable=False),
@@ -291,7 +291,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "studio_pull_ingestion_cursors",
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("cursor", sa.Text(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(
@@ -304,7 +304,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "studio_service_health_current",
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("overall_status", sa.String(length=32), nullable=False),
         sa.Column("last_checked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
@@ -328,7 +328,7 @@ def upgrade() -> None:
     op.create_table(
         "studio_service_health_history",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("overall_status", sa.String(length=32), nullable=False),
         sa.Column("checked_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
@@ -362,7 +362,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "studio_service_search_projections",
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("environment", sa.String(length=128), nullable=False),
         sa.Column(
@@ -396,7 +396,7 @@ def upgrade() -> None:
     )
     op.create_table(
         "studio_task_search_projections",
-        sa.Column("service_id", sa.String(length=255), nullable=False),
+        sa.Column("service_id", sa.Text(), nullable=False),
         sa.Column("task_id", sa.String(length=255), nullable=False),
         sa.Column("service_name", sa.String(length=255), nullable=False),
         sa.Column("environment", sa.String(length=128), nullable=False),

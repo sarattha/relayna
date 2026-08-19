@@ -73,6 +73,7 @@ class RedisBackfillSnapshot:
     services: list[ServiceRecord]
     members: list[StudioMember]
     events: list[StudioControlPlaneEvent]
+    event_expires_at: dict[str, datetime | None]
     pull_cursors: dict[str, str]
     health: dict[str, StudioServiceHealthDocument]
     task_projections: list[StudioTaskSearchDocument]
@@ -175,7 +176,7 @@ class RedisStudioBackfill:
             StudioMember,
             invalid,
         )
-        event_items = await self._scan_models(f"{self.prefixes.events}:event:*", StudioControlPlaneEvent, invalid)
+        event_items, event_expires_at = await self._scan_events(invalid)
         task_items = await self._scan_models(f"{self.prefixes.search}:task:doc:*", StudioTaskSearchDocument, invalid)
         service_projection_items = await self._scan_models(
             f"{self.prefixes.search}:service:doc:*", StudioServiceSearchDocument, invalid
@@ -221,6 +222,7 @@ class RedisStudioBackfill:
             services=service_items,
             members=member_items,
             events=event_items,
+            event_expires_at=event_expires_at,
             pull_cursors=cursors,
             health=health_items,
             task_projections=task_items,
@@ -352,7 +354,7 @@ class RedisStudioBackfill:
                         status=_optional_text(payload.get("status")),
                         stage=_optional_text(payload.get("stage")),
                         payload=payload,
-                        expires_at=None,
+                        expires_at=snapshot.event_expires_at.get(item.dedupe_key),
                     )
                     .on_conflict_do_nothing(index_elements=[events.c.dedupe_key])
                 )
@@ -538,6 +540,32 @@ class RedisStudioBackfill:
             except Exception:
                 invalid.append(key)
         return items
+
+    async def _scan_events(
+        self, invalid: list[str]
+    ) -> tuple[list[StudioControlPlaneEvent], dict[str, datetime | None]]:
+        items: list[StudioControlPlaneEvent] = []
+        expires_at: dict[str, datetime | None] = {}
+        snapshot_time = _utcnow()
+        async for raw_key in self.redis.scan_iter(match=f"{self.prefixes.events}:event:*"):
+            key = _decode(raw_key)
+            payload = await self.redis.get(key)
+            if payload is None:
+                continue
+            try:
+                item = StudioControlPlaneEvent.model_validate_json(payload)
+            except Exception:
+                invalid.append(key)
+                continue
+            remaining_ttl = int(await self.redis.ttl(key))
+            if remaining_ttl == -2:
+                invalid.append(key)
+                continue
+            items.append(item)
+            expires_at[item.dedupe_key] = (
+                None if remaining_ttl == -1 else snapshot_time + timedelta(seconds=max(0, remaining_ttl))
+            )
+        return items, expires_at
 
     async def _json_value(self, key: str, invalid: list[str]) -> dict[str, Any] | None:
         payload = await self.redis.get(key)
