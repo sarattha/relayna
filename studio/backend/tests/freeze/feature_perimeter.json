@@ -1,5 +1,5 @@
 {
-  "freeze_version": "v1.5.0",
+  "freeze_version": "v1.6.0",
   "features": {
     "asgi app": ["studio/backend/tests/test_asgi.py"],
     "authentication and access control": ["studio/backend/tests/test_studio_auth.py"],
@@ -11,6 +11,7 @@
     "metrics": ["studio/backend/tests/test_studio_metrics.py"],
     "failed task notifications": ["studio/backend/tests/test_failed_task_notifications.py"],
     "package surface": ["studio/backend/tests/test_package_surface.py"],
+    "postgresql persistence, migrations, backfill, and recovery (approved v1.6.0 perimeter change)": ["studio/backend/tests/test_postgres_persistence_integration.py", "studio/backend/tests/test_deployment_assets.py"],
     "registry": ["studio/backend/tests/test_studio_registry.py"],
     "search": ["studio/backend/tests/test_studio_search.py"],
     "traces": ["studio/backend/tests/test_studio_traces.py"]
