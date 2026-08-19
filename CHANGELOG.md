@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.6.0 - 2026-08-19
+
+### Added
+
+- Added PostgreSQL as Relayna Studio's authoritative durable control-plane
+  store, with SQLAlchemy async repositories, asyncpg, an initial Alembic
+  schema, relational query fields, constraints, indexes, health history,
+  notification history, and an append-only operator audit log.
+- Added a transactional outbox for post-commit Redis live publication and
+  PostgreSQL advisory/row-lock coordination for safe multi-replica workers.
+- Added `/livez`, `/healthz`, and dependency/schema-aware `/readyz` probes, a
+  PostgreSQL/Redis Compose topology, real-database CI coverage, and packaged
+  Alembic assets in the backend image.
+- Added an idempotent, checksummed Redis Studio-state importer with validation,
+  deleted-service tombstones, and documented backup, cutover, and rollback.
+
+### Changed
+
+- Studio service registry, members/RBAC, settings, retained events and cursors,
+  task/service search projections, health, and notification state now use
+  PostgreSQL. Redis remains required for OIDC login transactions, browser
+  sessions, live pub/sub, caches, and ephemeral coordination.
+- Relayna SDK service status, leases, workflow coordination, dedupe, and all
+  existing SDK runtime stores remain Redis-only; the SDK acquired no database
+  dependency.
+- Bumped the SDK, Studio backend, Studio frontend, lockfiles, backend SDK
+  dependency floor, and production-freeze manifests to `1.6.0`.
+
+### Migration
+
+- Studio deployments must provide `RELAYNA_STUDIO_DATABASE_URL`, run `alembic
+  upgrade head`, and complete the documented maintenance-window Redis backfill
+  before starting 1.6.0. Mixed Redis-authoritative and
+  PostgreSQL-authoritative Studio replicas are unsupported.
+- Preserve pre-cutover PostgreSQL and Redis backups until validation and the
+  rollback window are complete. Downgrading the initial Alembic revision is
+  destructive and is not an application rollback procedure.
+
+### Compatibility
+
+- This release intentionally breaks the v1.4.30 production freeze under the
+  user's approved Studio persistence perimeter. Existing Studio HTTP and
+  frontend response shapes are preserved; the intentional additions are the
+  probe and operator-audit routes plus required PostgreSQL deployment config.
+- Backend route and feature-perimeter manifests and all synchronized version
+  fields were intentionally updated. Frontend API/type/page exports and SDK
+  public API, routes, dependencies, persisted formats, and runtime behavior are
+  unchanged.
+
+### Verification
+
+- See the pull request verification section for exact real-PostgreSQL migration,
+  integration, coverage, build, container, documentation, and real-browser
+  results.
+
 ## 1.5.0 - 2026-08-18
 
 ### Added

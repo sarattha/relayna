@@ -11,7 +11,8 @@ task resource samples, and trace correlation in one place.
 | --- | --- | --- |
 | Registered service API pods | Relayna capabilities, status/history, event feed, execution graph, optional `/metrics` | Include `create_metrics_router(runtime.metrics)` when the API should expose runtime metrics. |
 | Registered service worker pods | Task execution, lifecycle observations, worker-only `/metrics` | Use `start_metrics_http_server(runtime.metrics, port=8001)` for worker-only processes. |
-| Redis | Relayna status, DLQ indexes, observation history, Studio registry/events | API pods, worker pods, and Studio must share the same logical Redis data plane for complete task detail. |
+| PostgreSQL | Durable Studio registry, RBAC, settings, events/search, health, notifications, outbox, and audit | Required by Studio only; Relayna service runtimes do not connect to it. |
+| Redis | Relayna status, DLQ indexes, observation history; Studio sessions, login transactions, pub/sub, and ephemeral state | API pods and workers retain their existing Redis data plane. Studio also requires Redis but owns durable control-plane data in PostgreSQL. |
 | RabbitMQ | Relayna task queues, status fanout, retry/DLQ flows | Workers publish lifecycle status and observations around RabbitMQ task handling. |
 | Loki | Studio log panels | Studio queries Loki from the backend. The browser does not connect to Loki directly. |
 | Alloy | Kubernetes pod log collection, Loki forwarding, and optional OTLP trace receiving | Runs as a DaemonSet for logs. It can also run an OpenTelemetry collector pipeline that forwards spans to Tempo. |
@@ -43,7 +44,8 @@ flowchart TB
     end
 
     rabbit["RabbitMQ\nTasks, status fanout, retry, DLQ"]
-    redis["Redis\nStatus, history, DLQ indexes,\nobservations, Studio registry/events"]
+    redis["Redis\nSDK status/history/DLQ/observations\nStudio sessions + live delivery"]
+    postgres["PostgreSQL\nDurable Studio control plane"]
 
     subgraph obs["observability namespace"]
       alloy["Grafana Alloy DaemonSet\nCRI log tail + Kubernetes labels"]
@@ -54,7 +56,7 @@ flowchart TB
     end
 
     subgraph studio["Studio namespace"]
-      studioBackend["Studio backend\nRegistry, federation,\nLoki, Prometheus, Tempo proxy, /metrics"]
+      studioBackend["Studio backend\nPostgreSQL stores + Redis live transport\nFederation and observability proxies"]
       studioFrontend["Studio frontend\nOperator UI"]
     end
   end
@@ -79,6 +81,7 @@ flowchart TB
 
   studioBackend -->|capabilities/status/history/events/graphs| api
   studioBackend -->|read/write| redis
+  studioBackend -->|durable read/write + outbox| postgres
   studioBackend -->|LogQL query| loki
   studioBackend -->|PromQL query_range| prom
   studioBackend -->|trace lookup| tempo
@@ -463,7 +466,7 @@ Install application-owned tracing dependencies in the service image:
 ```toml
 [project]
 dependencies = [
-  "relayna>=1.5.0",
+  "relayna>=1.6.0",
   "opentelemetry-sdk>=1.28.0",
   "opentelemetry-exporter-otlp-proto-grpc>=1.28.0",
   "structlog>=24.0.0",

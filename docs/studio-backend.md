@@ -14,9 +14,10 @@ control-plane operations.
 
 It owns:
 
-- Microsoft Entra BFF authentication, Redis sessions, and member authorization
-- a Redis-backed service registry
-- Redis-backed event, health, and task-search stores
+- Microsoft Entra BFF authentication, Redis sessions, and PostgreSQL-backed member authorization
+- a PostgreSQL-backed service registry and operator audit trail
+- PostgreSQL-backed event, health, notification, and task-search stores
+- Redis pub/sub, sessions, login transactions, caches, and ephemeral coordination
 - a federated read layer that proxies registered Relayna services
 - background workers for event pull sync, health refresh, and retention pruning
 
@@ -59,7 +60,8 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `RELAYNA_STUDIO_REDIS_URL` | none | Required Redis connection for registry, events, health, and search state. |
+| `RELAYNA_STUDIO_DATABASE_URL` | none | Required PostgreSQL system-of-record connection, using the asyncpg driver. |
+| `RELAYNA_STUDIO_REDIS_URL` | none | Required Redis connection for sessions, login transactions, pub/sub, and ephemeral state. |
 | `RELAYNA_STUDIO_ENTRA_APPLICATION_ID` | none | Existing Entra application/client ID shared with Gateway. |
 | `RELAYNA_STUDIO_ENTRA_TENANT_ID` | none | Accepted Entra tenant ID. |
 | `RELAYNA_STUDIO_ENTRA_ISSUER` | none | Exact accepted token issuer. |
@@ -68,7 +70,7 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | `RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH` | none | Studio-only RSA private key. |
 | `RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH` | none | Matching Studio public certificate. |
 
-Studio 1.5.0 has no unauthenticated human compatibility mode. See
+Studio 1.6.0 has no unauthenticated human compatibility mode. See
 [Studio Entra Authentication](studio-entra-auth.md) for bootstrap variables,
 session settings, route policy, and deployment guidance.
 
@@ -82,11 +84,14 @@ session settings, route policy, and deployment guidance.
 | `RELAYNA_STUDIO_APP_STATE_KEY` | `studio` | Key used on `app.state` for the runtime object. |
 | `RELAYNA_STUDIO_FEDERATION_TIMEOUT_SECONDS` | `5.0` | Timeout used by the backend HTTP client when talking to registered services. |
 
-### Optional registry and capability settings
+### Optional database, registry, and capability settings
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `RELAYNA_STUDIO_REGISTRY_PREFIX` | `studio:services` | Redis prefix for persisted service registry entries. |
+| `RELAYNA_STUDIO_DATABASE_POOL_SIZE` | `10` | PostgreSQL connections retained per replica. |
+| `RELAYNA_STUDIO_DATABASE_POOL_MAX_OVERFLOW` | `20` | Temporary PostgreSQL overflow connections per replica. |
+| `RELAYNA_STUDIO_OUTBOX_RELAY_INTERVAL_SECONDS` | `0.25` | PostgreSQL outbox relay poll interval. |
+| `RELAYNA_STUDIO_REGISTRY_PREFIX` | `studio:services` | Legacy Redis registry prefix used only by the migration command and compatibility-only direct app construction. |
 | `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` | unset | Comma-separated host suffix allowlist for Studio backend egress to registered services, Loki, Prometheus, and Tempo. |
 | `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS` | unset | Comma-separated CIDR allowlist for Studio backend egress to literal IP targets. |
 | `RELAYNA_STUDIO_CAPABILITY_STALE_AFTER_SECONDS` | `180` | Threshold after which a cached capability snapshot is considered stale. |
@@ -95,8 +100,8 @@ session settings, route policy, and deployment guidance.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `RELAYNA_STUDIO_EVENT_STORE_PREFIX` | `studio:events` | Redis prefix for retained Studio events. |
-| `RELAYNA_STUDIO_EVENT_STORE_TTL_SECONDS` | `86400` | TTL for retained events. Use `none`, `null`, or `off` to disable TTL. |
+| `RELAYNA_STUDIO_EVENT_STORE_PREFIX` | `studio:events` | Redis live-delivery channel prefix; also identifies legacy keys during backfill. |
+| `RELAYNA_STUDIO_EVENT_STORE_TTL_SECONDS` | `86400` | PostgreSQL retention period for events. Use `none`, `null`, or `off` to disable expiry. |
 | `RELAYNA_STUDIO_EVENT_HISTORY_MAXLEN` | `5000` | Max retained event history length. |
 | `RELAYNA_STUDIO_PUSH_INGEST_ENABLED` | `false` | Enables direct `POST /studio/ingest/events` push ingestion. Pull sync remains available when this is disabled. |
 | `RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS` | `5.0` | Interval for the background pull-sync worker. Use `none`, `null`, or `off` to disable the worker. |
@@ -105,7 +110,7 @@ session settings, route policy, and deployment guidance.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `RELAYNA_STUDIO_HEALTH_STORE_PREFIX` | `studio:health` | Redis prefix for service health snapshots. |
+| `RELAYNA_STUDIO_HEALTH_STORE_PREFIX` | `studio:health` | Legacy health prefix used only by backfill and compatibility-only tests. |
 | `RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS` | `60.0` | Interval for health refresh polling. The default Studio frontend services screen polls `/studio/services` on a similar cadence so updated health summaries appear without a manual page reload. Use `none`, `null`, or `off` to disable. |
 | `RELAYNA_STUDIO_OBSERVATION_STALE_AFTER_SECONDS` | `300` | Threshold after which ingested observations are considered stale. |
 | `RELAYNA_STUDIO_WORKER_HEARTBEAT_STALE_AFTER_SECONDS` | `90` | Threshold after which worker heartbeats are considered stale. |
@@ -114,7 +119,7 @@ session settings, route policy, and deployment guidance.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `RELAYNA_STUDIO_TASK_SEARCH_INDEX_PREFIX` | `studio:search` | Redis prefix for task search index state. |
+| `RELAYNA_STUDIO_TASK_SEARCH_INDEX_PREFIX` | `studio:search` | Legacy search prefix used only by backfill and compatibility-only tests. |
 | `RELAYNA_STUDIO_TASK_INDEX_TTL_SECONDS` | `86400` | TTL for search index entries. |
 | `RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS` | `60.0` | Interval for retention pruning. Use `none`, `null`, or `off` to disable. |
 
@@ -122,35 +127,36 @@ session settings, route policy, and deployment guidance.
 
 - Local development:
   - keep defaults for intervals and prefixes
-  - use `redis://localhost:6379/0`
+  - use isolated PostgreSQL and Redis databases
 - Shared dev or staging:
   - keep intervals enabled
-  - use a dedicated Redis DB or dedicated prefixes
+  - use dedicated PostgreSQL credentials and a dedicated Redis DB
   - set capability refresh allowlists explicitly
 - Production:
   - set explicit allowlists for capability refresh
-  - use deployment-specific Redis isolation
+  - use deployment-specific PostgreSQL and Redis isolation
   - keep retention and health intervals intentional rather than relying on
     defaults
 
-## Redis Requirements And Data Use
+## PostgreSQL And Redis Requirements
 
-Redis is mandatory for the Studio backend. It stores:
+Both services are mandatory. PostgreSQL stores durable Studio control-plane
+state. Redis stores only:
 
-- members, single-use login transactions, and hashed opaque sessions under
-  `studio:auth`
-- service registry records
-- retained event envelopes
-- service health snapshots
-- task search index state
+- single-use OIDC login transactions and hashed opaque browser sessions
+- exact legacy pub/sub channels for live SSE event delivery
+- caches and explicitly short-lived coordination
 
-Important prefixes:
+The old registry, event-history, health, member, search, and notification keys
+are read only by the one-time backfill command. See
+[Studio PostgreSQL and Redis persistence](studio-persistence.md) for storage
+ownership, migrations, backup, cutover, and rollback.
 
-- registry: `studio:services`
-- events: `studio:events`
-- health: `studio:health`
-- task search: `studio:search`
-- authentication: `studio:auth`
+Remaining production prefixes:
+
+- live event channels: `studio:events:channel:*`
+- authentication login/session keys: `studio:auth:login:*` and
+  `studio:auth:session:*`
 
 TTL behavior:
 
@@ -158,8 +164,8 @@ TTL behavior:
 - task index retention uses `RELAYNA_STUDIO_TASK_INDEX_TTL_SECONDS`
 - prune behavior is driven by `RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS`
 
-If you share one Redis instance across environments, change prefixes or DBs so
-local and non-local control-plane state cannot collide.
+Do not delete legacy durable keys until cutover validation and the rollback
+window are complete.
 
 ## Local Source Run
 
@@ -188,7 +194,15 @@ PYTHONPATH=src:studio/backend/src \
 uv run python -m relayna_studio
 ```
 
-The CLI entrypoint ultimately serves `uvicorn relayna_studio.asgi:app`.
+Run `make db-upgrade` before the application. The CLI entrypoint serves
+`uvicorn relayna_studio.asgi:app` and rejects a missing or stale schema.
+
+For a complete local container topology, copy `.env.studio.example` to a
+private `.env.studio`, set the secrets, and run:
+
+```bash
+docker compose --env-file .env.studio -f studio/compose.yaml up --build
+```
 
 ## Docker Run
 
@@ -205,7 +219,7 @@ ghcr.io/sarattha/relayna-studio-backend
 ```
 
 For the local Gateway development issuer, enable Docker host networking so the
-container's `127.0.0.1` reaches the host issuer, Redis, and Vite callback. Mount
+container's `127.0.0.1` reaches the host issuer, PostgreSQL, Redis, and Vite callback. Mount
 the Studio certificate and private key at the paths overridden below:
 
 ```bash
@@ -215,13 +229,15 @@ docker run --rm --network host \
   --mount type=bind,src=/tmp/relayna-studio-oidc/portal-certificate.pem,dst=/run/secrets/relayna-studio-certificate.pem,readonly \
   -e RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH=/run/secrets/relayna-studio-private-key.pem \
   -e RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH=/run/secrets/relayna-studio-certificate.pem \
+  -e RELAYNA_STUDIO_DATABASE_URL=postgresql+asyncpg://relayna:password@127.0.0.1:5432/relayna_studio \
   -e RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS=.svc.local,.cluster.local \
   relayna-studio-backend
 ```
 
 Docker Desktop requires host networking to be enabled for this development
-command. Production must instead use its HTTPS Entra endpoints, internal Redis
-address, and orchestrator-managed read-only certificate mounts.
+command. Production must instead use its HTTPS Entra endpoints, internal
+PostgreSQL and Redis addresses, and orchestrator-managed read-only certificate
+mounts.
 
 The container defaults to:
 

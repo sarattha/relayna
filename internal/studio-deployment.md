@@ -9,8 +9,11 @@ feature 11. It is internal-only and must not be published under `docs/`.
 - Studio backend is packaged separately in `studio/backend/` as
   `relayna-studio` with import root `relayna_studio`.
 - Studio frontend remains the SPA in `apps/studio/`.
+- PostgreSQL is Studio's durable authority; Redis remains the live/ephemeral
+  service. SDK runtime persistence is unchanged and Redis-only.
 - Image publication, registry promotion, Kubernetes manifests, and Helm charts
-  are out of scope for this feature.
+  remain outside this repository; `studio/compose.yaml` is the executable local
+  and single-host reference topology.
 
 ## Source Build Targets
 
@@ -25,12 +28,16 @@ docker build -f apps/studio/Dockerfile -t relayna-studio-frontend .
 
 Required:
 
+- `RELAYNA_STUDIO_DATABASE_URL`
 - `RELAYNA_STUDIO_REDIS_URL`
 
 Optional:
 
 - `RELAYNA_STUDIO_HOST`
 - `RELAYNA_STUDIO_PORT`
+- `RELAYNA_STUDIO_DATABASE_POOL_SIZE`
+- `RELAYNA_STUDIO_DATABASE_POOL_MAX_OVERFLOW`
+- `RELAYNA_STUDIO_OUTBOX_RELAY_INTERVAL_SECONDS`
 - `RELAYNA_STUDIO_FEDERATION_TIMEOUT_SECONDS`
 - `RELAYNA_STUDIO_EVENT_STORE_PREFIX`
 - `RELAYNA_STUDIO_EVENT_STORE_TTL_SECONDS`
@@ -78,6 +85,7 @@ Backend from source:
 
 ```bash
 PYTHONPATH=src:studio/backend/src \
+RELAYNA_STUDIO_DATABASE_URL=postgresql+asyncpg://relayna:password@localhost:5432/relayna_studio \
 RELAYNA_STUDIO_REDIS_URL=redis://localhost:6379/0 \
 uv run python -m relayna_studio
 ```
@@ -98,8 +106,9 @@ browser
        /services        -> SPA fallback -> index.html
        /tasks/search    -> SPA fallback -> index.html
        /studio/*        -> proxy -> studio-backend
-  -> studio-backend (FastAPI + Redis-backed Studio runtime)
+  -> studio-backend (FastAPI + PostgreSQL durable stores + Redis live transport)
        /studio/*        -> Studio API routes
+  -> PostgreSQL
   -> Redis
 ```
 
@@ -112,6 +121,7 @@ docker build -f studio/backend/Dockerfile -t relayna-studio-backend .
 docker build -f apps/studio/Dockerfile -t relayna-studio-frontend .
 
 docker run --rm -p 8000:8000 \
+  -e RELAYNA_STUDIO_DATABASE_URL=postgresql+asyncpg://relayna:password@host.docker.internal:5432/relayna_studio \
   -e RELAYNA_STUDIO_REDIS_URL=redis://host.docker.internal:6379/0 \
   relayna-studio-backend
 
