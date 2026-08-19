@@ -29,7 +29,7 @@ use Redis only and do not acquire a PostgreSQL dependency.
 - [x] (2026-08-19 20:09+07:00) Opened draft PR #122 with three focused commits; all ten initial CI checks passed. The first Codex review raised four actionable threads.
 - [x] (2026-08-19 20:15+07:00) Pushed review-fix commit `28ba080`, replied to and resolved all four Codex threads with concrete evidence, reran the full verification stack, and confirmed all ten replacement CI checks passed.
 - [x] (2026-08-19 21:40+07:00) Analyzed the latest Codex review and fixed all five actionable findings: PostgreSQL service-projection ownership, bulk task/service projection loading and pruning, timestamp-less event ordering, unbounded task identifiers, and colon-safe notification backfill parsing. Fourteen real integration tests, Alembic migration cycling/drift detection, 98.01% backend coverage, and the mandatory repository verification passed.
-- [ ] Push the latest review-fix commit, reply with evidence, resolve all four inline threads, and confirm replacement CI.
+- [x] (2026-08-19 21:48+07:00) Pushed review-fix commit `9386a72`, replied to the top-level finding and all four inline threads with verification evidence, resolved every inline thread, and confirmed all ten replacement CI checks passed.
 
 ## Surprises & Discoveries
 
@@ -170,6 +170,12 @@ duplicate projection writes, lost Redis event expiry during backfill,
 unenforced PostgreSQL history limits, and a 255-character service identifier
 ceiling. Each was fixed with regression coverage, answered with verification
 evidence, and resolved; the final thread audit found no unresolved comments.
+
+The latest Codex review added five actionable findings. Commit `9386a72`
+addressed all five, a review-level reply documented the service-projection
+ownership fix, every inline finding received a targeted evidence reply, and all
+four inline threads are resolved. Both push and pull-request workflows passed
+at the new head, and the final thread audit again found no unresolved comments.
 
 Residual operational risks are explicit rather than hidden: outbox delivery is
 at least once across the Redis publish/mark boundary, so live consumers must
