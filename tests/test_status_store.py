@@ -26,6 +26,8 @@ class FakePipeline:
         self._ops.append(("publish", (channel, payload)))
 
     async def execute(self) -> list[object]:
+        if self._redis.fail_pipeline:
+            raise RuntimeError("pipeline failed")
         results: list[object] = []
         for op, args in self._ops:
             if op == "lpush":
@@ -56,23 +58,36 @@ class FakePipeline:
 
 class FakeRedis:
     def __init__(self) -> None:
+        self.values: dict[str, str] = {}
         self.history: dict[str, list[str]] = {}
         self.sets: dict[str, set[str]] = {}
         self.expirations: dict[str, int] = {}
         self.published: list[tuple[str, str]] = []
-        self._seen_keys: set[str] = set()
+        self.fail_pipeline = False
+        self.fail_publish = False
 
     async def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
-        assert value == "1"
-        if nx and key in self._seen_keys:
+        if nx and key in self.values:
             return False
-        self._seen_keys.add(key)
+        self.values[key] = value
         if ex is not None:
             self.expirations[key] = ex
         return True
 
+    async def get(self, key: str) -> str | None:
+        return self.values.get(key)
+
+    async def delete(self, key: str) -> int:
+        return int(self.values.pop(key, None) is not None)
+
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
+
+    async def publish(self, channel: str, payload: str) -> int:
+        if self.fail_publish:
+            raise RuntimeError("publish failed")
+        self.published.append((channel, payload))
+        return 1
 
     async def lindex(self, key: str, index: int) -> str | None:
         items = self.history.get(key, [])
@@ -86,6 +101,15 @@ class FakeRedis:
 
     async def smembers(self, key: str) -> set[str]:
         return set(self.sets.get(key, set()))
+
+
+class FakeServiceEventStore:
+    def __init__(self) -> None:
+        self.events: list[dict[str, object]] = []
+
+    async def add_status_event(self, event: dict[str, object]) -> bool:
+        self.events.append(event)
+        return len(self.events) == 1
 
 
 @pytest.mark.asyncio
@@ -106,6 +130,49 @@ async def test_set_history_skips_duplicate_event_id() -> None:
             '{"task_id": "task-1", "status": "validating", "event_id": "evt-1"}',
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_set_history_retries_post_persistence_work_after_publish_failure() -> None:
+    redis = FakeRedis()
+    service_events = FakeServiceEventStore()
+    store = RedisStatusStore(
+        redis,
+        prefix="translation-status",
+        ttl_seconds=60,
+        history_maxlen=10,
+        service_event_store=service_events,  # type: ignore[arg-type]
+    )
+    event = {"task_id": "task-1", "status": "completed", "event_id": "evt-1"}
+    redis.fail_publish = True
+
+    with pytest.raises(RuntimeError, match="publish failed"):
+        await store.set_history("task-1", event)
+
+    redis.fail_publish = False
+    await store.set_history("task-1", event)
+    await store.set_history("task-1", event)
+
+    assert len(redis.history[store.history_key("task-1")]) == 1
+    assert service_events.events == [event, event]
+    assert len(redis.published) == 1
+    assert redis.values[store.event_key("task-1", event)] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_set_history_releases_pending_marker_after_storage_failure() -> None:
+    redis = FakeRedis()
+    store = RedisStatusStore(redis, prefix="translation-status", ttl_seconds=60, history_maxlen=10)
+    event = {"task_id": "task-1", "status": "queued", "event_id": "evt-1"}
+    redis.fail_pipeline = True
+
+    with pytest.raises(RuntimeError, match="pipeline failed"):
+        await store.set_history("task-1", event)
+
+    assert store.event_key("task-1", event) not in redis.values
+    redis.fail_pipeline = False
+    await store.set_history("task-1", event)
+    assert len(redis.history[store.history_key("task-1")]) == 1
 
 
 @pytest.mark.asyncio

@@ -4,8 +4,7 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
 
-from redis.asyncio import Redis
-
+from .._redis import RedisClient, redis_key
 from .models import DLQRecord, DLQRecordState, DLQReplayConflict, FailedTaskInvestigationStatus
 
 
@@ -71,7 +70,7 @@ class DLQStore(Protocol):
 class RedisDLQStore:
     def __init__(
         self,
-        redis: Redis,
+        redis: RedisClient,
         *,
         prefix: str = "relayna",
         ttl_seconds: int | None = None,
@@ -81,16 +80,16 @@ class RedisDLQStore:
         self.ttl_seconds = ttl_seconds
 
     def record_key(self, dlq_id: str) -> str:
-        return f"{self.prefix}:dlq:record:{dlq_id}"
+        return redis_key(self.prefix, "dlq", "dlq", "record", dlq_id)
 
     def records_key(self) -> str:
-        return f"{self.prefix}:dlq:records"
+        return redis_key(self.prefix, "dlq", "dlq", "records")
 
     def failed_tasks_index_key(self) -> str:
-        return f"{self.prefix}:failed_tasks:index"
+        return redis_key(self.prefix, "dlq", "failed_tasks", "index")
 
     def replay_lock_key(self, dlq_id: str) -> str:
-        return f"{self.prefix}:dlq:replay-lock:{dlq_id}"
+        return redis_key(self.prefix, "dlq", "dlq", "replay-lock", dlq_id)
 
     async def add(self, record: DLQRecord) -> None:
         payload = record.model_dump_json()

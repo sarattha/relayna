@@ -5,8 +5,7 @@ import json
 from collections.abc import Awaitable
 from typing import Any, cast
 
-from redis.asyncio import Redis
-
+from .._redis import RedisClient, redis_key
 from ..observability.feed import RedisServiceEventFeedStore
 
 
@@ -15,7 +14,7 @@ class RedisStatusStore:
 
     def __init__(
         self,
-        redis: Redis,
+        redis: RedisClient,
         *,
         prefix: str = "task",
         ttl_seconds: int | None = 86400,
@@ -29,10 +28,10 @@ class RedisStatusStore:
         self.service_event_store = service_event_store
 
     def history_key(self, task_id: str) -> str:
-        return f"{self.prefix}:history:{task_id}"
+        return redis_key(self.prefix, f"status:{task_id}", "history", task_id)
 
     def channel_name(self, task_id: str) -> str:
-        return f"{self.prefix}:channel:{task_id}"
+        return redis_key(self.prefix, f"status:{task_id}", "channel", task_id)
 
     def event_key(self, task_id: str, event: dict[str, Any]) -> str:
         event_id = event.get("event_id")
@@ -41,10 +40,10 @@ class RedisStatusStore:
         else:
             canonical = json.dumps(event, ensure_ascii=False, sort_keys=True)
             token = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        return f"{self.prefix}:event:{task_id}:{token}"
+        return redis_key(self.prefix, f"status:{task_id}", "event", task_id, token)
 
     def child_tasks_key(self, parent_task_id: str) -> str:
-        return f"{self.prefix}:children:{parent_task_id}"
+        return redis_key(self.prefix, f"status-children:{parent_task_id}", "children", parent_task_id)
 
     async def set_history(self, task_id: str, event: dict[str, Any]) -> None:
         payload = json.dumps(event, ensure_ascii=False)
@@ -52,25 +51,42 @@ class RedisStatusStore:
         set_kwargs: dict[str, Any] = {"nx": True}
         if self.ttl_seconds:
             set_kwargs["ex"] = self.ttl_seconds
-        inserted = await self.redis.set(dedupe_key, "1", **set_kwargs)
+        inserted = await self.redis.set(dedupe_key, "pending", **set_kwargs)
         if not inserted:
-            return
-        pipe = self.redis.pipeline()
-        history_key = self.history_key(task_id)
-        pipe.lpush(history_key, payload)
-        pipe.ltrim(history_key, 0, self.history_maxlen - 1)
-        if self.ttl_seconds:
-            pipe.expire(history_key, self.ttl_seconds)
+            marker = await cast(Awaitable[str | bytes | None], self.redis.get(dedupe_key))
+            if marker in {"complete", b"complete"}:
+                return
+
+        if inserted:
+            pipe = self.redis.pipeline()
+            history_key = self.history_key(task_id)
+            pipe.lpush(history_key, payload)
+            pipe.ltrim(history_key, 0, self.history_maxlen - 1)
+            if self.ttl_seconds:
+                pipe.expire(history_key, self.ttl_seconds)
+            try:
+                await pipe.execute()
+            except Exception:
+                await self.redis.delete(dedupe_key)
+                raise
+
         parent_task_id = self._parent_task_id(event)
         if parent_task_id is not None:
+            pipe = self.redis.pipeline()
             child_tasks_key = self.child_tasks_key(parent_task_id)
             pipe.sadd(child_tasks_key, task_id)
             if self.ttl_seconds:
                 pipe.expire(child_tasks_key, self.ttl_seconds)
-        pipe.publish(self.channel_name(task_id), payload)
-        await pipe.execute()
+            await pipe.execute()
+
         if self.service_event_store is not None:
             await self.service_event_store.add_status_event(event)
+        await self.redis.publish(self.channel_name(task_id), payload)
+
+        complete_kwargs: dict[str, Any] = {}
+        if self.ttl_seconds:
+            complete_kwargs["ex"] = self.ttl_seconds
+        await self.redis.set(dedupe_key, "complete", **complete_kwargs)
 
     async def get_history(self, task_id: str, limit: int | None = None) -> list[dict[str, Any]]:
         if limit is None:

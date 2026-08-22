@@ -204,8 +204,8 @@ async def test_task_lease_expiry_scanner_retries_after_publisher_failure() -> No
 
     assert await scanner.scan_once() == [expired]
     assert attempts == ["task-1"]
-    assert redis.sets["relayna:lease:expired_claims"] == set()
-    assert redis.sorted_sets["relayna:lease:expiries"] == {"task-1": expired.expires_at.timestamp()}
+    assert redis.sets[store._expired_claims_key] == set()
+    assert redis.sorted_sets[store._expiries_key] == {"task-1": expired.expires_at.timestamp()}
 
     assert await scanner.scan_once() == [expired]
     assert attempts == ["task-1", "task-1"]
@@ -219,7 +219,7 @@ async def test_task_lease_expiry_claim_allows_later_reacquire_of_same_lease_id()
 
     await store.acquire(expired)
     assert await store.claim_expired() == [expired]
-    redis.values.pop("relayna:lease:task:task-1")
+    redis.values.pop(store._lease_key("task-1"))
 
     replacement = make_lease(owner_id="worker-b")
     assert await store.acquire(replacement) is True
@@ -234,23 +234,23 @@ async def test_task_lease_store_owner_and_expiry_edge_paths() -> None:
     assert lease.expired is False
     assert await store.list_by_owner("missing") == []
     await store.acquire(lease)
-    redis.sets["relayna:lease:owner:worker-a"].add("missing")
+    redis.sets[store._owner_key("worker-a")].add("missing")
     assert await store.list_by_owner("worker-a") == [lease]
     assert await store.heartbeat("missing", owner_id="worker-a", expires_at=datetime.now(UTC)) is None
     assert await store.release("missing", owner_id="worker-a") is False
 
-    redis.sorted_sets["relayna:lease:expiries"]["missing"] = 0
+    redis.sorted_sets[store._expiries_key]["missing"] = 0
     future = make_lease(lease_id="future", task_id="future", expires_at=datetime.now(UTC) + timedelta(seconds=60))
-    redis.values["relayna:lease:task:future"] = future.model_dump_json()
-    redis.sorted_sets["relayna:lease:expiries"]["future"] = 0
+    redis.values[store._lease_key("future")] = future.model_dump_json()
+    redis.sorted_sets[store._expiries_key]["future"] = 0
     assert await store.claim_expired(now=datetime.now(UTC)) == []
-    assert "missing" not in redis.sorted_sets["relayna:lease:expiries"]
-    assert redis.sorted_sets["relayna:lease:expiries"]["future"] == future.expires_at.timestamp()
+    assert "missing" not in redis.sorted_sets[store._expiries_key]
+    assert redis.sorted_sets[store._expiries_key]["future"] == future.expires_at.timestamp()
     assert await store.claim_expired(now=datetime(1970, 1, 1, tzinfo=UTC)) == []
 
     await store._release_expired_claim("missing", retry=False)
     await store._release_expired_claim("future", retry=True)
-    assert redis.sorted_sets["relayna:lease:expiries"]["future"] == future.expires_at.timestamp()
+    assert redis.sorted_sets[store._expiries_key]["future"] == future.expires_at.timestamp()
 
 
 @pytest.mark.asyncio
@@ -310,11 +310,11 @@ async def test_task_lease_scanner_publisher_failure_without_private_release_hook
 async def test_task_lease_expiry_claim_clears_marker_when_payload_is_missing() -> None:
     redis = FakeRedis()
     store = RedisTaskLeaseStore(redis)
-    await redis.zadd("relayna:lease:expiries", {"missing-task": datetime.now(UTC).timestamp() - 1})
+    await redis.zadd(store._expiries_key, {"missing-task": datetime.now(UTC).timestamp() - 1})
 
     assert await store.claim_expired() == []
-    assert redis.sorted_sets["relayna:lease:expiries"] == {}
-    assert redis.sets["relayna:lease:expired_claims"] == set()
+    assert redis.sorted_sets[store._expiries_key] == {}
+    assert redis.sets[store._expired_claims_key] == set()
 
 
 def test_lease_policy_defaults_to_disabled_observe_only() -> None:

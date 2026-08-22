@@ -313,8 +313,8 @@ def test_workflow_state_registry_diagnostics_and_topology_helpers() -> None:
     assert linear.workflow_stage_names() == ("one", "two")
     assert search.workflow_entry_target_stage("planner") == "planner"
 
-    assert run_state_key("prefix", "task-1") == "prefix:workflow:run:task-1"
-    assert fanin_key("prefix", "task-1", "aggregate") == "prefix:workflow:fanin:task-1:aggregate"
+    assert run_state_key("prefix", "task-1").endswith(":prefix:workflow:run:task-1")
+    assert fanin_key("prefix", "task-1", "aggregate").endswith(":prefix:workflow:fanin:task-1:aggregate")
     assert clamp_ttl_seconds(None, default=10) == 10
     assert clamp_ttl_seconds(1, minimum=60) == 60
 

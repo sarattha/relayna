@@ -87,17 +87,26 @@ class FakeRabbitClient:
 class FakeRedis:
     instances: list[FakeRedis] = []
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, *, protocol: int) -> None:
         self.url = url
+        self.protocol = protocol
+        self.initialize_calls = 0
         self.close_calls = 0
-        FakeRedis.instances.append(self)
+        type(self).instances.append(self)
 
     @classmethod
-    def from_url(cls, url: str) -> FakeRedis:
-        return cls(url)
+    def from_url(cls, url: str, *, protocol: int) -> FakeRedis:
+        return cls(url, protocol=protocol)
+
+    async def initialize(self) -> None:
+        self.initialize_calls += 1
 
     async def aclose(self) -> None:
         self.close_calls += 1
+
+
+class FakeRedisCluster(FakeRedis):
+    instances: list[FakeRedisCluster] = []
 
 
 class FakeStore:
@@ -338,6 +347,7 @@ def patch_fastapi_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeRabbitClient.instances.clear()
     FakeRabbitClient.fail_initialize = False
     FakeRedis.instances.clear()
+    FakeRedisCluster.instances.clear()
     FakeStore.instances.clear()
     FakeStore.fail_init = False
     FakeHub.instances.clear()
@@ -346,6 +356,7 @@ def patch_fastapi_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeDLQStore.instances.clear()
     monkeypatch.setattr(relayna_fastapi, "RelaynaRabbitClient", FakeRabbitClient)
     monkeypatch.setattr(relayna_fastapi, "Redis", FakeRedis)
+    monkeypatch.setattr(relayna_fastapi, "RedisCluster", FakeRedisCluster)
     monkeypatch.setattr(relayna_fastapi, "RedisStatusStore", FakeStore)
     monkeypatch.setattr(relayna_fastapi, "RedisDLQStore", FakeDLQStore)
     monkeypatch.setattr(relayna_fastapi, "StatusHub", FakeHub)
@@ -383,6 +394,8 @@ async def test_lifespan_startup_and_shutdown_manage_runtime(topology: SharedTask
         stored_runtime = relayna_fastapi.get_relayna_runtime(app)
         assert stored_runtime is runtime
         assert runtime.rabbitmq.initialize_calls == 1
+        assert runtime.redis.protocol == 3
+        assert runtime.redis.initialize_calls == 1
         assert runtime.hub_task is not None
         await asyncio.sleep(0)
         assert runtime.hub.run_calls == 1
@@ -394,6 +407,36 @@ async def test_lifespan_startup_and_shutdown_manage_runtime(topology: SharedTask
     paths = {route.path for route in app.routes}
     assert "/events/{task_id}" in paths
     assert "/history" in paths
+
+
+@pytest.mark.asyncio
+async def test_lifespan_uses_resp3_cluster_client_when_requested(
+    topology: SharedTasksSharedStatusTopology,
+) -> None:
+    app = FastAPI(
+        lifespan=relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://cluster-node:6379/0",
+            redis_mode="cluster",
+        )
+    )
+    runtime = relayna_fastapi.get_relayna_runtime(app)
+
+    assert isinstance(runtime.redis, FakeRedisCluster)
+    assert runtime.redis.protocol == 3
+    async with app.router.lifespan_context(app):
+        assert runtime.redis.initialize_calls == 1
+
+    assert runtime.redis.close_calls == 1
+
+
+def test_lifespan_rejects_unknown_redis_mode(topology: SharedTasksSharedStatusTopology) -> None:
+    with pytest.raises(ValueError, match="redis_mode must be 'standalone' or 'cluster'"):
+        relayna_fastapi.create_relayna_lifespan(
+            topology=topology,
+            redis_url="redis://localhost:6379/0",
+            redis_mode="sentinel",  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.asyncio

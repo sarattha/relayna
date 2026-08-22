@@ -51,7 +51,7 @@ class FakePubSub:
     async def unsubscribe(self, channel: str) -> None:
         self.unsubscriptions.append(channel)
 
-    async def close(self) -> None:
+    async def aclose(self) -> None:
         self.closed = True
 
     async def get_message(self, *, timeout: float | None = None) -> dict[str, Any] | None:
