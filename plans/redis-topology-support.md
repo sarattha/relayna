@@ -43,6 +43,14 @@ three-primary cluster, and a three-primary/three-replica cluster.
   coverage, and mandatory verification.
 - [x] (2026-08-22 16:32Z) Replied to the P1 inline with verification evidence,
   resolved its thread, and confirmed all ten replacement CI jobs pass.
+- [x] (2026-08-22 17:05Z) Chose a synchronized 1.7.0 feature release,
+  refreshed SDK and Studio version metadata and lockfiles, intentionally
+  advanced all three freeze manifests, and expanded the Redis topology and
+  release documentation with selection and rollout conditions.
+- [x] (2026-08-22 17:24Z) Passed release metadata validation, strict MkDocs,
+  synchronized freeze tests, SDK/Studio/frontend builds, the mandatory Python
+  verification stack, and coverage at 98%, 98.04%, and 98.09% statements.
+- [ ] Push the 1.7.0 release update and confirm replacement CI.
 
 ## Surprises & Discoveries
 
@@ -145,6 +153,15 @@ three-primary cluster, and a three-primary/three-replica cluster.
   duplicate delivery.
   Date/Author: 2026-08-22 / Codex.
 
+- Decision: Release the Redis topology work as synchronized version 1.7.0
+  across the SDK, Studio backend, and Studio frontend.
+  Rationale: Explicit topology configuration, redis-py 8/RESP3, and the SDK
+  key-layout replacement are feature and persisted-data changes relative to
+  v1.6.0. A minor version communicates that impact better than a patch, while
+  the repository release validator requires all three package versions to
+  remain aligned.
+  Date/Author: 2026-08-22 / Codex.
+
 ## Outcomes & Retrospective
 
 Implementation and local validation are complete. Relayna now selects either
@@ -170,6 +187,15 @@ topologies, and all ten replacement CI jobs. The inline thread has a concrete
 verification reply and is resolved. The intentional residual limitation is
 that Relayna does not discover Sentinel or promote primaries; a replicated
 non-sharded deployment must expose a primary-aware endpoint.
+
+The follow-up release pass advances all synchronized package and freeze
+versions to 1.7.0, refreshes both Python lockfiles and the frontend lockfile,
+and publishes detailed standalone-versus-cluster operator conditions. Release
+metadata validates as v1.7.0; both Python wheels and the SDK source distribution
+build with 1.7.0 metadata; strict documentation and the frontend production
+bundle pass. Coverage remains above the requested threshold in every codebase:
+SDK 98%, Studio backend 98.04% with real PostgreSQL/Redis integration, and
+Studio frontend 98.09% statements.
 
 ## Context and Orientation
 

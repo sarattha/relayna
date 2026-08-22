@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.7.0 - 2026-08-22
+
 ### Added
 
 - Added explicit `standalone` and `cluster` Redis runtime modes. Standalone
@@ -17,6 +19,20 @@ All notable changes to this project will be documented in this file.
 
 - Upgraded the SDK to redis-py 8, enabled RESP3, and made SDK Redis keys
   hash-slot safe for cluster Lua scripts, bulk reads, pipelines, and Pub/Sub.
+- Bumped the SDK, Studio backend, Studio frontend, lockfiles, backend SDK
+  dependency floor, and production-freeze manifests to `1.7.0`.
+
+### Operations
+
+- Use `redis_mode="standalone"` for one Redis server or one primary with
+  replicas, and point Relayna at an endpoint that always selects the writable
+  primary. Replica-inclusive load balancing and direct Sentinel discovery are
+  unsupported.
+- Use `redis_mode="cluster"` only for a genuine sharded Redis Cluster with all
+  slots covered and every advertised node endpoint reachable from Relayna.
+  Redis Cluster database zero is required.
+- Added operator checks, AKS endpoint examples, wrong-mode symptoms, and
+  rollout conditions to the Redis topology guide.
 
 ### Compatibility
 
@@ -24,6 +40,9 @@ All notable changes to this project will be documented in this file.
   perimeter. Previous SDK Redis keys are not read or migrated; deployments
   must start with an empty namespace or discard the old namespace after their
   rollback window.
+- SDK, Studio backend, and Studio frontend freeze versions were intentionally
+  advanced together. No Studio API, route, schema, or persistence behavior
+  changes in this release.
 
 ## 1.6.0 - 2026-08-19
 

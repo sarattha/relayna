@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.6.0/relayna-1.6.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.7.0/relayna-1.7.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.6.0/relayna-1.6.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.7.0/relayna-1.7.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.6.0.tar.gz`
-- `dist/relayna-1.6.0-py3-none-any.whl`
+- `dist/relayna-1.7.0.tar.gz`
+- `dist/relayna-1.7.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,28 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.7.0
+
+Relayna 1.7.0 upgrades the SDK to redis-py 8 with RESP3 and adds explicit
+`standalone` and `cluster` Redis modes. `standalone` remains the default and is
+correct for either one writable Redis server or one primary with replicas when
+the configured endpoint always resolves to the current writable primary. Use
+`cluster` only when Redis Cluster is enabled, all 16,384 hash slots are
+assigned, and every node address advertised by the cluster is reachable from
+each Relayna process. See [Redis Topologies](redis-topologies.md) for the full
+selection checklist, AKS service requirements, verification commands, and
+failure symptoms.
+
+The SDK's Redis key layout intentionally changed to cluster-tagged keys. Relayna
+does not read or migrate pre-1.7.0 SDK keys. Upgrade all Relayna processes that
+share a Redis namespace together and use an empty namespace, or retain the old
+namespace only for a defined rollback window and discard it afterward. Do not
+run pre-1.7.0 and 1.7.0 SDK processes against the same logical namespace.
+
+The SDK, Studio backend, and Studio frontend versions and production-freeze
+manifests advance together to 1.7.0. Studio's PostgreSQL and Redis persistence
+roles introduced in 1.6.0 are otherwise unchanged.
 
 ### Upgrading to 1.6.0
 
