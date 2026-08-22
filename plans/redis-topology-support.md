@@ -40,8 +40,9 @@ three-primary cluster, and a three-primary/three-replica cluster.
 - [x] (2026-08-22 16:29Z) Committed and pushed the implementation, opened
   ready PR #124, received one actionable P1 from the first Codex review, fixed
   retry suppression after publication failures, and reran focused, Docker,
-  coverage, and mandatory verification. Inline reply, thread resolution, and
-  replacement CI confirmation remain.
+  coverage, and mandatory verification.
+- [x] (2026-08-22 16:32Z) Replied to the P1 inline with verification evidence,
+  resolved its thread, and confirmed all ten replacement CI jobs pass.
 
 ## Surprises & Discoveries
 
@@ -162,13 +163,13 @@ used `WAIT` and direct replica reads to prove both replicas received status
 history. The exact Compose project was removed afterward and Docker's API
 reported no remaining containers.
 
-PR #124 is open. Its first Codex review raised one P1 about retry suppression;
-the fix has passed 686 SDK tests, the 98 percent coverage gate, 260 Studio
-tests, and all four real Redis Stack topologies. The remaining delivery work is
-to push that fix, reply inline, resolve the thread, and confirm replacement CI.
-The intentional residual limitation is that Relayna does not discover Sentinel
-or promote primaries; a replicated non-sharded deployment must expose a
-primary-aware endpoint.
+PR #124 is open and ready for human review. Its first Codex review raised one
+P1 about retry suppression; commit `be8e088` fixes it and has passed 686 SDK
+tests, the 98 percent coverage gate, 260 Studio tests, all four real Redis Stack
+topologies, and all ten replacement CI jobs. The inline thread has a concrete
+verification reply and is resolved. The intentional residual limitation is
+that Relayna does not discover Sentinel or promote primaries; a replicated
+non-sharded deployment must expose a primary-aware endpoint.
 
 ## Context and Orientation
 
