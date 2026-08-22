@@ -50,7 +50,9 @@ three-primary cluster, and a three-primary/three-replica cluster.
 - [x] (2026-08-22 17:24Z) Passed release metadata validation, strict MkDocs,
   synchronized freeze tests, SDK/Studio/frontend builds, the mandatory Python
   verification stack, and coverage at 98%, 98.04%, and 98.09% statements.
-- [ ] Push the 1.7.0 release update and confirm replacement CI.
+- [x] (2026-08-22 17:28Z) Committed and pushed the 1.7.0 release update,
+  refreshed PR #124's compatibility and verification summary, and confirmed
+  both replacement CI runs pass across all ten reported jobs.
 
 ## Surprises & Discoveries
 
@@ -196,6 +198,10 @@ build with 1.7.0 metadata; strict documentation and the frontend production
 bundle pass. Coverage remains above the requested threshold in every codebase:
 SDK 98%, Studio backend 98.04% with real PostgreSQL/Redis integration, and
 Studio frontend 98.09% statements.
+
+Commit `aee7560` carries the synchronized release update. PR #124's replacement
+GitHub Actions runs passed both SDK Python versions, security hardening, Studio
+backend, and Studio frontend with no failed or cancelled checks.
 
 ## Context and Orientation
 
