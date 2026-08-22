@@ -37,8 +37,11 @@ three-primary cluster, and a three-primary/three-replica cluster.
 - [x] (2026-08-22 16:15Z) Passed focused tests, all four real Docker topology
   environments, the 98 percent coverage gate, and the mandatory SDK and Studio
   verification stack.
-- [ ] Commit, push, open a draft PR, wait for the first Codex review, address
-  every actionable comment with replies and resolutions, and confirm checks.
+- [x] (2026-08-22 16:29Z) Committed and pushed the implementation, opened
+  ready PR #124, received one actionable P1 from the first Codex review, fixed
+  retry suppression after publication failures, and reran focused, Docker,
+  coverage, and mandatory verification. Inline reply, thread resolution, and
+  replacement CI confirmation remain.
 
 ## Surprises & Discoveries
 
@@ -77,6 +80,13 @@ three-primary cluster, and a three-primary/three-replica cluster.
   Evidence: `MaxConnectionsError` in the stress-test cleanup. The integration
   clients use a test-only 256-connection pool; production defaults are not
   changed by this work.
+
+- Observation: The first Codex review found that moving `PUBLISH` after the
+  pipeline exposed a retry-suppression gap: the existing history dedupe marker
+  caused a RabbitMQ redelivery to return before live publication or feed work.
+  Evidence: PR #124 review thread `discussion_r3836465894`. Status events now
+  remain `pending` until history, child indexing, feed ingestion, and Pub/Sub
+  complete, while history itself is written only once.
 
 ## Decision Log
 
@@ -126,6 +136,14 @@ three-primary cluster, and a three-primary/three-replica cluster.
   fanout ordering and works for both client modes.
   Date/Author: 2026-08-22 / Codex.
 
+- Decision: Represent status-event processing with `pending` and `complete`
+  dedupe marker values rather than treating marker existence as completion.
+  Rationale: RabbitMQ redeliveries must retry idempotent post-persistence work
+  after a transient failure without duplicating status history. Feed ingestion
+  already deduplicates atomically, and a completed marker suppresses ordinary
+  duplicate delivery.
+  Date/Author: 2026-08-22 / Codex.
+
 ## Outcomes & Retrospective
 
 Implementation and local validation are complete. Relayna now selects either
@@ -144,10 +162,13 @@ used `WAIT` and direct replica reads to prove both replicas received status
 history. The exact Compose project was removed afterward and Docker's API
 reported no remaining containers.
 
-The remaining work is repository delivery: commit, push, PR creation, first
-Codex review, and any resulting fixes or replies. The intentional residual
-limitation is that Relayna does not discover Sentinel or promote primaries; a
-replicated non-sharded deployment must expose a primary-aware endpoint.
+PR #124 is open. Its first Codex review raised one P1 about retry suppression;
+the fix has passed 686 SDK tests, the 98 percent coverage gate, 260 Studio
+tests, and all four real Redis Stack topologies. The remaining delivery work is
+to push that fix, reply inline, resolve the thread, and confirm replacement CI.
+The intentional residual limitation is that Relayna does not discover Sentinel
+or promote primaries; a replicated non-sharded deployment must expose a
+primary-aware endpoint.
 
 ## Context and Orientation
 
