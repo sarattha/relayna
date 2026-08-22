@@ -7,8 +7,11 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis, RedisCluster
 
+from relayna.api import create_status_router
 from relayna.dlq import RedisDLQStore, build_dlq_record
 from relayna.observability import RedisObservationStore, RedisServiceEventFeedStore, SSEKeepaliveSent
 from relayna.status import RedisStatusStore, SSEStatusStream
@@ -29,6 +32,44 @@ def _client(url: str, mode: str | None = None) -> Any:
 async def _delete_test_keys(redis: Any, prefix: str) -> None:
     async for key in redis.scan_iter(match=f"*:{prefix}:*"):
         await redis.delete(key)
+
+
+@pytest.mark.asyncio
+async def test_completed_history_replays_through_sse_route_against_real_redis_topology() -> None:
+    redis = _client(os.environ["RELAYNA_TEST_REDIS_URL"])
+    await redis.initialize()
+    prefix = f"relayna-history-replay-test-{uuid4().hex}"
+    status = RedisStatusStore(redis, prefix=f"{prefix}:status", ttl_seconds=60, history_maxlen=10)
+    task_id = "completed-before-sse-connects"
+    event = {
+        "task_id": task_id,
+        "status": "completed",
+        "event_id": "completed-event-1",
+        "result": {"pages": 7},
+    }
+
+    try:
+        await status.set_history(task_id, event)
+        assert await status.get_history(task_id) == [event]
+
+        app = FastAPI()
+        app.include_router(create_status_router(sse_stream=SSEStatusStream(store=status)))
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            response = await asyncio.wait_for(client.get(f"/events/{task_id}"), timeout=5)
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.text.startswith("event: ready\ndata: {}\n\n")
+        assert "id: completed-event-1\n" in response.text
+        assert "event: status\n" in response.text
+        assert '"status": "completed"' in response.text
+        assert '"pages": 7' in response.text
+        assert ": keepalive" not in response.text
+        assert response.text.count("event: status\n") == 1
+    finally:
+        await _delete_test_keys(redis, prefix)
+        await redis.aclose()
 
 
 @pytest.mark.asyncio

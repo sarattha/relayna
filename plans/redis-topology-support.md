@@ -53,6 +53,11 @@ three-primary cluster, and a three-primary/three-replica cluster.
 - [x] (2026-08-22 17:28Z) Committed and pushed the 1.7.0 release update,
   refreshed PR #124's compatibility and verification summary, and confirmed
   both replacement CI runs pass across all ten reported jobs.
+- [x] (2026-08-23) Added the requested real-Redis HTTP regression that stores a
+  completed seven-page task before the SSE connection, proves history replay,
+  and rules out keepalive-only behavior. It passed against all four Docker
+  topologies, the 98 percent coverage gate, and the mandatory verification
+  stack.
 
 ## Surprises & Discoveries
 
@@ -202,6 +207,14 @@ Studio frontend 98.09% statements.
 Commit `aee7560` carries the synchronized release update. PR #124's replacement
 GitHub Actions runs passed both SDK Python versions, security hardening, Studio
 backend, and Studio frontend with no failed or cancelled checks.
+
+The final issue #123 regression now exercises the public FastAPI
+`GET /events/{task_id}` route against real Redis. It stores a terminal event
+before the client connects, asserts the route retrieves the persisted history,
+emits exactly one status event with the seven-page result, emits no keepalive,
+and closes within five seconds. The same assertion passed on standalone Redis
+Stack, one primary plus two replicas, three cluster primaries, and three cluster
+primaries plus three replicas.
 
 ## Context and Orientation
 
