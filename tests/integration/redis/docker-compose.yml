@@ -1,0 +1,170 @@
+x-redis-stack: &redis-stack
+  image: redis/redis-stack-server:7.4.0-v8
+  restart: "no"
+
+services:
+  standalone:
+    <<: *redis-stack
+    profiles: [standalone]
+    ports:
+      - "16379:6379"
+    environment:
+      REDIS_ARGS: "--appendonly no --save ''"
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  primary:
+    <<: *redis-stack
+    profiles: [replication]
+    ports:
+      - "16380:6379"
+    environment:
+      REDIS_ARGS: "--appendonly no --save ''"
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replica-1:
+    <<: *redis-stack
+    profiles: [replication]
+    depends_on:
+      primary:
+        condition: service_healthy
+    ports:
+      - "16381:6379"
+    environment:
+      REDIS_ARGS: "--replicaof primary 6379 --appendonly no --save ''"
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replica-2:
+    <<: *redis-stack
+    profiles: [replication]
+    depends_on:
+      primary:
+        condition: service_healthy
+    ports:
+      - "16382:6379"
+    environment:
+      REDIS_ARGS: "--replicaof primary 6379 --appendonly no --save ''"
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  cluster-1:
+    <<: *redis-stack
+    profiles: [cluster]
+    ports: ["17001:17001", "27001:27001"]
+    environment:
+      REDIS_ARGS: "--port 17001 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17001 --cluster-announce-bus-port 27001"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17001", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  cluster-2:
+    <<: *redis-stack
+    profiles: [cluster]
+    ports: ["17002:17002", "27002:27002"]
+    environment:
+      REDIS_ARGS: "--port 17002 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17002 --cluster-announce-bus-port 27002"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17002", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  cluster-3:
+    <<: *redis-stack
+    profiles: [cluster]
+    ports: ["17003:17003", "27003:27003"]
+    environment:
+      REDIS_ARGS: "--port 17003 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17003 --cluster-announce-bus-port 27003"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17003", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replicated-cluster-1:
+    <<: *redis-stack
+    profiles: [replicated-cluster]
+    ports: ["17101:17101", "27101:27101"]
+    environment:
+      REDIS_ARGS: "--port 17101 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17101 --cluster-announce-bus-port 27101"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17101", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replicated-cluster-2:
+    <<: *redis-stack
+    profiles: [replicated-cluster]
+    ports: ["17102:17102", "27102:27102"]
+    environment:
+      REDIS_ARGS: "--port 17102 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17102 --cluster-announce-bus-port 27102"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17102", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replicated-cluster-3:
+    <<: *redis-stack
+    profiles: [replicated-cluster]
+    ports: ["17103:17103", "27103:27103"]
+    environment:
+      REDIS_ARGS: "--port 17103 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17103 --cluster-announce-bus-port 27103"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17103", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replicated-cluster-4:
+    <<: *redis-stack
+    profiles: [replicated-cluster]
+    ports: ["17104:17104", "27104:27104"]
+    environment:
+      REDIS_ARGS: "--port 17104 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17104 --cluster-announce-bus-port 27104"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17104", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replicated-cluster-5:
+    <<: *redis-stack
+    profiles: [replicated-cluster]
+    ports: ["17105:17105", "27105:27105"]
+    environment:
+      REDIS_ARGS: "--port 17105 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17105 --cluster-announce-bus-port 27105"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17105", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  replicated-cluster-6:
+    <<: *redis-stack
+    profiles: [replicated-cluster]
+    ports: ["17106:17106", "27106:27106"]
+    environment:
+      REDIS_ARGS: "--port 17106 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly no --save '' --protected-mode no --cluster-announce-hostname localhost --cluster-preferred-endpoint-type hostname --cluster-announce-port 17106 --cluster-announce-bus-port 27106"
+    healthcheck:
+      test: [CMD, redis-cli, -p, "17106", ping]
+      interval: 1s
+      timeout: 1s
+      retries: 30

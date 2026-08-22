@@ -58,7 +58,7 @@ async def test_workflow_contract_store_dedup_and_inflight_lifecycle() -> None:
     assert await store.acquire_dedup(**kwargs) is True  # type: ignore[arg-type]
 
     await store.mark_inflight(**kwargs)  # type: ignore[arg-type]
-    key = "test:workflow:contract:planner:inflight:task-1"
+    key = store._inflight_key(stage="planner", task_id="task-1")
     payload = json.loads(redis.hashes[key][signature])
     assert payload == {
         "action": "plan",

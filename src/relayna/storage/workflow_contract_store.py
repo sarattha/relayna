@@ -5,7 +5,7 @@ import json
 from collections.abc import Awaitable, Mapping, Sequence
 from typing import Any, Protocol, cast
 
-from redis.asyncio import Redis
+from .._redis import RedisClient, redis_key
 
 
 class WorkflowContractStore(Protocol):
@@ -51,7 +51,7 @@ class WorkflowContractStore(Protocol):
 
 
 class RedisWorkflowContractStore:
-    def __init__(self, redis: Redis, *, prefix: str = "relayna", ttl_seconds: int | None = 86400) -> None:
+    def __init__(self, redis: RedisClient, *, prefix: str = "relayna", ttl_seconds: int | None = 86400) -> None:
         self.redis = redis
         self.prefix = prefix
         self.ttl_seconds = ttl_seconds
@@ -157,10 +157,27 @@ class RedisWorkflowContractStore:
             payload=payload,
             dedup_key_fields=dedup_key_fields,
         )
-        return f"{self.prefix}:workflow:contract:{stage}:dedup:{task_id}:{signature}"
+        return redis_key(
+            self.prefix,
+            f"workflow-contract:{stage}:{task_id}",
+            "workflow",
+            "contract",
+            stage,
+            "dedup",
+            task_id,
+            signature,
+        )
 
     def _inflight_key(self, *, stage: str, task_id: str) -> str:
-        return f"{self.prefix}:workflow:contract:{stage}:inflight:{task_id}"
+        return redis_key(
+            self.prefix,
+            f"workflow-contract:{stage}:{task_id}",
+            "workflow",
+            "contract",
+            stage,
+            "inflight",
+            task_id,
+        )
 
 
 def build_dedup_signature(

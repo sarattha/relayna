@@ -92,6 +92,10 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
+    async def publish(self, channel: str, payload: str) -> int:
+        del channel, payload
+        return 1
+
     async def lrange(self, key: str, start: int, stop: int) -> list[str]:
         items = self.lists.get(key, [])
         return items[int(start) : int(stop) + 1]
@@ -396,9 +400,9 @@ def test_service_event_feed_atomically_trims_index_and_payloads() -> None:
         for index in range(5):
             assert await store.add_status_event({"task_id": f"task-{index}", "event_id": f"event-{index}"})
 
-        assert store.feed_key() == "trimmed:feed:index"
-        assert store.feed_payloads_key() == "trimmed:feed:payloads"
-        assert store.feed_sequence_key() == "trimmed:feed:sequence"
+        assert store.feed_key().endswith(":trimmed:feed:index")
+        assert store.feed_payloads_key().endswith(":trimmed:feed:payloads")
+        assert store.feed_sequence_key().endswith(":trimmed:feed:sequence")
         assert set(redis.sorted_sets[store.feed_key()]) == {"event-2", "event-3", "event-4"}
         assert set(redis.hashes[store.feed_payloads_key()]) == {"event-2", "event-3", "event-4"}
         assert redis.expirations[store.feed_key()] == 30

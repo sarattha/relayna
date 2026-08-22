@@ -186,7 +186,7 @@ class SSEStatusStream:
                     break
         finally:
             await pubsub.unsubscribe(channel)
-            await pubsub.close()
+            await pubsub.aclose()
             await emit_observation(
                 self._observation_sink,
                 SSEStreamEnded(task_id=task_id, terminal_status=terminal_status, sent_count=sent_count),

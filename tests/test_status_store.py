@@ -74,6 +74,10 @@ class FakeRedis:
     def pipeline(self) -> FakePipeline:
         return FakePipeline(self)
 
+    async def publish(self, channel: str, payload: str) -> int:
+        self.published.append((channel, payload))
+        return 1
+
     async def lindex(self, key: str, index: int) -> str | None:
         items = self.history.get(key, [])
         if not items:

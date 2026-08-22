@@ -4,12 +4,13 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster
 
+from .._redis import RedisClient
 from ..contracts import ContractAliasConfig, TerminalStatusSet, public_output_aliases
 from ..dlq import BrokerDLQMessageInspector, DLQService, RedisDLQStore
 from ..metrics import RelaynaMetrics
@@ -29,7 +30,7 @@ class HistoryOutputAdapter(Protocol):
 @dataclass(slots=True)
 class RelaynaRuntime:
     rabbitmq: RelaynaRabbitClient
-    redis: Redis
+    redis: RedisClient
     store: RedisStatusStore
     dlq_store: RedisDLQStore | None
     observation_store: RedisObservationStore | None
@@ -49,6 +50,7 @@ class _RelaynaLifespan:
         *,
         topology: RelaynaTopology,
         redis_url: str,
+        redis_mode: Literal["standalone", "cluster"],
         store_prefix: str,
         store_ttl_seconds: int | None,
         store_history_maxlen: int,
@@ -76,6 +78,7 @@ class _RelaynaLifespan:
     ) -> None:
         self._topology = topology
         self._redis_url = redis_url
+        self._redis_mode = redis_mode
         self._store_prefix = store_prefix
         self._store_ttl_seconds = store_ttl_seconds
         self._store_history_maxlen = store_history_maxlen
@@ -119,7 +122,10 @@ class _RelaynaLifespan:
                     raise
                 rabbit_kwargs.pop("metrics", None)
                 rabbitmq = RelaynaRabbitClient(self._topology, **rabbit_kwargs)
-            redis = Redis.from_url(self._redis_url)
+            if self._redis_mode == "cluster":
+                redis = RedisCluster.from_url(self._redis_url, protocol=3)
+            else:
+                redis = Redis.from_url(self._redis_url, protocol=3)
             service_event_store = None
             if self._service_event_store_prefix is not None:
                 service_event_store = RedisServiceEventFeedStore(
@@ -228,6 +234,9 @@ class _RelaynaLifespan:
             runtime = self.ensure_runtime()
             setattr(app.state, self._app_state_key, runtime)
             try:
+                initialize_redis = getattr(runtime.redis, "initialize", None)
+                if callable(initialize_redis):
+                    await initialize_redis()
                 await runtime.rabbitmq.initialize()
                 runtime.hub_task = asyncio.create_task(runtime.hub.run_forever(), name="relayna-status-hub")
             except Exception:
@@ -265,6 +274,7 @@ def create_relayna_lifespan(
     *,
     topology: RelaynaTopology,
     redis_url: str,
+    redis_mode: Literal["standalone", "cluster"] = "standalone",
     store_prefix: str = "relayna",
     store_ttl_seconds: int | None = 86400,
     store_history_maxlen: int = 50,
@@ -290,9 +300,12 @@ def create_relayna_lifespan(
     metrics: RelaynaMetrics | None = None,
     metrics_service_name: str = "relayna",
 ) -> _RelaynaLifespan:
+    if redis_mode not in {"standalone", "cluster"}:
+        raise ValueError("redis_mode must be 'standalone' or 'cluster'.")
     return _RelaynaLifespan(
         topology=topology,
         redis_url=redis_url,
+        redis_mode=redis_mode,
         store_prefix=store_prefix,
         store_ttl_seconds=store_ttl_seconds,
         store_history_maxlen=store_history_maxlen,

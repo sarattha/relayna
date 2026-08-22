@@ -5,8 +5,7 @@ import json
 from collections.abc import Awaitable
 from typing import Any, cast
 
-from redis.asyncio import Redis
-
+from .._redis import RedisClient, redis_key
 from ..observability.feed import RedisServiceEventFeedStore
 
 
@@ -15,7 +14,7 @@ class RedisStatusStore:
 
     def __init__(
         self,
-        redis: Redis,
+        redis: RedisClient,
         *,
         prefix: str = "task",
         ttl_seconds: int | None = 86400,
@@ -29,10 +28,10 @@ class RedisStatusStore:
         self.service_event_store = service_event_store
 
     def history_key(self, task_id: str) -> str:
-        return f"{self.prefix}:history:{task_id}"
+        return redis_key(self.prefix, f"status:{task_id}", "history", task_id)
 
     def channel_name(self, task_id: str) -> str:
-        return f"{self.prefix}:channel:{task_id}"
+        return redis_key(self.prefix, f"status:{task_id}", "channel", task_id)
 
     def event_key(self, task_id: str, event: dict[str, Any]) -> str:
         event_id = event.get("event_id")
@@ -41,10 +40,10 @@ class RedisStatusStore:
         else:
             canonical = json.dumps(event, ensure_ascii=False, sort_keys=True)
             token = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        return f"{self.prefix}:event:{task_id}:{token}"
+        return redis_key(self.prefix, f"status:{task_id}", "event", task_id, token)
 
     def child_tasks_key(self, parent_task_id: str) -> str:
-        return f"{self.prefix}:children:{parent_task_id}"
+        return redis_key(self.prefix, f"status-children:{parent_task_id}", "children", parent_task_id)
 
     async def set_history(self, task_id: str, event: dict[str, Any]) -> None:
         payload = json.dumps(event, ensure_ascii=False)
@@ -67,8 +66,8 @@ class RedisStatusStore:
             pipe.sadd(child_tasks_key, task_id)
             if self.ttl_seconds:
                 pipe.expire(child_tasks_key, self.ttl_seconds)
-        pipe.publish(self.channel_name(task_id), payload)
         await pipe.execute()
+        await self.redis.publish(self.channel_name(task_id), payload)
         if self.service_event_store is not None:
             await self.service_event_store.add_status_event(event)
 

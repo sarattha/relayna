@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Added explicit `standalone` and `cluster` Redis runtime modes. Standalone
+  mode supports a writable primary endpoint backed by replicas; cluster mode
+  uses async `RedisCluster`, including live SSE Pub/Sub.
+- Added repeatable Redis Stack Docker acceptance for standalone, one primary
+  plus two replicas, three cluster primaries, and three primaries plus three
+  replicas.
+
+### Changed
+
+- Upgraded the SDK to redis-py 8, enabled RESP3, and made SDK Redis keys
+  hash-slot safe for cluster Lua scripts, bulk reads, pipelines, and Pub/Sub.
+
+### Compatibility
+
+- This intentionally breaks the production freeze for the approved Redis
+  perimeter. Previous SDK Redis keys are not read or migrated; deployments
+  must start with an empty namespace or discard the old namespace after their
+  rollback window.
+
 ## 1.6.0 - 2026-08-19
 
 ### Added

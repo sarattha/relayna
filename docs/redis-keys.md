@@ -8,6 +8,18 @@ Key names are shown with placeholders such as `{prefix}`, `{task_id}`, and
 `{service_id}`. Prefixes should be isolated per environment when multiple
 Relayna stacks share one Redis instance.
 
+SDK runtime keys are physically prefixed by a generated Redis Cluster hash tag:
+`{relayna:<digest>}:{prefix}:...`. The tables below show the readable suffix
+beginning with `{prefix}`. Related keys that participate in one Lua script,
+bulk read, or coordination operation use the same digest and therefore the
+same cluster hash slot. The digest is derived from the configured prefix and
+the operation's stable slot identity.
+
+This cluster-tagged layout intentionally replaces the previous SDK key names.
+There is no fallback read or data migration. Upgrade processes sharing a
+namespace together and use an empty namespace. Studio-owned keys described
+later in this document are not changed by the SDK layout.
+
 ## SDK Runtime Keys
 
 The SDK uses Redis for task status, status streaming, optional DLQ indexing,
@@ -68,12 +80,6 @@ length is controlled by `service_event_feed_maxlen`. The index and payload hash
 are trimmed together atomically. Feed pagination performs an indexed cursor
 lookup and loads no more than `limit + 1` payloads, including when the cursor is
 deep or missing.
-
-`v1.4.28` intentionally replaces the `v1.4.27` `{prefix}:feed` list without a
-data migration or backward read. Upgrade all Relayna service instances sharing
-one prefix together. The v2 feed starts with newly written events; after all old
-instances are drained, the unused legacy list may be deleted. Existing
-`{prefix}:event:{cursor}` dedupe markers remain valid and can be left in place.
 
 ### DLQ Store
 

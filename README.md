@@ -91,6 +91,12 @@ This setup gives you:
 - `GET /status/{task_id}` for the latest Redis-backed status
 - `GET /metrics` for low-cardinality Prometheus runtime metrics
 
+Relayna uses redis-py 8 with RESP3. The default `redis_mode="standalone"`
+supports a standalone server and a primary endpoint backed by replicas. Set
+`redis_mode="cluster"` only for a genuine sharded Redis Cluster. See
+[Redis topologies](docs/redis-topologies.md) for AKS endpoint requirements,
+the intentional Redis key-layout break, and the Docker acceptance matrix.
+
 Worker-only processes can expose the same registry with
 `start_metrics_http_server(runtime_metrics, port=8001)`. Relayna Prometheus
 labels are limited to `service`, `stage`, `queue`, `status`, and `worker_type`;

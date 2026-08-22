@@ -6,8 +6,7 @@ from collections.abc import Awaitable
 from datetime import datetime
 from typing import Any, cast
 
-from redis.asyncio import Redis
-
+from .._redis import RedisClient, redis_key
 from ..metrics import RelaynaMetrics
 from .exporters import event_to_dict
 from .feed import RedisServiceEventFeedStore
@@ -24,7 +23,7 @@ class RedisObservationStore:
 
     def __init__(
         self,
-        redis: Redis,
+        redis: RedisClient,
         *,
         prefix: str = "relayna-observations",
         ttl_seconds: int | None = 86400,
@@ -40,12 +39,12 @@ class RedisObservationStore:
         self.metrics = metrics
 
     def history_key(self, task_id: str) -> str:
-        return f"{self.prefix}:history:{task_id}"
+        return redis_key(self.prefix, f"observation:{task_id}", "history", task_id)
 
     def event_key(self, task_id: str, event: dict[str, Any]) -> str:
         canonical = json.dumps(event, ensure_ascii=False, sort_keys=True, default=_json_default)
         token = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        return f"{self.prefix}:event:{task_id}:{token}"
+        return redis_key(self.prefix, f"observation:{task_id}", "event", task_id, token)
 
     async def set_event(self, event: object) -> bool:
         payload = self.normalize_event(event)

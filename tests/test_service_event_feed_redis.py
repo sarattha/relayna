@@ -5,7 +5,7 @@ import os
 from uuid import uuid4
 
 import pytest
-from redis.asyncio import Redis
+from redis.asyncio import Redis, RedisCluster
 
 from relayna.observability import RedisServiceEventFeedStore
 
@@ -16,7 +16,14 @@ from relayna.observability import RedisServiceEventFeedStore
 )
 @pytest.mark.asyncio
 async def test_service_event_feed_v2_against_real_redis() -> None:
-    redis = Redis.from_url(os.environ["RELAYNA_TEST_REDIS_URL"])
+    client_type = RedisCluster if os.environ.get("RELAYNA_TEST_REDIS_MODE") == "cluster" else Redis
+    redis = client_type.from_url(
+        os.environ["RELAYNA_TEST_REDIS_URL"],
+        protocol=3,
+        decode_responses=True,
+        max_connections=256,
+    )
+    await redis.initialize()
     prefix = f"relayna-test:service-feed:{uuid4().hex}"
     store = RedisServiceEventFeedStore(redis, prefix=prefix, ttl_seconds=60, feed_maxlen=5000)
     try:
@@ -72,7 +79,7 @@ async def test_service_event_feed_v2_against_real_redis() -> None:
         assert await redis.zcard(store.feed_key()) == 5000
         assert await redis.hlen(store.feed_payloads_key()) == 5000
     finally:
-        keys = [key async for key in redis.scan_iter(match=f"{prefix}:*")]
-        if keys:
-            await redis.delete(*keys)
+        keys = [key async for key in redis.scan_iter(match=f"*:{prefix}:*")]
+        for key in keys:
+            await redis.delete(key)
         await redis.aclose()

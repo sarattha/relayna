@@ -8,6 +8,8 @@ from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, Field
 
+from .._redis import RedisClient, redis_key
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -64,23 +66,23 @@ class TaskLeaseStore(Protocol):
 
 
 class RedisTaskLeaseStore:
-    def __init__(self, redis: Any, *, prefix: str = "relayna") -> None:
+    def __init__(self, redis: RedisClient, *, prefix: str = "relayna") -> None:
         self._redis = redis
         self._prefix = prefix
 
     def _lease_key(self, lease_id: str) -> str:
-        return f"{self._prefix}:lease:task:{lease_id}"
+        return redis_key(self._prefix, "task-leases", "lease", "task", lease_id)
 
     def _owner_key(self, owner_id: str) -> str:
-        return f"{self._prefix}:lease:owner:{owner_id}"
+        return redis_key(self._prefix, "task-leases", "lease", "owner", owner_id)
 
     @property
     def _expiries_key(self) -> str:
-        return f"{self._prefix}:lease:expiries"
+        return redis_key(self._prefix, "task-leases", "lease", "expiries")
 
     @property
     def _expired_claims_key(self) -> str:
-        return f"{self._prefix}:lease:expired_claims"
+        return redis_key(self._prefix, "task-leases", "lease", "expired_claims")
 
     async def acquire(self, lease: TaskLease) -> bool:
         payload = lease.model_dump_json()

@@ -9,8 +9,8 @@ from typing import Any, cast
 
 import httpx
 from pydantic import BaseModel, Field
-from redis.asyncio import Redis
 
+from .._redis import RedisClient, redis_key
 from .exporters import event_to_dict
 
 _STORE_SERVICE_EVENT_SCRIPT = """
@@ -185,7 +185,7 @@ class RedisServiceEventFeedStore:
 
     def __init__(
         self,
-        redis: Redis,
+        redis: RedisClient,
         *,
         prefix: str = "relayna-service-events",
         ttl_seconds: int | None = 86400,
@@ -199,16 +199,16 @@ class RedisServiceEventFeedStore:
         self._read_script = None
 
     def feed_key(self) -> str:
-        return f"{self.prefix}:feed:index"
+        return redis_key(self.prefix, "service-event-feed", "feed", "index")
 
     def feed_payloads_key(self) -> str:
-        return f"{self.prefix}:feed:payloads"
+        return redis_key(self.prefix, "service-event-feed", "feed", "payloads")
 
     def feed_sequence_key(self) -> str:
-        return f"{self.prefix}:feed:sequence"
+        return redis_key(self.prefix, "service-event-feed", "feed", "sequence")
 
     def event_key(self, cursor: str) -> str:
-        return f"{self.prefix}:event:{cursor}"
+        return redis_key(self.prefix, "service-event-feed", "event", cursor)
 
     async def add_status_event(self, event: dict[str, Any]) -> bool:
         normalized = normalize_status_feed_event(event)
