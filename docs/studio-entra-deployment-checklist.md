@@ -169,11 +169,19 @@ normal deployment process.
 
 | Resource | Type | Contents |
 | --- | --- | --- |
-| `relayna-studio-config` | `ConfigMap` | Non-secret Entra identifiers and URLs, certificate mount paths, cookie policy, and TTLs |
+| `relayna-studio-config` | `ConfigMap` | Non-secret Entra identifiers and URLs, certificate mount paths, cookie policy, TTLs, and reviewed outbound host/network allowlists |
 | `relayna-studio-runtime-secrets` | `Secret` (`Opaque`) | PostgreSQL URL, Redis URL, and temporary bootstrap administrator allowlists |
 | `relayna-studio-entra-oidc` | `Secret` (`Opaque`) | Studio-specific RSA private key and matching public X.509 certificate |
 
 - [ ] Create `relayna-studio-config` from reviewed, environment-specific values.
+- [ ] Inventory every registered service, Loki, Prometheus, and Tempo URL. Add
+      every required DNS suffix to
+      `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS` and every required
+      literal-IP CIDR to `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS`.
+- [ ] When setting the host allowlist, retain every built-in cluster suffix the
+      environment still uses because an explicit value replaces Studio's
+      defaults; do not add a broader suffix or CIDR than the reviewed targets
+      require.
 - [ ] Create `relayna-studio-runtime-secrets` without printing its values or
       committing its rendered manifest.
 - [ ] Create `relayna-studio-entra-oidc` from the approved certificate files,
@@ -205,6 +213,13 @@ data:
   RELAYNA_STUDIO_SESSION_TTL_SECONDS: "28800"
   RELAYNA_STUDIO_LOGIN_TTL_SECONDS: "600"
   RELAYNA_STUDIO_SESSION_COOKIE_SECURE: "true"
+  # Replace the corporate suffix placeholder, or remove it and its comma when
+  # unused. Retain only cluster suffixes used by this environment. An explicit
+  # value replaces Studio's defaults.
+  RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS: ".svc.local,.svc.cluster.local,.cluster.local,<reviewed-corporate-private-dns-suffixes>"
+  # Replace with the narrow CIDRs containing approved literal-IP targets. Use
+  # an empty string only when no registered or observability URL uses an IP.
+  RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS: "<reviewed-private-cidrs>"
 ---
 apiVersion: v1
 kind: Secret
@@ -318,6 +333,9 @@ prevents startup.
       deployment-readiness gates.
 - [ ] Permit the Studio backend to resolve and reach the handed-off Entra
       discovery, token, and JWKS endpoints over HTTPS.
+- [ ] Confirm every registered service, Loki, Prometheus, and Tempo hostname
+      matches the reviewed host-suffix allowlist, and every literal IP falls
+      within the reviewed network allowlist.
 - [ ] Ensure node and pod clocks are synchronized because nonce, token, and
       client-assertion validation are time-bound.
 - [ ] Keep the Studio origin behind approved internal ingress, VPN/IAP, source
@@ -338,6 +356,13 @@ prevents startup.
 - [ ] Expected Secret keys and mount paths exist without displaying values.
 - [ ] The backend Deployment resolves both `envFrom` references and mounts
       `relayna-studio-entra-oidc` read-only at the configured path.
+- [ ] The applied ConfigMap contains the reviewed host and network allowlists,
+      including every cluster suffix still used after the explicit host value
+      replaces Studio's defaults.
+- [ ] From the deployed backend, verify capability refresh and polling for one
+      target in every allowed DNS suffix or CIDR, plus Loki, Prometheus, and
+      Tempo federated reads when those providers are configured.
+- [ ] Verify an unlisted hostname and an out-of-range literal IP are rejected.
 - [ ] Backend and frontend images are immutable and digest-pinned to one
       reviewed source revision.
 - [ ] Database migration and `/readyz` checks pass in the target environment.
@@ -394,7 +419,8 @@ callback differs between the Entra return package and the rendered deployment;
 the Studio certificate is unregistered, expired, non-RSA, or mismatched; secure
 cookies are disabled for production HTTPS; bootstrap administration is not
 prepared; PostgreSQL migration or `/readyz` fails; the rollback point is absent;
-or existing Gateway registration state would be removed or replaced.
+required service or observability targets are absent from the outbound
+allowlists; or existing Gateway registration state would be removed or replaced.
 
 Deployment is **Go** only when both teams have signed off, the return package is
 complete, pre-deployment verification passes, an immutable rollback point is
