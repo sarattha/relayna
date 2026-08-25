@@ -41,6 +41,11 @@ https://studio.internal.example/studio/auth/callback
 The browser-facing frontend and `/studio/*` backend routes must share that
 origin. Keep the default secure cookie setting enabled behind HTTPS.
 
+Before changing the shared application or deploying Studio, complete the
+separate [Studio Entra and DevOps deployment checklist](studio-entra-deployment-checklist.md).
+It defines the ownership boundary, Entra return package, rollout evidence, and
+go/no-go gate.
+
 ## Required Configuration
 
 | Variable | Purpose |

@@ -28,6 +28,7 @@ nav:
   - Studio Persistence: studio-persistence.md
   - Studio Frontend: studio-frontend.md
   - Studio Entra Authentication: studio-entra-auth.md
+  - Studio Entra Deployment Checklist: studio-entra-deployment-checklist.md
   - Redis Topologies: redis-topologies.md
   - Redis Keys: redis-keys.md
   - Migration v1 to v2: migration-v1-to-v2.md
