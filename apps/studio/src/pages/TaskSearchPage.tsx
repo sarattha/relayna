@@ -1,7 +1,10 @@
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Link } from "../scoped-link";
 
+import { scopedResults } from "../scoped-results";
+import { useStudioServices } from "../services-context";
 import { searchTasks } from "../api";
 import {
   NoticeBanner,
@@ -33,29 +36,45 @@ export function TaskSearchPage() {
   const [query, setQuery] = useState<StudioTaskSearchQuery>(() => buildInitialQuery(searchParams));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
+  const [savedSearches, setSavedSearches] = useState<string[]>(() => { try { const saved: unknown = JSON.parse(localStorage.getItem("studio:saved-searches") || "[]"); return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string").slice(-10) : []; } catch { return []; } });
+  const services = useStudioServices();
+  const environment = searchParams.get("environment") || "";
   const [result, setResult] = useState<StudioTaskSearchResponse | null>(null);
 
   const backServiceId = useMemo(() => searchParams.get("service_id") || query.service_id || "", [query.service_id, searchParams]);
 
   useEffect(() => {
-    setQuery(buildInitialQuery(searchParams));
-  }, [searchParams]);
+    if (services.loading && environment) return;
+    const next = buildInitialQuery(searchParams);
+    setQuery(next);
+    if (Object.entries(next).some(([key, value]) => !["limit", "cursor"].includes(key) && value)) void loadSearch(next);
+    else { requestVersion.current++; setResult(null); setLoading(false); }
+    return () => { requestVersion.current++; };
+  }, [searchParams, environment ? services.loading : false]);
 
   function writeQueryToUrl(nextQuery: StudioTaskSearchQuery) {
     const nextParams = new URLSearchParams();
+    if (environment) nextParams.set("environment", environment);
     for (const [key, value] of Object.entries(nextQuery)) {
       if (key !== "cursor" && key !== "limit" && typeof value === "string" && value.trim()) {
         nextParams.set(key, value.trim());
       }
     }
-    setSearchParams(nextParams);
+    if (nextParams.toString() === searchParams.toString()) void loadSearch(nextQuery);
+    else setSearchParams(nextParams);
   }
 
   async function loadSearch(nextQuery: StudioTaskSearchQuery) {
+    const version = ++requestVersion.current;
     setLoading(true);
     setError(null);
     try {
-      const payload = await searchTasks(nextQuery);
+      const ids = services.services.filter((service) => service.environment === environment && (!nextQuery.service_id || service.service_id === nextQuery.service_id)).map((service) => service.service_id);
+      const scoped = environment ? await scopedResults(ids, nextQuery.cursor, nextQuery.limit || 50, (serviceId, cursor) => searchTasks({ ...nextQuery, service_id: serviceId, cursor, limit: 50 }), (item) => `${item.last_seen_at || ""}|${item.task_id}`) : null;
+      const payload = scoped || await searchTasks(nextQuery);
+      if (version !== requestVersion.current) return;
+      if (scoped?.errors.length) setError(`Partial search: ${scoped.errors.map((item) => `${item.service_id}: ${item.detail}`).join("; ")}`);
       setResult((current) =>
         nextQuery.cursor && current
           ? {
@@ -66,12 +85,13 @@ export function TaskSearchPage() {
           : payload,
       );
     } catch (fetchError) {
+      if (version !== requestVersion.current) return;
       setError(fetchError instanceof Error ? fetchError.message : "Unable to search tasks.");
       if (!nextQuery.cursor) {
         setResult(null);
       }
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }
 
@@ -80,13 +100,13 @@ export function TaskSearchPage() {
     const nextQuery = { ...query, cursor: null };
     setQuery(nextQuery);
     writeQueryToUrl(nextQuery);
-    await loadSearch(nextQuery);
+
   }
 
   function clearSearch() {
     const nextQuery = buildInitialQuery(new URLSearchParams());
     setQuery(nextQuery);
-    setSearchParams(new URLSearchParams());
+    setSearchParams(environment ? new URLSearchParams({ environment }) : new URLSearchParams());
     setResult(null);
     setError(null);
   }
@@ -97,7 +117,7 @@ export function TaskSearchPage() {
 
       <SectionCard
         title="Task Search"
-        subtitle="Indexed cross-service task search over retained Studio task summaries."
+        subtitle="Find a task by its ID, correlation, status or time window."
         action={
           backServiceId ? (
             <Link to={`/services/${encodeURIComponent(backServiceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
@@ -172,6 +192,10 @@ export function TaskSearchPage() {
             />
           </label>
           <div className="studio-search-actions">
+            <button type="button" style={secondaryButtonStyle} onClick={() => {
+              const saved = Array.from(new Set([...savedSearches, searchParams.toString()])).filter(Boolean).slice(-10);
+              setSavedSearches(saved); try { localStorage.setItem("studio:saved-searches", JSON.stringify(saved)); } catch { setError("Browser storage is unavailable."); }
+            }} disabled={!searchParams.toString()}>Save search</button>
             <button type="submit" style={primaryButtonStyle}>
               <StudioIcon name="search" />
               Search
@@ -183,6 +207,7 @@ export function TaskSearchPage() {
           </div>
         </form>
 
+        {savedSearches.length ? <label className="studio-filter-field"><span>Saved searches</span><select style={inputStyle} value="" onChange={(event) => setSearchParams(new URLSearchParams(event.target.value))}><option value="">Load a saved search</option>{savedSearches.map((saved) => <option key={saved} value={saved}>{decodeURIComponent(saved.split("&").join(" · "))}</option>)}</select></label> : null}
         {loading ? <p style={mutedTextStyle}>Searching retained task summaries...</p> : null}
         {!loading && result ? (
           <div className="studio-stack-md">
@@ -227,7 +252,7 @@ export function TaskSearchPage() {
             {result.next_cursor ? (
               <button
                 type="button"
-                onClick={() => void loadSearch({ ...query, cursor: result.next_cursor || null })}
+                onClick={() => void loadSearch({ ...buildInitialQuery(searchParams), cursor: result.next_cursor || null })}
                 style={secondaryButtonStyle}
               >
                 <StudioIcon name="next" />

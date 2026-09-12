@@ -138,7 +138,7 @@ function buildMockService(): MockServiceRecord {
     tags: ["core", "money"],
     auth_mode: "internal_network",
     status: "registered",
-    capabilities: { supported_routes: ["status.latest", "workflow.topology", "broker.dlq.messages"] },
+    capabilities: { supported_routes: ["status.latest", "workflow.topology", "broker.dlq.messages", "failed_tasks.investigate", "failed_tasks.uninvestigate", "failed_tasks.retry", "failed_tasks.delete"] },
     last_seen_at: "2026-04-08T12:00:00Z",
     health: {
       service_id: "payments-api",
@@ -485,6 +485,15 @@ function customPodLabelMetricsResponse() {
       },
     ],
   };
+}
+
+async function openTaskTelemetry() {
+  const summary = await screen.findByText("Task Logs", { selector: "summary" });
+  for (const name of ["Task Logs", "Task Kubernetes Metrics", "Trace path"]) {
+    const disclosure = (name === "Task Logs" ? summary : screen.getByText(name, { selector: "summary" })).closest("details")!;
+    disclosure.open = true;
+    fireEvent(disclosure, new Event("toggle"));
+  }
 }
 
 describe("App", () => {
@@ -841,7 +850,7 @@ describe("App", () => {
           next_cursor: null,
         });
       }
-      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
+      if (url === "/studio/tasks/payments-api/task-123?join=none" && method === "GET") {
         return jsonResponse(taskDetailResponse());
       }
       if (url === "/studio/tasks/payments-api/task-123/events?limit=50" && method === "GET") {
@@ -984,7 +993,7 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: "Open service" })).toHaveAttribute("href", "/services/payments-api");
     expect(window.location.pathname).toBe("/");
     expect(screen.getByRole("link", { name: "Manage registry" })).toHaveAttribute("href", "/services");
-    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: /^Overview/ })).toHaveAttribute("aria-current", "page");
     expect(within(screen.getByText("Unknown").closest("article")!).getByText("1")).toBeInTheDocument();
     const brandLink = screen.getByRole("link", { name: "Relayna Studio overview" });
     expect(brandLink.querySelector("img.studio-brand__mark")).toHaveAttribute("src", expect.stringContaining("relayna-mark"));
@@ -993,7 +1002,7 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Find task"), { target: { value: "task-123" } });
     fireEvent.click(screen.getByRole("button", { name: "Search tasks" }));
     await waitFor(() => expect(window.location.pathname).toBe("/tasks/search"));
-    expect(window.location.search).toBe("?task_id=task-123");
+    expect(window.location.search).toBe("?task_id=task-123&environment=prod");
   });
 
   it("hides administrative navigation and service mutations for readonly users", async () => {
@@ -1266,7 +1275,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/logs?limit=20&source=runtime-worker", undefined),
+      expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/logs?limit=20&source=runtime-worker", expect.objectContaining({ signal: expect.any(AbortSignal) })),
     );
   });
 
@@ -2117,9 +2126,9 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("No log provider configured for this service.")).toBeInTheDocument();
-    expect((await screen.findAllByText("No metrics provider configured for this service.")).length).toBeGreaterThan(1);
+    expect((await screen.findAllByText("No metrics provider configured for this service.")).length).toBe(1);
     expect(screen.getAllByText("unknown").length).toBeGreaterThan(0);
-    for (const label of ["Reload Metrics", "Reload Charts", "Reload Pods"]) {
+    for (const label of ["Reload Metrics", "Reload Pods"]) {
       fireEvent.click(screen.getByRole("button", { name: label }));
     }
   });
@@ -2372,7 +2381,7 @@ describe("App", () => {
     window.history.replaceState({}, "", "/services");
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit payments-api" }));
+    fireEvent.click(await screen.findAllByRole("button", { name: /^Edit/ }).then((buttons) => buttons[0]));
     const editorHeading = await screen.findByRole("heading", { name: "Edit Service" });
     const editor = editorHeading.closest("section");
     expect(editor).not.toBeNull();
@@ -2501,7 +2510,7 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findAllByRole("button", { name: /^Edit/ }).then((buttons) => buttons[0]));
     expect(screen.getByRole("heading", { name: "Editing Target" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Delete Service" }));
 
@@ -2576,7 +2585,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Load Next Page" }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/dlq/messages?limit=50&cursor=cursor-2", undefined),
+      expect(fetchMock).toHaveBeenCalledWith("/studio/services/payments-api/dlq/messages?limit=50&cursor=cursor-2", expect.objectContaining({ signal: expect.any(AbortSignal) })),
     );
   });
 
@@ -2589,7 +2598,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/studio/services/payments-api/broker/dlq/messages?limit=50&task_id=task-123",
-        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       ),
     );
     expect(screen.getByText(/Live broker inspection mode is active/)).toBeInTheDocument();
@@ -2834,7 +2843,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("1 service read failed while loading failed tasks.")).toBeInTheDocument();
+    expect(await screen.findByText("Failed tasks unavailable")).toBeInTheDocument();
     expect(screen.getByText("No error message captured.")).toBeInTheDocument();
     expect(screen.getByText("unattributed")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Load Next Page" }));
@@ -2860,7 +2869,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download JSON" }));
     expect(anchorClick).toHaveBeenCalled();
 
-    fireEvent.change(screen.getByPlaceholderText("Operator"), { target: { value: "oncall" } });
+    expect(screen.getByText(/Actions recorded as/)).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("Investigation note"), { target: { value: "checked" } });
     fireEvent.click(screen.getByRole("button", { name: "Mark Investigated" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -2877,13 +2886,16 @@ describe("App", () => {
     fireEvent.change(screen.getByPlaceholderText("Retry note"), { target: { value: "retry now" } });
     fireEvent.change(screen.getByPlaceholderText("Optional JSON payload override"), { target: { value: '{"safe":true}' } });
     confirmSpy.mockReturnValueOnce(false).mockReturnValue(true);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/studio/failed-tasks/payments-api/failure-1/retry",
       expect.objectContaining({ method: "POST" }),
     ));
 
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByText("Failure Detail")).not.toBeInTheDocument());
     anchorClick.mockRestore();
@@ -3015,6 +3027,7 @@ describe("App", () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
 
     const { unmount } = render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(screen.getByText("Failure summary")).toBeInTheDocument();
@@ -3024,7 +3037,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open Graph" }));
     expect(await screen.findByTestId("rf-root")).toBeInTheDocument();
     expect(screen.getByText("Task Timeline")).toBeInTheDocument();
-    expect(screen.getByText("Task Logs")).toBeInTheDocument();
+    expect(screen.getByText("Task Logs", { selector: "summary" })).toBeInTheDocument();
     expect(screen.getByText("Joined Refs")).toBeInTheDocument();
     expect(screen.getByText("Join Warnings")).toBeInTheDocument();
     expect(screen.getByText("Section Errors")).toBeInTheDocument();
@@ -3078,7 +3091,7 @@ describe("App", () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
     const baseImpl = fetchMock.getMockImplementation();
     fetchMock.mockImplementation(async (input, init) => {
-      if (String(input) === "/studio/tasks/payments-api/task-123?join=all") {
+      if (String(input) === "/studio/tasks/payments-api/task-123?join=none") {
         const detail = taskDetailResponse({ dlqItems: [] });
         detail.latest_status.event.status = "completed";
         detail.execution_graph.summary.status = "completed";
@@ -3088,6 +3101,7 @@ describe("App", () => {
     });
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(screen.getByText("Current signal")).toBeInTheDocument();
@@ -3121,6 +3135,7 @@ describe("App", () => {
     });
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Unable to load task timeline.")).toBeInTheDocument();
     expect(await screen.findByText("Unable to load task logs.")).toBeInTheDocument();
@@ -3139,6 +3154,7 @@ describe("App", () => {
     Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
@@ -3154,6 +3170,7 @@ describe("App", () => {
     Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn().mockReturnValue(false) });
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
@@ -3164,8 +3181,7 @@ describe("App", () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
     services[0] = { ...services[0], log_config: null, metrics_config: null };
     const first = render(<App />);
-    expect(await screen.findByText("No log provider configured for this service.")).toBeInTheDocument();
-    expect(await screen.findByText("No metrics provider configured for this service.")).toBeInTheDocument();
+    expect((await screen.findAllByText(/No provider configured/)).length).toBe(2);
     first.unmount();
 
     fetchMock.mockImplementation(async (input) => {
@@ -3175,7 +3191,7 @@ describe("App", () => {
       if (String(input) === "/studio/services") {
         return serviceListResponse(services);
       }
-      if (String(input) === "/studio/tasks/payments-api/task-123?join=all") {
+      if (String(input) === "/studio/tasks/payments-api/task-123?join=none") {
         throw "offline";
       }
       throw new Error(`Unhandled fetch: ${String(input)}`);
@@ -3211,6 +3227,7 @@ describe("App", () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Task log source"), { target: { value: "api" } });
@@ -3235,6 +3252,7 @@ describe("App", () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     await waitFor(() => {
@@ -3256,6 +3274,7 @@ describe("App", () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Task log window mode"), { target: { value: "manual" } });
@@ -3320,6 +3339,7 @@ describe("App", () => {
     });
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("old task log line")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Task log window mode"), { target: { value: "15m" } });
@@ -3365,6 +3385,7 @@ describe("App", () => {
     });
 
     render(<App />);
+    await openTaskTelemetry();
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(await screen.findByText("Loading task logs...")).toBeInTheDocument();
@@ -3402,7 +3423,7 @@ describe("App", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || "GET";
-      if (url === "/studio/tasks/payments-api/task-123?join=all" && method === "GET") {
+      if (url === "/studio/tasks/payments-api/task-123?join=none" && method === "GET") {
         const detail = taskDetailResponse();
         detail.execution_graph.nodes.push(
           {
@@ -3431,8 +3452,9 @@ describe("App", () => {
     });
 
     render(<App />);
+    await openTaskTelemetry();
 
-    expect(await screen.findByText("Task Kubernetes Metrics")).toBeInTheDocument();
+    expect(await screen.findByText("Task Kubernetes Metrics", { selector: "summary" })).toBeInTheDocument();
     expect(await screen.findByText("Exact Task Resources")).toBeInTheDocument();
     expect(await screen.findByText("0.750s")).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText(/approximate for long-running workers/i).length).toBeGreaterThan(0));
@@ -3457,7 +3479,7 @@ describe("App", () => {
   });
 
   it("advances the auto task log window end when reload logs is clicked on a running task", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-04-08T10:01:00Z"));
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
 
@@ -3470,6 +3492,8 @@ describe("App", () => {
 
     render(<App />);
 
+    await flushRender();
+    await openTaskTelemetry();
     await flushRender();
     expect(screen.getByText("Task Detail")).toBeInTheDocument();
     expect(
@@ -3505,7 +3529,7 @@ describe("App", () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || "GET";
-      if (url === "/studio/tasks/payments-api/task-empty-dlq?join=all" && method === "GET") {
+      if (url === "/studio/tasks/payments-api/task-empty-dlq?join=none" && method === "GET") {
         return jsonResponse(taskDetailResponse({ taskId: "task-empty-dlq", dlqItems: [] }));
       }
       if (url === "/studio/tasks/payments-api/task-empty-dlq/events?limit=50" && method === "GET") {
@@ -3523,4 +3547,14 @@ describe("App", () => {
       "/services/payments-api/dlq?mode=broker&task_id=task-empty-dlq",
     );
   });
+  it("defers task provider reads until an investigation section is opened", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    render(<App />);
+    await screen.findByText("Task Logs", { selector: "summary" });
+    expect(fetchMock.mock.calls.some(([input]) => /task-123\/(logs|metrics|trace-path)/.test(String(input)))).toBe(false);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("task-123?join=none"))).toBe(true);
+    await openTaskTelemetry();
+    await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("task-123/logs?"))).toBe(true));
+  });
+
 });

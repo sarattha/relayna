@@ -740,3 +740,35 @@ def test_metrics_routes_return_expected_error_codes(monkeypatch) -> None:
 
     assert response.status_code == 501
     assert invalid_range.status_code == 422
+
+
+def test_metrics_bound_group_concurrency_and_long_window_resolution() -> None:
+    active = peak = 0
+    steps: list[int] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        steps.append(int(request.url.params["step"]))
+        try:
+            await asyncio.sleep(0.005)
+            return httpx.Response(200, json=prometheus_success_response())
+        finally:
+            active -= 1
+
+    async def scenario() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = PrometheusMetricsProvider(http_client=client)
+            response = await provider.query_metrics(
+                service=make_record(metrics_config=make_metrics_config()),
+                config=make_metrics_config(),
+                query=StudioMetricsQuery(
+                    from_time="2026-08-01T00:00:00Z", to_time="2026-09-01T00:00:00Z", groups=list(StudioMetricGroup)
+                ),
+            )
+            assert response.series
+
+    asyncio.run(scenario())
+    assert 1 < peak <= 4
+    assert all(31 * 86400 / step + 1 <= 1200 for step in steps)

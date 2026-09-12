@@ -1,5 +1,6 @@
-import { lazy, startTransition, Suspense, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { lazy, startTransition, Suspense, useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
+import { Link } from "../scoped-link";
 
 import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics, fetchTaskTracePath } from "../api";
 import {
@@ -638,6 +639,9 @@ export function TaskDetailPage() {
   const [taskMetricManualTo, setTaskMetricManualTo] = useState("");
   const [mermaidCopyState, setMermaidCopyState] = useState<"idle" | "copied" | "selected" | "failed">("idle");
   const [showGraph, setShowGraph] = useState(false);
+  const [streamState, setStreamState] = useState("Connecting to live updates…");
+  const requestVersions = useRef<Record<string, number>>({});
+  useEffect(() => () => { for (const key of Object.keys(requestVersions.current)) requestVersions.current[key]++; }, [serviceId, taskId]);
 
   useEffect(() => {
     if (!serviceId || !taskId) {
@@ -687,28 +691,6 @@ export function TaskDetailPage() {
       ? localDateTimeToIso(taskMetricManualTo)
       : quickTaskMetricWindow?.to || derivedTaskLogWindow?.to || "";
 
-  useEffect(() => {
-    if (!taskDetail || taskTimelineLoading) {
-      return;
-    }
-    const window = getTaskLogWindow();
-    if (taskDetail.service.log_config) {
-      void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, window);
-    } else {
-      setTaskLogs(null);
-      setTaskLogsError("No log provider configured for this service.");
-    }
-    if (taskDetail.service.metrics_config) {
-      void loadTaskMetrics(taskDetail.service_id, taskDetail.task_id, getTaskMetricWindowForMode("auto", "", ""));
-    } else {
-      setTaskMetrics(null);
-      setTaskMetricsError("No metrics provider configured for this service.");
-    }
-    void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id);
-  }, [
-    taskDetail,
-    taskTimelineLoading,
-  ]);
 
   function getTaskLogWindow({ refreshAutoNow = false }: { refreshAutoNow?: boolean } = {}) {
     return getTaskLogWindowForMode(taskLogWindowMode, taskLogManualFrom, taskLogManualTo, { refreshAutoNow });
@@ -766,7 +748,10 @@ export function TaskDetailPage() {
     if (typeof EventSource === "undefined" || !serviceId || !taskId) {
       return;
     }
+    setStreamState("Connecting to live updates…");
     const source = new EventSource(`/studio/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(taskId)}/events/stream`);
+    source.addEventListener("open", () => setStreamState("Live updates connected"));
+    source.addEventListener("error", () => setStreamState("Live updates disconnected. Reconnecting; displayed data may be stale."));
     source.addEventListener("event", (message) => {
       try {
         const parsed = JSON.parse((message as MessageEvent<string>).data) as StudioControlPlaneEvent;
@@ -783,16 +768,21 @@ export function TaskDetailPage() {
     return () => source.close();
   }, [serviceId, taskId]);
 
-  async function loadTaskDetail() {
+  async function loadTaskDetail(includeJoins = false) {
     setLoading(true);
     setError(null);
+    const version = (requestVersions.current["loadTaskDetail"] || 0) + 1;
+    requestVersions.current["loadTaskDetail"] = version;
     try {
-      const payload = await fetchTaskDetail(serviceId, taskId, "all");
+      const payload = await fetchTaskDetail(serviceId, taskId, includeJoins ? "all" : "none");
+      if (requestVersions.current["loadTaskDetail"] !== version) return;
       setTaskDetail(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadTaskDetail"] !== version) return;
       setTaskDetail(null);
       setError(fetchError instanceof Error ? fetchError.message : "Unable to load task detail.");
     } finally {
+      if (requestVersions.current["loadTaskDetail"] !== version) return;
       setLoading(false);
     }
   }
@@ -800,12 +790,17 @@ export function TaskDetailPage() {
   async function loadTaskTimeline(targetServiceId: string, targetTaskId: string) {
     setTaskTimelineLoading(true);
     setTaskTimelineError(null);
+    const version = (requestVersions.current["loadTaskTimeline"] || 0) + 1;
+    requestVersions.current["loadTaskTimeline"] = version;
     try {
       const payload = await fetchTaskEvents(targetServiceId, targetTaskId);
+      if (requestVersions.current["loadTaskTimeline"] !== version) return;
       setTaskTimeline(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadTaskTimeline"] !== version) return;
       setTaskTimelineError(fetchError instanceof Error ? fetchError.message : "Unable to load task timeline.");
     } finally {
+      if (requestVersions.current["loadTaskTimeline"] !== version) return;
       setTaskTimelineLoading(false);
     }
   }
@@ -819,6 +814,8 @@ export function TaskDetailPage() {
   ) {
     setTaskLogsLoading(true);
     setTaskLogsError(null);
+    const version = (requestVersions.current["loadTaskLogs"] || 0) + 1;
+    requestVersions.current["loadTaskLogs"] = version;
     try {
       const payload = await fetchTaskLogs(targetServiceId, targetTaskId, {
         query: queryOverride ?? taskLogQuery,
@@ -829,10 +826,13 @@ export function TaskDetailPage() {
         from: window?.from,
         to: window?.to,
       });
+      if (requestVersions.current["loadTaskLogs"] !== version) return;
       setTaskLogs(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadTaskLogs"] !== version) return;
       setTaskLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load task logs.");
     } finally {
+      if (requestVersions.current["loadTaskLogs"] !== version) return;
       setTaskLogsLoading(false);
     }
   }
@@ -855,13 +855,18 @@ export function TaskDetailPage() {
   ) {
     setTaskMetricsLoading(true);
     setTaskMetricsError(null);
+    const version = (requestVersions.current["loadTaskMetrics"] || 0) + 1;
+    requestVersions.current["loadTaskMetrics"] = version;
     try {
       const payload = await fetchTaskMetrics(targetServiceId, targetTaskId, window);
+      if (requestVersions.current["loadTaskMetrics"] !== version) return;
       setTaskMetrics(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadTaskMetrics"] !== version) return;
       setTaskMetrics(null);
       setTaskMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load task metrics.");
     } finally {
+      if (requestVersions.current["loadTaskMetrics"] !== version) return;
       setTaskMetricsLoading(false);
     }
   }
@@ -869,14 +874,19 @@ export function TaskDetailPage() {
   async function loadTaskTracePath(targetServiceId: string, targetTaskId: string) {
     setTaskTracePathLoading(true);
     setTaskTracePathError(null);
+    const version = (requestVersions.current["loadTaskTracePath"] || 0) + 1;
+    requestVersions.current["loadTaskTracePath"] = version;
     try {
       const payload = await fetchTaskTracePath(targetServiceId, targetTaskId);
+      if (requestVersions.current["loadTaskTracePath"] !== version) return;
       setTaskTracePath(payload);
       setSelectedTracePathNodeId((current) => current || preferredTracePathNodeId(payload));
     } catch (fetchError) {
+      if (requestVersions.current["loadTaskTracePath"] !== version) return;
       setTaskTracePath(null);
       setTaskTracePathError(fetchError instanceof Error ? fetchError.message : "Unable to load task trace path.");
     } finally {
+      if (requestVersions.current["loadTaskTracePath"] !== version) return;
       setTaskTracePathLoading(false);
     }
   }
@@ -962,7 +972,7 @@ export function TaskDetailPage() {
 
       <SectionCard
         title="Task Detail"
-        subtitle="Canonical federated task route backed by `/studio/tasks/:serviceId/:taskId`."
+        subtitle="Inspect task status, failure evidence and related activity."
         action={
           <div style={{ display: "flex", gap: 10 }}>
             <Link to={`/services/${encodeURIComponent(serviceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
@@ -976,6 +986,16 @@ export function TaskDetailPage() {
           </div>
         }
       >
+        <p role="status" style={mutedTextStyle}>{streamState}</p>
+        <label className="studio-filter-field"><span>Shared telemetry window ({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><select style={inputStyle} defaultValue="" onChange={(event) => {
+          const mode = event.target.value as TaskLogWindowMode;
+          if (!mode || !taskDetail) return;
+          setTaskLogWindowMode(mode); setTaskMetricWindowMode(mode);
+          const window = getTaskLogWindowForMode(mode, "", "");
+          if (taskLogs && taskDetail.service.log_config) void loadTaskLogs(serviceId, taskId, taskDetail.task_ref.correlation_id, window);
+          if (taskMetrics && taskDetail.service.metrics_config) void loadTaskMetrics(serviceId, taskId, window);
+        }}><option value="">Choose a shared window</option><option value="auto">Task lifetime</option><option value="15m">Last 15 minutes</option><option value="1h">Last hour</option><option value="24h">Last 24 hours</option></select></label>
+        <button type="button" style={secondaryButtonStyle} disabled={loading} onClick={() => void loadTaskDetail(true)}>Load related tasks across services</button>
         {loading ? <p style={mutedTextStyle}>Loading task detail...</p> : null}
         {!loading && !taskDetail ? <p style={mutedTextStyle}>No task detail is available for this task.</p> : null}
         {taskDetail ? (
@@ -1009,7 +1029,7 @@ export function TaskDetailPage() {
                 {graph ? (
                   <SectionCard
                     title="Execution Graph"
-                    subtitle="Graph code loads only when this investigation view is opened."
+                    subtitle="Follow the task through its execution steps."
                     action={
                       <button type="button" onClick={() => setShowGraph((current) => !current)} style={secondaryButtonStyle}>
                         {showGraph ? "Hide Graph" : "Open Graph"}
@@ -1068,7 +1088,7 @@ export function TaskDetailPage() {
                   ) : null}
                 </SectionCard>
 
-                <SectionCard
+                <details onToggle={(event) => { if (event.currentTarget.open && !taskTracePath) void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id); }}><summary>Trace path</summary><SectionCard
                   title="Task Trace"
                   action={
                     <button
@@ -1096,7 +1116,7 @@ export function TaskDetailPage() {
                       onFilterLogs={applyTraceLogFilter}
                     />
                   ) : null}
-                </SectionCard>
+                </SectionCard></details>
               </div>
 
               <aside className="studio-stack-md">
@@ -1152,8 +1172,9 @@ export function TaskDetailPage() {
                   ) : null}
                 </SectionCard>
 
-                <SectionCard title="Task Logs" action={
+                <details onToggle={(event) => { if (event.currentTarget.open && !taskLogs && taskDetail.service.log_config) { void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, getTaskLogWindow()); } }}><summary>Task Logs</summary>{taskDetail.service.log_config ? <SectionCard title="Task Logs" action={
                   <button
+                    disabled={!taskDetail.service.log_config}
                     type="button"
                     onClick={() =>
                       void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, {
@@ -1254,7 +1275,7 @@ export function TaskDetailPage() {
                       </select>
                     </label>
                     <label className="studio-filter-field">
-                      <span>From</span>
+                      <span>From (local time)</span>
                       <input
                         aria-label="Task log from"
                         type="datetime-local"
@@ -1280,7 +1301,7 @@ export function TaskDetailPage() {
                       />
                     </label>
                     <label className="studio-filter-field">
-                      <span>To</span>
+                      <span>To (local time)</span>
                       <input
                         aria-label="Task log to"
                         type="datetime-local"
@@ -1355,10 +1376,11 @@ export function TaskDetailPage() {
                       ))}
                     </div>
                   ) : null}
-                </SectionCard>
+                </SectionCard> : <p style={mutedTextStyle}>No provider configured. <Link to={`/services/${encodeURIComponent(serviceId)}#service-configure`}>Configure telemetry for this service</Link>.</p>}</details>
 
-                <SectionCard title="Task Kubernetes Metrics" action={
+                <details onToggle={(event) => { if (event.currentTarget.open && !taskMetrics && taskDetail.service.metrics_config) { void loadTaskMetrics(taskDetail.service_id, taskDetail.task_id, getTaskMetricWindowForMode(taskMetricWindowMode, taskMetricManualFrom, taskMetricManualTo)); } }}><summary>Task Kubernetes Metrics</summary>{taskDetail.service.metrics_config ? <SectionCard title="Task Kubernetes Metrics" action={
                   <button
+                    disabled={!taskDetail.service.metrics_config}
                     type="button"
                     onClick={() =>
                       void loadTaskMetrics(
@@ -1411,7 +1433,7 @@ export function TaskDetailPage() {
                       </select>
                     </label>
                     <label className="studio-filter-field">
-                      <span>From</span>
+                      <span>From (local time)</span>
                       <input
                         aria-label="Task metrics from"
                         type="datetime-local"
@@ -1436,7 +1458,7 @@ export function TaskDetailPage() {
                       />
                     </label>
                     <label className="studio-filter-field">
-                      <span>To</span>
+                      <span>To (local time)</span>
                       <input
                         aria-label="Task metrics to"
                         type="datetime-local"
@@ -1491,7 +1513,7 @@ export function TaskDetailPage() {
                       ))}
                     </div>
                   ) : null}
-                </SectionCard>
+                </SectionCard> : <p style={mutedTextStyle}>No provider configured. <Link to={`/services/${encodeURIComponent(serviceId)}#service-configure`}>Configure telemetry for this service</Link>.</p>}</details>
 
                 <SectionCard
                   title="Exact Task Resources"

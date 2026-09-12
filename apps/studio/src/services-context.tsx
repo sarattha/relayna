@@ -17,6 +17,7 @@ type ServicesContextValue = {
   services: ServiceRecord[];
   servicesById: Map<string, ServiceRecord>;
   loading: boolean;
+  updatedAt: string | null;
   error: string | null;
   notice: string | null;
   emptyDraft: ServiceDraft;
@@ -84,6 +85,7 @@ type InFlightServicesRequest = {
 
 export function StudioServicesProvider({ children }: { children: ReactNode }) {
   const [services, setServices] = useState<ServiceRecord[]>([]);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -123,14 +125,14 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
         }
         if (mountedRef.current && isLatestRequest) {
           setServices(nextServices);
+          setUpdatedAt(new Date().toISOString());
           setError(null);
         }
         return isLatestRequest ? nextServices : servicesRef.current;
       } catch (fetchError) {
         if (
           mountedRef.current &&
-          latestRequestTokenRef.current === token &&
-          (!background || !hasLoadedServicesRef.current)
+          latestRequestTokenRef.current === token
         ) {
           setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
         }
@@ -166,7 +168,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
     void loadServices();
 
     const intervalId = window.setInterval(() => {
-      void loadServices({ background: true });
+      if (document.visibilityState === "visible") void loadServices({ background: true });
     }, SERVICE_REFRESH_INTERVAL_MS);
 
     return () => {
@@ -180,6 +182,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
       services,
       servicesById: new Map(services.map((service) => [service.service_id, service])),
       loading,
+      updatedAt,
       error,
       notice,
       emptyDraft,
@@ -226,8 +229,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
           await runHealthCheck(serviceId);
           setNotice(`Ran health check for '${serviceId}'.`);
           setError(null);
-          await reload();
-          const updated = (await listServices()).services.find((service) => service.service_id === serviceId);
+          const updated = (await loadServices()).find((service) => service.service_id === serviceId);
           if (!updated) {
             throw new Error(`Service '${serviceId}' was not found after health refresh.`);
           }
@@ -268,7 +270,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
         setNotice(null);
       },
     }),
-    [services, loading, error, notice, reload],
+    [services, loading, updatedAt, error, notice, reload, loadServices],
   );
 
   return <ServicesContext.Provider value={value}>{children}</ServicesContext.Provider>;

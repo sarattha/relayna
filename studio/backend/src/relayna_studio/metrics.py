@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -238,12 +240,16 @@ class PrometheusMetricsProvider:
         now = datetime.now(UTC)
         start = _parse_iso_timestamp(query.from_time) if query.from_time else now - timedelta(hours=1)
         end = _parse_iso_timestamp(query.to_time) if query.to_time else now
-        step_seconds = query.step_seconds or config.step_seconds
-        groups = query.groups or list(_DEFAULT_GROUPS)
-        series: list[StudioMetricSeries] = []
-        for group in groups:
-            series.extend(
-                await self._query_group(
+        # Bound each series to 1,200 points even for a large selected time window.
+        step_seconds = max(
+            query.step_seconds or config.step_seconds, math.ceil((end - start).total_seconds() / 1199), 1
+        )
+        groups = list(dict.fromkeys(query.groups or list(_DEFAULT_GROUPS)))
+        semaphore = asyncio.Semaphore(4)
+
+        async def query_group(group: StudioMetricGroup) -> list[StudioMetricSeries]:
+            async with semaphore:
+                return await self._query_group(
                     service=service,
                     config=config,
                     query=query,
@@ -252,7 +258,9 @@ class PrometheusMetricsProvider:
                     end=end,
                     step_seconds=step_seconds,
                 )
-            )
+
+        results = await asyncio.gather(*(query_group(group) for group in groups))
+        series = [item for result in results for item in result]
         return StudioMetricsResponse.model_validate(
             {
                 "service_id": service.service_id,

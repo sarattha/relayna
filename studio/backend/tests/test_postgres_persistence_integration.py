@@ -1082,3 +1082,32 @@ async def test_database_configuration_and_schema_failures() -> None:
                 await connection.execute(text("ALTER TABLE alembic_version_hidden RENAME TO alembic_version"))
     finally:
         await database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_database_task_search_keyset_survives_deleted_boundary(database: StudioDatabase) -> None:
+    from relayna_studio.search import StudioTaskSearchQuery
+
+    await PostgresServiceRegistryStore(database).create(service_record())
+    store = PostgresStudioSearchStore(database)
+    for index in range(6):
+        await store.set_task_document(
+            StudioTaskSearchDocument(
+                service_id="payments-api",
+                service_name="Payments",
+                environment="production",
+                task_id=f"keyset-{index}",
+                status="failed" if index != 4 else "running",
+                last_seen_at="2026-09-12T10:00:00Z",
+                detail_path=f"/studio/tasks/payments-api/keyset-{index}",
+                expires_at="2000-01-01T00:00:00Z" if index == 5 else None,
+            )
+        )
+    query = StudioTaskSearchQuery(service_id="payments-api", status="failed", limit=2)
+    first, cursor = await store._search_task_page(query)
+    assert [item.task_id for item in first] == ["keyset-3", "keyset-2"]
+    assert cursor
+    await store.delete_task_documents([first[-1].document_id])
+    second, end = await store._search_task_page(query.model_copy(update={"cursor": cursor}))
+    assert [item.task_id for item in second] == ["keyset-1", "keyset-0"]
+    assert end is None
