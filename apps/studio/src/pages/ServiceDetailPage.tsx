@@ -1,5 +1,6 @@
 import { startTransition, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+import { Link } from "../scoped-link";
 
 import { fetchServiceEvents, fetchServiceLogs, fetchServiceMetrics, requestJson } from "../api";
 import { useStudioAuth } from "../auth-context";
@@ -549,6 +550,20 @@ export function ServiceDetailPage() {
   const serviceLogConfigKey = `${service?.service_id || ""}:${service?.log_config ? "configured" : "unconfigured"}`;
   const serviceMetricsConfigKey = `${service?.service_id || ""}:${service?.metrics_config ? "configured" : "unconfigured"}`;
 
+  const requestVersions = useRef<Record<string, number>>({});
+  useEffect(() => () => { for (const key of Object.keys(requestVersions.current)) requestVersions.current[key]++; }, [serviceId]);
+  const podsInFlight = useRef(false);
+  const [showServiceConfig, setShowServiceConfig] = useState(false);
+  const location = useLocation();
+  useEffect(() => {
+    if (location.hash !== "#service-configure") return;
+    setShowServiceConfig(true);
+    const frame = requestAnimationFrame(() => document.getElementById("service-configure")?.scrollIntoView({ block: "start" }));
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash, serviceId]);
+  const [connectionResult, setConnectionResult] = useState<string | null>(null);
+  const [testingConnections, setTestingConnections] = useState(false);
+  const [streamState, setStreamState] = useState("Connecting to live updates…");
   const [serviceEvents, setServiceEvents] = useState<StudioEventListResponse | null>(null);
   const [serviceEventsLoading, setServiceEventsLoading] = useState(false);
   const [serviceEventsError, setServiceEventsError] = useState<string | null>(null);
@@ -627,7 +642,7 @@ export function ServiceDetailPage() {
     setServiceLogManualTo("");
     if (!service?.log_config) {
       setServiceLogs(null);
-      setServiceLogsError(service ? "No log provider configured for this service." : null);
+      setServiceLogsError(null);
       return;
     }
     void loadServiceLogs({
@@ -640,12 +655,12 @@ export function ServiceDetailPage() {
   useEffect(() => {
     if (!service?.metrics_config) {
       updateServicePods(null);
-      setServicePodsError(service ? "No metrics provider configured for this service." : null);
+      setServicePodsError(null);
       return;
     }
     void loadServicePods(service);
     const interval = window.setInterval(() => {
-      void loadServicePods(service, { quiet: true });
+      if (document.visibilityState === "visible") void loadServicePods(service, { quiet: true });
     }, 10000);
     return () => window.clearInterval(interval);
   }, [serviceMetricsConfigKey]);
@@ -667,9 +682,9 @@ export function ServiceDetailPage() {
     setPodMetricManualTo("");
     if (!service?.metrics_config) {
       setServiceMetrics(null);
-      setServiceMetricsError(service ? "No metrics provider configured for this service." : null);
+      setServiceMetricsError(null);
       setPodMetrics(null);
-      setPodMetricsError(service ? "No metrics provider configured for this service." : null);
+      setPodMetricsError(null);
       return;
     }
     void loadServiceMetrics({ targetService: service, window: resolveWindow("1h", "", "") });
@@ -681,6 +696,8 @@ export function ServiceDetailPage() {
       return;
     }
     const source = new EventSource(`/studio/services/${encodeURIComponent(serviceId)}/events/stream`);
+    source.addEventListener("open", () => setStreamState("Live updates connected"));
+    source.addEventListener("error", () => setStreamState("Live updates disconnected. Reconnecting; displayed data may be stale."));
     source.addEventListener("event", (message) => {
       try {
         const parsed = JSON.parse((message as MessageEvent<string>).data) as StudioControlPlaneEvent;
@@ -700,16 +717,21 @@ export function ServiceDetailPage() {
   async function loadServiceEvents(targetServiceId: string, window = activeServiceEventWindow) {
     setServiceEventsLoading(true);
     setServiceEventsError(null);
+    const version = (requestVersions.current["loadServiceEvents"] || 0) + 1;
+    requestVersions.current["loadServiceEvents"] = version;
     try {
       const payload = await fetchServiceEvents(targetServiceId, {
         limit: 20,
         from: window.from,
         to: window.to,
       });
+      if (requestVersions.current["loadServiceEvents"] !== version) return;
       setServiceEvents(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadServiceEvents"] !== version) return;
       setServiceEventsError(fetchError instanceof Error ? fetchError.message : "Unable to load service activity.");
     } finally {
+      if (requestVersions.current["loadServiceEvents"] !== version) return;
       setServiceEventsLoading(false);
     }
   }
@@ -730,6 +752,8 @@ export function ServiceDetailPage() {
     }
     setServiceLogsLoading(true);
     setServiceLogsError(null);
+    const version = (requestVersions.current["loadServiceLogs"] || 0) + 1;
+    requestVersions.current["loadServiceLogs"] = version;
     try {
       const limit = parseLimit(serviceLogLimit, 20);
       const podFilters = pods.filter((pod) => pod.trim());
@@ -762,26 +786,34 @@ export function ServiceDetailPage() {
             from: window.from,
             to: window.to,
           });
+      if (requestVersions.current["loadServiceLogs"] !== version) return;
       setServiceLogs(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadServiceLogs"] !== version) return;
       setServiceLogsError(fetchError instanceof Error ? fetchError.message : "Unable to load service logs.");
     } finally {
+      if (requestVersions.current["loadServiceLogs"] !== version) return;
       setServiceLogsLoading(false);
     }
   }
 
   async function loadServicePods(targetService = service, options: { quiet?: boolean } = {}) {
+    if (podsInFlight.current) return;
     if (!targetService?.metrics_config) {
       updateServicePods(null);
       setServicePodsError("No metrics provider configured for this service.");
       return;
     }
+    podsInFlight.current = true;
     if (!options.quiet) {
       setServicePodsLoading(true);
     }
     setServicePodsError(null);
+    const version = (requestVersions.current["loadServicePods"] || 0) + 1;
+    requestVersions.current["loadServicePods"] = version;
     try {
       const payload = await fetchServicePods(targetService.service_id);
+      if (requestVersions.current["loadServicePods"] !== version) return;
       const currentSelectedPods = selectedServicePodsRef.current;
       const previousServicePods = servicePodsRef.current;
       const lastNonEmptyServicePods = lastNonEmptyServicePodsRef.current;
@@ -806,8 +838,12 @@ export function ServiceDetailPage() {
         void loadPodMetrics({ targetService, pods: nextPods });
       }
     } catch (fetchError) {
+      if (requestVersions.current["loadServicePods"] !== version) return;
       setServicePodsError(fetchError instanceof Error ? fetchError.message : "Unable to load service pods.");
     } finally {
+      podsInFlight.current = false;
+      if (requestVersions.current["loadServicePods"] !== version) return;
+      podsInFlight.current = false;
       if (!options.quiet) {
         setServicePodsLoading(false);
       }
@@ -828,17 +864,22 @@ export function ServiceDetailPage() {
     }
     setServiceMetricsLoading(true);
     setServiceMetricsError(null);
+    const version = (requestVersions.current["loadServiceMetrics"] || 0) + 1;
+    requestVersions.current["loadServiceMetrics"] = version;
     try {
       const payload = await fetchServiceMetrics(targetService.service_id, {
         from: window.from,
         to: window.to,
         groups: serviceMetricSummaryGroups,
       });
+      if (requestVersions.current["loadServiceMetrics"] !== version) return;
       setServiceMetrics(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadServiceMetrics"] !== version) return;
       setServiceMetrics(null);
       setServiceMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load service metrics.");
     } finally {
+      if (requestVersions.current["loadServiceMetrics"] !== version) return;
       setServiceMetricsLoading(false);
     }
   }
@@ -861,6 +902,8 @@ export function ServiceDetailPage() {
     }
     setPodMetricsLoading(true);
     setPodMetricsError(null);
+    const version = (requestVersions.current["loadPodMetrics"] || 0) + 1;
+    requestVersions.current["loadPodMetrics"] = version;
     try {
       const podFilters = pods.filter((pod) => pod.trim());
       if (!podFilters.length && hasLoadedPodsForService(servicePodsRef.current, targetService)) {
@@ -886,13 +929,28 @@ export function ServiceDetailPage() {
             ),
           )
         : await fetchServiceMetrics(targetService.service_id, baseQuery);
+      if (requestVersions.current["loadPodMetrics"] !== version) return;
       setPodMetrics(payload);
     } catch (fetchError) {
+      if (requestVersions.current["loadPodMetrics"] !== version) return;
       setPodMetrics(null);
       setPodMetricsError(fetchError instanceof Error ? fetchError.message : "Unable to load pod metrics.");
     } finally {
+      if (requestVersions.current["loadPodMetrics"] !== version) return;
       setPodMetricsLoading(false);
     }
+  }
+
+  async function testConnections() {
+    if (!service || testingConnections) return;
+    setTestingConnections(true); setConnectionResult(null);
+    const checks: Array<[string, Promise<unknown>]> = [];
+    if (service.log_config) checks.push(["Logs", fetchServiceLogs(service.service_id, { limit: 1 })]);
+    if (service.metrics_config) checks.push(["Metrics", fetchServiceMetrics(service.service_id, { groups: ["cpu_usage"], from: new Date(Date.now() - 300000).toISOString(), to: new Date().toISOString() })]);
+    try {
+      const results = await Promise.allSettled(checks.map(([, request]) => request));
+      setConnectionResult(results.map((result, index) => `${checks[index][0]}: ${result.status === "fulfilled" ? "query succeeded" : result.reason instanceof Error ? result.reason.message : "query failed"}`).join(" · ") || "Configure a log or metrics provider first.");
+    } finally { setTestingConnections(false); }
   }
 
   async function handleRefreshService() {
@@ -1001,6 +1059,7 @@ export function ServiceDetailPage() {
 
   return (
     <div className="studio-stack-lg">
+      <p role="status" style={mutedTextStyle}>{streamState}</p>
       {servicesState.notice ? <NoticeBanner>{servicesState.notice}</NoticeBanner> : null}
 
       <SectionCard
@@ -1017,7 +1076,7 @@ export function ServiceDetailPage() {
         <nav className="studio-workspace-tabs" aria-label="Service workspace">
           <a href="#service-overview">Overview</a>
           <a href="#service-observe">Observe</a>
-          <a href="#service-configure">Configure</a>
+          <a href="#service-configure" onClick={() => setShowServiceConfig(true)}>Configure</a>
         </nav>
         <div className="studio-action-row">
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
@@ -1067,7 +1126,21 @@ export function ServiceDetailPage() {
           </details></> : null}
         </div>
 
-        <div id="service-overview" className="studio-detail-grid">
+        {!service.log_config || !service.metrics_config ? <NoticeBanner>Telemetry setup is incomplete. Configure {(!service.log_config ? ["logs"] : []).concat(!service.metrics_config ? ["metrics"] : []).join(" and ")} to inspect this service. <Link to="/services">Open service settings</Link>.</NoticeBanner> : null}
+        <div className="studio-action-row">
+          <label className="studio-filter-field"><span>Shared observation window ({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><select style={inputStyle} defaultValue="" onChange={(event) => {
+            const mode = event.target.value as TimeWindowMode;
+            if (!mode) return;
+            const window = resolveWindow(mode, "", "");
+            setServiceEventWindowMode(mode); setServiceLogWindowMode(mode); setServiceMetricWindowMode(mode); setPodMetricWindowMode(mode);
+            void loadServiceEvents(serviceId, window);
+            if (service.log_config) void loadServiceLogs({ targetService: service, window });
+            if (service.metrics_config) { void loadServiceMetrics({ targetService: service, window }); void loadPodMetrics({ targetService: service, window, mode }); }
+          }}><option value="">Choose a shared window</option><option value="15m">Last 15 minutes</option><option value="1h">Last hour</option><option value="24h">Last 24 hours</option></select></label>
+          <button type="button" style={secondaryButtonStyle} disabled={testingConnections || (!service.log_config && !service.metrics_config)} onClick={() => void testConnections()}>{testingConnections ? "Testing connections…" : "Test telemetry connections"}</button>
+        </div>
+        {connectionResult ? <NoticeBanner>{connectionResult}</NoticeBanner> : null}
+        <details id="service-overview" open={showServiceConfig} onToggle={(event) => setShowServiceConfig(event.currentTarget.open)}><summary>Service details and configuration</summary><div className="studio-detail-grid">
           <dl style={{ margin: 0, display: "grid", gap: 10, fontSize: 13 }}>
             <MetadataRow label="Service id" value={service.service_id} />
             <MetadataRow label="Name" value={service.name} />
@@ -1101,40 +1174,40 @@ export function ServiceDetailPage() {
                 <p style={{ ...mutedTextStyle, marginTop: 8 }}>Worker detail: {health.worker_health.detail}</p>
               ) : null}
             </div>
-            <div>
-              <h3 style={{ margin: 0, marginBottom: 8 }}>Stored Capability Document</h3>
+            <details>
+              <summary>Capability Document</summary>
               {service.capabilities ? (
                 <InlineCodeBox value={JSON.stringify(service.capabilities, null, 2)} />
               ) : (
                 <p style={mutedTextStyle}>No capability document stored yet.</p>
               )}
-            </div>
-            <div>
-              <h3 style={{ margin: 0, marginBottom: 8 }}>Stored Log Config</h3>
+            </details>
+            <details>
+              <summary>Log Config</summary>
               {service.log_config ? (
                 <InlineCodeBox value={JSON.stringify(service.log_config, null, 2)} minHeight={160} />
               ) : (
                 <p style={mutedTextStyle}>No log provider configured for this service.</p>
               )}
-            </div>
-            <div>
-              <h3 style={{ margin: 0, marginBottom: 8 }}>Stored Metrics Config</h3>
+            </details>
+            <details>
+              <summary>Metrics Config</summary>
               {service.metrics_config ? (
                 <InlineCodeBox value={JSON.stringify(service.metrics_config, null, 2)} minHeight={160} />
               ) : (
                 <p style={mutedTextStyle}>No metrics provider configured for this service.</p>
               )}
-            </div>
-            <div>
-              <h3 style={{ margin: 0, marginBottom: 8 }}>Stored Trace Config</h3>
+            </details>
+            <details>
+              <summary>Trace Config</summary>
               {service.trace_config ? (
                 <InlineCodeBox value={JSON.stringify(service.trace_config, null, 2)} minHeight={120} />
               ) : (
                 <p style={mutedTextStyle}>No trace provider configured for this service.</p>
               )}
-            </div>
+            </details>
           </div>
-        </div>
+        </div></details>
       </SectionCard>
 
       <div id="service-observe" />
@@ -1142,7 +1215,7 @@ export function ServiceDetailPage() {
         title="Service Metrics"
         subtitle="Service-wide Relayna runtime metrics and pod-level Kubernetes charts for this registered service."
         action={
-          <button
+          <button disabled={!service.metrics_config || serviceMetricsLoading}
             type="button"
             onClick={() => {
               void loadServiceMetrics();
@@ -1155,6 +1228,7 @@ export function ServiceDetailPage() {
           </button>
         }
       >
+        {service.metrics_config ? <>
         <div className="studio-log-filter-grid studio-log-window-grid">
           <label className="studio-filter-field">
             <span>Metrics Window</span>
@@ -1258,7 +1332,7 @@ export function ServiceDetailPage() {
                   : "Showing every current pod matched by this service."}
             </p>
           </div>
-          <button type="button" onClick={() => void loadPodMetrics()} style={secondaryButtonStyle}>
+          <button disabled={!service.metrics_config || podMetricsLoading} type="button" onClick={() => void loadPodMetrics()} style={secondaryButtonStyle}>
             <StudioIcon name="refresh" />
             Reload Charts
           </button>
@@ -1371,18 +1445,20 @@ export function ServiceDetailPage() {
             })}
           </div>
         ) : null}
+      </> : <p style={mutedTextStyle}>No metrics provider configured. <a href="#service-configure" onClick={() => setShowServiceConfig(true)}>View configuration</a> or <Link to="/services">edit this service</Link> to connect telemetry.</p>}
       </SectionCard>
 
       <SectionCard
         title="Service Pods"
         subtitle="Current Kubernetes pods matched by this service's metrics selector; all pods are selected by default, and clicking a pod toggles it in the log and metric chart filter."
         action={
-          <button type="button" onClick={() => void loadServicePods()} style={secondaryButtonStyle}>
+          <button disabled={!service.metrics_config || servicePodsLoading} type="button" onClick={() => void loadServicePods()} style={secondaryButtonStyle}>
             <StudioIcon name="refresh" />
             Reload Pods
           </button>
         }
       >
+        {service.metrics_config ? <>
         {servicePodsLoading ? <p style={mutedTextStyle}>Loading service pods...</p> : null}
         {servicePodsError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{servicePodsError}</p> : null}
         {!service.metrics_config ? (
@@ -1486,6 +1562,7 @@ export function ServiceDetailPage() {
             })}
           </div>
         ) : null}
+      </> : <p style={mutedTextStyle}>No metrics provider configured. <a href="#service-configure" onClick={() => setShowServiceConfig(true)}>View configuration</a> or <Link to="/services">edit this service</Link> to connect telemetry.</p>}
       </SectionCard>
 
       <div className="studio-two-column">
@@ -1641,12 +1718,13 @@ export function ServiceDetailPage() {
               : "Service-scoped log queries remain separate from Relayna status and observations."
           }
           action={
-            <button type="button" onClick={() => void loadServiceLogs()} style={secondaryButtonStyle}>
+            <button disabled={!service.log_config || serviceLogsLoading} type="button" onClick={() => void loadServiceLogs()} style={secondaryButtonStyle}>
               <StudioIcon name="refresh" />
               Reload Logs
             </button>
           }
         >
+        {service.log_config ? <>
           <div className="studio-log-filter-grid">
             <label className="studio-filter-field">
               <span>Text</span>
@@ -1806,7 +1884,8 @@ export function ServiceDetailPage() {
               ))}
             </div>
           ) : null}
-        </SectionCard>
+        </> : <p style={mutedTextStyle}>No log provider configured. <a href="#service-configure" onClick={() => setShowServiceConfig(true)}>View configuration</a> or <Link to="/services">edit this service</Link> to connect telemetry.</p>}
+      </SectionCard>
       </div>
       {confirmation ? (
         <ConfirmationDialog

@@ -73,7 +73,7 @@ from .events import (
 from .failed_task_notifications import FailedTaskEmailRuntimeSettings, _normalize_batch_wait_seconds
 from .health import StudioServiceHealthDocument
 from .registry import DuplicateServiceError, ServiceNotFoundError, ServiceRecord
-from .search import StudioServiceSearchDocument, StudioTaskSearchDocument
+from .search import StudioServiceSearchDocument, StudioTaskSearchDocument, StudioTaskSearchQuery
 
 LOGGER = logging.getLogger(__name__)
 EXPECTED_SCHEMA_REVISION = "0001_studio_postgres"
@@ -999,6 +999,55 @@ class PostgresStudioSearchStore:
 
     def __init__(self, database: StudioDatabase) -> None:
         self.database = database
+
+    async def _search_task_page(
+        self,
+        query: StudioTaskSearchQuery,
+    ) -> tuple[list[StudioTaskSearchDocument], str | None]:
+        from .search import _decode_cursor, _encode_cursor, _normalize_optional_string
+
+        table = task_projections.c
+        filters = [or_(table.expires_at.is_(None), table.expires_at > datetime.now(UTC))]
+        for name in ("service_id", "task_id", "correlation_id", "status", "stage"):
+            value = _normalize_optional_string(getattr(query, name))
+            if value is not None:
+                filters.append(table[name] == value)
+        if query.from_timestamp:
+            filters.append(table.last_seen_at >= _dt(query.from_timestamp))
+        if query.to_timestamp:
+            filters.append(table.last_seen_at <= _dt(query.to_timestamp))
+        # Match Python ordering for missing timestamps and keep cursor positions
+        # stable when the boundary document is deleted between page requests.
+        timestamp = func.coalesce(table.last_seen_at, datetime.min.replace(tzinfo=UTC))
+        if query.cursor:
+            boundary = _decode_cursor(query.cursor)
+            if set(boundary) != {"last_seen_at", "service_id", "task_id"}:
+                raise ValueError("Invalid cursor.")
+            filters.append(
+                tuple_(timestamp, table.service_id, table.task_id)
+                < tuple_(
+                    literal(_dt(boundary["last_seen_at"]) or datetime.min.replace(tzinfo=UTC)),
+                    literal(boundary["service_id"]),
+                    literal(boundary["task_id"]),
+                )
+            )
+        statement = (
+            select(task_projections)
+            .where(*filters)
+            .order_by(timestamp.desc(), table.service_id.desc(), table.task_id.desc())
+            .limit(max(1, query.limit) + 1)
+        )
+        async with self.database.sessions() as session:
+            rows = (await session.execute(statement)).mappings().all()
+        documents = [_task_from_row(row) for row in rows]
+        page = documents[: max(1, query.limit)]
+        cursor = None
+        if len(documents) > len(page):
+            last = page[-1]
+            cursor = _encode_cursor(
+                {"last_seen_at": last.last_seen_at or "", "service_id": last.service_id, "task_id": last.task_id}
+            )
+        return page, cursor
 
     async def task_index_is_empty(self) -> bool:
         async with self.database.sessions() as session:

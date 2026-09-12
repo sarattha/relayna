@@ -307,62 +307,124 @@ class StudioFederationService:
                 "errors": [],
                 "scanned_services": [service.service_id],
             }
-        offset = 0
+        # Store upstream positions, not offsets into a truncated merged first page.
+        positions: dict[str, dict[str, Any]] = {}
+        legacy_offset = 0
         if cursor:
             try:
-                offset = _decode_failed_task_cursor(cursor)
-            except ValueError as exc:
-                raise StudioFederationError(status_code=400, detail=str(exc), code="invalid_cursor") from exc
-        services = (
-            [await self._get_proxyable_service(service_id)]
-            if service_id
-            else await self.registry_service.list_services()
-        )
-        tasks = [
-            asyncio.create_task(
-                self._capture(
-                    self._fetch_failed_tasks(
-                        service,
-                        service_name=service_name,
-                        queue_name=queue_name,
-                        dlq_name=dlq_name,
-                        error_type=error_type,
-                        status=status,
-                        task_id=task_id,
-                        worker_id=worker_id,
-                        investigation_status=investigation_status,
-                        failed_from=failed_from,
-                        failed_to=failed_to,
-                        limit=limit,
-                    )
-                )
-            )
-            for service in services
+                decoded = json.loads(base64.urlsafe_b64decode(cursor.encode("ascii")))
+                if isinstance(decoded, dict) and decoded.get("version") == 2:
+                    positions = decoded["positions"]
+                    if not isinstance(positions, dict) or any(
+                        not isinstance(value, dict)
+                        or not isinstance(value.get("skip", 0), int)
+                        or value.get("skip", 0) < 0
+                        or value.get("cursor") is not None
+                        and not isinstance(value["cursor"], str)
+                        for value in positions.values()
+                    ):
+                        raise ValueError("Invalid cursor.")
+                else:
+                    legacy_offset = _decode_failed_task_cursor(cursor)
+            except (ValueError, KeyError, TypeError, binascii.Error) as exc:
+                raise StudioFederationError(status_code=400, detail="Invalid cursor.", code="invalid_cursor") from exc
+        services = [
+            service
+            for service in await self.registry_service.list_services()
             if service.status != ServiceStatus.DISABLED
         ]
-        results = await asyncio.gather(*tasks) if tasks else []
-        items: list[dict[str, Any]] = []
+        semaphore = asyncio.Semaphore(max(1, self.search_max_concurrency))
+        pages: dict[str, list[dict[str, Any]]] = {}
+        following: dict[str, str | None] = {}
         errors: list[dict[str, Any]] = []
-        scanned_services: list[str] = []
-        for payload, error in results:
-            if error is not None:
-                errors.append(error.to_model().model_dump(mode="json"))
-                continue
-            if payload is None:
-                continue
-            scanned_services.append(str(payload.get("service_id") or ""))
-            for item in payload.get("items", []):
-                if isinstance(item, dict):
-                    items.append(item)
-        items.sort(key=lambda item: str(item.get("failed_at") or ""), reverse=True)
-        page = items[offset : offset + limit]
-        next_offset = offset + len(page)
-        return {
-            "items": page,
-            "next_cursor": _encode_failed_task_cursor(next_offset) if next_offset < len(items) else None,
-            "errors": errors,
-            "scanned_services": [item for item in scanned_services if item],
-        }
+        scanned: set[str] = set()
+        unavailable: set[str] = set()
+
+        async def fetch_page(service: ServiceRecord) -> None:
+            sid = service.service_id
+            position = positions.setdefault(sid, {"cursor": None, "skip": 0})
+            if position.get("done"):
+                return
+            async with semaphore:
+                try:
+                    async with asyncio.timeout(10):
+                        payload = await self._fetch_failed_tasks(
+                            service,
+                            service_name=service_name,
+                            queue_name=queue_name,
+                            dlq_name=dlq_name,
+                            error_type=error_type,
+                            status=status,
+                            task_id=task_id,
+                            worker_id=worker_id,
+                            investigation_status=investigation_status,
+                            failed_from=failed_from,
+                            failed_to=failed_to,
+                            cursor=position.get("cursor"),
+                            limit=50,
+                        )
+                except (StudioFederationError, TimeoutError) as exc:
+                    error = (
+                        exc
+                        if isinstance(exc, StudioFederationError)
+                        else StudioFederationError(
+                            status_code=504,
+                            detail="Service read timed out.",
+                            code="upstream_timeout",
+                            service_id=sid,
+                            retryable=True,
+                        )
+                    )
+                    errors.append(error.to_model().model_dump(mode="json"))
+                    unavailable.add(sid)
+                    return
+            scanned.add(sid)
+            pages[sid] = [item for item in payload.get("items", []) if isinstance(item, dict)][position["skip"] :]
+            following[sid] = payload.get("next_cursor")
+            if not pages[sid]:
+                # Filtered upstream pages can be empty but still have continuation.
+                following_cursor = following[sid]
+                if following_cursor and following_cursor != position.get("cursor"):
+                    positions[sid] = {"cursor": following_cursor, "skip": 0}
+                else:
+                    position["done"] = True
+
+        await asyncio.gather(*(fetch_page(service) for service in services))
+        by_id = {service.service_id: service for service in services}
+        page: list[dict[str, Any]] = []
+        while len(page) < limit:
+            candidates = [(sid, items[0]) for sid, items in pages.items() if items]
+            if not candidates:
+                break
+            sid, item = max(
+                candidates,
+                key=lambda pair: (str(pair[1].get("failed_at") or ""), pair[0], str(pair[1].get("failure_id") or "")),
+            )
+            pages[sid].pop(0)
+            positions[sid]["skip"] += 1
+            if legacy_offset:
+                legacy_offset -= 1
+            else:
+                page.append(item)
+            if not pages[sid]:
+                next_upstream = following[sid]
+                if next_upstream and next_upstream != positions[sid].get("cursor"):
+                    positions[sid] = {"cursor": next_upstream, "skip": 0}
+                    if len(page) < limit:
+                        await fetch_page(by_id[sid])
+                else:
+                    positions[sid]["done"] = True
+        has_more = any(
+            not position.get("done") and sid not in unavailable for sid, position in positions.items() if sid in by_id
+        )
+        next_cursor = (
+            base64.urlsafe_b64encode(
+                json.dumps({"version": 2, "positions": positions}, separators=(",", ":")).encode()
+            ).decode()
+            if has_more
+            else None
+        )
+        return {"items": page, "next_cursor": next_cursor, "errors": errors, "scanned_services": sorted(scanned)}
 
     async def get_failed_task_detail(self, service_id: str, failure_id: str) -> dict[str, Any]:
         service = await self._get_proxyable_service(service_id)

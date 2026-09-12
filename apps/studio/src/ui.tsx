@@ -7,7 +7,8 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
+import { Link } from "./scoped-link";
 
 import relaynaMarkUrl from "./assets/relayna-mark.png";
 import type {
@@ -906,9 +907,9 @@ export function SectionCard({
   );
 }
 
-export function InlineCodeBox({ value, minHeight = 180 }: { value: string; minHeight?: number }) {
+export function InlineCodeBox({ value, minHeight = 180, label }: { value: string; minHeight?: number; label?: string }) {
   return (
-    <textarea
+    <textarea aria-label={label}
       value={value}
       readOnly
       spellCheck={false}
@@ -935,49 +936,56 @@ export function AppChrome({ children }: { children: ReactNode }) {
 
 export function AppHeader() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const environment = new URLSearchParams(location.search).get("environment") || "";
+  const scopedPath = (path: string) => environment ? `${path}${path.includes("?") ? "&" : "?"}environment=${encodeURIComponent(environment)}` : path;
   const servicesState = useStudioServices();
   const auth = useStudioAuth();
   const [globalQuery, setGlobalQuery] = useState("");
-  const environments = Array.from(new Set(servicesState.services.map((service) => service.environment))).sort();
+  const environments = Array.from(new Set([...servicesState.services.map((service) => service.environment), ...(environment ? [environment] : [])])).sort();
   const alertCount = servicesState.services.filter((service) =>
-    ["degraded", "stale", "unreachable"].includes(service.health?.overall_status || ""),
+    (!environment || service.environment === environment) && ["degraded", "stale", "unreachable"].includes(service.health?.overall_status || ""),
   ).length;
 
   function submitGlobalSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const query = globalQuery.trim();
-    navigate(query ? `/tasks/search?task_id=${encodeURIComponent(query)}` : "/tasks/search");
+    navigate(scopedPath(query ? `/tasks/search?task_id=${encodeURIComponent(query)}` : "/tasks/search"));
   }
 
   return (
     <header className="studio-header">
-      <Link to="/" className="studio-brand" aria-label="Relayna Studio overview">
+      <Link to={scopedPath("/")} className="studio-brand" aria-label="Relayna Studio overview">
         <img className="studio-brand__mark" src={relaynaMarkUrl} alt="" aria-hidden="true" />
         <span>
           <strong>Relayna</strong>
-          <small>Studio control plane</small>
+          <small title={servicesState.updatedAt ? `Registry updated ${new Date(servicesState.updatedAt).toLocaleString()}` : "Loading registry"}>{servicesState.error ? "Registry stale · refresh failed" : "Studio control plane"}</small>
         </span>
       </Link>
       <nav className="studio-primary-nav" aria-label="Primary navigation">
-        <NavLink to="/" end>
+        <NavLink to={scopedPath("/")} end>
           Overview
-        </NavLink>
-        <NavLink to="/services">Services</NavLink>
-        <NavLink to="/tasks/search">Task Search</NavLink>
-        <NavLink to="/failed-tasks">
-          Failed Tasks
           {alertCount ? <span className="studio-alert-count" aria-label={`${alertCount} service alerts`}>{alertCount}</span> : null}
         </NavLink>
-        {auth.isAdmin ? <NavLink to="/access">Access</NavLink> : null}
+        <NavLink to={scopedPath("/services")}>Services</NavLink>
+        <NavLink to={scopedPath("/tasks/search")}>Task Search</NavLink>
+        <NavLink to={scopedPath("/failed-tasks")}>
+          Failed Tasks
+
+        </NavLink>
+        {auth.isAdmin ? <NavLink to={scopedPath("/access")}>Access</NavLink> : null}
       </nav>
       <div className="studio-header__tools">
         <label className="studio-environment-scope">
           <span>Environment</span>
           <select
-            defaultValue=""
+            value={environment}
             onChange={(event) => {
               const value = event.target.value;
-              navigate(value ? `/?environment=${encodeURIComponent(value)}` : "/");
+              const params = new URLSearchParams(location.search);
+              if (value) params.set("environment", value); else params.delete("environment");
+              params.delete("service_id");
+              navigate({ pathname: location.pathname.startsWith("/services/") || location.pathname.startsWith("/tasks/") && location.pathname !== "/tasks/search" ? "/services" : location.pathname, search: params.toString() });
             }}
           >
             <option value="">All environments</option>

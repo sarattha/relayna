@@ -1,6 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link } from "../scoped-link";
 
 import { searchServices } from "../api";
 import { useStudioAuth } from "../auth-context";
@@ -34,7 +35,11 @@ type ConfirmationRequest = {
 
 export function ServicesPage() {
   const navigate = useNavigate();
+  const [scopeParams, setScopeParams] = useSearchParams();
+  const environment = scopeParams.get("environment") || "";
   const servicesState = useStudioServices();
+  const scopedServices = servicesState.services.filter((service) => !environment || service.environment === environment);
+  const searchVersion = useRef(0);
   const { isAdmin } = useStudioAuth();
   const [showEditor, setShowEditor] = useState(false);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
@@ -43,7 +48,7 @@ export function ServicesPage() {
   const [saving, setSaving] = useState(false);
   const [searchDraft, setSearchDraft] = useState({
     query: "",
-    environment: "",
+    environment,
     status: "",
     health: "",
     tag: "",
@@ -53,10 +58,16 @@ export function ServicesPage() {
   const [searchResults, setSearchResults] = useState<StudioServiceSearchItem[] | null>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationRequest | null>(null);
 
+  useEffect(() => {
+    searchVersion.current++;
+    setSearchDraft((current) => ({ ...current, environment }));
+    setSearchResults(null);
+  }, [environment]);
+
   function startCreate() {
     setShowEditor(true);
     setEditingServiceId(null);
-    setDraft(servicesState.emptyDraft);
+    setDraft({ ...servicesState.emptyDraft, environment: environment || servicesState.emptyDraft.environment });
     servicesState.clearMessages();
   }
 
@@ -120,23 +131,26 @@ export function ServicesPage() {
 
   async function handleServiceSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const version = ++searchVersion.current;
     setSearchLoading(true);
     setSearchError(null);
     try {
       const payload = await searchServices({ ...searchDraft, limit: 25 });
+      if (version !== searchVersion.current) return;
       setSearchResults(payload.items);
     } catch (fetchError) {
+      if (version !== searchVersion.current) return;
       setSearchResults(null);
       setSearchError(fetchError instanceof Error ? fetchError.message : "Unable to search services.");
     } finally {
-      setSearchLoading(false);
+      if (version === searchVersion.current) setSearchLoading(false);
     }
   }
 
   function clearServiceSearch() {
     setSearchDraft({
       query: "",
-      environment: "",
+      environment,
       status: "",
       health: "",
       tag: "",
@@ -145,15 +159,16 @@ export function ServicesPage() {
     setSearchResults(null);
   }
 
-  const unreachableCount = servicesState.services.filter((service) => service.health?.overall_status === "unreachable").length;
-  const staleOrDegradedCount = servicesState.services.filter((service) =>
+  const unreachableCount = scopedServices.filter((service) => service.health?.overall_status === "unreachable").length;
+  const staleOrDegradedCount = scopedServices.filter((service) =>
     service.health ? ["stale", "degraded"].includes(service.health.overall_status) : false,
   ).length;
-  const disabledCount = servicesState.services.filter((service) => service.status === "disabled").length;
+  const disabledCount = scopedServices.filter((service) => service.status === "disabled").length;
 
   useEffect(() => {
     if (showEditor) {
       editorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      editorRef.current?.querySelector<HTMLInputElement>("input")?.focus({ preventScroll: true });
     }
   }, [editingServiceId, showEditor]);
 
@@ -164,7 +179,7 @@ export function ServicesPage() {
 
       <SectionCard
         title="Registry Overview"
-        subtitle="The Studio backend serves the registry from `/studio/services`."
+        subtitle="Registered services and their current health."
         className="studio-section-card--compact"
         action={
           <button type="button" onClick={() => void servicesState.reload()} style={secondaryButtonStyle}>
@@ -174,16 +189,16 @@ export function ServicesPage() {
         }
       >
         <div className="studio-metrics-grid studio-metrics-grid--4 studio-metrics-grid--compact">
-          <MetricCard label="Services" value={String(servicesState.services.length)} className="studio-metric-card--compact" />
+          <MetricCard label="Services" value={String(scopedServices.length)} className="studio-metric-card--compact" />
           <MetricCard label="Unreachable" value={String(unreachableCount)} className="studio-metric-card--compact" />
           <MetricCard label="Stale / Degraded" value={String(staleOrDegradedCount)} className="studio-metric-card--compact" />
           <MetricCard label="Disabled" value={String(disabledCount)} className="studio-metric-card--compact" />
         </div>
       </SectionCard>
 
-      <SectionCard
+      <details><summary>Gateway setup and export</summary>      <SectionCard
         title="Gateway Import"
-        subtitle="Gateway Admin can import these registered services from `/studio/gateway/services`."
+        subtitle="Export registered services for Gateway Admin."
         className="studio-section-card--compact"
         action={
           <a href="/studio/gateway/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
@@ -193,12 +208,12 @@ export function ServicesPage() {
         }
       >
         <div className="studio-metrics-grid studio-metrics-grid--4 studio-metrics-grid--compact">
-          <MetricCard label="Exportable" value={String(servicesState.services.length)} className="studio-metric-card--compact" />
+          <MetricCard label="Exportable" value={String(scopedServices.length)} className="studio-metric-card--compact" />
           <MetricCard label="Route Prefix" value="/services/*" className="studio-metric-card--compact" />
           <MetricCard label="Owner" value="Gateway" className="studio-metric-card--compact" />
           <MetricCard label="Credentials" value="Excluded" className="studio-metric-card--compact" />
         </div>
-      </SectionCard>
+      </SectionCard></details>
 
       <SectionCard
         title="Service Search"
@@ -218,8 +233,8 @@ export function ServicesPage() {
           <label className="studio-filter-field">
             <span>Environment</span>
             <input
-              value={searchDraft.environment}
-              onChange={(event) => setSearchDraft((current) => ({ ...current, environment: event.target.value }))}
+              value={environment}
+              onChange={(event) => { const params = new URLSearchParams(scopeParams); if (event.target.value) params.set("environment", event.target.value); else params.delete("environment"); setScopeParams(params); }}
               placeholder="mock, prod"
               style={inputStyle}
             />
@@ -306,7 +321,7 @@ export function ServicesPage() {
       </SectionCard>
 
       {isAdmin && showEditor ? (
-        <div ref={editorRef}>
+        <div ref={editorRef} data-service-editor>
           <SectionCard
             title={editingServiceId ? "Edit Service" : "Register Service"}
             subtitle={
@@ -389,7 +404,7 @@ export function ServicesPage() {
             <details style={insetSurfaceStyle}>
               <summary style={{ cursor: "pointer", fontSize: 16, fontWeight: 700, listStyle: "none" }}>Log Configuration</summary>
               <div className="studio-stack-sm" style={{ marginTop: 12 }}>
-                <p style={mutedTextStyle}>Optional per-service Loki query settings for Studio log panels.</p>
+                <p style={mutedTextStyle}>Choose Loki, enter its base URL and a label that identifies this service. Save the service, then use Test telemetry connections on its detail page.</p>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Log provider
                   <select
@@ -569,7 +584,7 @@ export function ServicesPage() {
             <details style={insetSurfaceStyle}>
               <summary style={{ cursor: "pointer", fontSize: 16, fontWeight: 700, listStyle: "none" }}>Metrics Configuration</summary>
               <div className="studio-stack-sm" style={{ marginTop: 12 }}>
-                <p style={mutedTextStyle}>Optional per-service Prometheus query settings for Kubernetes metrics panels.</p>
+                <p style={mutedTextStyle}>Choose Prometheus, enter its base URL and namespace, then identify the service with selector labels. Test the saved connection from the service detail page.</p>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Metrics provider
                   <select
@@ -797,7 +812,7 @@ export function ServicesPage() {
 
       <SectionCard
         title="Registered Services"
-        subtitle="Choose a service to open the routed detail view, topology page, or DLQ explorer."
+        subtitle="Open a service to inspect health, activity, topology and failed messages."
         className="studio-section-card--featured"
         action={isAdmin ? (
           <button type="button" onClick={startCreate} style={secondaryButtonStyle}>
@@ -825,7 +840,7 @@ export function ServicesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {servicesState.services.map((service) => (
+                  {scopedServices.map((service) => (
                     <tr key={service.service_id}>
                       <td>
                         <div style={{ display: "grid", gap: 4 }}>
@@ -863,7 +878,7 @@ export function ServicesPage() {
             </div>
 
             <div className="studio-card-list studio-mobile-only">
-              {servicesState.services.map((service) => (
+              {scopedServices.map((service) => (
                 <article key={`${service.service_id}-card`} className="studio-subcard studio-list-card">
                   <div className="studio-list-card__top">
                     <div style={{ display: "grid", gap: 4 }}>
