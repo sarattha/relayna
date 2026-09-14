@@ -552,7 +552,7 @@ export function ServiceDetailPage() {
 
   const requestVersions = useRef<Record<string, number>>({});
   useEffect(() => () => { for (const key of Object.keys(requestVersions.current)) requestVersions.current[key]++; }, [serviceId]);
-  const podsInFlight = useRef(false);
+  const podsInFlight = useRef<{ serviceId: string } | null>(null);
   const [showServiceConfig, setShowServiceConfig] = useState(false);
   const location = useLocation();
   useEffect(() => {
@@ -648,11 +648,14 @@ export function ServiceDetailPage() {
     void loadServiceLogs({
       targetService: service,
       source: "",
+      pods: [],
       window: emptyWindow,
     });
   }, [serviceLogConfigKey]);
 
   useEffect(() => {
+    updateServicePods(null);
+    updateSelectedServicePods([]);
     if (!service?.metrics_config) {
       updateServicePods(null);
       setServicePodsError(null);
@@ -798,13 +801,14 @@ export function ServiceDetailPage() {
   }
 
   async function loadServicePods(targetService = service, options: { quiet?: boolean } = {}) {
-    if (podsInFlight.current) return;
     if (!targetService?.metrics_config) {
       updateServicePods(null);
       setServicePodsError("No metrics provider configured for this service.");
       return;
     }
-    podsInFlight.current = true;
+    if (podsInFlight.current?.serviceId === targetService.service_id) return;
+    const request = { serviceId: targetService.service_id };
+    podsInFlight.current = request;
     if (!options.quiet) {
       setServicePodsLoading(true);
     }
@@ -841,9 +845,8 @@ export function ServiceDetailPage() {
       if (requestVersions.current["loadServicePods"] !== version) return;
       setServicePodsError(fetchError instanceof Error ? fetchError.message : "Unable to load service pods.");
     } finally {
-      podsInFlight.current = false;
+      if (podsInFlight.current === request) podsInFlight.current = null;
       if (requestVersions.current["loadServicePods"] !== version) return;
-      podsInFlight.current = false;
       if (!options.quiet) {
         setServicePodsLoading(false);
       }
@@ -1099,7 +1102,9 @@ export function ServiceDetailPage() {
             <StudioIcon name="refresh" />
             {refreshingService ? "Refreshing..." : "Refresh"}
           </button>
-          <button type="button" onClick={() => void servicesState.runHealthCheck(service.service_id)} style={secondaryButtonStyle}>
+          <button type="button" onClick={() => void servicesState.runHealthCheck(service.service_id).catch(() => {
+            // The services context displays the health-check error banner.
+          })} style={secondaryButtonStyle}>
             <StudioIcon name="health" />
             Run Health Check
           </button>

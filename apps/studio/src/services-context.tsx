@@ -100,9 +100,9 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
     setError(fetchError instanceof Error ? fetchError.message : fallback);
   }
 
-  const loadServices = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
+  const loadServices = useCallback(async ({ background = false, requireFresh = false }: { background?: boolean; requireFresh?: boolean } = {}) => {
     const currentRequest = reloadInFlightRef.current;
-    if (currentRequest) {
+    if (currentRequest && !requireFresh) {
       if (background || !currentRequest.background) {
         return currentRequest.promise;
       }
@@ -128,6 +128,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
           setUpdatedAt(new Date().toISOString());
           setError(null);
         }
+        if (requireFresh && !isLatestRequest) throw new Error("The health refresh was superseded. Please retry.");
         return isLatestRequest ? nextServices : servicesRef.current;
       } catch (fetchError) {
         if (
@@ -136,6 +137,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
         ) {
           setError(fetchError instanceof Error ? fetchError.message : "Unable to load services.");
         }
+        if (requireFresh) throw fetchError;
         return servicesRef.current;
       } finally {
         const isCurrentRequest = reloadInFlightRef.current?.token === token;
@@ -229,7 +231,7 @@ export function StudioServicesProvider({ children }: { children: ReactNode }) {
           await runHealthCheck(serviceId);
           setNotice(`Ran health check for '${serviceId}'.`);
           setError(null);
-          const updated = (await loadServices()).find((service) => service.service_id === serviceId);
+          const updated = (await loadServices({ requireFresh: true })).find((service) => service.service_id === serviceId);
           if (!updated) {
             throw new Error(`Service '${serviceId}' was not found after health refresh.`);
           }

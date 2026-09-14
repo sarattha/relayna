@@ -1013,9 +1013,15 @@ class PostgresStudioSearchStore:
             if value is not None:
                 filters.append(table[name] == value)
         if query.from_timestamp:
-            filters.append(table.last_seen_at >= _dt(query.from_timestamp))
+            from_timestamp = _dt(query.from_timestamp)
+            if from_timestamp is None:
+                raise ValueError("Invalid 'from' timestamp. Use an ISO 8601 datetime.")
+            filters.append(table.last_seen_at >= from_timestamp)
         if query.to_timestamp:
-            filters.append(table.last_seen_at <= _dt(query.to_timestamp))
+            to_timestamp = _dt(query.to_timestamp)
+            if to_timestamp is None:
+                raise ValueError("Invalid 'to' timestamp. Use an ISO 8601 datetime.")
+            filters.append(table.last_seen_at <= to_timestamp)
         # Match Python ordering for missing timestamps and keep cursor positions
         # stable when the boundary document is deleted between page requests.
         timestamp = func.coalesce(table.last_seen_at, datetime.min.replace(tzinfo=UTC))

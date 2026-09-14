@@ -1496,6 +1496,117 @@ describe("App", () => {
     });
   });
 
+  it("loads the next service while the previous pod reload is pending", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    const metricsConfig = {
+      provider: "prometheus",
+      base_url: "https://prometheus.example.test",
+      namespace: "prod",
+      service_selector_labels: { app: "payments-api" },
+      namespace_label: "namespace",
+      pod_label: "kubernetes_pod_name",
+      container_label: "container",
+      step_seconds: 30,
+      task_window_padding_seconds: 120,
+    };
+    services[0] = {
+      ...services[0],
+      metrics_config: metricsConfig,
+    };
+    services.push({
+      ...buildMockService(),
+      service_id: "orders-api",
+      name: "Orders API",
+      base_url: "https://orders.example.test",
+      metrics_config: {
+        ...metricsConfig,
+        service_selector_labels: { app: "orders-api" },
+      },
+    });
+
+    let paymentPodCalls = 0;
+    let resolveOldPods!: (response: Response) => void;
+    const baseImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url === "/studio/services/payments-api/pods" && method === "GET") {
+        paymentPodCalls += 1;
+        if (paymentPodCalls === 2) return new Promise<Response>((resolve) => { resolveOldPods = resolve; });
+        return jsonResponse({
+          service_id: "payments-api",
+          count: 2,
+          pods: [
+            { name: "payments-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+            { name: "payments-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+          ],
+        });
+      }
+      if (url === "/studio/services/orders-api/pods" && method === "GET") {
+        return jsonResponse({
+          service_id: "orders-api",
+          count: 2,
+          pods: [
+            { name: "orders-api-abc", namespace: "prod", phase: "Running", labels: { app: "service-api" } },
+            { name: "orders-worker-def", namespace: "prod", phase: "Running", labels: { app: "worker" } },
+          ],
+        });
+      }
+      if (url.startsWith("/studio/services/orders-api/events?") && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url.startsWith("/studio/services/orders-api/logs?") && method === "GET") {
+        return jsonResponse({ count: 0, items: [], next_cursor: null });
+      }
+      if (url.startsWith("/studio/services/orders-api/metrics") && method === "GET") {
+        return jsonResponse(metricsResponse(null));
+      }
+      return baseImpl?.(input, init) ?? jsonResponse({});
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Selected pods: payments-api-abc, payments-worker-def")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reload Pods" }));
+    await waitFor(() => expect(paymentPodCalls).toBe(2));
+
+    act(() => {
+      window.history.pushState({}, "", "/services/orders-api");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    expect(await screen.findByRole("heading", { name: "Orders API" })).toBeInTheDocument();
+    expect(await screen.findByText("Selected pods: orders-api-abc, orders-worker-def")).toBeInTheDocument();
+    await waitFor(() => {
+      const matchingOrdersLogCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return parsed.pathname === "/studio/services/orders-api/logs" && parsed.searchParams.get("pod") === "orders-api-abc";
+      });
+      const matchingOrdersMetricCall = fetchMock.mock.calls.find(([input]) => {
+        const parsed = new URL(String(input), "http://studio.test");
+        return (
+          parsed.pathname === "/studio/services/orders-api/metrics" &&
+          parsed.searchParams.get("pod") === "orders-worker-def" &&
+          parsed.searchParams.get("split_by_pod") === "true"
+        );
+      });
+      expect(matchingOrdersLogCall).toBeTruthy();
+      expect(matchingOrdersMetricCall).toBeTruthy();
+    });
+    await act(async () => {
+      resolveOldPods(jsonResponse({ service_id: "payments-api", count: 1, pods: [
+        { name: "stale-payment-pod", namespace: "prod", phase: "Running", labels: {} },
+      ] }));
+    });
+    expect(screen.getByText("Selected pods: orders-api-abc, orders-worker-def")).toBeInTheDocument();
+    expect(screen.queryByText("stale-payment-pod")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => {
+      const parsed = new URL(String(input), "http://studio.test");
+      return parsed.pathname.startsWith("/studio/services/orders-api/") &&
+        parsed.searchParams.getAll("pod").some((pod) => pod.startsWith("payments"));
+    })).toEqual([]);
+  });
+
   it("keeps default all-pods selection when pod refresh discovers a new pod", async () => {
     vi.useFakeTimers();
     window.history.replaceState({}, "", "/services/payments-api");
@@ -3555,6 +3666,27 @@ describe("App", () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("task-123?join=none"))).toBe(true);
     await openTaskTelemetry();
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("task-123/logs?"))).toBe(true));
+  });
+
+  it("clears health-check success when the registry refresh fails", async () => {
+    window.history.replaceState({}, "", "/services/payments-api");
+    const baseImpl = fetchMock.getMockImplementation();
+    let healthChecked = false;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/studio/services/payments-api/health/refresh") {
+        healthChecked = true;
+        return jsonResponse({});
+      }
+      if (String(input) === "/studio/services" && healthChecked) {
+        return jsonResponse({ detail: "Registry refresh unavailable" }, 503);
+      }
+      return await baseImpl!(input, init);
+    });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Payments API" });
+    fireEvent.click(screen.getByRole("button", { name: "Run Health Check" }));
+    await waitFor(() => expect(screen.getAllByText("Registry refresh unavailable").length).toBeGreaterThan(0));
+    expect(screen.queryByText("Ran health check for 'payments-api'.")).not.toBeInTheDocument();
   });
 
 });

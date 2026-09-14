@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from typing import Any, cast
 
 import httpx
 import pytest
 import relayna_studio.app as studio_app
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from relayna_studio import (
     CreateServiceRequest,
@@ -22,6 +24,7 @@ from relayna_studio import (
     create_studio_app,
     get_studio_runtime,
 )
+from relayna_studio.database import PostgresStudioSearchStore
 from relayna_studio.events import StudioControlPlaneEvent, StudioEventEnvelope, StudioEventIngestService
 from relayna_studio.search import (
     RedisStudioSearchStore,
@@ -29,6 +32,7 @@ from relayna_studio.search import (
     StudioServiceSearchQuery,
     StudioTaskSearchQuery,
     _later_iso,
+    create_studio_search_router,
 )
 
 from relayna.observability import RelaynaServiceEvent, ServiceEventSourceKind, StudioEventIngestMethod
@@ -1074,3 +1078,22 @@ def test_parse_datetime_treats_offsetless_timestamps_as_local_time(monkeypatch: 
         else:
             monkeypatch.delenv("TZ", raising=False)
         time.tzset()
+
+
+@pytest.mark.parametrize("bound", ["from", "to"])
+@pytest.mark.parametrize("value", ["not-a-date", "2026-99-99T00:00:00Z"])
+def test_postgres_search_rejects_malformed_time_bounds(bound: str, value: str) -> None:
+    app = FastAPI()
+    app.include_router(
+        create_studio_search_router(
+            search_service=StudioSearchService(
+                registry_service=cast(Any, None),
+                event_store=cast(Any, None),
+                store=PostgresStudioSearchStore(cast(Any, None)),
+            )
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get("/studio/tasks/search", params={bound: value})
+    assert response.status_code == 422
+    assert response.json()["detail"] == f"Invalid '{bound}' timestamp. Use an ISO 8601 datetime."
