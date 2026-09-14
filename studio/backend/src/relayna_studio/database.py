@@ -1821,6 +1821,11 @@ _FAILED_TASK_MUTATION = re.compile(
     r"(?:/(?P<operation>mark-investigated|mark-uninvestigated|retry))?$"
 )
 
+_LOAD_TEST_MUTATION = re.compile(
+    r"^/studio/services/(?P<service_id>[^/]+)/load-tests/"
+    r"(?:plans|(?P<run_id>[^/]+)/(?P<operation>start|cancel))$"
+)
+
 
 class StudioMutationAuditMiddleware(BaseHTTPMiddleware):
     """Audit request and outcome around synchronous upstream mutations."""
@@ -1831,19 +1836,28 @@ class StudioMutationAuditMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         match = _FAILED_TASK_MUTATION.fullmatch(request.url.path)
-        if match is None or request.method not in {"POST", "DELETE"}:
+        load_match = _LOAD_TEST_MUTATION.fullmatch(request.url.path) if request.method == "POST" else None
+        if load_match is not None:
+            operation = load_match.group("operation") or "plan"
+            target_type = "load_test"
+            target_id = load_match.group("service_id")
+            if load_match.group("run_id"):
+                target_id += f":{load_match.group('run_id')}"
+        elif match is not None and request.method in {"POST", "DELETE"}:
+            operation = match.group("operation") or "delete"
+            target_type = "failed_task"
+            target_id = f"{match.group('service_id')}:{match.group('failure_id')}"
+        else:
             return await call_next(request)
-        operation = match.group("operation") or "delete"
         operation_id = str(uuid.uuid4())
-        target_id = f"{match.group('service_id')}:{match.group('failure_id')}"
         base_details = {
             "operation_id": operation_id,
             "method": request.method,
             "path": request.url.path,
         }
         await self.database.append_audit(
-            action=f"failed_task.{operation}.requested",
-            target_type="failed_task",
+            action=f"{target_type}.{operation}.requested",
+            target_type=target_type,
             target_id=target_id,
             details=base_details,
         )
@@ -1851,16 +1865,16 @@ class StudioMutationAuditMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         except Exception as exc:
             await self.database.append_audit(
-                action=f"failed_task.{operation}.failed",
-                target_type="failed_task",
+                action=f"{target_type}.{operation}.failed",
+                target_type=target_type,
                 target_id=target_id,
                 details={**base_details, "error_type": type(exc).__name__},
             )
             raise
         outcome = "succeeded" if response.status_code < 400 else "failed"
         await self.database.append_audit(
-            action=f"failed_task.{operation}.{outcome}",
-            target_type="failed_task",
+            action=f"{target_type}.{operation}.{outcome}",
+            target_type=target_type,
             target_id=target_id,
             details={**base_details, "status_code": response.status_code},
         )

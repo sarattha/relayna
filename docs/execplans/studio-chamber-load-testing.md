@@ -109,3 +109,11 @@ These amend unreleased behavior directly; no released-state migration is needed.
 Add regression coverage and request a fresh Codex review after verification.
 
 All three first-review findings are fixed with regressions. Mandatory verification passed; full PostgreSQL/Redis backend coverage passes at 98.13% with 400 tests, and 120 frontend tests/build pass. Request a second Codex review of the fix commit before landing.
+
+Second review identified missing load-test audit matching, exclusive numeric
+bounds in forms, and maxItems=0 handling. Added actor/outcome audit events using
+the existing append-only middleware and database schema, with a real PostgreSQL
+integration test. Forms now initialize/display/enforce exclusive bounds and
+respect zero-item arrays. Existing failed-task audit behavior remains unchanged.
+
+Second-review verification passed: 401 backend tests with real temporary PostgreSQL/Redis at 98.15% coverage, mandatory SDK/backend checks, 122 frontend tests, production frontend build and strict documentation build. Request another Codex review after pushing.

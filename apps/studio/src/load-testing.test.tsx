@@ -49,3 +49,32 @@ it("can leave null and select a concrete nullable enum value", () => {
   fireEvent.click(screen.getByLabelText("Send null for Mode"));
   expect(screen.queryByLabelText("Mode *")).not.toBeInTheDocument();
 });
+
+it("shows and enforces exclusive bounds and starts inside them", () => {
+  const schema: InputSchema = { type: "number", exclusiveMinimum: 0, exclusiveMaximum: 0.5 };
+  function Form() {
+    const [value, setValue] = useState(initialInput(schema));
+    return <RequestField schema={schema} value={value} onChange={setValue} label="Ratio" />;
+  }
+  render(<Form />);
+  const field = screen.getByLabelText("Ratio *");
+  expect(field).toHaveValue(0.25);
+  expect(screen.getByText("Must be greater than 0.")).toBeInTheDocument();
+  expect(screen.getByText("Must be less than 0.5.")).toBeInTheDocument();
+  fireEvent.change(field, { target: { value: "0" } });
+  expect(field).toBeInvalid();
+  fireEvent.change(field, { target: { value: "0.5" } });
+  expect(field).toBeInvalid();
+  fireEvent.change(field, { target: { value: "0.3" } });
+  expect(field).toBeValid();
+  expect(initialInput({ type: "integer", exclusiveMinimum: 0 })).toBe(1);
+  expect(initialInput({ type: "integer", exclusiveMaximum: 0 })).toBe(-1);
+  expect(initialInput({ type: "number", exclusiveMinimum: 0 })).toBe(1);
+  expect(initialInput({ type: "number", exclusiveMaximum: 0 })).toBe(-1);
+  expect(initialInput({ type: "number", exclusiveMinimum: 0, multipleOf: 0.1 })).toBe(0.1);
+});
+
+it("does not add items to a zero-capacity array", () => {
+  render(<RequestField schema={{ type: "array", maxItems: 0, items: { type: "string" } }} value={[]} onChange={() => { throw new Error("must not add"); }} label="Tags" />);
+  expect(screen.getByRole("button", { name: "Add tags item" })).toBeDisabled();
+});

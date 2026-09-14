@@ -25,6 +25,26 @@ export type LoadRun = {
   tasks?: { task_id: string; terminal_status: string; success: boolean; total_duration_ms: number }[];
 };
 export const terminalLoadStates = new Set(["completed", "failed", "cancelled"]);
+function initialNumber(schema: InputSchema): number {
+  const lower = Math.max(schema.minimum ?? -Infinity, schema.exclusiveMinimum ?? -Infinity);
+  const upper = Math.min(schema.maximum ?? Infinity, schema.exclusiveMaximum ?? Infinity);
+  const step = schema.multipleOf ?? (schema.type === "integer" ? 1 : undefined);
+  let value = Math.min(upper, Math.max(lower, 0));
+  if (step) {
+    value = Math.ceil(value / step) * step;
+    if (value === schema.exclusiveMinimum) value += step;
+    if (value > upper || value === schema.exclusiveMaximum) {
+      value = Math.floor(upper / step) * step;
+      if (value === schema.exclusiveMaximum) value -= step;
+    }
+  } else if (value === schema.exclusiveMinimum || value === schema.exclusiveMaximum) {
+    value = Number.isFinite(lower) && Number.isFinite(upper) ? lower / 2 + upper / 2
+      : value === schema.exclusiveMinimum ? lower + Math.max(1, Math.abs(lower) * Number.EPSILON)
+      : upper - Math.max(1, Math.abs(upper) * Number.EPSILON);
+  }
+  return value;
+}
+
 export function initialInput(schema: InputSchema): unknown {
   if (schema.default !== undefined) return structuredClone(schema.default);
   if (schema.enum?.length) return schema.enum[0];
@@ -34,7 +54,7 @@ export function initialInput(schema: InputSchema): unknown {
     .map(([key, child]) => [key, initialInput(child)]));
   if (schema.type === "array") return Array.from({ length: schema.minItems || 0 }, () => initialInput(schema.items!));
   if (schema.type === "boolean") return false;
-  if (schema.type === "number" || schema.type === "integer") return schema.minimum ?? 0;
+  if (schema.type === "number" || schema.type === "integer") return initialNumber(schema);
   return "";
 }
 
@@ -72,7 +92,7 @@ export function RequestField({ schema, value, onChange, label, required = true }
         <RequestField schema={schema.items!} value={item} label={`${name} ${index + 1}`} onChange={(next) => onChange(items.map((old, i) => i === index ? next : old))} />
         <button type="button" style={secondaryButtonStyle} disabled={items.length <= (schema.minItems || 0)} onClick={() => onChange(items.filter((_, i) => i !== index))}>Remove {index + 1}</button>
       </div>)}
-      <button type="button" style={secondaryButtonStyle} disabled={items.length >= (schema.maxItems || 100)} onClick={() => onChange([...items, initialInput(schema.items!)])}>Add {name.toLowerCase()} item</button>
+      <button type="button" style={secondaryButtonStyle} disabled={items.length >= (schema.maxItems ?? 100)} onClick={() => onChange([...items, initialInput(schema.items!)])}>Add {name.toLowerCase()} item</button>
     </fieldset>;
   }
   return <div className="load-field"><label htmlFor={id}>{name}{required ? " *" : ""}</label>
@@ -80,8 +100,12 @@ export function RequestField({ schema, value, onChange, label, required = true }
       {schema.enum.map((option) => <option key={JSON.stringify(option)} value={JSON.stringify(option)}>{String(option)}</option>)}
     </select> : schema.type === "boolean" ? <select id={id} style={inputStyle} value={String(value ?? false)} onChange={(event) => onChange(event.target.value === "true")}><option value="false">No</option><option value="true">Yes</option></select>
       : schema.type === "string" ? <textarea id={id} style={inputStyle} required={required} rows={2} value={String(value ?? "")} minLength={schema.minLength} maxLength={schema.maxLength} onChange={(event) => onChange(event.target.value)} />
-        : <input id={id} style={inputStyle} type="number" required={required} value={value === undefined ? "" : Number(value)} min={schema.minimum} max={schema.maximum} step={schema.multipleOf ?? (schema.type === "integer" ? 1 : "any")} onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))} />}
+        : <input id={id} style={inputStyle} type="number" required={required} value={value === undefined ? "" : Number(value)} min={schema.minimum ?? schema.exclusiveMinimum} max={schema.maximum ?? schema.exclusiveMaximum} step={schema.multipleOf ?? (schema.type === "integer" ? 1 : "any")} ref={(element) => {
+          const invalid = typeof value === "number" && ((schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) || (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum));
+          element?.setCustomValidity(invalid ? "Value must be strictly inside the displayed bounds." : "");
+        }} onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))} />}
     {schema.description && <small>{schema.description}</small>}
+    {schema.exclusiveMinimum !== undefined && <small>Must be greater than {schema.exclusiveMinimum}.</small>}{schema.exclusiveMaximum !== undefined && <small>Must be less than {schema.exclusiveMaximum}.</small>}
     {schema.format && <small>Format: {schema.format}</small>}{schema.pattern && <small>Must match: {schema.pattern}</small>}
   </div>;
 }

@@ -1111,3 +1111,73 @@ async def test_database_task_search_keyset_survives_deleted_boundary(database: S
     second, end = await store._search_task_page(query.model_copy(update={"cursor": cursor}))
     assert [item.task_id for item in second] == ["keyset-1", "keyset-0"]
     assert end is None
+
+
+@pytest.mark.asyncio
+async def test_load_test_actions_audit_actor_and_outcome(
+    database: StudioDatabase, redis: Redis, monkeypatch, tmp_path
+) -> None:
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    import httpx
+    from relayna_studio.audit_context import reset_actor_user_id, set_actor_user_id
+    from relayna_studio.load_testing import _create_load_testing_router
+
+    profiles = Path(__file__).resolve().parents[3] / "docs/examples/studio-chamber-profiles.json"
+    monkeypatch.setenv("RELAYNA_STUDIO_CHAMBER_PROFILES_PATH", str(profiles))
+    monkeypatch.setenv("RELAYNA_STUDIO_CHAMBER_URL", "http://chamber.internal")
+    monkeypatch.setenv("RELAYNA_STUDIO_CHAMBER_TOKEN", "test-token")
+    registry = SimpleNamespace(
+        get_service=AsyncMock(return_value=SimpleNamespace(environment="staging", status="healthy"))
+    )
+
+    def upstream(request):
+        if request.url.path.endswith("/plans"):
+            return httpx.Response(200, json={"run_id": "plan"})
+        if request.url.path.endswith("/cancel"):
+            return httpx.Response(503)
+        return httpx.Response(200, json={"job_id": "job", "state": "queued"})
+
+    app = FastAPI()
+    app.include_router(
+        _create_load_testing_router(registry, redis, httpx.AsyncClient(transport=httpx.MockTransport(upstream)))
+    )
+    app.add_middleware(StudioMutationAuditMiddleware, database=database)
+    actor = set_actor_user_id("load-test-admin")
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://studio.test") as client:
+            base = "/studio/services/translation-staging/load-tests"
+            response = await client.post(
+                f"{base}/plans",
+                json={
+                    "profile_id": "translate-text",
+                    "inputs": {"text": "Hello", "language_target": "Thai"},
+                    "vus": 1,
+                    "iterations": 1,
+                    "duration_seconds": 30,
+                },
+            )
+            assert response.status_code == 201
+            identity = response.json()["id"]
+            assert (await client.post(f"{base}/{identity}/start")).status_code == 202
+            assert (await client.post(f"{base}/{identity}/cancel")).status_code == 502
+            assert (await client.get(base)).status_code == 200
+    finally:
+        reset_actor_user_id(actor)
+    async with database.sessions() as session:
+        rows = (await session.execute(select(audit_log).order_by(audit_log.c.id))).mappings().all()
+    assert [row["action"] for row in rows] == [
+        "load_test.plan.requested",
+        "load_test.plan.succeeded",
+        "load_test.start.requested",
+        "load_test.start.succeeded",
+        "load_test.cancel.requested",
+        "load_test.cancel.failed",
+    ]
+    assert {row["actor_user_id"] for row in rows} == {"load-test-admin"}
+    assert rows[0]["target_id"] == "translation-staging"
+    assert rows[2]["target_id"] == f"translation-staging:{identity}"
+    assert rows[4]["details"]["operation_id"] == rows[5]["details"]["operation_id"]
+    assert rows[5]["details"]["status_code"] == 502
+    assert all("Hello" not in json.dumps(row["details"]) for row in rows)

@@ -42,7 +42,10 @@ Set these variables on the **Studio backend** deployment:
 Mount the profile file read-only, configure the matching operator token in
 Chamber, and restart Studio after profile changes. Never put the bearer token
 in frontend variables. Existing Studio authentication, CSRF and mutation audit
-middleware protects these routes. Configure normal Studio Entra authentication
+middleware protects these routes. Planning, starting and cancelling record
+`load_test.plan`, `load_test.start` and `load_test.cancel` request/outcome audit
+events with the actor and service/run target; request bodies and tokens are not
+written to audit details. Configure normal Studio Entra authentication
 for shared deployments. Read-only users have the same global service visibility
 as other Studio views; this feature does not introduce tenant isolation.
 
