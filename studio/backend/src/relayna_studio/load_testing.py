@@ -7,6 +7,7 @@ import json
 import os
 import time
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
@@ -14,11 +15,13 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import SchemaError
 from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
 
-from .registry import ServiceNotFoundError, ServiceRegistryService
+from ._openapi import _is_sdk_operation, _request_schema
+from .registry import OutboundUrlPolicyError, ServiceNotFoundError, ServiceRegistryService, StudioOutboundUrlPolicy
 
 _RETENTION = 30 * 86400
 _TERMINAL = {"completed", "failed", "cancelled"}
@@ -38,11 +41,17 @@ _SCHEMA_KEYS = {
     "maxLength",
     "minItems",
     "maxItems",
+    "format",
+    "pattern",
+    "multipleOf",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
 }
 
 
 class _LoadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    schema_revision: str = Field(default="", max_length=64)
     profile_id: str = Field(min_length=1, max_length=100)
     inputs: dict[str, Any] = Field(default_factory=dict)
     vus: int = Field(ge=1, le=100)
@@ -55,6 +64,11 @@ def _check_schema(schema: dict[str, Any], depth: int = 0) -> None:
     if depth > 8 or set(schema) - _SCHEMA_KEYS:
         raise ValueError("Request schema uses unsupported form keywords")
     kind = schema.get("type")
+    if isinstance(kind, list):
+        concrete = [item for item in kind if item != "null"]
+        if len(concrete) != 1 or len(kind) != 2:
+            raise ValueError("Each nullable field needs one concrete type")
+        kind = concrete[0]
     if kind not in {"object", "array", "string", "number", "integer", "boolean"}:
         raise ValueError("Each request field needs a concrete type")
     if kind == "object":
@@ -85,7 +99,7 @@ def _load_profiles() -> dict[str, Any]:
             if not profile.get("id") or profile["id"] in ids:
                 raise ValueError("Chamber profile IDs must be unique within a service")
             ids.add(profile["id"])
-            schema = profile["input_schema"]
+            schema = profile.get("input_schema", {"type": "object", "properties": {}, "additionalProperties": False})
             _check_schema(schema)
             if schema["type"] != "object":
                 raise ValueError("Request schema must describe an object")
@@ -110,15 +124,20 @@ def _load_profiles() -> dict[str, Any]:
                 raise ValueError("A profile requires one supported request journey")
             encoding = journeys[0].get("requestEncoding", "json")
             if encoding in {"multipart", "form"} and any(
-                child["type"] in {"object", "array"} for child in schema.get("properties", {}).values()
+                isinstance(child["type"], list) or child["type"] in {"object", "array"}
+                for child in schema.get("properties", {}).values()
             ):
                 raise ValueError("Form fields must have scalar types")
             if encoding == "multipart" and not journeys[0].get("multipart", {}).get("files"):
                 raise ValueError("Multipart profiles need approved file fixtures in Chamber storage")
-            if encoding == "raw" and (
-                set(schema.get("properties", {})) != {"body"}
-                or schema["properties"]["body"]["type"] != "string"
-                or schema.get("required") != ["body"]
+            if (
+                "input_schema" in profile
+                and encoding == "raw"
+                and (
+                    set(schema.get("properties", {})) != {"body"}
+                    or schema["properties"]["body"]["type"] != "string"
+                    or schema.get("required") != ["body"]
+                )
             ):
                 raise ValueError("Raw request schemas need one required string field named body")
             if journeys[0].get("adapter") == "relayna" and encoding not in {"json", "multipart"}:
@@ -139,7 +158,14 @@ def _load_profiles() -> dict[str, Any]:
 
 
 class _Chamber:
-    def __init__(self, registry: ServiceRegistryService, redis: Redis, client: httpx.AsyncClient):
+    def __init__(
+        self,
+        registry: ServiceRegistryService,
+        redis: Redis,
+        client: httpx.AsyncClient,
+        url_policy: StudioOutboundUrlPolicy | None = None,
+    ):
+        self.url_policy = url_policy or StudioOutboundUrlPolicy()
         self.registry = registry
         self.redis = redis
         self.client = client
@@ -224,6 +250,79 @@ class _Chamber:
     async def save(self, service_id: str, record: dict[str, Any]) -> None:
         await self.redis.set(self.key(service_id, record["id"]), json.dumps(record), ex=_RETENTION)
 
+    async def openapi(self, service: Any, settings: dict[str, Any]) -> dict[str, Any]:
+        path = settings.get("openapi_path", "/openapi.json")
+        if (
+            not isinstance(path, str)
+            or not path.startswith("/")
+            or path.startswith("//")
+            or any(char in path for char in ("?", "#", "%", "\\"))
+            or ".." in path
+        ):
+            raise ValueError("openapi_path must be a service-relative path without query or traversal")
+        url = f"{service.base_url.rstrip('/')}{path}"
+        self.url_policy.validate_url(url, label="OpenAPI source")
+        # No Chamber token, Studio cookies or OpenAPI server URLs are forwarded.
+        async with self.client.stream(
+            "GET", url, timeout=10, follow_redirects=False, headers={"Accept": "application/json"}
+        ) as response:
+            if response.status_code != 200:
+                raise ValueError("Service OpenAPI document is unavailable (expected HTTP 200)")
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                content.extend(chunk)
+                if len(content) > 2 * 1024 * 1024:
+                    raise ValueError("OpenAPI document exceeds 2 MiB")
+        document = json.loads(content)
+        if not isinstance(document, dict):
+            raise ValueError("OpenAPI document must be an object")
+        return document
+
+    async def resolved_profiles(self, service_id: str, service: Any) -> tuple[list[dict[str, Any]], list[str]]:
+        settings = self.profiles.get(service_id, {})
+        configured = settings.get("profiles", [])
+        resolved = []
+        errors = []
+        document = None
+        discovery_error = ""
+        if any("input_schema" not in profile for profile in configured):
+            try:
+                document = await self.openapi(service, settings)
+            except (ValueError, httpx.HTTPError, OutboundUrlPolicyError) as exc:
+                discovery_error = (
+                    str(exc)
+                    if isinstance(exc, ValueError)
+                    else "OpenAPI discovery failed; check the service connection and outbound allowlist."
+                )
+        for original in configured:
+            if _is_sdk_operation(original["config"]["traffic"]["journeys"][0]["path"]):
+                errors.append(f"{original['name']}: Relayna SDK control endpoints are excluded.")
+                continue
+            profile = copy.deepcopy(original)
+            if "input_schema" not in profile:
+                try:
+                    if document is None:
+                        raise ValueError(discovery_error)
+                    journey = profile["config"]["traffic"]["journeys"][0]
+                    schema = _request_schema(document, journey)
+                    _check_schema(schema)
+                    if journey.get("requestEncoding") in {"form", "multipart"} and any(
+                        isinstance(child["type"], list) or child["type"] in {"object", "array"}
+                        for child in schema.get("properties", {}).values()
+                    ):
+                        raise ValueError("Form fields must have non-null scalar types")
+                    profile["input_schema"] = schema
+                    profile["schema_source"] = "openapi"
+                    profile["schema_revision"] = sha256(json.dumps(schema, sort_keys=True).encode()).hexdigest()
+                except (ValueError, KeyError, TypeError, RecursionError, SchemaError) as exc:
+                    errors.append(f"{profile['name']}: {exc}")
+                    continue
+            else:
+                profile["schema_source"] = "configured"
+                profile["schema_revision"] = ""
+            resolved.append(profile)
+        return resolved, errors
+
     async def options(self, service_id: str) -> dict[str, Any]:
         service = await self.service(service_id)
         configured = self.profiles.get(service_id, {})
@@ -231,13 +330,23 @@ class _Chamber:
             self.url and configured.get("environment") == service.environment and service.status != "disabled"
         )
         profiles = []
-        for profile in configured.get("profiles", []) if enabled else []:
+        resolved, errors = await self.resolved_profiles(service_id, service) if enabled else ([], [])
+        for profile in resolved:
             journey = profile["config"]["traffic"]["journeys"][0]
             profiles.append(
                 {
                     **{
                         key: profile[key]
-                        for key in ("id", "name", "input_schema", "max_vus", "max_iterations", "max_duration_seconds")
+                        for key in (
+                            "id",
+                            "name",
+                            "input_schema",
+                            "max_vus",
+                            "max_iterations",
+                            "max_duration_seconds",
+                            "schema_source",
+                            "schema_revision",
+                        )
                     },
                     "method": journey["method"],
                     "path": journey["path"],
@@ -249,6 +358,7 @@ class _Chamber:
         return {
             "available": bool(profiles),
             "profiles": profiles,
+            "errors": errors,
             "message": ""
             if profiles
             else "This service needs an approved load-test profile for its environment. "
@@ -257,17 +367,24 @@ class _Chamber:
 
     async def plan(self, service_id: str, payload: _LoadRequest) -> dict[str, Any]:
         service = await self.service(service_id, mutate=True)
-        options = await self.options(service_id)
-        if not any(item["id"] == payload.profile_id for item in options["profiles"]):
+        settings = self.profiles.get(service_id, {})
+        if not self.url or settings.get("environment") != service.environment:
+            raise HTTPException(409, "Load testing is not configured for this environment.")
+        profiles, errors = await self.resolved_profiles(service_id, service)
+        if not any(item["id"] == payload.profile_id for item in profiles):
             raise HTTPException(409, "This load-test profile is not available for this service and environment.")
-        profile = next(item for item in self.profiles[service_id]["profiles"] if item["id"] == payload.profile_id)
+        profile = next(item for item in profiles if item["id"] == payload.profile_id)
+        if profile["schema_source"] == "openapi" and payload.schema_revision != profile["schema_revision"]:
+            raise HTTPException(409, "The service input schema changed. Refresh operations and review the new fields.")
         try:
             input_size = len(json.dumps(payload.inputs, allow_nan=False).encode())
         except ValueError as exc:
             raise HTTPException(422, "Inputs must contain finite JSON values.") from exc
         if input_size > 65536:
             raise HTTPException(422, "Request inputs exceed 64 KiB.")
-        errors = list(Draft202012Validator(profile["input_schema"]).iter_errors(payload.inputs))
+        errors = list(
+            Draft202012Validator(profile["input_schema"], format_checker=FormatChecker()).iter_errors(payload.inputs)
+        )
         if errors:
             error = errors[0]
             field = ".".join(map(str, error.absolute_path)) or "request"
@@ -408,8 +525,13 @@ class _Chamber:
         return self.public(record)
 
 
-def _create_load_testing_router(registry: ServiceRegistryService, redis: Redis, client: httpx.AsyncClient) -> APIRouter:
-    bridge = _Chamber(registry, redis, client)
+def _create_load_testing_router(
+    registry: ServiceRegistryService,
+    redis: Redis,
+    client: httpx.AsyncClient,
+    url_policy: StudioOutboundUrlPolicy | None = None,
+) -> APIRouter:
+    bridge = _Chamber(registry, redis, client, url_policy)
     router = APIRouter(prefix="/studio/services/{service_id}/load-tests", tags=["load-testing"])
 
     @router.get("/profiles")

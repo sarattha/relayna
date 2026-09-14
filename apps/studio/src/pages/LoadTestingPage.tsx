@@ -24,6 +24,8 @@ function ServiceLoadTesting({ serviceId }: { serviceId: string }) {
   const [params, setParams] = useSearchParams();
   const selected = params.get("run") || "";
   const base = `/studio/services/${encodeURIComponent(serviceId)}/load-tests`;
+  const [profileRevision, setProfileRevision] = useState(0);
+  const [importErrors, setImportErrors] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<LoadProfile[]>([]);
   const [setup, setSetup] = useState("Loading load-test profiles…");
   const [profileId, setProfileId] = useState("");
@@ -41,19 +43,19 @@ function ServiceLoadTesting({ serviceId }: { serviceId: string }) {
   useEffect(() => {
     let alive = true;
     void Promise.allSettled([
-      requestJson<{ profiles: LoadProfile[]; message: string }>(`${base}/profiles`),
+      requestJson<{ profiles: LoadProfile[]; message: string; errors?: string[] }>(`${base}/profiles`),
       requestJson<{ items: LoadRun[] }>(base),
     ]).then(([options, recent]) => {
       if (!alive) return;
       if (options.status === "fulfilled") {
-        setProfiles(options.value.profiles); setSetup(options.value.message);
+        setProfiles(options.value.profiles); setSetup(options.value.message); setImportErrors(options.value.errors || []);
         if (options.value.profiles[0]) chooseProfile(options.value.profiles[0]);
       } else { setSetup(""); setError(message(options.reason)); }
       if (recent.status === "fulfilled") setHistory(recent.value.items);
       else setError(message(recent.reason));
     });
     return () => { alive = false; };
-  }, [base]);
+  }, [base, profileRevision]);
 
   useEffect(() => {
     let alive = true;
@@ -90,7 +92,7 @@ function ServiceLoadTesting({ serviceId }: { serviceId: string }) {
     if (!profile || busy) return;
     setBusy(true); setError("");
     try {
-      const result = await requestJson<LoadRun>(`${base}/plans`, body({ profile_id: profile.id, inputs, vus, iterations, duration_seconds: duration }));
+      const result = await requestJson<LoadRun>(`${base}/plans`, body({ profile_id: profile.id, schema_revision: profile.schema_revision, inputs, vus, iterations, duration_seconds: duration }));
       setHistory((old) => [result, ...old].slice(0, 20)); selectRun(result.id);
     } catch (failure) { setError(message(failure)); }
     finally { setBusy(false); }
@@ -117,10 +119,13 @@ function ServiceLoadTesting({ serviceId }: { serviceId: string }) {
     <div className="load-layout"><div className="load-main">
       {!selected ? <SectionCard title="Configure a load test" subtitle="Choose an approved operation. Its target and input format are already defined for this service.">
         {setup && <p role="status">{setup}</p>}
+        <button type="button" style={secondaryButtonStyle} onClick={() => setProfileRevision((old) => old + 1)}>Refresh operations</button>
+        {importErrors.map((item) => <NoticeBanner tone="error" key={item}>{item}</NoticeBanner>)}
         {profile && <form onSubmit={(event) => void createPlan(event)}>
           <fieldset disabled={!isAdmin || busy} className="load-form-fields">
             <div className="load-field"><label htmlFor="load-operation">Operation</label><select id="load-operation" style={inputStyle} value={profileId} onChange={(event) => chooseProfile(profiles.find((item) => item.id === event.target.value)!)}>{profiles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
             <div className="load-target"><code>{profile.method} {profile.path}</code><span>Namespace: {profile.namespace}</span></div>
+            {profile.schema_source === "openapi" && <p className="load-muted">Request fields imported from this service’s OpenAPI definition.</p>}
             <RequestField schema={profile.input_schema} value={inputs} onChange={(next) => setInputs(next as Record<string, unknown>)} label="Request inputs" />
             {profile.files?.length ? <div className="load-target"><strong>Test files</strong>{profile.files.map((file) => <span key={file.field}>{file.field}: {file.filename} ({file.content_type})</span>)}</div> : null}
             <h3>Load settings</h3><div className="load-controls">

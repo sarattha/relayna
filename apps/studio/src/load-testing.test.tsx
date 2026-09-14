@@ -23,3 +23,13 @@ describe("structured service inputs", () => {
     expect(screen.getByRole("button", { name: "Remove 1" })).toBeDisabled();
   });
 });
+
+it("lets users supply null or a typed value for OpenAPI nullable fields", () => {
+  const schema: InputSchema = { type: ["integer", "null"], minimum: 1, default: null };
+  function Form() { const [value, setValue] = useState(initialInput(schema)); return <><RequestField schema={schema} value={value} onChange={setValue} label="Priority" /><output>{JSON.stringify(value)}</output></>; }
+  render(<Form />);
+  expect(screen.getByLabelText("Send null for Priority")).toBeChecked();
+  fireEvent.click(screen.getByLabelText("Send null for Priority"));
+  fireEvent.change(screen.getByLabelText("Priority *"), { target: { value: "5" } });
+  expect(screen.getByText("5", { selector: "output" })).toBeInTheDocument();
+});

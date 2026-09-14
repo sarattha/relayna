@@ -1,7 +1,7 @@
 # Load testing services in Studio
 
 Open **Services → a service → Load testing**. Choose an approved operation,
-fill in its typed request fields, set load within the displayed limits and select
+fill in its typed request fields (automatically imported from OpenAPI when enabled), set load within the displayed limits and select
 **Review load test**. Review creates a Chamber plan without sending traffic.
 **Start load test** executes that plan against the named environment. A lost
 start response can be retried on the same plan without starting duplicate work.
@@ -67,12 +67,12 @@ and log selectors. The backend loads and validates profiles at startup.
 Profiles are operator-owned deployment configuration. A service name or topology
 alone does not define an HTTP request body or Kubernetes deployment. Studio's
 current capability document does not publish request schemas, so onboarding
-must supply an accurate schema from the service's actual request contract.
+can obtain the schema from the service’s OpenAPI document.
 There is no fallback to a free-form JSON/YAML editor. Unconfigured services show
 setup guidance and cannot create tests.
 
-Each profile contains `id`, `name`, `input_schema`, `max_vus`, `max_iterations`,
-`max_duration_seconds`, and a valid Chamber `config`. Optional `prometheus_url`
+Each profile contains `id`, `name`, `max_vus`, `max_iterations`,
+`max_duration_seconds`, and a valid Chamber `config`. An optional `input_schema` overrides OpenAPI discovery. Optional `prometheus_url`
 is passed server-to-server to Chamber for its own assessment collection; the
 Studio charts independently use the service registry's metrics configuration.
 
@@ -80,9 +80,9 @@ Supported form schemas use concrete object, array, string, integer, number and
 boolean types. Nested fields, required fields, enums, defaults, string lengths,
 numeric bounds and array bounds are supported. Objects require
 `additionalProperties: false`; arrays require `maxItems` no greater than 100.
-Unsupported schema keywords, references and unions fail during startup rather
-than producing an inaccurate form. Flatten references and choose a specific
-operation variant during onboarding. Inputs are validated on the backend with
+Manual schemas must use the supported concrete form types. OpenAPI imports resolve
+local references, basic object composition and nullable variants automatically;
+ambiguous multi-variant or recursive schemas show a per-operation setup error. Inputs are validated on the backend with
 JSON Schema, with a 64-KiB request-input limit. They are retained in the reviewed
 plan; use representative test data.
 
@@ -98,7 +98,7 @@ Use separate named profiles for representative file datasets. Uploading new
 files through Studio is not supported. URL-encoded profiles use `requestEncoding:
 form` and scalar schema fields. Raw profiles use `requestEncoding: raw`, a pinned
 `contentType`, and a schema with exactly one required string property named
-`body`. Schema unions are not supported.
+`body`. Nullable fields are supported; unions of multiple non-null types require an explicit schema override.
 
 HTTP load ramps to the selected concurrency over the reviewed duration; request
 count depends on response time and k6's graceful completion can extend execution.
@@ -113,6 +113,51 @@ cleanup. Browsers cannot replace repository paths, upstream URLs, Kubernetes
 contexts or run IDs. Plans bind the service environment and snapshot execution
 context; changing the registry environment blocks old plans. Disabled services
 cannot start work. Existing run status and cancellation remain service-bound.
+
+## Automatic inputs from OpenAPI
+
+Use [the OpenAPI profile example](examples/studio-chamber-openapi-profiles.json).
+Omit `input_schema` from an approved operation profile. Studio fetches
+`<registered service base URL>/openapi.json`, matches the profile’s method,
+path and request encoding, and generates its form automatically. Set service-level
+`openapi_path` for a different service-relative document path. This removes the
+need to maintain a second handwritten copy of each request body.
+
+Administrators still configure the approved service operations, AKS targets,
+load limits, task lifecycle mapping and file fixtures. OpenAPI `servers` and
+security definitions do not change execution targets or supply credentials.
+The document must be readable by the Studio backend and the registered service
+host must satisfy Studio's existing capability-refresh outbound allowlist.
+Requests have a 10-second timeout and a 2-MiB response limit; redirects and
+external references are not followed. No Chamber bearer token is sent to services.
+
+Studio focuses on service endpoints such as `/translations`, `/ocr` and `/tasks`.
+Typical Relayna SDK endpoints under `/relayna`, `/status`, `/events`, `/history`,
+`/dlq`, `/broker/dlq`, `/failed-tasks`, workflow topology/stages and execution
+graphs are excluded, including common `/api/v1` mount prefixes. Operations
+tagged `relayna`, `relayna:*` or `relayna.*` are excluded during import. SDK event
+and status routes may still be used to follow a submitted task's lifecycle;
+they are not offered as load targets. Custom SDK aliases should be tagged or
+left out of approved operation profiles.
+
+The importer supports OpenAPI 3.0/3.1 request bodies, local component references,
+non-conflicting object composition, nested objects/arrays, enums, nullable
+values, required fields, defaults, string/numeric limits, patterns and formats.
+Response-only `readOnly` properties are omitted. Free-form extra properties are
+not editable; imported objects forbid them and imported arrays are limited to
+100 items. These are narrower test-input limits, not changes to the service API.
+Required path/query/header parameters, custom form encodings, dictionaries,
+recursive definitions and ambiguous variants require explicit mapping or a
+manual schema. Multipart binary properties use matching approved file fixtures;
+no server file paths are generated from an OpenAPI document.
+
+Select **Refresh operations** to reload schemas. One failed import does not hide
+other usable profiles. When creating a plan, Studio fetches the definition again
+and compares the form's schema revision; if it changed, the user must refresh and
+review the fields. Already-reviewed plans retain their input snapshot.
+
+The conversion follows the request-body and schema model described in the
+[OpenAPI 3.0 specification](https://spec.openapis.org/oas/v3.0.3.html#request-body-object).
 
 ## Persistence and compatibility
 

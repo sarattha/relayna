@@ -72,3 +72,16 @@ Use httpx and redis already present in Studio, add standards-based JSON Schema v
 2026-09-14 validation findings: actual Chamber planning rejected `agents.mode: disabled`; corrected the example to the supported `off` value and reran planning successfully. Guard against `experiment` and separate `traffic.load` settings overriding the reviewed observe-only journey. Visual checks moved the sticky run list below the header and added pod-color legends.
 
 Final review: disabled services retain cancellation access for existing jobs. Terminal telemetry windows use Chamber run timestamps when available. Regression coverage passed in the final full verification run.
+
+## OpenAPI follow-up — 14 September 2026
+
+The user requested automatic request schemas. Preserve manual profile schemas as overrides; when omitted, fetch the registered service's /openapi.json (operator-configurable relative openapi_path), match its pinned method/path/encoding, resolve local references and normalize common OpenAPI 3.0/3.1 request bodies. Never follow remote references, redirects or OpenAPI servers. Reuse the existing outbound allowlist. Bound document size and recursion. Keep runtime targets/load limits/lifecycle settings explicit. Surface individual import failures alongside usable profiles. Carry a schema revision from form to plan and reject stale forms; reviewed plans keep their snapshot. This extends the unreleased PR #127 interface directly, with no change to released SDK contracts or new routes. The user explicitly approved breaking the production freeze if needed. This extension adds schema provenance/revision and import errors to unreleased load-test responses and a revision field to plan requests, with no new routes.
+
+- [x] Implement and test OpenAPI importer, safe discovery and form revision validation.
+- [x] Show schema provenance, nullable fields and import errors in Studio; update examples/docs.
+- [x] Run mandatory verification and refresh the local preview.
+- [ ] Push the OpenAPI follow-up and update draft PR #127.
+
+User steering: exclude standard Relayna SDK endpoint families and SDK-tagged operations. Focus request-schema import on per-service business operations; SDK status/events remain usable as task lifecycle observers.
+
+Follow-up validation: the complete verification script passed (686 SDK tests, 337 backend tests), along with 119 frontend tests and the production build. Computer Use confirmed imported schema provenance, nullable-to-integer controls and successful plan review in a synthetic preview on port 18994. Common SDK routes are filtered while business routes remain eligible; no live AKS load was generated.

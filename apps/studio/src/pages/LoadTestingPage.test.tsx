@@ -107,3 +107,15 @@ describe("service load testing", () => {
     await waitFor(() => expect(mocks.fetchServiceLogs).toHaveBeenLastCalledWith("svc", expect.objectContaining({ query: "task-1" })));
   });
 });
+
+it("shows OpenAPI provenance and submits its revision with the request", async () => {
+  const original = mocks.requestJson.getMockImplementation()!;
+  mocks.requestJson.mockImplementation(async (path, init) => path.endsWith("/profiles") ? { profiles: [{ ...profile, schema_source: "openapi", schema_revision: "revision-1" }], errors: ["SDK status route excluded"], message: "" } : original(path, init));
+  show();
+  expect(await screen.findByText("Request fields imported from this service’s OpenAPI definition.")).toBeInTheDocument();
+  expect(screen.getByText("SDK status route excluded")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Text *"), { target: { value: "Hello" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review load test" }));
+  await screen.findByRole("button", { name: "Start load test" });
+  expect(JSON.parse(mocks.requestJson.mock.calls.find(([path]) => path.endsWith("/plans"))![1].body).schema_revision).toBe("revision-1");
+});

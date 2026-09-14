@@ -694,7 +694,16 @@ def create_studio_app(
             push_ingest_enabled=push_ingest_enabled,
         )
     )
-    app.include_router(_create_load_testing_router(runtime.registry_service, runtime.redis, runtime.http_client))
+    app.include_router(
+        _create_load_testing_router(
+            runtime.registry_service,
+            runtime.redis,
+            runtime.http_client,
+            StudioOutboundUrlPolicy(
+                allowed_hosts=capability_refresh_allowed_hosts, allowed_networks=capability_refresh_allowed_networks
+            ),
+        )
+    )
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     app.include_router(create_studio_metrics_router(metrics_query_service=runtime.metrics_query_service))
     app.include_router(create_studio_traces_router(trace_query_service=runtime.trace_query_service))

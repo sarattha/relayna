@@ -191,7 +191,7 @@ def test_missing_profile_and_malformed_upstream(harness):
         lambda p: p.update(max_iterations=1001),
         lambda p: p["input_schema"].update(additionalProperties=True),
         lambda p: p["input_schema"]["properties"]["text"].update(default=""),
-        lambda p: p["input_schema"]["properties"]["text"].update(pattern=".*"),
+        lambda p: p["input_schema"]["properties"]["text"].update(oneOf=[{"type": "string"}]),
     ],
 )
 def test_invalid_operator_profiles_fail_at_startup(configured, change):
