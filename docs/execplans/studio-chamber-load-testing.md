@@ -13,7 +13,7 @@ An administrator opens a service's Load testing workspace, selects an approved o
 - [x] (2026-09-14) Implemented native service workspace, structured inputs, review/start/cancel, task links, logs and pod charts.
 - [x] (2026-09-14) Added backend/frontend regression tests, profile example, deployment documentation and narrow additive route/page/feature freeze entries.
 - [x] (2026-09-14) Mandatory verification passed: SDK 686 passed/9 skipped, backend 304 passed/15 skipped; frontend 117 passed and production build passed. Computer Use validated desktop and 390-pixel layouts, with viewport and document width both 390.
-- [ ] Open draft pull request.
+- [x] (2026-09-14) Opened draft PR https://github.com/sarattha/relayna/pull/127 on codex/studio-chamber-load-testing.
 
 ## Surprises & Discoveries
 
@@ -29,7 +29,7 @@ The user named v0.10.0; the available release and preparation artifact identify 
 
 ## Outcomes & Retrospective
 
-Implementation and verification complete; draft PR publication remains. Chamber 1.10.0 successfully planned the generated Relayna configuration using its actual planner. Computer Use exercised a synthetic local preview through the actual Studio adapter; no live load was generated. Real AKS execution remains unverified and requires deployment configuration. Multipart supports approved Chamber file fixtures rather than new browser uploads.
+Implementation and verification complete; draft PR #127 is open for review. Chamber 1.10.0 successfully planned the generated Relayna configuration using its actual planner. Computer Use exercised a synthetic local preview through the actual Studio adapter; no live load was generated. Real AKS execution remains unverified and requires deployment configuration. Multipart supports approved Chamber file fixtures rather than new browser uploads.
 
 ## Context and Orientation
 
