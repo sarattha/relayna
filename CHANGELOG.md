@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.8.0 - 2026-09-15
+
+### Added
+
+- Added service-specific load testing in Studio through Ampule Chamber 1.10.0,
+  with typed inputs, load review, idempotent starts, cancellation and retained
+  run history, runner output, task links, service logs and AKS pod metrics.
+- Import request schemas from approved service OpenAPI 3.0/3.1 operations,
+  excluding standard Relayna SDK endpoints. Support local references, nullable
+  fields, schema refresh and stale-form rejection; manual schemas remain overrides.
+
+### Changed
+
+- Bumped the SDK, Studio backend/frontend, lockfiles and freeze manifests to
+  1.8.0 on the shared release line. Added deployment and operator documentation.
+
+### Compatibility and operations
+
+- The user-approved production perimeter extension adds Studio load-test routes
+  and a page; existing SDK contracts, service records and broker formats remain
+  compatible. This feature requires no existing-data migration.
+- Enable load testing with a backend-only Chamber URL/token and approved profiles
+  defining operations, execution targets, lifecycle mappings and load limits.
+  OpenAPI supplies request fields, not execution permissions or AKS configuration.
+- Build and deploy matching Studio images first, then upgrade sandbox Chamber
+  from 1.9.0 to 1.10.0 and connect it internally. Live AKS execution requires a
+  separate deployment acceptance test; local UI validation used synthetic data.
+
 ## 1.7.0 - 2026-08-22
 
 ### Added

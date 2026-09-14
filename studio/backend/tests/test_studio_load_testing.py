@@ -360,3 +360,145 @@ def test_disabling_service_still_allows_cancellation(harness):
     assert client.post(f"{BASE}/{identity}/start").status_code == 202
     registry.get_service.return_value.status = "disabled"
     assert client.post(f"{BASE}/{identity}/cancel").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda p: p.update(id=""),
+        lambda p: p.update(input_schema={"type": "string"}),
+        lambda p: p["config"]["runtime"].pop("namespace"),
+        lambda p: p["config"]["traffic"].update(journeys=[]),
+        lambda p: p["config"]["traffic"]["journeys"][0].update(requestEncoding="multipart"),
+        lambda p: p["config"]["traffic"]["journeys"][0].update(requestEncoding="raw"),
+        lambda p: p["config"]["traffic"]["journeys"][0].update(requestEncoding="form"),
+        lambda p: p["config"]["traffic"]["journeys"][0].update(requestEncoding="none", adapter="http"),
+        lambda p: p["config"]["traffic"]["journeys"][0].update(adapter="other"),
+        lambda p: p.update(max_duration_seconds=0),
+        lambda p: p["input_schema"]["properties"].update(
+            nested={"type": "object", "properties": {}, "additionalProperties": False}
+        )
+        or p["config"]["traffic"]["journeys"][0].update(requestEncoding="form"),
+    ],
+)
+def test_misconfigured_profiles_cannot_enable_execution(configured, change):
+    document, path = configured
+    change(document["translation-staging"]["profiles"][0])
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError):
+        _load_profiles()
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        [],
+        {"service": {}},
+        {"service": {"environment": "staging", "profiles": [{"id": "same", "input_schema": {"type": "string"}}]}},
+    ],
+)
+def test_invalid_profile_document_rejected(configured, document):
+    _, path = configured
+    path.write_text(json.dumps(document))
+    with pytest.raises(ValueError):
+        _load_profiles()
+
+
+@pytest.mark.parametrize("schema", [{"type": ["string", "integer"]}, {}, {"type": "null"}])
+def test_forms_require_one_concrete_type(schema):
+    with pytest.raises(ValueError):
+        _check_schema(schema)
+
+
+@pytest.mark.asyncio
+async def test_missing_token_and_disabled_upstream(configured, monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.delenv("RELAYNA_STUDIO_CHAMBER_TOKEN")
+    with pytest.raises(ValueError, match="TOKEN"):
+        _Chamber(SimpleNamespace(), fakeredis.aioredis.FakeRedis(), httpx.AsyncClient())
+    monkeypatch.delenv("RELAYNA_STUDIO_CHAMBER_URL")
+    bridge = _Chamber(SimpleNamespace(), fakeredis.aioredis.FakeRedis(), httpx.AsyncClient())
+    with pytest.raises(HTTPException) as caught:
+        await bridge.call("GET", "jobs/x")
+    assert caught.value.status_code == 503
+
+
+@pytest.mark.parametrize(
+    "response, expected",
+    [
+        (httpx.Response(422), 409),
+        (httpx.Response(503), 502),
+        (httpx.Response(200, content=b"x" * (2 * 1024 * 1024 + 1)), 502),
+        (httpx.Response(200, json={}), 502),
+    ],
+)
+def test_upstream_rejections_and_missing_plan_do_not_create_history(configured, response, expected):
+    registry = SimpleNamespace(
+        get_service=AsyncMock(return_value=SimpleNamespace(environment="staging", status="healthy"))
+    )
+    app = FastAPI()
+    app.include_router(
+        _create_load_testing_router(
+            registry,
+            fakeredis.aioredis.FakeRedis(),
+            httpx.AsyncClient(transport=httpx.MockTransport(lambda _: response)),
+        )
+    )
+    client = TestClient(app)
+    assert client.post(f"{BASE}/plans", json=PAYLOAD).status_code == expected
+    assert client.get(BASE).json()["items"] == []
+
+
+def test_noncanonical_plan_id_is_not_accepted(harness):
+    from uuid import UUID
+
+    client, *_ = harness
+    identity = client.post(f"{BASE}/plans", json=PAYLOAD).json()["id"]
+    assert client.get(f"{BASE}/{UUID(identity)}").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_nonfinite_payload_and_unconfigured_environment(configured):
+    from fastapi import HTTPException
+    from relayna_studio.load_testing import _LoadRequest
+
+    registry = SimpleNamespace(
+        get_service=AsyncMock(return_value=SimpleNamespace(environment="staging", status="healthy"))
+    )
+    bridge = _Chamber(registry, fakeredis.aioredis.FakeRedis(), httpx.AsyncClient())
+    payload = _LoadRequest(**{**PAYLOAD, "inputs": {"value": float("nan")}})
+    with pytest.raises(HTTPException) as caught:
+        await bridge.plan("translation-staging", payload)
+    assert caught.value.status_code == 422 and "finite" in caught.value.detail
+    registry.get_service.return_value.environment = "production"
+    with pytest.raises(HTTPException) as caught:
+        await bridge.plan("translation-staging", payload)
+    assert caught.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_missing_job_and_unavailable_evidence_keep_plan_recoverable(configured):
+    from fastapi import HTTPException
+    from relayna_studio.load_testing import _LoadRequest
+
+    registry = SimpleNamespace(
+        get_service=AsyncMock(return_value=SimpleNamespace(environment="staging", status="healthy"))
+    )
+    bridge = _Chamber(registry, fakeredis.aioredis.FakeRedis(), httpx.AsyncClient())
+    bridge.call = AsyncMock(return_value={"run_id": "plan"})
+    identity = (await bridge.plan("translation-staging", _LoadRequest(**PAYLOAD)))["id"]
+    bridge.call.return_value = {}
+    with pytest.raises(HTTPException, match="job ID"):
+        await bridge.start("translation-staging", identity)
+    bridge.call.return_value = {"job_id": "job"}
+    await bridge.start("translation-staging", identity)
+    bridge.call.side_effect = [
+        {"state": "failed", "run_id": "run", "output": "failure detail"},
+        HTTPException(502, "not ready"),
+    ]
+    status = await bridge.status("translation-staging", identity)
+    assert status["output"] == "failure detail" and status["evidence_error"]
+    bridge.call.side_effect = [{"state": "failed", "run_id": "run"}, {"run": {"updated_at": "invalid"}}]
+    status = await bridge.status("translation-staging", identity)
+    assert status["finished_at"] and not status["evidence_error"]

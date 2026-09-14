@@ -85,3 +85,17 @@ The user requested automatic request schemas. Preserve manual profile schemas as
 User steering: exclude standard Relayna SDK endpoint families and SDK-tagged operations. Focus request-schema import on per-service business operations; SDK status/events remain usable as task lifecycle observers.
 
 Follow-up validation: the complete verification script passed (686 SDK tests, 337 backend tests), along with 119 frontend tests and the production build. Computer Use confirmed imported schema provenance, nullable-to-integer controls and successful plan review in a synthetic preview on port 18994. Common SDK routes are filtered while business routes remain eligible; no live AKS load was generated.
+
+## Release and landing — 15 September 2026
+
+The user authorized a synchronized 1.8.0 version bump, changelog/docs, Codex
+review, fixing valid findings and checks, and merging after satisfaction.
+Latest released boundary remains v1.7.0; approved additive Studio perimeter
+and version manifest updates introduce no SDK contract or existing-data changes.
+Backend CI coverage is 97.21% against 98%; add meaningful failure-path coverage.
+Deployment is deferred until the user builds and deploys Studio via Azure, then
+confirms readiness for Chamber 1.10.0 and backend connection.
+
+- [ ] Update release metadata, locks, changelog and rollout documentation.
+- [ ] Meet coverage and required verification; request and satisfy Codex review.
+- [ ] Merge PR #127 only after checks/review pass; stop PR monitoring.
