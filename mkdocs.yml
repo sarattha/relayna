@@ -27,6 +27,7 @@ nav:
   - Studio Backend: studio-backend.md
   - Studio Persistence: studio-persistence.md
   - Studio Frontend: studio-frontend.md
+  - Studio Load Testing: studio-load-testing.md
   - Studio Entra Authentication: studio-entra-auth.md
   - Studio Entra Deployment Checklist: studio-entra-deployment-checklist.md
   - Redis Topologies: redis-topologies.md

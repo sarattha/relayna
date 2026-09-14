@@ -430,7 +430,7 @@ export function formatChartOffset(milliseconds: number) {
   return `+${days}d`;
 }
 
-function MetricLineChart({ series, podLabel }: { series: StudioMetricSeries[]; podLabel?: string | null }) {
+export function MetricLineChart({ series, podLabel }: { series: StudioMetricSeries[]; podLabel?: string | null }) {
   const width = 640;
   const height = 220;
   const paddingTop = 28;
@@ -1090,6 +1090,7 @@ export function ServiceDetailPage() {
             <StudioIcon name="topology" />
             Topology
           </Link>
+          <Link to={`/services/${encodeURIComponent(service.service_id)}/load-tests`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>Load testing</Link>
           <Link to={`/services/${encodeURIComponent(service.service_id)}/dlq`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             <StudioIcon name="dlq" />
             DLQ Explorer
