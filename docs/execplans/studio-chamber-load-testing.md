@@ -101,3 +101,11 @@ confirms readiness for Chamber 1.10.0 and backend connection.
 - [ ] Merge PR #127 only after checks/review pass; stop PR monitoring.
 
 Release verification: all mandatory checks passed; 686 SDK tests and 119 frontend tests passed, with successful frontend/docs builds. Temporary PostgreSQL/Redis enabled all 398 backend tests with 98.13% total coverage (100% for both new adapter/importer modules). The database migration cycle passed. Codex review requested on fbed292; CI/review pending.
+
+Codex review on fbed292 identified three valid P2 findings. Fix retention to a
+stable plan-creation deadline, return terminal snapshots during upstream
+outages, and choose non-null enum values when leaving nullable controls.
+These amend unreleased behavior directly; no released-state migration is needed.
+Add regression coverage and request a fresh Codex review after verification.
+
+All three first-review findings are fixed with regressions. Mandatory verification passed; full PostgreSQL/Redis backend coverage passes at 98.13% with 400 tests, and 120 frontend tests/build pass. Request a second Codex review of the fix commit before landing.

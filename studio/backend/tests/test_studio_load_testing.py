@@ -502,3 +502,57 @@ async def test_missing_job_and_unavailable_evidence_keep_plan_recoverable(config
     bridge.call.side_effect = [{"state": "failed", "run_id": "run"}, {"run": {"updated_at": "invalid"}}]
     status = await bridge.status("translation-staging", identity)
     assert status["finished_at"] and not status["evidence_error"]
+
+
+@pytest.mark.asyncio
+async def test_polling_does_not_extend_retention_or_resurrect_expired_runs(configured):
+    from datetime import UTC, datetime, timedelta
+
+    from fastapi import HTTPException
+
+    redis = fakeredis.aioredis.FakeRedis()
+    bridge = _Chamber(SimpleNamespace(), redis, httpx.AsyncClient())
+    record = {"id": "retention-test", "created_at": (datetime.now(UTC) - timedelta(days=29)).isoformat()}
+    await bridge.save("service", record)
+    deadline = await redis.expiretime(bridge.key("service", record["id"]))
+    assert 86398 <= await redis.ttl(bridge.key("service", record["id"])) <= 86400
+    record["output"] = "new output"
+    await bridge.save("service", record)
+    assert await redis.expiretime(bridge.key("service", record["id"])) == deadline
+    record["created_at"] = (datetime.now(UTC) - timedelta(days=31)).isoformat()
+    await redis.delete(bridge.key("service", record["id"]))
+    with pytest.raises(HTTPException) as caught:
+        await bridge.save("service", record)
+    assert caught.value.status_code == 404
+    assert not await redis.exists(bridge.key("service", record["id"]))
+
+
+@pytest.mark.asyncio
+async def test_terminal_snapshots_survive_outage_but_running_and_cancel_errors_surface(configured):
+    from fastapi import HTTPException
+    from relayna_studio.load_testing import _LoadRequest
+
+    registry = SimpleNamespace(
+        get_service=AsyncMock(return_value=SimpleNamespace(environment="staging", status="healthy"))
+    )
+    bridge = _Chamber(registry, fakeredis.aioredis.FakeRedis(), httpx.AsyncClient())
+    bridge.call = AsyncMock(return_value={"run_id": "plan"})
+    identity = (await bridge.plan("translation-staging", _LoadRequest(**PAYLOAD)))["id"]
+    bridge.call.return_value = {"job_id": "job", "state": "running"}
+    await bridge.start("translation-staging", identity)
+    bridge.call.side_effect = HTTPException(502, "offline")
+    with pytest.raises(HTTPException):
+        await bridge.status("translation-staging", identity)
+    bridge.call.side_effect = [
+        {"state": "completed", "run_id": "run", "output": "finished"},
+        {"result": {"status": "passed"}, "relayna": {"tasks": [{"task_id": "task-1", "success": True}]}},
+    ]
+    completed = await bridge.status("translation-staging", identity)
+    bridge.call.side_effect = HTTPException(502, "offline")
+    retained = await bridge.status("translation-staging", identity)
+    assert retained["output"] == completed["output"] == "finished"
+    assert retained["tasks"] == completed["tasks"]
+    assert retained["result"] == completed["result"]
+    assert retained["state"] == "completed" and "snapshot" in retained["evidence_error"]
+    with pytest.raises(HTTPException):
+        await bridge.status("translation-staging", identity, cancel=True)

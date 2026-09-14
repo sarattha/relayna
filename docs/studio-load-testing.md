@@ -7,7 +7,9 @@ fill in its typed request fields (automatically imported from OpenAPI when enabl
 start response can be retried on the same plan without starting duplicate work.
 
 The run URL can be bookmarked. Recent plans and runs remain in Studio for
-30 days (latest 20 displayed). Administrators can plan, start and cancel;
+30 days from plan creation (latest 20 displayed); opening or polling a run
+does not extend that deadline. Retained terminal runs remain readable during
+Chamber outages using their last stored snapshot. Administrators can plan, start and cancel;
 active read-only members can inspect. Cancellation remains pending until
 Chamber reports a terminal state, and cleanup warnings remain visible.
 

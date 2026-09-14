@@ -33,3 +33,19 @@ it("lets users supply null or a typed value for OpenAPI nullable fields", () => 
   fireEvent.change(screen.getByLabelText("Priority *"), { target: { value: "5" } });
   expect(screen.getByText("5", { selector: "output" })).toBeInTheDocument();
 });
+
+it("can leave null and select a concrete nullable enum value", () => {
+  const schema: InputSchema = { type: ["string", "null"], enum: [null, "fast", "safe"] };
+  function Form() {
+    const [value, setValue] = useState(initialInput(schema));
+    return <RequestField schema={schema} value={value} onChange={setValue} label="Mode" />;
+  }
+  render(<Form />);
+  expect(screen.getByLabelText("Send null for Mode")).toBeChecked();
+  fireEvent.click(screen.getByLabelText("Send null for Mode"));
+  expect(screen.getByLabelText("Mode *")).toHaveValue('"fast"');
+  fireEvent.change(screen.getByLabelText("Mode *"), { target: { value: '"safe"' } });
+  expect(screen.getByLabelText("Mode *")).toHaveValue('"safe"');
+  fireEvent.click(screen.getByLabelText("Send null for Mode"));
+  expect(screen.queryByLabelText("Mode *")).not.toBeInTheDocument();
+});

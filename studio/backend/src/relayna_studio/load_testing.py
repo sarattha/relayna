@@ -248,7 +248,10 @@ class _Chamber:
         return record
 
     async def save(self, service_id: str, record: dict[str, Any]) -> None:
-        await self.redis.set(self.key(service_id, record["id"]), json.dumps(record), ex=_RETENTION)
+        deadline = int(datetime.fromisoformat(record["created_at"]).timestamp()) + _RETENTION
+        if deadline <= time.time():
+            raise HTTPException(404, "This load test's 30-day retention expired.")
+        await self.redis.set(self.key(service_id, record["id"]), json.dumps(record), exat=deadline)
 
     async def openapi(self, service: Any, settings: dict[str, Any]) -> dict[str, Any]:
         path = settings.get("openapi_path", "/openapi.json")
@@ -491,7 +494,17 @@ class _Chamber:
                 raise HTTPException(409, "This plan has not started.")
             return self.public(record)
         job_path = f"jobs/{quote(str(record['job_id']), safe='')}"
-        job = await self.call("POST" if cancel else "GET", f"{job_path}/cancel" if cancel else job_path)
+        try:
+            job = await self.call("POST" if cancel else "GET", f"{job_path}/cancel" if cancel else job_path)
+        except HTTPException:
+            if cancel or record["state"] not in _TERMINAL:
+                raise
+            return self.public(
+                {
+                    **record,
+                    "evidence_error": "Chamber is unavailable. Showing the last retained run snapshot.",
+                }
+            )
         record.update({key: job.get(key) for key in ("state", "run_id", "cancel_requested", "cleanup_required")})
         record["output"] = str(job.get("output") or "")[-65536:]
         record["error"] = str(job.get("error") or "")[:2000]

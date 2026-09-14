@@ -45,7 +45,8 @@ export function RequestField({ schema, value, onChange, label, required = true }
   const name = schema.title || label;
   if (Array.isArray(schema.type)) {
     const concrete = schema.type.find((item) => item !== "null")!;
-    return <div className="load-field">{(!schema.enum || schema.enum.includes(null)) && <label><input type="checkbox" checked={value === null} onChange={(event) => onChange(event.target.checked ? null : initialInput({ ...schema, default: undefined, type: concrete }))} /> Send null for {name}</label>}{value !== null && <RequestField schema={{ ...schema, type: concrete }} value={value} onChange={onChange} label={label} required={required} />}</div>;
+    const concreteSchema = { ...schema, type: concrete, enum: schema.enum?.filter((item) => item !== null) };
+    return <div className="load-field">{(!schema.enum || schema.enum.includes(null)) && <label><input type="checkbox" checked={value === null} onChange={(event) => onChange(event.target.checked ? null : initialInput({ ...concreteSchema, default: undefined }))} /> Send null for {name}</label>}{value !== null && <RequestField schema={concreteSchema} value={value} onChange={onChange} label={label} required={required} />}</div>;
   }
   if (schema.type === "object") {
     const fields = (value || {}) as Record<string, unknown>;
