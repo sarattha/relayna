@@ -514,35 +514,41 @@ class StudioSearchService(StudioSearchIndexer):
         ):
             raise ValueError("Provide at least one task search filter or a time range.")
 
-        filter_sets: list[set[str]] = []
-        for field_name, value in (
-            ("service_id", query.service_id),
-            ("task_id", query.task_id),
-            ("correlation_id", query.correlation_id),
-            ("status", query.status),
-            ("stage", query.stage),
-        ):
-            normalized = _normalize_optional_string(value)
-            if normalized is None:
-                continue
-            filter_sets.append(await self.store.list_task_document_ids_for_filter(field_name, normalized))
-        candidate_ids = set.intersection(*filter_sets) if filter_sets else await self.store.list_task_document_ids()
+        database_search = getattr(self.store, "_search_task_page", None)
+        if callable(database_search):
+            page, next_cursor = await database_search(query)
+        else:
+            filter_sets: list[set[str]] = []
+            for field_name, value in (
+                ("service_id", query.service_id),
+                ("task_id", query.task_id),
+                ("correlation_id", query.correlation_id),
+                ("status", query.status),
+                ("stage", query.stage),
+            ):
+                normalized = _normalize_optional_string(value)
+                if normalized is None:
+                    continue
+                filter_sets.append(await self.store.list_task_document_ids_for_filter(field_name, normalized))
+            candidate_ids = set.intersection(*filter_sets) if filter_sets else await self.store.list_task_document_ids()
 
-        items = await self._load_task_documents(candidate_ids)
-        from_dt = _parse_datetime(query.from_timestamp)
-        to_dt = _parse_datetime(query.to_timestamp)
-        filtered = [
-            item for item in items if _within_range(_parse_datetime(item.last_seen_at), from_dt=from_dt, to_dt=to_dt)
-        ]
-        filtered.sort(
-            key=lambda item: (
-                _parse_datetime(item.last_seen_at) or datetime.min.replace(tzinfo=UTC),
-                item.service_id,
-                item.task_id,
-            ),
-            reverse=True,
-        )
-        page, next_cursor = _paginate_task_documents(filtered, limit=query.limit, cursor=query.cursor)
+            items = await self._load_task_documents(candidate_ids)
+            from_dt = _parse_datetime(query.from_timestamp)
+            to_dt = _parse_datetime(query.to_timestamp)
+            filtered = [
+                item
+                for item in items
+                if _within_range(_parse_datetime(item.last_seen_at), from_dt=from_dt, to_dt=to_dt)
+            ]
+            filtered.sort(
+                key=lambda item: (
+                    _parse_datetime(item.last_seen_at) or datetime.min.replace(tzinfo=UTC),
+                    item.service_id,
+                    item.task_id,
+                ),
+                reverse=True,
+            )
+            page, next_cursor = _paginate_task_documents(filtered, limit=query.limit, cursor=query.cursor)
         if not page:
             fallback_items = await self._search_task_logs(query)
             if fallback_items:

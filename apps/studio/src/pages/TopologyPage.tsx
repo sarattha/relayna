@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { Link } from "../scoped-link";
 
 import { fetchTopology } from "../api";
 import { useStudioServices } from "../services-context";

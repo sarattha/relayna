@@ -1,4 +1,5 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
+import { Link } from "../scoped-link";
 
 import { useStudioServices } from "../services-context";
 import {

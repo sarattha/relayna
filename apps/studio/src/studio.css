@@ -1149,3 +1149,23 @@ button:hover {
   }
 
 }
+
+/* Keep operational controls readable at narrow and zoomed viewports. */
+.studio-shell, .studio-header, .studio-header__tools, .studio-user-menu { min-width: 0; }
+.studio-header__tools { flex-wrap: wrap; }
+.studio-user-menu strong { overflow-wrap: anywhere; }
+.studio-header input, .studio-header select { max-width: 100%; }
+button:disabled { cursor: not-allowed; opacity: .5; }
+input[type="datetime-local"] { min-width: 0; width: 100%; box-sizing: border-box; }
+[data-service-editor] { scroll-margin-top: 110px; }
+@media (max-width: 960px) {
+  .studio-environment-scope { display: grid; }
+  .studio-header__tools { width: 100%; margin-left: 0; gap: 10px; }
+  .studio-environment-scope { flex: 1 1 140px; min-width: 0; }
+  .studio-global-search { flex: 1 1 120px; }
+  .studio-global-search input { width: 100%; }
+  .studio-user-menu { flex: 1 1 100%; justify-content: space-between; }
+}
+
+summary { cursor: pointer; font-weight: 650; padding: 12px 4px; }
+.studio-content-split--graph .studio-log-filter-grid { grid-template-columns: minmax(0, 1fr); }

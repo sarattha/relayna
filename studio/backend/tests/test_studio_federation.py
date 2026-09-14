@@ -1451,3 +1451,97 @@ def test_create_studio_app_closes_shared_federation_client(monkeypatch) -> None:
         assert response.status_code == 200
 
     assert TrackingAsyncClient.instances[0].close_calls == 1
+
+
+def test_failed_tasks_follow_each_upstream_cursor_without_losing_items(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    seen_cursors: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/failed-tasks":
+            raise AssertionError(str(request.url))
+        offset = int(request.url.params.get("cursor", "0"))
+        seen_cursors.append(str(offset))
+        # Deliberately return fewer rows than requested: continuation is authoritative.
+        rows = [
+            {"failure_id": f"failure-{index}", "failed_at": f"2026-09-12T10:{59 - index:02d}:00Z"}
+            for index in range(offset, min(offset + 2, 7))
+        ]
+        return httpx.Response(200, json={"items": rows, "next_cursor": str(offset + 2) if offset + 2 < 7 else None})
+
+    app = create_studio_app(
+        redis_url="redis://test",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler), timeout=timeout
+        ),
+        pull_sync_interval_seconds=None,
+        health_refresh_interval_seconds=None,
+        retention_prune_interval_seconds=None,
+    )
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="payments-api",
+                base_url="https://payments.example.test",
+                capabilities=make_capability_document(supported_routes=["failed_tasks.list"]),
+            ),
+        )
+        ids: list[str] = []
+        cursor = None
+        for _ in range(8):
+            params = {"limit": "3"}
+            if cursor:
+                params["cursor"] = cursor
+            response = client.get("/studio/failed-tasks", params=params)
+            assert response.status_code == 200
+            payload = response.json()
+            ids.extend(item["failure_id"] for item in payload["items"])
+            cursor = payload["next_cursor"]
+            if not cursor:
+                break
+        assert ids == [f"failure-{index}" for index in range(7)]
+        assert "6" in seen_cursors
+
+
+def test_failed_task_fanout_respects_concurrency_and_keeps_partial_errors(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    active = peak = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.005)
+            if request.url.host == "service-0.example.test":
+                return httpx.Response(503, json={"detail": "Unavailable"})
+            return httpx.Response(200, json={"items": [], "next_cursor": None})
+        finally:
+            active -= 1
+
+    app = create_studio_app(
+        redis_url="redis://test",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler), timeout=timeout
+        ),
+        pull_sync_interval_seconds=None,
+        health_refresh_interval_seconds=None,
+        retention_prune_interval_seconds=None,
+    )
+    with TestClient(app) as client:
+        get_studio_runtime(app).federation_service.search_max_concurrency = 2
+        for index in range(6):
+            install_service(
+                app,
+                make_record(
+                    service_id=f"service-{index}",
+                    base_url=f"https://service-{index}.example.test",
+                    capabilities=make_capability_document(supported_routes=["failed_tasks.list"]),
+                ),
+            )
+        response = client.get("/studio/failed-tasks")
+        assert response.status_code == 200
+        assert len(response.json()["errors"]) == 1
+        assert len(response.json()["scanned_services"]) == 5
+    assert 1 < peak <= 2

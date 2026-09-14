@@ -44,7 +44,25 @@ export function setStudioCsrfToken(value: string | null) {
   csrfToken = value;
 }
 
+const pendingReads = new Map<string, Promise<unknown>>();
+let activeReads = 0;
+const readQueue: Array<() => void> = [];
+
 export async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
+  if ((init?.method || "GET").toUpperCase() !== "GET" || init?.signal || init?.headers || init?.cache === "no-store") return performRequest<T>(input, init);
+  const existing = pendingReads.get(input);
+  if (existing) return existing as Promise<T>;
+  const request = (async () => {
+    if (activeReads >= 8) await new Promise<void>((resolve) => readQueue.push(resolve));
+    else activeReads++;
+    try { return await performRequest<T>(input, init); }
+    finally { const next = readQueue.shift(); if (next) next(); else activeReads--; pendingReads.delete(input); }
+  })();
+  pendingReads.set(input, request);
+  return request;
+}
+
+async function performRequest<T>(input: string, init?: RequestInit): Promise<T> {
   const method = (init?.method || "GET").toUpperCase();
   let resolvedInit = init;
   if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) {
@@ -52,16 +70,26 @@ export async function requestJson<T>(input: string, init?: RequestInit): Promise
     headers.set("X-CSRF-Token", csrfToken);
     resolvedInit = { ...init, headers };
   }
-  const response = await fetch(input, resolvedInit);
-  const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-  if (!response.ok) {
-    const message = payload?.detail || `Request failed with status ${response.status}.`;
-    window.dispatchEvent(
-      new CustomEvent("relayna:api-error", { detail: { status: response.status, input, message } }),
-    );
-    throw new StudioApiError(message, response.status);
+  const controller = new AbortController();
+  const abort = () => controller.abort(init?.signal?.reason);
+  if (init?.signal?.aborted) abort();
+  else init?.signal?.addEventListener("abort", abort, { once: true });
+  const timeout = window.setTimeout(() => controller.abort(new Error("Request timed out. Please retry.")), 20_000);
+  try {
+    const response = await fetch(input, { ...resolvedInit, signal: controller.signal });
+    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    if (!response.ok) {
+      const message = payload?.detail || `Request failed with status ${response.status}.`;
+      window.dispatchEvent(
+        new CustomEvent("relayna:api-error", { detail: { status: response.status, input, message } }),
+      );
+      throw new StudioApiError(message, response.status);
+    }
+    return payload as T;
+  } finally {
+    window.clearTimeout(timeout);
+    init?.signal?.removeEventListener("abort", abort);
   }
-  return payload as T;
 }
 
 export async function fetchStudioSession() {
@@ -278,7 +306,7 @@ export function buildServicePayload(draft: ServiceDraft) {
 }
 
 export async function listServices() {
-  return requestJson<ServiceListResponse>("/studio/services");
+  return requestJson<ServiceListResponse>("/studio/services", { cache: "no-store" });
 }
 
 export async function listGatewayServiceExports() {

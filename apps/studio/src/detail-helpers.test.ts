@@ -283,7 +283,7 @@ describe("service detail helpers", () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ service_id: "service/id", count: 0, pods: [] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(fetchServicePods("service/id")).resolves.toMatchObject({ count: 0 });
-    expect(fetchMock).toHaveBeenCalledWith("/studio/services/service%2Fid/pods", undefined);
+    expect(fetchMock).toHaveBeenCalledWith("/studio/services/service%2Fid/pods", expect.objectContaining({ signal: expect.any(AbortSignal) }));
 
     const logs = mergeLogResponses([
       { count: 1, items: [{ service_id: "s", timestamp: "2026-01-01T00:00:00Z", source: "a", message: "old", fields: {} }], next_cursor: "a" },

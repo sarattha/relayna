@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
+import { Link } from "../scoped-link";
 
 import { fetchBrokerDlq, fetchDlq } from "../api";
 import { useStudioServices } from "../services-context";
@@ -34,6 +35,8 @@ export function DlqPage() {
   const servicesState = useStudioServices();
   const service = servicesState.servicesById.get(serviceId) || null;
 
+  const requestVersion = useRef(0);
+  useEffect(() => () => { requestVersion.current++; }, [serviceId]);
   const [mode, setMode] = useState<DlqMode>("indexed");
   const [query, setQuery] = useState<DlqQueryState>(emptyState);
   const [indexedPayload, setIndexedPayload] = useState<DlqMessageListResponse | null>(null);
@@ -55,6 +58,8 @@ export function DlqPage() {
 
   function syncSearch(nextQuery: DlqQueryState, nextMode: DlqMode) {
     const params = new URLSearchParams();
+    const environment = searchParams.get("environment");
+    if (environment) params.set("environment", environment);
     if (nextMode === "broker") {
       params.set("mode", "broker");
     }
@@ -83,16 +88,19 @@ export function DlqPage() {
   }
 
   async function load(nextQuery: DlqQueryState, nextMode = mode, syncUrl = true) {
+    const version = ++requestVersion.current;
     setLoading(true);
     setError(null);
     try {
       const sanitized = { ...nextQuery, limit: String(parseLimit(nextQuery.limit, 50)) };
       if (nextMode === "broker") {
         const nextPayload = await fetchBrokerDlq(serviceId, sanitized);
+        if (version !== requestVersion.current) return;
         setBrokerPayload(nextPayload);
         setIndexedPayload(null);
       } else {
         const nextPayload = await fetchDlq(serviceId, sanitized);
+        if (version !== requestVersion.current) return;
         setIndexedPayload(nextPayload);
         setBrokerPayload(null);
       }
@@ -102,9 +110,10 @@ export function DlqPage() {
         syncSearch(sanitized, nextMode);
       }
     } catch (fetchError) {
+      if (version !== requestVersion.current) return;
       setError(fetchError instanceof Error ? fetchError.message : "Unable to load DLQ messages.");
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }
 
@@ -114,7 +123,7 @@ export function DlqPage() {
 
       <SectionCard
         title="DLQ Explorer"
-        subtitle="Service-scoped DLQ explorer with explicit indexed and broker-backed inspection modes."
+        subtitle="Inspect retained failure messages or read directly from the service queue."
         action={
           <Link to={`/services/${encodeURIComponent(serviceId)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             <StudioIcon name="back" />
@@ -127,6 +136,7 @@ export function DlqPage() {
             Inspecting DLQ messages for <strong>{service.name}</strong> ({service.service_id}).
           </p>
         ) : null}
+        {!brokerSupported ? <p style={mutedTextStyle}>Broker Mode is unavailable because this service does not advertise direct broker reads.</p> : null}
         <div className="studio-action-row">
           <button
             type="button"
@@ -163,45 +173,45 @@ export function DlqPage() {
           }}
           className="studio-form-grid studio-form-grid--triple"
         >
-          <input
+          <label className="studio-filter-field"><span>Queue name</span><input
             value={query.queue_name}
             onChange={(event) => setQuery((current) => ({ ...current, queue_name: event.target.value }))}
             placeholder="Queue name"
             style={inputStyle}
-          />
-          <input
+          /></label>
+          <label className="studio-filter-field"><span>Task id</span><input
             value={query.task_id}
             onChange={(event) => setQuery((current) => ({ ...current, task_id: event.target.value }))}
             placeholder="Task id"
             style={inputStyle}
-          />
-          <input
+          /></label>
+          <label className="studio-filter-field"><span>Reason</span><input
             value={query.reason}
             onChange={(event) => setQuery((current) => ({ ...current, reason: event.target.value }))}
             placeholder="Reason"
             style={inputStyle}
             disabled={mode === "broker"}
-          />
-          <input
+          /></label>
+          <label className="studio-filter-field"><span>Source queue</span><input
             value={query.source_queue_name}
             onChange={(event) => setQuery((current) => ({ ...current, source_queue_name: event.target.value }))}
             placeholder="Source queue"
             style={inputStyle}
             disabled={mode === "broker"}
-          />
-          <input
+          /></label>
+          <label className="studio-filter-field"><span>State</span><input
             value={query.state}
             onChange={(event) => setQuery((current) => ({ ...current, state: event.target.value }))}
             placeholder="State"
             style={inputStyle}
             disabled={mode === "broker"}
-          />
-          <input
+          /></label>
+          <label className="studio-filter-field"><span>50</span><input
             value={query.limit}
             onChange={(event) => setQuery((current) => ({ ...current, limit: event.target.value }))}
             placeholder="50"
             style={inputStyle}
-          />
+          /></label>
           <button type="submit" style={primaryButtonStyle}>
             <StudioIcon name="filter" />
             Apply Filters
