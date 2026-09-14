@@ -23,7 +23,7 @@ if the provider has ingestion delay.
 
 ## Deployment
 
-This integration targets **Ampule Chamber 1.10.0**, the version identified in its
+Relayna Studio **1.8.0** targets **Ampule Chamber 1.10.0**, the version identified in its
 Studio preparation artifact. Chamber remains an internal service; only the
 Studio hostname is exposed. Studio renders native React forms, run views and
 its existing log/metric components, consuming Chamber's execution and evidence
@@ -53,6 +53,32 @@ observe-only tests with faults and cleanup disabled. Do not expose Chamber's
 operator API publicly. Existing Studio ingress `/studio` routing also covers
 `/studio/services/{service_id}/load-tests`, so no new hostname or ingress path is
 necessary.
+
+## Sandbox rollout through vm-machine01
+
+The sandbox inspection on 15 September 2026 found Helm release `ampule` in
+namespace `ampule-system`, with one ready replica using
+`ghcr.io/sarattha/ampule-chamber:1.9.0` and `IfNotPresent` image pulling.
+Its internal service is
+`http://ampule-ampule-chamber.ampule-system.svc.cluster.local:8765`, and its
+workspace PVC is 5 GiB. Treat this as an observed baseline and recheck it before
+rollout; the running image is older than this integration's target.
+
+1. Build Studio backend/frontend 1.8.0 through the Azure pipelines and deploy
+   matching images. Confirm Studio health and login before enabling load testing.
+2. Upgrade the existing Chamber Helm release to 1.10.0 while preserving its
+   workspace, secrets, service account, runtime tools and workload permissions.
+   Verify the ready pod's actual image and internal API health.
+3. Mount approved profiles and the operator secret on Studio's backend, set the
+   internal URL above and allow registered service hosts for OpenAPI discovery.
+4. Review the imported request fields for a real service. Run a small staging
+   test only after checking its target, load and lifecycle mappings; confirm
+   runner output, task completion, Loki logs and Prometheus pod samples.
+5. If acceptance fails, disable the Studio Chamber connection and retain the
+   workspace and run evidence while diagnosing; do not delete active runs.
+
+The release PR does not execute this rollout. The operator builds/deploys Studio
+first, then coordinates the Chamber upgrade and connection.
 
 ## Service profiles
 

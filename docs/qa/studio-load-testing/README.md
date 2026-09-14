@@ -49,3 +49,9 @@ approved translation operation. Automated tests verify SDK path/tag exclusion,
 reference resolution, unsafe/unsupported documents and stale schema rejection.
 
 - [OpenAPI-derived form (synthetic preview)](openapi-form.png)
+
+Release 1.8.0 verification: 398 backend tests passed with temporary local
+PostgreSQL/Redis and 98.13% aggregate coverage; both new load-testing modules
+reached 100% statement coverage. SDK checks (686 passed), frontend tests
+(119 passed), production build and strict documentation build passed. The
+PostgreSQL upgrade/downgrade/re-upgrade cycle passed.

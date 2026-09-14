@@ -96,6 +96,8 @@ Backend CI coverage is 97.21% against 98%; add meaningful failure-path coverage.
 Deployment is deferred until the user builds and deploys Studio via Azure, then
 confirms readiness for Chamber 1.10.0 and backend connection.
 
-- [ ] Update release metadata, locks, changelog and rollout documentation.
+- [x] Update release metadata, locks, changelog and rollout documentation.
 - [ ] Meet coverage and required verification; request and satisfy Codex review.
 - [ ] Merge PR #127 only after checks/review pass; stop PR monitoring.
+
+Release verification: all mandatory checks passed; 686 SDK tests and 119 frontend tests passed, with successful frontend/docs builds. Temporary PostgreSQL/Redis enabled all 398 backend tests with 98.13% total coverage (100% for both new adapter/importer modules). The database migration cycle passed. Codex review requested on fbed292; CI/review pending.
