@@ -80,7 +80,7 @@ The user requested automatic request schemas. Preserve manual profile schemas as
 - [x] Implement and test OpenAPI importer, safe discovery and form revision validation.
 - [x] Show schema provenance, nullable fields and import errors in Studio; update examples/docs.
 - [x] Run mandatory verification and refresh the local preview.
-- [ ] Push the OpenAPI follow-up and update draft PR #127.
+- [x] Push the OpenAPI follow-up and update draft PR #127 (ff96d57).
 
 User steering: exclude standard Relayna SDK endpoint families and SDK-tagged operations. Focus request-schema import on per-service business operations; SDK status/events remain usable as task lifecycle observers.
 
