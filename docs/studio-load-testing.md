@@ -174,6 +174,9 @@ left out of approved operation profiles.
 The importer supports OpenAPI 3.0/3.1 request bodies, local component references,
 non-conflicting object composition, nested objects/arrays, enums, nullable
 values, required fields, defaults, string/numeric limits, patterns and formats.
+Numeric bounds/multiples and ECMAScript-compatible string patterns are checked
+in the form. Formats and any server-specific regular expressions are validated
+when reviewing; the backend remains authoritative for every constraint.
 Response-only `readOnly` properties are omitted. Free-form extra properties are
 not editable; imported objects forbid them and imported arrays are limited to
 100 items. These are narrower test-input limits, not changes to the service API.

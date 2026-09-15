@@ -117,3 +117,10 @@ integration test. Forms now initialize/display/enforce exclusive bounds and
 respect zero-item arrays. Existing failed-task audit behavior remains unchanged.
 
 Second-review verification passed: 401 backend tests with real temporary PostgreSQL/Redis at 98.15% coverage, mandatory SDK/backend checks, 122 frontend tests, production frontend build and strict documentation build. Request another Codex review after pushing.
+
+Third review: align numeric multiples with JSON Schema's zero-based multiples,
+validate browser-compatible string patterns before submission, and exclude the
+SDK /metrics endpoint (including supported API prefixes). Preserve server-side
+validation for all inputs and explicitly document server-specific formats/regex.
+
+Third-review fixes pass all mandatory checks; 403 backend tests with temporary PostgreSQL/Redis and 98.13% coverage, plus 125 frontend tests and production build. All nine reported findings are addressed; request a final review of the updated head.

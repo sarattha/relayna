@@ -99,6 +99,8 @@ def test_ambiguous_external_recursive_and_closed_composed_schemas_fail(schema):
 @pytest.mark.parametrize(
     "path",
     [
+        "/metrics",
+        "/api/v1/metrics",
         "/relayna/capabilities",
         "/relayna/runtime/backpressure",
         "/events/feed",

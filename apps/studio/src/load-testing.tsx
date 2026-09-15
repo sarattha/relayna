@@ -99,13 +99,25 @@ export function RequestField({ schema, value, onChange, label, required = true }
     {schema.enum ? <select id={id} style={inputStyle} required={required} value={JSON.stringify(value)} onChange={(event) => onChange(JSON.parse(event.target.value))}>
       {schema.enum.map((option) => <option key={JSON.stringify(option)} value={JSON.stringify(option)}>{String(option)}</option>)}
     </select> : schema.type === "boolean" ? <select id={id} style={inputStyle} value={String(value ?? false)} onChange={(event) => onChange(event.target.value === "true")}><option value="false">No</option><option value="true">Yes</option></select>
-      : schema.type === "string" ? <textarea id={id} style={inputStyle} required={required} rows={2} value={String(value ?? "")} minLength={schema.minLength} maxLength={schema.maxLength} onChange={(event) => onChange(event.target.value)} />
-        : <input id={id} style={inputStyle} type="number" required={required} value={value === undefined ? "" : Number(value)} min={schema.minimum ?? schema.exclusiveMinimum} max={schema.maximum ?? schema.exclusiveMaximum} step={schema.multipleOf ?? (schema.type === "integer" ? 1 : "any")} ref={(element) => {
+      : schema.type === "string" ? <textarea id={id} style={inputStyle} required={required} rows={2} value={String(value ?? "")} minLength={schema.minLength} maxLength={schema.maxLength} ref={(element) => {
+          let error = "";
+          if (schema.pattern) {
+            try { if (!new RegExp(schema.pattern).test(String(value ?? ""))) error = `Value must match ${schema.pattern}.`; }
+            catch { /* Non-ECMAScript patterns are validated by Studio when reviewing. */ }
+          }
+          element?.setCustomValidity(error);
+        }} onChange={(event) => onChange(event.target.value)} />
+        : <input id={id} style={inputStyle} type="number" required={required} value={value === undefined ? "" : Number(value)} min={schema.minimum ?? schema.exclusiveMinimum} max={schema.maximum ?? schema.exclusiveMaximum} step="any" ref={(element) => {
           const invalid = typeof value === "number" && ((schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) || (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum));
-          element?.setCustomValidity(invalid ? "Value must be strictly inside the displayed bounds." : "");
+          const multiple = schema.multipleOf;
+          const quotient = typeof value === "number" && multiple ? value / multiple : 0;
+          const invalidMultiple = multiple !== undefined && Math.abs(quotient - Math.round(quotient)) > Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
+          const invalidInteger = schema.type === "integer" && typeof value === "number" && !Number.isInteger(value);
+          element?.setCustomValidity(invalid ? "Value must be strictly inside the displayed bounds." : invalidInteger ? "Enter a whole number." : invalidMultiple ? `Enter a multiple of ${multiple}.` : "");
         }} onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))} />}
     {schema.description && <small>{schema.description}</small>}
     {schema.exclusiveMinimum !== undefined && <small>Must be greater than {schema.exclusiveMinimum}.</small>}{schema.exclusiveMaximum !== undefined && <small>Must be less than {schema.exclusiveMaximum}.</small>}
+    {schema.multipleOf !== undefined && <small>Must be a multiple of {schema.multipleOf}.</small>}
     {schema.format && <small>Format: {schema.format}</small>}{schema.pattern && <small>Must match: {schema.pattern}</small>}
   </div>;
 }

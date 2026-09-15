@@ -78,3 +78,47 @@ it("does not add items to a zero-capacity array", () => {
   render(<RequestField schema={{ type: "array", maxItems: 0, items: { type: "string" } }} value={[]} onChange={() => { throw new Error("must not add"); }} label="Tags" />);
   expect(screen.getByRole("button", { name: "Add tags item" })).toBeDisabled();
 });
+
+it("validates numeric multiples from zero rather than the HTML minimum", () => {
+  const schema: InputSchema = { type: "number", minimum: 0.1, multipleOf: 0.2 };
+  function Form() {
+    const [value, setValue] = useState(initialInput(schema));
+    return <RequestField schema={schema} value={value} onChange={setValue} label="Weight" />;
+  }
+  render(<Form />);
+  const field = screen.getByLabelText("Weight *");
+  expect(field).toHaveValue(0.2);
+  expect(field).toBeValid();
+  fireEvent.change(field, { target: { value: "0.4" } });
+  expect(field).toBeValid();
+  fireEvent.change(field, { target: { value: "0.3" } });
+  expect(field).toBeInvalid();
+});
+
+it("rejects nonmatching patterns and clears validity when the schema changes", () => {
+  const schema: InputSchema = { type: "string", pattern: "^[A-Z]{3}$" };
+  function Form() {
+    const [value, setValue] = useState<unknown>("bad");
+    return <RequestField schema={schema} value={value} onChange={setValue} label="Code" />;
+  }
+  const { rerender } = render(<Form />);
+  const field = screen.getByLabelText("Code *");
+  expect(field).toBeInvalid();
+  fireEvent.change(field, { target: { value: "ABC" } });
+  expect(field).toBeValid();
+  fireEvent.change(field, { target: { value: "a" } });
+  expect(field).toBeInvalid();
+  rerender(<RequestField schema={{ type: "string" }} value="a" onChange={() => {}} label="Code" />);
+  expect(screen.getByLabelText("Code *")).toBeValid();
+});
+
+it("enforces integer values even with a fractional lower bound", () => {
+  function Form() {
+    const [value, setValue] = useState<unknown>(1);
+    return <RequestField schema={{ type: "integer", minimum: 0.1 }} value={value} onChange={setValue} label="Count" />;
+  }
+  render(<Form />);
+  expect(screen.getByLabelText("Count *")).toBeValid();
+  fireEvent.change(screen.getByLabelText("Count *"), { target: { value: "1.1" } });
+  expect(screen.getByLabelText("Count *")).toBeInvalid();
+});

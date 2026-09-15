@@ -118,7 +118,7 @@ def _is_sdk_operation(path: str, operation: dict[str, Any] | None = None) -> boo
     # Accept common API mount prefixes, but do not classify /orders or /tasks as SDK routes.
     path = re.sub(r"^/(?:api/)?v[0-9]+(?=/)", "", path)
     path = path.removeprefix("/api") if path.startswith("/api/") else path
-    prefixes = ("/relayna", "/dlq", "/broker/dlq", "/failed-tasks", "/events", "/status", "/history")
+    prefixes = ("/relayna", "/dlq", "/broker/dlq", "/failed-tasks", "/events", "/status", "/history", "/metrics")
     if any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes):
         return True
     if path in {"/workflow/topology", "/workflow/stages"} or re.fullmatch(r"/executions/[^/]+/graph", path):
