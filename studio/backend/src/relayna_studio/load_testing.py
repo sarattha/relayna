@@ -62,20 +62,21 @@ class _LoadRequest(BaseModel):
 def _form_size(schema: dict[str, Any]) -> int:
     if "enum" in schema:
         return 1
+    default_size = 1
     if "default" in schema:
 
         def size(value: Any) -> int:
             children = value.values() if isinstance(value, dict) else value if isinstance(value, list) else []
             return 1 + sum(size(child) for child in children)
 
-        return size(schema["default"])
+        default_size = size(schema["default"])
     kind = schema.get("type")
     if isinstance(kind, list):
         kind = next(item for item in kind if item != "null")
     if kind == "object":
-        return 1 + sum(_form_size(child) for child in schema.get("properties", {}).values())
+        return max(default_size, 1 + sum(_form_size(child) for child in schema.get("properties", {}).values()))
     if kind == "array":
-        return 1 + max(1, schema.get("minItems", 0)) * _form_size(schema["items"])
+        return max(default_size, 1 + max(1, schema.get("minItems", 0)) * _form_size(schema["items"]))
     return 1
 
 

@@ -580,3 +580,16 @@ def test_nested_array_expansion_and_large_defaults_are_bounded():
             "default": {"mode": "a"},
         }
     )
+
+
+def test_nullable_default_does_not_bypass_expansion_bound():
+    with pytest.raises(ValueError, match="1000 values"):
+        _check_schema(
+            {
+                "type": ["array", "null"],
+                "default": None,
+                "minItems": 100,
+                "maxItems": 100,
+                "items": {"type": "array", "minItems": 100, "maxItems": 100, "items": {"type": "string"}},
+            }
+        )

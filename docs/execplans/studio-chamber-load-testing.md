@@ -131,3 +131,5 @@ rather than presence as HTML required, and render structured enums as fixed
 choices before recursive field expansion. Add regressions for each case.
 
 Fourth-review fixes pass all mandatory checks; 406 backend tests with temporary PostgreSQL/Redis and 98.14% coverage, 127 frontend tests and production/docs builds. All twelve findings addressed with regression coverage. GitHub requires one approving review; an explicit administrator-merge decision was requested from the user and remains pending. Do not bypass the requirement without that answer.
+
+Follow-up hardening: nullable defaults cannot bypass the structural expansion limit when cleared. Regression and full verification pass (407 backend tests, 98.14% coverage). Review of e1320b4 is in progress; this subsequent change only strengthens the same bound. PR monitoring remains active and explicitly waits for the pending merge-approval decision.
