@@ -133,3 +133,10 @@ choices before recursive field expansion. Add regressions for each case.
 Fourth-review fixes pass all mandatory checks; 406 backend tests with temporary PostgreSQL/Redis and 98.14% coverage, 127 frontend tests and production/docs builds. All twelve findings addressed with regression coverage. GitHub requires one approving review; an explicit administrator-merge decision was requested from the user and remains pending. Do not bypass the requirement without that answer.
 
 Follow-up hardening: nullable defaults cannot bypass the structural expansion limit when cleared. Regression and full verification pass (407 backend tests, 98.14% coverage). Review of e1320b4 is in progress; this subsequent change only strengthens the same bound. PR monitoring remains active and explicitly waits for the pending merge-approval decision.
+
+Fifth review: preserve null in enums introduced by anyOf[T,null] normalization,
+while preserving enclosing enum restrictions; classify SDK targets by canonical
+URL path rather than query-bearing strings. These are unreleased importer/filter
+corrections within the approved perimeter. Add regressions and rerun verification.
+
+Fifth-review fixes pass mandatory verification and all 412 backend tests with temporary PostgreSQL/Redis at 98.14% coverage. All fourteen reported findings are addressed. Request Codex review on the fix commit, keep monitoring CI, and continue waiting for the outstanding merge approval.

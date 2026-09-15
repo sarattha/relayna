@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import copy
+import posixpath
 import re
 from typing import Any
 from urllib.parse import unquote, urlsplit
+
+from jsonschema import Draft202012Validator
 
 
 def _resolve(document: dict[str, Any], value: Any, trail: tuple[str, ...] = ()) -> dict[str, Any]:
@@ -67,8 +70,12 @@ def _schema(document: dict[str, Any], value: Any, depth: int = 0, budget: list[i
         nonnull = [item for item in variants if item.get("type") != "null"]
         if len(variants) != 2 or len(nonnull) != 1:
             raise ValueError("Multiple request variants need an explicit input_schema")
+        null_variant = next(item for item in variants if item.get("type") == "null")
+        allows_null = Draft202012Validator(null_variant).is_valid(None)
+        if allows_null and "enum" in nonnull[0] and "enum" not in schema:
+            nonnull[0]["enum"] = [*nonnull[0]["enum"], None]
         schema = _merge(nonnull[0], schema)
-        schema["nullable"] = True
+        schema["nullable"] = allows_null
     nullable = schema.pop("nullable", False)
     for key in (
         "example",
@@ -115,6 +122,8 @@ def _schema(document: dict[str, Any], value: Any, depth: int = 0, budget: list[i
 
 
 def _is_sdk_operation(path: str, operation: dict[str, Any] | None = None) -> bool:
+    # Classify the target path, excluding query values and resolving encoded/dot segments.
+    path = posixpath.normpath(unquote(urlsplit(path).path))
     # Accept common API mount prefixes, but do not classify /orders or /tasks as SDK routes.
     path = re.sub(r"^/(?:api/)?v[0-9]+(?=/)", "", path)
     path = path.removeprefix("/api") if path.startswith("/api/") else path

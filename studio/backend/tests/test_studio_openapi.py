@@ -387,3 +387,30 @@ def test_array_minimum_cannot_exceed_bounded_capacity(discovery, minimum, maximu
     result = client.get(f"{BASE}/profiles").json()
     assert not result["available"] and "minItems" in result["errors"][0]
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "path", ["/metrics?format=prometheus", "/api/v1/metrics?x=1", "/%6detrics", "/other/../metrics"]
+)
+def test_sdk_target_classification_uses_canonical_path(path):
+    assert _is_sdk_operation(path)
+    assert not _is_sdk_operation("/orders?next=/metrics")
+
+
+def test_imported_enum_union_preserves_null_without_widening_outer_constraints():
+    from jsonschema import Draft202012Validator
+
+    union = {"anyOf": [{"type": "string", "enum": ["fast", "safe"]}, {"type": "null"}]}
+    schema = _request_schema(document({"type": "object", "properties": {"mode": union}}), JOURNEY)
+    _check_schema(schema)
+    assert schema["properties"]["mode"]["enum"] == ["fast", "safe", None]
+    assert Draft202012Validator(schema).is_valid({"mode": None})
+    assert Draft202012Validator(schema).is_valid({"mode": "fast"})
+    assert not Draft202012Validator(schema).is_valid({"mode": "other"})
+    union["enum"] = ["fast", "safe"]
+    schema = _request_schema(document({"type": "object", "properties": {"mode": union}}), JOURNEY)
+    assert not Draft202012Validator(schema).is_valid({"mode": None})
+    union.pop("enum")
+    union["anyOf"][1]["enum"] = ["impossible"]
+    schema = _request_schema(document({"type": "object", "properties": {"mode": union}}), JOURNEY)
+    assert not Draft202012Validator(schema).is_valid({"mode": None})
