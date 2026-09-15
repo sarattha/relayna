@@ -68,6 +68,13 @@ export function RequestField({ schema, value, onChange, label, required = true }
     const concreteSchema = { ...schema, type: concrete, enum: schema.enum?.filter((item) => item !== null) };
     return <div className="load-field">{(!schema.enum || schema.enum.includes(null)) && <label><input type="checkbox" checked={value === null} onChange={(event) => onChange(event.target.checked ? null : initialInput({ ...concreteSchema, default: undefined }))} /> Send null for {name}</label>}{value !== null && <RequestField schema={concreteSchema} value={value} onChange={onChange} label={label} required={required} />}</div>;
   }
+  if (schema.enum) {
+    return <div className="load-field"><label htmlFor={id}>{name}{required ? " *" : ""}</label>
+      <select id={id} style={inputStyle} value={JSON.stringify(value)} onChange={(event) => onChange(JSON.parse(event.target.value))}>
+        {schema.enum.map((option) => <option key={JSON.stringify(option)} value={JSON.stringify(option)}>{typeof option === "object" ? JSON.stringify(option) : String(option)}</option>)}
+      </select>{schema.description && <small>{schema.description}</small>}
+    </div>;
+  }
   if (schema.type === "object") {
     const fields = (value || {}) as Record<string, unknown>;
     return <fieldset className="load-input-group"><legend>{name}</legend>{schema.description && <p>{schema.description}</p>}
@@ -96,11 +103,11 @@ export function RequestField({ schema, value, onChange, label, required = true }
     </fieldset>;
   }
   return <div className="load-field"><label htmlFor={id}>{name}{required ? " *" : ""}</label>
-    {schema.enum ? <select id={id} style={inputStyle} required={required} value={JSON.stringify(value)} onChange={(event) => onChange(JSON.parse(event.target.value))}>
-      {schema.enum.map((option) => <option key={JSON.stringify(option)} value={JSON.stringify(option)}>{String(option)}</option>)}
-    </select> : schema.type === "boolean" ? <select id={id} style={inputStyle} value={String(value ?? false)} onChange={(event) => onChange(event.target.value === "true")}><option value="false">No</option><option value="true">Yes</option></select>
-      : schema.type === "string" ? <textarea id={id} style={inputStyle} required={required} rows={2} value={String(value ?? "")} minLength={schema.minLength} maxLength={schema.maxLength} ref={(element) => {
-          let error = "";
+    {schema.type === "boolean" ? <select id={id} style={inputStyle} value={String(value ?? false)} onChange={(event) => onChange(event.target.value === "true")}><option value="false">No</option><option value="true">Yes</option></select>
+      : schema.type === "string" ? <textarea id={id} style={inputStyle} required={(schema.minLength ?? 0) > 0} rows={2} value={String(value ?? "")} ref={(element) => {
+          const length = Array.from(String(value ?? "")).length;
+          let error = length < (schema.minLength ?? 0) ? `Enter at least ${schema.minLength} characters.`
+            : length > (schema.maxLength ?? Infinity) ? `Enter at most ${schema.maxLength} characters.` : "";
           if (schema.pattern) {
             try { if (!new RegExp(schema.pattern).test(String(value ?? ""))) error = `Value must match ${schema.pattern}.`; }
             catch { /* Non-ECMAScript patterns are validated by Studio when reviewing. */ }

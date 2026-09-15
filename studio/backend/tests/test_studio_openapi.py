@@ -371,3 +371,19 @@ async def test_discovery_keeps_manual_profile_when_network_fails(monkeypatch):
     bridge.openapi.return_value = doc
     profiles, errors = await bridge.resolved_profiles("service", SimpleNamespace())
     assert len(profiles) == 1 and "non-null scalar" in errors[0]
+
+
+@pytest.mark.parametrize("minimum,maximum", [(1000000000, 1000000001), (2, 1)])
+def test_array_minimum_cannot_exceed_bounded_capacity(discovery, minimum, maximum):
+    client, current, calls, _ = discovery
+    current["document"] = document(
+        {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"type": "string"}, "minItems": minimum, "maxItems": maximum}
+            },
+        }
+    )
+    result = client.get(f"{BASE}/profiles").json()
+    assert not result["available"] and "minItems" in result["errors"][0]
+    assert len(calls) == 1

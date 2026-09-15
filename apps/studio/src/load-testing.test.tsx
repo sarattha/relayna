@@ -122,3 +122,26 @@ it("enforces integer values even with a fractional lower bound", () => {
   fireEvent.change(screen.getByLabelText("Count *"), { target: { value: "1.1" } });
   expect(screen.getByLabelText("Count *")).toBeInvalid();
 });
+
+it("allows empty required strings and raw bodies when minLength permits them", () => {
+  const { rerender } = render(<RequestField schema={{ type: "string" }} value="" onChange={() => {}} label="body" required />);
+  expect(screen.getByLabelText("body *")).toBeValid();
+  rerender(<RequestField schema={{ type: "string", minLength: 1 }} value="" onChange={() => {}} label="body" required />);
+  expect(screen.getByLabelText("body *")).toBeInvalid();
+  rerender(<RequestField schema={{ type: "string", maxLength: 1 }} value="😀" onChange={() => {}} label="body" required />);
+  expect(screen.getByLabelText("body *")).toBeValid();
+});
+
+it("selects complete structured enum alternatives", () => {
+  const schema: InputSchema = { type: "object", enum: [{ mode: "fast" }, { mode: "safe" }], properties: { mode: { type: "string" } } };
+  function Form() {
+    const [value, setValue] = useState(initialInput(schema));
+    return <RequestField schema={schema} value={value} onChange={setValue} label="Config" />;
+  }
+  render(<Form />);
+  const field = screen.getByLabelText("Config *");
+  expect(field).toHaveValue('{"mode":"fast"}');
+  fireEvent.change(field, { target: { value: '{"mode":"safe"}' } });
+  expect(field).toHaveValue('{"mode":"safe"}');
+  expect(screen.queryByLabelText("mode *")).not.toBeInTheDocument();
+});

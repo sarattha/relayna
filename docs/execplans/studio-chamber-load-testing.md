@@ -124,3 +124,10 @@ SDK /metrics endpoint (including supported API prefixes). Preserve server-side
 validation for all inputs and explicitly document server-specific formats/regex.
 
 Third-review fixes pass all mandatory checks; 403 backend tests with temporary PostgreSQL/Redis and 98.13% coverage, plus 125 frontend tests and production build. All nine reported findings are addressed; request a final review of the updated head.
+
+Fourth review: reject array minItems outside 0..maxItems (including OpenAPI
+maximum clamping), allow schema-valid empty strings using length constraints
+rather than presence as HTML required, and render structured enums as fixed
+choices before recursive field expansion. Add regressions for each case.
+
+Fourth-review fixes pass all mandatory checks; 406 backend tests with temporary PostgreSQL/Redis and 98.14% coverage, 127 frontend tests and production/docs builds. All twelve findings addressed with regression coverage. GitHub requires one approving review; an explicit administrator-merge decision was requested from the user and remains pending. Do not bypass the requirement without that answer.

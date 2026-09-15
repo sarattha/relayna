@@ -556,3 +556,27 @@ async def test_terminal_snapshots_survive_outage_but_running_and_cancel_errors_s
     assert retained["state"] == "completed" and "snapshot" in retained["evidence_error"]
     with pytest.raises(HTTPException):
         await bridge.status("translation-staging", identity, cancel=True)
+
+
+def test_nested_array_expansion_and_large_defaults_are_bounded():
+    leaf = {"type": "array", "minItems": 100, "maxItems": 100, "items": {"type": "string"}}
+    with pytest.raises(ValueError, match="1000 values"):
+        _check_schema({"type": "array", "minItems": 100, "maxItems": 100, "items": leaf})
+    with pytest.raises(ValueError, match="1000 values"):
+        _check_schema({"type": "array", "maxItems": 100, "items": leaf, "default": [[""] * 100 for _ in range(100)]})
+    _check_schema(
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"mode": {"type": "string"}},
+            "enum": [{"mode": "a"}, {"mode": "b"}],
+        }
+    )
+    _check_schema(
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"mode": {"type": "string"}},
+            "default": {"mode": "a"},
+        }
+    )

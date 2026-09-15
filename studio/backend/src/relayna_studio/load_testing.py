@@ -59,6 +59,26 @@ class _LoadRequest(BaseModel):
     duration_seconds: int = Field(ge=1, le=3600)
 
 
+def _form_size(schema: dict[str, Any]) -> int:
+    if "enum" in schema:
+        return 1
+    if "default" in schema:
+
+        def size(value: Any) -> int:
+            children = value.values() if isinstance(value, dict) else value if isinstance(value, list) else []
+            return 1 + sum(size(child) for child in children)
+
+        return size(schema["default"])
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next(item for item in kind if item != "null")
+    if kind == "object":
+        return 1 + sum(_form_size(child) for child in schema.get("properties", {}).values())
+    if kind == "array":
+        return 1 + max(1, schema.get("minItems", 0)) * _form_size(schema["items"])
+    return 1
+
+
 def _check_schema(schema: dict[str, Any], depth: int = 0) -> None:
     Draft202012Validator.check_schema(schema)
     if depth > 8 or set(schema) - _SCHEMA_KEYS:
@@ -79,9 +99,14 @@ def _check_schema(schema: dict[str, Any], depth: int = 0) -> None:
     if kind == "array":
         if not isinstance(schema.get("maxItems"), int) or not 0 <= schema["maxItems"] <= 100:
             raise ValueError("Array schemas need maxItems between 0 and 100")
+        minimum = schema.get("minItems", 0)
+        if type(minimum) is not int or not 0 <= minimum <= schema["maxItems"]:
+            raise ValueError("Array schemas need 0 <= minItems <= maxItems <= 100")
         _check_schema(schema.get("items", {}), depth + 1)
     if "default" in schema and not Draft202012Validator(schema).is_valid(schema["default"]):
         raise ValueError("Request default does not match its schema")
+    if _form_size(schema) > 1000:
+        raise ValueError("Request form initialization exceeds 1000 values")
 
 
 def _load_profiles() -> dict[str, Any]:

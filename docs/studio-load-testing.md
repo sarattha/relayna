@@ -174,6 +174,10 @@ left out of approved operation profiles.
 The importer supports OpenAPI 3.0/3.1 request bodies, local component references,
 non-conflicting object composition, nested objects/arrays, enums, nullable
 values, required fields, defaults, string/numeric limits, patterns and formats.
+Array minimums must fit their maximum (at most 100 items), and initial form
+expansion is limited to 1000 values, including nested arrays and defaults.
+Structured enums render as fixed choices; string emptiness follows minLength,
+independently of whether the property is required.
 Numeric bounds/multiples and ECMAScript-compatible string patterns are checked
 in the form. Formats and any server-specific regular expressions are validated
 when reviewing; the backend remains authoritative for every constraint.
