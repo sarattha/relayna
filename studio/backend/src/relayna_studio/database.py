@@ -76,7 +76,7 @@ from .registry import DuplicateServiceError, ServiceNotFoundError, ServiceRecord
 from .search import StudioServiceSearchDocument, StudioTaskSearchDocument, StudioTaskSearchQuery
 
 LOGGER = logging.getLogger(__name__)
-EXPECTED_SCHEMA_REVISION = "0001_studio_postgres"
+EXPECTED_SCHEMA_REVISION = "0002_load_profiles"
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
@@ -119,6 +119,15 @@ Index(
     services.c.base_url,
     unique=True,
     postgresql_where=services.c.deleted_at.is_(None),
+)
+
+_load_profiles = Table(
+    "studio_load_profiles",
+    metadata,
+    Column("service_id", Text, ForeignKey("studio_services.service_id", ondelete="CASCADE"), primary_key=True),
+    Column("environment", String(128), primary_key=True),
+    Column("profile_id", String(100), primary_key=True),
+    Column("profile", json_type, nullable=False),
 )
 
 members = Table(
@@ -628,6 +637,7 @@ class PostgresServiceRegistryStore:
             )
             if getattr(result, "rowcount", 0) == 0:
                 raise ServiceNotFoundError(f"Service '{service_id}' was not found.")
+            await session.execute(delete(_load_profiles).where(_load_profiles.c.service_id == service_id))
             await session.execute(delete(service_projections).where(service_projections.c.service_id == service_id))
             await session.execute(delete(task_projections).where(task_projections.c.service_id == service_id))
             await _append_audit(session, action="service.delete", target_type="service", target_id=service_id)
@@ -1837,7 +1847,15 @@ class StudioMutationAuditMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         match = _FAILED_TASK_MUTATION.fullmatch(request.url.path)
         load_match = _LOAD_TEST_MUTATION.fullmatch(request.url.path) if request.method == "POST" else None
-        if load_match is not None:
+        profile_match = re.fullmatch(
+            r"/studio/services/(?P<service_id>[^/]+)/load-tests/profile-import(?:/(?P<profile_id>[^/]+))?",
+            request.url.path,
+        )
+        if profile_match is not None and request.method in {"POST", "DELETE"}:
+            operation = "remove" if request.method == "DELETE" else profile_match.group("profile_id") or "import"
+            target_type = "load_profile"
+            target_id = profile_match.group("service_id")
+        elif load_match is not None:
             operation = load_match.group("operation") or "plan"
             target_type = "load_test"
             target_id = load_match.group("service_id")

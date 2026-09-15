@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
 
 from ._openapi import _is_sdk_operation, _request_schema
+from .database import StudioDatabase
 from .registry import OutboundUrlPolicyError, ServiceNotFoundError, ServiceRegistryService, StudioOutboundUrlPolicy
 
 _RETENTION = 30 * 86400
@@ -142,7 +143,10 @@ def _load_profiles() -> dict[str, Any]:
     path = os.getenv("RELAYNA_STUDIO_CHAMBER_PROFILES_PATH", "").strip()
     if not path:
         return {}
-    profiles = json.loads(Path(path).read_text())
+    return _validate_profiles(json.loads(Path(path).read_text()))
+
+
+def _validate_profiles(profiles: Any) -> dict[str, Any]:
     if not isinstance(profiles, dict):
         raise ValueError("Chamber profiles must be keyed by service ID")
     for settings in profiles.values():
@@ -218,6 +222,7 @@ class _Chamber:
         redis: Redis,
         client: httpx.AsyncClient,
         url_policy: StudioOutboundUrlPolicy | None = None,
+        database: StudioDatabase | None = None,
     ):
         self.url_policy = url_policy or StudioOutboundUrlPolicy()
         self.registry = registry
@@ -239,6 +244,19 @@ class _Chamber:
             if not self.token:
                 raise ValueError("RELAYNA_STUDIO_CHAMBER_TOKEN is required when Chamber is enabled")
         self.profiles = _load_profiles()
+        from ._profile_import import _ProfileStore
+
+        self.profile_store = _ProfileStore(database)
+
+    async def settings(self, service_id: str, environment: str) -> dict[str, Any]:
+        configured = self.profiles.get(service_id, {})
+        settings: dict[str, Any] = (
+            copy.deepcopy(configured)
+            if configured.get("environment") == environment
+            else {"environment": environment, "profiles": []}
+        )
+        settings["profiles"].extend(await self.profile_store.get_profiles(service_id, environment))
+        return settings
 
     async def call(self, method: str, path: str, payload: Any = None, key: str | None = None) -> dict[str, Any]:
         if not self.url:
@@ -335,8 +353,10 @@ class _Chamber:
             raise ValueError("OpenAPI document must be an object")
         return document
 
-    async def resolved_profiles(self, service_id: str, service: Any) -> tuple[list[dict[str, Any]], list[str]]:
-        settings = self.profiles.get(service_id, {})
+    async def resolved_profiles(
+        self, service_id: str, service: Any, settings: dict[str, Any] | None = None
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        settings = settings if settings is not None else await self.settings(service_id, service.environment)
         configured = settings.get("profiles", [])
         resolved = []
         errors = []
@@ -382,12 +402,12 @@ class _Chamber:
 
     async def options(self, service_id: str) -> dict[str, Any]:
         service = await self.service(service_id)
-        configured = self.profiles.get(service_id, {})
+        configured = await self.settings(service_id, service.environment)
         enabled = bool(
             self.url and configured.get("environment") == service.environment and service.status != "disabled"
         )
         profiles = []
-        resolved, errors = await self.resolved_profiles(service_id, service) if enabled else ([], [])
+        resolved, errors = await self.resolved_profiles(service_id, service, configured) if enabled else ([], [])
         for profile in resolved:
             journey = profile["config"]["traffic"]["journeys"][0]
             profiles.append(
@@ -424,10 +444,10 @@ class _Chamber:
 
     async def plan(self, service_id: str, payload: _LoadRequest) -> dict[str, Any]:
         service = await self.service(service_id, mutate=True)
-        settings = self.profiles.get(service_id, {})
+        settings = await self.settings(service_id, service.environment)
         if not self.url or settings.get("environment") != service.environment:
             raise HTTPException(409, "Load testing is not configured for this environment.")
-        profiles, errors = await self.resolved_profiles(service_id, service)
+        profiles, errors = await self.resolved_profiles(service_id, service, settings)
         if not any(item["id"] == payload.profile_id for item in profiles):
             raise HTTPException(409, "This load-test profile is not available for this service and environment.")
         profile = next(item for item in profiles if item["id"] == payload.profile_id)
@@ -605,9 +625,14 @@ def _create_load_testing_router(
     redis: Redis,
     client: httpx.AsyncClient,
     url_policy: StudioOutboundUrlPolicy | None = None,
+    database: StudioDatabase | None = None,
 ) -> APIRouter:
-    bridge = _Chamber(registry, redis, client, url_policy)
+    bridge = _Chamber(registry, redis, client, url_policy, database)
     router = APIRouter(prefix="/studio/services/{service_id}/load-tests", tags=["load-testing"])
+
+    from ._profile_import import _import_router
+
+    router.include_router(_import_router(bridge))
 
     @router.get("/profiles")
     async def profiles(service_id: str) -> dict[str, Any]:

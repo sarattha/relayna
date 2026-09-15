@@ -702,6 +702,7 @@ def create_studio_app(
             StudioOutboundUrlPolicy(
                 allowed_hosts=capability_refresh_allowed_hosts, allowed_networks=capability_refresh_allowed_networks
             ),
+            database=runtime.database,
         )
     )
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))

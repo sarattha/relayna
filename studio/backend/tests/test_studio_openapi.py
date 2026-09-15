@@ -357,9 +357,9 @@ async def test_discovery_keeps_manual_profile_when_network_fails(monkeypatch):
     imported.pop("input_schema")
     sdk = copy.deepcopy(profile)
     sdk["config"]["traffic"]["journeys"][0]["path"] = "/relayna/capabilities"
-    bridge.profiles = {"service": {"profiles": [profile, imported, sdk]}}
+    bridge.profiles = {"service": {"environment": "staging", "profiles": [profile, imported, sdk]}}
     bridge.openapi = AsyncMock(side_effect=httpx.ConnectError("connection failed"))
-    profiles, errors = await bridge.resolved_profiles("service", SimpleNamespace())
+    profiles, errors = await bridge.resolved_profiles("service", SimpleNamespace(environment="staging"))
     assert len(profiles) == 1 and profiles[0]["schema_source"] == "configured"
     assert len(errors) == 2
     assert "connection" in errors[0] and "SDK" in errors[1]
@@ -369,7 +369,7 @@ async def test_discovery_keeps_manual_profile_when_network_fails(monkeypatch):
     content = doc["paths"]["/translations"]["post"]["requestBody"]["content"]
     content["application/x-www-form-urlencoded"] = content.pop("application/json")
     bridge.openapi.return_value = doc
-    profiles, errors = await bridge.resolved_profiles("service", SimpleNamespace())
+    profiles, errors = await bridge.resolved_profiles("service", SimpleNamespace(environment="staging"))
     assert len(profiles) == 1 and "non-null scalar" in errors[0]
 
 

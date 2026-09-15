@@ -1,5 +1,5 @@
 {
-  "freeze_version": "v1.8.2",
+  "freeze_version": "v1.9.0",
   "route_declarations": [
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "get", "path_expression": "'/studio/auth/config'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "get", "path_expression": "'/studio/auth/login'"},
@@ -8,6 +8,12 @@
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "post", "path_expression": "'/studio/auth/logout'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "get", "path_expression": "'/studio/admin/users'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "patch", "path_expression": "'/studio/admin/users/{user_id}'"},
+    {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "get", "path_expression": "''"},
+    {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "get", "path_expression": "'/sources'"},
+    {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "post", "path_expression": "'/inspect'"},
+    {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "post", "path_expression": "'/preview'"},
+    {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "post", "path_expression": "''"},
+    {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "delete", "path_expression": "'/{profile_id}'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/config'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/login'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/callback'"},

@@ -1,3 +1,4 @@
+import { LoadProfileManager } from "./LoadProfileManager";
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { fetchServiceLogs, fetchServiceMetrics, requestJson } from "../api";
@@ -120,6 +121,7 @@ function ServiceLoadTesting({ serviceId }: { serviceId: string }) {
       {!selected ? <SectionCard title="Configure a load test" subtitle="Choose an approved operation. Its target and input format are already defined for this service.">
         {setup && <p role="status">{setup}</p>}
         <button type="button" style={secondaryButtonStyle} onClick={() => setProfileRevision((old) => old + 1)}>Refresh operations</button>
+        {isAdmin && <LoadProfileManager base={base} onSaved={() => setProfileRevision((old) => old + 1)} />}
         {importErrors.map((item) => <NoticeBanner tone="error" key={item}>{item}</NoticeBanner>)}
         {profile && <form onSubmit={(event) => void createPlan(event)}>
           <fieldset disabled={!isAdmin || busy} className="load-form-fields">

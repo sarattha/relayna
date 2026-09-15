@@ -1069,10 +1069,10 @@ async def test_database_configuration_and_schema_failures() -> None:
         await database.check_schema()
         async with database.engine.begin() as connection:
             await connection.execute(text("UPDATE alembic_version SET version_num = 'wrong'"))
-        with pytest.raises(RuntimeError, match="expected 0001_studio_postgres"):
+        with pytest.raises(RuntimeError, match="expected 0002_load_profiles"):
             await database.check_schema()
         async with database.engine.begin() as connection:
-            await connection.execute(text("UPDATE alembic_version SET version_num = '0001_studio_postgres'"))
+            await connection.execute(text("UPDATE alembic_version SET version_num = '0002_load_profiles'"))
             await connection.execute(text("ALTER TABLE alembic_version RENAME TO alembic_version_hidden"))
         try:
             with pytest.raises(RuntimeError, match="schema is missing"):
@@ -1181,3 +1181,86 @@ async def test_load_test_actions_audit_actor_and_outcome(
     assert rows[4]["details"]["operation_id"] == rows[5]["details"]["operation_id"]
     assert rows[5]["details"]["status_code"] == 502
     assert all("Hello" not in json.dumps(row["details"]) for row in rows)
+
+
+@pytest.mark.asyncio
+async def test_imported_profiles_are_durable_scoped_and_idempotent(database):
+    from fastapi import HTTPException
+    from relayna_studio._profile_import import _ProfileStore
+
+    await PostgresServiceRegistryStore(database).create(service_record())
+    store = _ProfileStore(database)
+    profile = {"id": "chamber-test", "name": "Imported", "max_vus": 8}
+    await store.save("payments-api", "production", profile)
+    await store.save("payments-api", "production", profile)
+    assert await _ProfileStore(database).get_profiles("payments-api", "production") == [profile]
+    assert await store.get_profiles("payments-api", "staging") == []
+    with pytest.raises(HTTPException) as error:
+        await store.save("payments-api", "production", {**profile, "max_vus": 9})
+    assert error.value.status_code == 409
+    await store.remove("payments-api", "staging", "chamber-test")
+    assert await store.get_profiles("payments-api", "production") == [profile]
+    await store.remove("payments-api", "production", "chamber-test")
+    assert await store.get_profiles("payments-api", "production") == []
+
+
+@pytest.mark.asyncio
+async def test_profile_mutations_audit_without_request_values(database):
+    from relayna_studio.audit_context import reset_actor_user_id, set_actor_user_id
+
+    app = FastAPI()
+    path = "/studio/services/payments-api/load-tests/profile-import"
+
+    @app.post(path)
+    async def save_profile():
+        return {"id": "profile"}
+
+    @app.delete(path + "/{profile_id}")
+    async def remove_profile(profile_id: str):
+        return {"removed": True}
+
+    app.add_middleware(StudioMutationAuditMiddleware, database=database)
+    actor = set_actor_user_id("profile-admin")
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://studio.test") as client:
+            assert (await client.post(path, json={"token": "never-log"})).status_code == 200
+            assert (await client.delete(path + "/profile")).status_code == 200
+    finally:
+        reset_actor_user_id(actor)
+    async with database.sessions() as session:
+        rows = (await session.execute(select(audit_log).order_by(audit_log.c.id))).mappings().all()
+    assert [row["action"] for row in rows] == [
+        "load_profile.import.requested",
+        "load_profile.import.succeeded",
+        "load_profile.remove.requested",
+        "load_profile.remove.succeeded",
+    ]
+    assert {row["actor_user_id"] for row in rows} == {"profile-admin"}
+    assert "never-log" not in str(rows)
+
+
+@pytest.mark.asyncio
+async def test_service_deletion_revokes_profiles_before_id_reuse(database):
+    from fastapi import HTTPException
+    from relayna_studio._profile_import import _ProfileStore
+
+    registry = PostgresServiceRegistryStore(database)
+    original = service_record()
+    other = service_record("other", base_url="https://other.example.test")
+    await registry.create(original)
+    await registry.create(other)
+    store = _ProfileStore(database)
+    profile = {"id": "chamber-old-target", "name": "Old approved target"}
+    await store.save(original.service_id, original.environment, profile)
+    await store.save(other.service_id, other.environment, profile)
+    await registry.delete(original.service_id)
+    assert await store.get_profiles(original.service_id, original.environment) == []
+    with pytest.raises(HTTPException) as stale:
+        await store.save(original.service_id, original.environment, profile)
+    assert stale.value.status_code == 409
+    await registry.create(original)
+    assert await store.get_profiles(original.service_id, original.environment) == []
+    assert await store.get_profiles(other.service_id, other.environment) == [profile]
+    # A new explicit import after registration is supported.
+    await store.save(original.service_id, original.environment, profile)
+    assert await store.get_profiles(original.service_id, original.environment) == [profile]
