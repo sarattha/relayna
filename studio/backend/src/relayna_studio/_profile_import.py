@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 
 from .auth import StudioMemberStatus, StudioRole
-from .database import StudioDatabase, _load_profiles
+from .database import StudioDatabase, _load_profiles, services
 
 if TYPE_CHECKING:
     from .load_testing import _Chamber
@@ -46,6 +46,20 @@ class _ProfileStore:
 
     async def save(self, service_id: str, environment: str, profile: dict[str, Any]) -> None:
         async with self.required().transaction() as session:
+            # Serialize with service deletion so an in-flight import cannot
+            # recreate profile rows after the soft-delete transaction clears them.
+            active = await session.scalar(
+                select(services.c.service_id)
+                .where(
+                    services.c.service_id == service_id,
+                    services.c.deleted_at.is_(None),
+                    services.c.environment == environment,
+                    services.c.status != "disabled",
+                )
+                .with_for_update()
+            )
+            if active is None:
+                raise HTTPException(409, "The service was removed, disabled or changed environment. Preview again.")
             await session.execute(
                 insert(_load_profiles)
                 .values(

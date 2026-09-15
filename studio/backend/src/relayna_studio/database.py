@@ -637,6 +637,7 @@ class PostgresServiceRegistryStore:
             )
             if getattr(result, "rowcount", 0) == 0:
                 raise ServiceNotFoundError(f"Service '{service_id}' was not found.")
+            await session.execute(delete(_load_profiles).where(_load_profiles.c.service_id == service_id))
             await session.execute(delete(service_projections).where(service_projections.c.service_id == service_id))
             await session.execute(delete(task_projections).where(task_projections.c.service_id == service_id))
             await _append_audit(session, action="service.delete", target_type="service", target_id=service_id)

@@ -93,3 +93,14 @@ Release 1.9.0 on the coordinated version line for this additive feature. The
 existing one-Codex-review preference applies: request once, fix findings without
 another request, and merge only after checks pass. Document the maintenance
 window because backend readiness checks enforce the exact Alembic revision.
+
+Codex review was requested exactly once on PR #130. Its one finding identified
+profile resurrection after service soft deletion. The fix clears imported rows
+in the deletion transaction and locks the active service row during profile save,
+preventing an in-flight save from restoring rows after deletion. Add database
+regression coverage for deletion/re-registration and stale saves, then rerun
+verification/coverage and CI before merging. No second review request.
+
+The review fix passes the mandatory verification stack and database-backed
+coverage: 461 tests, 98.12%. Strict documentation build also passes. Resolve the
+single review thread and merge after CI passes on the fix commit.

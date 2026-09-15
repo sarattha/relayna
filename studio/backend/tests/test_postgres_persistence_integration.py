@@ -1237,3 +1237,30 @@ async def test_profile_mutations_audit_without_request_values(database):
     ]
     assert {row["actor_user_id"] for row in rows} == {"profile-admin"}
     assert "never-log" not in str(rows)
+
+
+@pytest.mark.asyncio
+async def test_service_deletion_revokes_profiles_before_id_reuse(database):
+    from fastapi import HTTPException
+    from relayna_studio._profile_import import _ProfileStore
+
+    registry = PostgresServiceRegistryStore(database)
+    original = service_record()
+    other = service_record("other", base_url="https://other.example.test")
+    await registry.create(original)
+    await registry.create(other)
+    store = _ProfileStore(database)
+    profile = {"id": "chamber-old-target", "name": "Old approved target"}
+    await store.save(original.service_id, original.environment, profile)
+    await store.save(other.service_id, other.environment, profile)
+    await registry.delete(original.service_id)
+    assert await store.get_profiles(original.service_id, original.environment) == []
+    with pytest.raises(HTTPException) as stale:
+        await store.save(original.service_id, original.environment, profile)
+    assert stale.value.status_code == 409
+    await registry.create(original)
+    assert await store.get_profiles(original.service_id, original.environment) == []
+    assert await store.get_profiles(other.service_id, other.environment) == [profile]
+    # A new explicit import after registration is supported.
+    await store.save(original.service_id, original.environment, profile)
+    assert await store.get_profiles(original.service_id, original.environment) == [profile]

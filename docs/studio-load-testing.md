@@ -212,7 +212,9 @@ and base URL. Saving checks the request schema again. Profiles are stored durabl
 PostgreSQL, scoped to the immutable service ID and exact environment. Existing
 ConfigMap profiles remain available alongside imported profiles. Repeating an
 identical save is safe; to replace an imported operation, remove it in the manager
-and import again. Removing it does not remove already-reviewed plans or runs.
+and import again. Removing it does not remove already-reviewed plans or runs. Deleting a service
+also clears all of its imported profiles, so re-registering the same ID does not
+restore old target approvals.
 
 Before deploying this feature, stop old backend replicas during a maintenance
 window, back up PostgreSQL and run `alembic upgrade head`
