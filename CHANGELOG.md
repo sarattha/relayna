@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.8.1 - 2026-09-15
+
+### Added
+
+- Optional Studio operator-token login for sandbox deployments without Entra. Browser sessions use HttpOnly cookies, CSRF protection, bounded sign-in attempts and token-rotation invalidation. Entra remains the default.
+
 ## 1.8.0 - 2026-09-15
 
 ### Added

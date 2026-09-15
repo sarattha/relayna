@@ -144,3 +144,9 @@ Certificate-secret installation and Entra application changes are operator
 actions. Rolling back from 1.6.0 requires the maintenance-window procedure in
 [Studio persistence](studio-persistence.md); old versions cannot read members
 or other durable Studio writes from PostgreSQL.
+
+## Sandbox operator login
+
+Studio 1.8.1 also supports `RELAYNA_STUDIO_AUTH_MODE=operator` for shared sandbox access. Set `RELAYNA_STUDIO_OPERATOR_TOKEN` from a Secret to a randomly generated value starting with `op_live_` and at least 24 characters long. Entra identifiers and certificates are unnecessary in this mode; PostgreSQL and Redis remain required. The default mode is `entra`, and unknown modes or missing operator tokens fail startup.
+
+The sign-in page exchanges the token for an HttpOnly, SameSite cookie with the configured session TTL. Browser mutations require CSRF, sign-in attempts are limited to ten per minute per connecting address, logout removes the session, and rotating the configured token invalidates old sessions. Keep secure cookies enabled on HTTPS; disable them only for an intentional HTTP deployment. API clients may supply `Authorization: Bearer <operator-token>`. Requests share the audit actor `shared-operator`; per-person membership is managed only in Entra mode. Use a separate operator token for Studio and the internal Chamber connection.

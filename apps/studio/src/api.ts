@@ -35,7 +35,7 @@ import type {
 let csrfToken: string | null = null;
 
 export class StudioApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly authMode?: string) {
     super(message);
   }
 }
@@ -77,13 +77,13 @@ async function performRequest<T>(input: string, init?: RequestInit): Promise<T> 
   const timeout = window.setTimeout(() => controller.abort(new Error("Request timed out. Please retry.")), 20_000);
   try {
     const response = await fetch(input, { ...resolvedInit, signal: controller.signal });
-    const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
+    const payload = (await response.json().catch(() => null)) as { detail?: string; auth_mode?: string } | null;
     if (!response.ok) {
       const message = payload?.detail || `Request failed with status ${response.status}.`;
       window.dispatchEvent(
-        new CustomEvent("relayna:api-error", { detail: { status: response.status, input, message } }),
+        new CustomEvent("relayna:api-error", { detail: { status: response.status, input, message, authMode: payload?.auth_mode } }),
       );
-      throw new StudioApiError(message, response.status);
+      throw new StudioApiError(message, response.status, payload?.auth_mode);
     }
     return payload as T;
   } finally {

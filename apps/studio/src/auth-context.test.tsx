@@ -138,3 +138,24 @@ describe("StudioAuthProvider", () => {
     );
   });
 });
+
+
+it("signs in with an operator token without Entra and handles invalid tokens", async () => {
+  vi.stubGlobal("fetch", fetchMock);
+  fetchMock.mockResolvedValueOnce(response({detail:"Operator sign-in is required.",auth_mode:"operator"},401));
+  render(<StudioAuthProvider><SessionChild /></StudioAuthProvider>);
+  const input = await screen.findByLabelText("Operator token");
+  expect(screen.queryByRole("link",{name:"Sign in with Microsoft Entra"})).not.toBeInTheDocument();
+  fireEvent.change(input,{target:{value:"op_live_example"}});
+  fetchMock.mockResolvedValueOnce(response({detail:"Invalid operator token."},401));
+  fireEvent.click(screen.getByRole("button",{name:"Sign in"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Invalid operator token.");
+  fetchMock.mockResolvedValueOnce(response({...session(),auth_mode:"operator"})).mockResolvedValueOnce(response({...session(),auth_mode:"operator"}));
+  fireEvent.click(screen.getByRole("button",{name:"Sign in"}));
+  expect(await screen.findByRole("button",{name:"Admin session"})).toBeInTheDocument();
+  const login = fetchMock.mock.calls.find(([input])=>String(input)==="/studio/auth/login");
+  expect(JSON.parse(String(login?.[1]?.body)).token).toBe("op_live_example");
+  expect(new Headers(login?.[1]?.headers).get("X-CSRF-Token")).toBe("operator-login");
+  window.dispatchEvent(new CustomEvent("relayna:api-error",{detail:{status:401,input:"/studio/services",authMode:"operator"}}));
+  expect(await screen.findByLabelText("Operator token")).toBeInTheDocument();
+});
