@@ -56,12 +56,17 @@ central control plane runs the backend package.
 
 The backend reads configuration from `StudioBackendSettings.from_env()`.
 
-### Required
+### Required in every authentication mode
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `RELAYNA_STUDIO_DATABASE_URL` | none | Required PostgreSQL system-of-record connection, using the asyncpg driver. |
 | `RELAYNA_STUDIO_REDIS_URL` | none | Required Redis connection for sessions, login transactions, pub/sub, and ephemeral state. |
+
+### Required when using Entra (the default)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
 | `RELAYNA_STUDIO_ENTRA_APPLICATION_ID` | none | Existing Entra application/client ID shared with Gateway. |
 | `RELAYNA_STUDIO_ENTRA_TENANT_ID` | none | Accepted Entra tenant ID. |
 | `RELAYNA_STUDIO_ENTRA_ISSUER` | none | Exact accepted token issuer. |
@@ -70,7 +75,14 @@ The backend reads configuration from `StudioBackendSettings.from_env()`.
 | `RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH` | none | Studio-only RSA private key. |
 | `RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH` | none | Matching Studio public certificate. |
 
-Studio 1.6.0 has no unauthenticated human compatibility mode. See
+For sandbox shared-operator login, set `RELAYNA_STUDIO_AUTH_MODE=operator` and
+inject `RELAYNA_STUDIO_OPERATOR_TOKEN` from a Secret. It must start with
+`op_live_` and contain at least 24 characters in total. Entra variables and
+certificates are not required in operator mode. This mode uses one shared
+administrator identity; it still requires sign-in. Entra remains the default
+with `RELAYNA_STUDIO_AUTH_MODE=entra`.
+
+See
 [Studio Entra Authentication](studio-entra-auth.md) for bootstrap variables,
 session settings, route policy, and deployment guidance.
 

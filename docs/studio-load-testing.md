@@ -31,7 +31,7 @@ if the provider has ingestion delay.
 
 ## Deployment
 
-Relayna Studio **1.8.0** targets **Ampule Chamber 1.10.0**, the version identified in its
+Relayna Studio **1.8.2** targets **Ampule Chamber 1.10.0**, the version identified in its
 Studio preparation artifact. Chamber remains an internal service; only the
 Studio hostname is exposed. Studio renders native React forms, run views and
 its existing log/metric components, consuming Chamber's execution and evidence
@@ -51,13 +51,15 @@ in frontend variables. Existing Studio authentication, CSRF and mutation audit
 middleware protects these routes. Planning, starting and cancelling record
 `load_test.plan`, `load_test.start` and `load_test.cancel` request/outcome audit
 events with the actor and service/run target; request bodies and tokens are not
-written to audit details. Configure normal Studio Entra authentication
-for shared deployments. Read-only users have the same global service visibility
+written to audit details. Configure Studio Entra authentication or the opt-in
+[shared operator login](studio-entra-auth.md) for sandbox deployments. Read-only users have the same global service visibility
 as other Studio views; this feature does not introduce tenant isolation.
 
-Chamber needs its normal persistent workspace, the specified repository mounted
-inside its container, Kubernetes credentials/context for the target AKS cluster,
-and the tools required by its runner. Attach-mode permissions must cover target
+Chamber needs its normal persistent workspace, Kubernetes credentials/context
+for the target AKS cluster, and the tools required by its runner. Kubernetes
+attach profiles can use `kubernetes://in-cluster/<namespace>/<workload>` as
+`service.repo`; profiles using a local repository path require that repository
+to be mounted inside the Chamber container. Attach-mode permissions must cover target
 workload observation and service port-forwarding. Studio does not need Kubernetes
 credentials. Retain the existing Chamber safety gates; this integration creates
 observe-only tests with faults and cleanup disabled. Do not expose Chamber's
@@ -65,31 +67,122 @@ operator API publicly. Existing Studio ingress `/studio` routing also covers
 `/studio/services/{service_id}/load-tests`, so no new hostname or ingress path is
 necessary.
 
+## ConfigMaps and Secrets
+
+The sandbox uses the following resources. Create equivalents in each environment;
+resource names are conventions, while the environment variable names are the
+backend contract. Secrets must be supplied through your deployment secret store.
+
+| Namespace | Resource | Keys / purpose |
+| --- | --- | --- |
+| `relayna` | ConfigMap `relayna-studio-config` | Authentication mode, internal Chamber URL, profile path, outbound host allowlist and worker settings. |
+| `relayna` | ConfigMap `relayna-studio-chamber-profiles` | `profiles.json`: approved profiles keyed by immutable Studio service ID, with the exact registered environment. |
+| `relayna` | Secret `relayna-studio-runtime-secrets` | `RELAYNA_STUDIO_DATABASE_URL`, `RELAYNA_STUDIO_REDIS_URL`, `RELAYNA_STUDIO_CHAMBER_TOKEN`; also `RELAYNA_STUDIO_OPERATOR_TOKEN` when using operator login. |
+| `ampule-system` | Secret `ampule-ampule-chamber-auth` | `admin-token`: Chamber's operator credential. Copy its value into Studio's `RELAYNA_STUDIO_CHAMBER_TOKEN` using your secret-management workflow; Kubernetes Secret references cannot cross namespaces. |
+| `ampule-system` | ConfigMap `ampule-ampule-chamber` | Helm-managed Chamber runtime configuration, including Kubernetes context and discovery namespaces. Preserve its chart-generated service-account and workspace wiring. |
+
+The two tokens serve different purposes. Generate a distinct Studio login token
+starting with `op_live_` (at least 24 characters total); never reuse the Chamber
+admin credential as the browser login token. Restart the corresponding workloads
+after rotating environment-injected credentials. Studio token rotation invalidates
+existing operator sessions. Entra deployments instead configure their
+[Entra variables and certificate Secret mounts](studio-entra-auth.md).
+
+Example sandbox ConfigMap (replace namespaces, hosts and mode for your environment):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: relayna-studio-config
+  namespace: relayna
+data:
+  RELAYNA_STUDIO_AUTH_MODE: operator
+  RELAYNA_STUDIO_SESSION_COOKIE_SECURE: "true"
+  RELAYNA_STUDIO_CHAMBER_URL: http://ampule-ampule-chamber.ampule-system.svc.cluster.local:8765
+  RELAYNA_STUDIO_CHAMBER_PROFILES_PATH: /etc/relayna/chamber/profiles.json
+  RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS: .svc.cluster.local
+  RELAYNA_STUDIO_PULL_SYNC_INTERVAL_SECONDS: "5"
+  RELAYNA_STUDIO_HEALTH_REFRESH_INTERVAL_SECONDS: "60"
+  RELAYNA_STUDIO_RETENTION_PRUNE_INTERVAL_SECONDS: "60"
+```
+
+Include the registered service, Loki and Prometheus host suffixes actually used
+in that environment in the outbound allowlist. Populate the profile ConfigMap
+from your approved JSON file:
+
+```bash
+kubectl -n relayna create configmap relayna-studio-chamber-profiles \
+  --from-file=profiles.json=/path/to/approved-profiles.json \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Then add these fields to the backend pod template:
+
+```yaml
+spec:
+  containers:
+    - name: backend # Match the existing container name.
+      envFrom:
+        - configMapRef:
+            name: relayna-studio-config
+        - secretRef:
+            name: relayna-studio-runtime-secrets
+      volumeMounts:
+        - name: chamber-profiles
+          mountPath: /etc/relayna/chamber
+          readOnly: true
+  volumes:
+    - name: chamber-profiles
+      configMap:
+        name: relayna-studio-chamber-profiles
+```
+
+The database URL uses `postgresql+asyncpg://USER:PASSWORD@HOST:5432/DATABASE`;
+Redis uses the environment's authenticated Redis URL. URL-encode credentials as
+needed. Provision PostgreSQL, apply Alembic migrations, and follow the
+[legacy Redis import procedure](studio-persistence.md) for pre-1.6.0 Studio.
+The frontend needs only `STUDIO_BACKEND_UPSTREAM` pointing at the backend service
+(for example `relayna-studio-backend-service.relayna.svc.cluster.local:8000`).
+Keep secure session cookies enabled behind the Studio HTTPS hostname.
+
 ## Sandbox rollout through vm-machine01
 
-The sandbox inspection on 15 September 2026 found Helm release `ampule` in
-namespace `ampule-system`, with one ready replica using
-`ghcr.io/sarattha/ampule-chamber:1.9.0` and `IfNotPresent` image pulling.
-Its internal service is
-`http://ampule-ampule-chamber.ampule-system.svc.cluster.local:8765`, and its
-workspace PVC is 5 GiB. Treat this as an observed baseline and recheck it before
-rollout; the running image is older than this integration's target.
+The completed rollout on 15 September 2026 runs Studio **1.8.1** backend/frontend
+and **Ampule Chamber 1.10.0** in AKS context `aks-in-aic-sdbx-tara2-app-01`, accessed
+through `vm-machine01`. Studio images are pinned to GHCR digests published by
+repository CI after the operator-login release. Chamber pulls
+`ghcr.io/sarattha/ampule-chamber:1.10.0` directly, without an image-pull Secret;
+Helm release `ampule` is revision 5 in `ampule-system`. Its existing 5-GiB
+workspace PVC, operator credential and observe-only permissions were preserved.
 
-1. Build Studio backend/frontend 1.8.0 through the Azure pipelines and deploy
-   matching images. Confirm Studio health and login before enabling load testing.
-2. Upgrade the existing Chamber Helm release to 1.10.0 while preserving its
-   workspace, secrets, service account, runtime tools and workload permissions.
-   Verify the ready pod's actual image and internal API health.
-3. Mount approved profiles and the operator secret on Studio's backend, set the
-   internal URL above and allow registered service hosts for OpenAPI discovery.
-4. Review the imported request fields for a real service. Run a small staging
-   test only after checking its target, load and lifecycle mappings; confirm
+The old Studio 1.4.28 Redis state was backed up and imported into PostgreSQL:
+8 services, 1,717 events and 540 task projections, with no invalid records.
+A repeat import returned `already_imported` with the same checksum. Source
+Redis keys and protected rollback artifacts were retained.
+
+All eight service profiles are available. Summary imports live OpenAPI; the
+other seven use constrained snapshots of their actual service schemas and
+approved existing file fixtures where required. Profile environment values
+match the registry (`dev`), even though the cluster is named sdbx. Operator
+browser login, plan creation, Chamber connectivity, logs, metrics and pod
+observations were verified. No load traffic was started. Browser validation
+used a loopback tunnel; the external Studio hostname has not been verified.
+This 1.8.2 documentation release does not change those deployed versions.
+
+For subsequent environments:
+
+1. Provision PostgreSQL and Redis; migrate old Studio state during a maintenance
+   window when required. Deploy matching Studio backend/frontend images from
+   Azure pipelines or the repository's published GHCR images.
+2. Upgrade Chamber to 1.10.0 while preserving its workspace, credentials,
+   service account, runtime tools and workload permissions. Verify readiness.
+3. Configure the resources above, review each service's operation and target,
+   and restart Studio after profile changes. Verify login and available profiles.
+4. Review a small test before starting traffic. After an authorized run, confirm
    runner output, task completion, Loki logs and Prometheus pod samples.
-5. If acceptance fails, disable the Studio Chamber connection and retain the
-   workspace and run evidence while diagnosing; do not delete active runs.
-
-The release PR does not execute this rollout. The operator builds/deploys Studio
-first, then coordinates the Chamber upgrade and connection.
+5. If acceptance fails, disable new testing and retain workspace/run evidence
+   while diagnosing. Cancel active runs before removing the Studio connection.
 
 ## Service profiles
 
@@ -211,7 +304,8 @@ The conversion follows the request-body and schema model described in the
 This is an additive Studio feature authorized by the integration request.
 Existing SDK contracts, service records, route responses and broker protocols
 are unchanged. The production freeze route/page manifests intentionally add the
-new Studio endpoints and page. No existing data migration is required.
+new Studio endpoints and page. The load-testing feature itself needs no data migration. Upgrading Studio
+from before 1.6.0 still requires the [PostgreSQL migration](studio-persistence.md).
 
 Studio stores service-bound plans/job references under `studio:load-testing:v1:`
 in its existing Redis connection, with 30-day retention. Persist Redis if run
