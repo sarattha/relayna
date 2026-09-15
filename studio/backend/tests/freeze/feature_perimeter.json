@@ -1,5 +1,5 @@
 {
-  "freeze_version": "v1.7.0",
+  "freeze_version": "v1.8.0",
   "features": {
     "asgi app": ["studio/backend/tests/test_asgi.py"],
     "authentication and access control": ["studio/backend/tests/test_studio_auth.py"],
@@ -7,6 +7,7 @@
     "events": ["studio/backend/tests/test_studio_events.py"],
     "federation": ["studio/backend/tests/test_studio_federation.py"],
     "health": ["studio/backend/tests/test_studio_health.py"],
+    "service load testing (approved Studio integration)": ["studio/backend/tests/test_studio_load_testing.py"],
     "logs": ["studio/backend/tests/test_studio_logs.py"],
     "metrics": ["studio/backend/tests/test_studio_metrics.py"],
     "failed task notifications": ["studio/backend/tests/test_failed_task_notifications.py"],

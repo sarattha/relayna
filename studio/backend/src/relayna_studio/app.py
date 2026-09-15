@@ -60,6 +60,7 @@ from .health import (
     StudioHealthRefreshWorker,
     create_studio_health_router,
 )
+from .load_testing import _create_load_testing_router
 from .logs import LokiLogProvider, StudioLogQueryService, create_studio_logs_router
 from .metrics import PrometheusMetricsProvider, StudioMetricsQueryService, create_studio_metrics_router
 from .registry import (
@@ -691,6 +692,16 @@ def create_studio_app(
             ingest_service=runtime.event_ingest_service,
             event_stream=runtime.event_stream,
             push_ingest_enabled=push_ingest_enabled,
+        )
+    )
+    app.include_router(
+        _create_load_testing_router(
+            runtime.registry_service,
+            runtime.redis,
+            runtime.http_client,
+            StudioOutboundUrlPolicy(
+                allowed_hosts=capability_refresh_allowed_hosts, allowed_networks=capability_refresh_allowed_networks
+            ),
         )
     )
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))

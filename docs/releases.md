@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.7.0/relayna-1.7.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.8.0/relayna-1.8.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.7.0/relayna-1.7.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.8.0/relayna-1.8.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.7.0.tar.gz`
-- `dist/relayna-1.7.0-py3-none-any.whl`
+- `dist/relayna-1.8.0.tar.gz`
+- `dist/relayna-1.8.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,26 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.8.0
+
+Studio adds service-specific load testing through Ampule Chamber 1.10.0.
+Deploy matching Studio backend/frontend 1.8.0 images. Existing service records,
+SDK contracts and broker formats remain compatible; no data migration is needed
+for this feature. The release intentionally advances the approved freeze
+manifests for the new Studio routes and page.
+
+Configure the internal Chamber endpoint/token and approved service profiles.
+Profiles may import typed request fields from service OpenAPI 3.0/3.1 documents;
+standard Relayna SDK endpoints are excluded. Operators still pin execution
+targets, lifecycle mappings and load limits. See
+[Studio load testing](studio-load-testing.md) for configuration and rollout.
+
+For the sandbox rollout, build and deploy Studio with the Azure pipelines first,
+then upgrade Chamber to 1.10.0 and connect the backend using its internal service.
+Keep the integration disabled until the profiles, credentials and AKS permissions
+are ready. Validate a reviewed staging test before wider use. No deployment is
+performed by this release preparation.
 
 ### Upgrading to 1.7.0
 

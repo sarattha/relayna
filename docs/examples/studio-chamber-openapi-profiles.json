@@ -1,0 +1,94 @@
+{
+  "translation-staging": {
+    "environment": "staging",
+    "profiles": [
+      {
+        "id": "translate-text",
+        "name": "Translate text",
+        "max_vus": 8,
+        "max_iterations": 100,
+        "max_duration_seconds": 300,
+        "config": {
+          "apiVersion": "chamber.ampule.dev/v1alpha1",
+          "kind": "ChamberConfig",
+          "service": {
+            "name": "translation-service",
+            "repo": "/workspace/services/translation-service"
+          },
+          "deployment": {
+            "manifests": [],
+            "images": {},
+            "workloads": [
+              {
+                "name": "translation-api",
+                "role": "target",
+                "kind": "Deployment"
+              },
+              {
+                "name": "translation-worker",
+                "role": "worker",
+                "kind": "Deployment"
+              }
+            ],
+            "services": [
+              {
+                "name": "translation-service",
+                "port": 8887
+              }
+            ]
+          },
+          "traffic": {
+            "entrypoint": "translation-service",
+            "journeys": [
+              {
+                "name": "translate-text",
+                "tool": "relayna",
+                "adapter": "relayna",
+                "method": "POST",
+                "path": "/translations",
+                "expectedStatus": 202,
+                "requestEncoding": "json",
+                "relayna": {
+                  "taskIdPath": "task_id",
+                  "eventsPath": "/events/{task_id}",
+                  "terminalStatuses": [
+                    "completed",
+                    "failed"
+                  ],
+                  "successStatuses": [
+                    "completed"
+                  ],
+                  "timeoutSeconds": 120
+                }
+              }
+            ]
+          },
+          "dependencies": {
+            "internal": [],
+            "external": []
+          },
+          "runtime": {
+            "provider": "kubernetes",
+            "mode": "attach",
+            "kubernetesContext": "aks-staging",
+            "namespace": "translation-staging",
+            "cleanup": false,
+            "trafficAccess": {
+              "mode": "port-forward",
+              "service": "translation-service",
+              "servicePort": 8887
+            },
+            "faults": [],
+            "requiredEnv": [],
+            "secretEnv": [],
+            "config": {}
+          },
+          "agents": {
+            "mode": "off"
+          }
+        }
+      }
+    ],
+    "openapi_path": "/openapi.json"
+  }
+}
