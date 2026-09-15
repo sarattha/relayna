@@ -5,6 +5,9 @@ fill in its typed request fields (automatically imported from OpenAPI when enabl
 **Review load test**. Review creates a Chamber plan without sending traffic.
 **Start load test** executes that plan against the named environment. A lost
 start response can be retried on the same plan without starting duplicate work.
+Chamber-backed requests have a 15-second server deadline, below Studio’s
+20-second browser timeout. Check recent runs before retrying a timed-out plan;
+planning itself does not generate load.
 
 The run URL can be bookmarked. Recent plans and runs remain in Studio for
 30 days from plan creation (latest 20 displayed); opening or polling a run
@@ -178,6 +181,9 @@ Array minimums must fit their maximum (at most 100 items), and initial form
 expansion is limited to 1000 values, including nested arrays and defaults.
 Structured enums render as fixed choices; string emptiness follows minLength,
 independently of whether the property is required.
+Integer inputs are restricted to −9007199254740991 through 9007199254740991
+so their values remain exact in the browser. Schemas with larger integer
+bounds/defaults/enums are rejected; larger identifiers need a string API contract.
 Numeric bounds/multiples and ECMAScript-compatible string patterns are checked
 in the form. Formats and any server-specific regular expressions are validated
 when reviewing; the backend remains authoritative for every constraint.

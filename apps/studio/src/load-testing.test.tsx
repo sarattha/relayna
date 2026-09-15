@@ -145,3 +145,16 @@ it("selects complete structured enum alternatives", () => {
   expect(field).toHaveValue('{"mode":"safe"}');
   expect(screen.queryByLabelText("mode *")).not.toBeInTheDocument();
 });
+
+it("blocks rounded integer input outside the exact supported range", () => {
+  function Form() {
+    const [value, setValue] = useState<unknown>(1);
+    return <RequestField schema={{ type: "integer" }} value={value} onChange={setValue} label="Identifier" />;
+  }
+  render(<Form />);
+  const field = screen.getByLabelText("Identifier *");
+  fireEvent.change(field, { target: { value: "9007199254740993" } });
+  expect(field).toBeInvalid();
+  fireEvent.change(field, { target: { value: "9007199254740991" } });
+  expect(field).toBeValid();
+});

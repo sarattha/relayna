@@ -140,3 +140,11 @@ URL path rather than query-bearing strings. These are unreleased importer/filter
 corrections within the approved perimeter. Add regressions and rerun verification.
 
 Fifth-review fixes pass mandatory verification and all 412 backend tests with temporary PostgreSQL/Redis at 98.14% coverage. All fourteen reported findings are addressed. Request Codex review on the fix commit, keep monitoring CI, and continue waiting for the outstanding merge approval.
+
+Sixth review: bound Chamber-backed requests to 15 seconds overall (five-second
+upstream timeouts), below the browser's 20-second deadline; reject integer
+schemas/defaults/enums outside the exactly representable browser range, constrain
+unbounded integer fields and prevent unsafe integer entry. Add regressions;
+these amend unreleased behavior inside the approved perimeter.
+
+Sixth-review fixes pass mandatory verification, all 418 backend tests with temporary PostgreSQL/Redis at 98.13% coverage, 128 frontend tests and frontend/docs builds. All sixteen findings are addressed; request another Codex pass and keep CI monitoring active while merge approval remains outstanding.

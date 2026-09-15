@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import os
 import time
+from collections.abc import Awaitable
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -24,6 +26,8 @@ from ._openapi import _is_sdk_operation, _request_schema
 from .registry import OutboundUrlPolicyError, ServiceNotFoundError, ServiceRegistryService, StudioOutboundUrlPolicy
 
 _RETENTION = 30 * 86400
+_REQUEST_TIMEOUT_SECONDS = 15
+_MAX_SAFE_INTEGER = 2**53 - 1
 _TERMINAL = {"completed", "failed", "cancelled"}
 _SCHEMA_KEYS = {
     "type",
@@ -92,6 +96,12 @@ def _check_schema(schema: dict[str, Any], depth: int = 0) -> None:
         kind = concrete[0]
     if kind not in {"object", "array", "string", "number", "integer", "boolean"}:
         raise ValueError("Each request field needs a concrete type")
+    if kind == "integer":
+        for key in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"):
+            if key in schema and abs(schema[key]) > _MAX_SAFE_INTEGER:
+                raise ValueError("Integer constraints exceed the exact supported range; use a string contract")
+        schema.setdefault("minimum", -_MAX_SAFE_INTEGER)
+        schema.setdefault("maximum", _MAX_SAFE_INTEGER)
     if kind == "object":
         if schema.get("additionalProperties") is not False:
             raise ValueError("Object schemas must forbid additional properties")
@@ -106,6 +116,8 @@ def _check_schema(schema: dict[str, Any], depth: int = 0) -> None:
         _check_schema(schema.get("items", {}), depth + 1)
     if "default" in schema and not Draft202012Validator(schema).is_valid(schema["default"]):
         raise ValueError("Request default does not match its schema")
+    if any(not Draft202012Validator(schema).is_valid(item) for item in schema.get("enum", [])):
+        raise ValueError("Enum choices must match the supported request schema")
     if _form_size(schema) > 1000:
         raise ValueError("Request form initialization exceeds 1000 values")
 
@@ -224,7 +236,7 @@ class _Chamber:
                 f"{self.url}/api/v1/{path}",
                 json=payload,
                 headers=headers,
-                timeout=30,
+                timeout=5,
                 follow_redirects=False,
             ) as response:
                 if response.status_code >= 300:
@@ -293,7 +305,7 @@ class _Chamber:
         self.url_policy.validate_url(url, label="OpenAPI source")
         # No Chamber token, Studio cookies or OpenAPI server URLs are forwarded.
         async with self.client.stream(
-            "GET", url, timeout=10, follow_redirects=False, headers={"Accept": "application/json"}
+            "GET", url, timeout=5, follow_redirects=False, headers={"Accept": "application/json"}
         ) as response:
             if response.status_code != 200:
                 raise ValueError("Service OpenAPI document is unavailable (expected HTTP 200)")
@@ -564,6 +576,14 @@ class _Chamber:
         return self.public(record)
 
 
+async def _request_deadline(operation: Awaitable[dict[str, Any]]) -> dict[str, Any]:
+    try:
+        async with asyncio.timeout(_REQUEST_TIMEOUT_SECONDS):
+            return await operation
+    except TimeoutError as exc:
+        raise HTTPException(504, "Load-testing request timed out. Check recent runs before retrying.") from exc
+
+
 def _create_load_testing_router(
     registry: ServiceRegistryService,
     redis: Redis,
@@ -575,7 +595,7 @@ def _create_load_testing_router(
 
     @router.get("/profiles")
     async def profiles(service_id: str) -> dict[str, Any]:
-        return await bridge.options(service_id)
+        return await _request_deadline(bridge.options(service_id))
 
     @router.get("")
     async def history(service_id: str) -> dict[str, Any]:
@@ -593,18 +613,18 @@ def _create_load_testing_router(
 
     @router.post("/plans", status_code=201)
     async def plan(service_id: str, payload: _LoadRequest) -> dict[str, Any]:
-        return await bridge.plan(service_id, payload)
+        return await _request_deadline(bridge.plan(service_id, payload))
 
     @router.post("/{identity}/start", status_code=202)
     async def start(service_id: str, identity: str) -> dict[str, Any]:
-        return await bridge.start(service_id, identity)
+        return await _request_deadline(bridge.start(service_id, identity))
 
     @router.get("/{identity}")
     async def status(service_id: str, identity: str) -> dict[str, Any]:
-        return await bridge.status(service_id, identity)
+        return await _request_deadline(bridge.status(service_id, identity))
 
     @router.post("/{identity}/cancel")
     async def cancel(service_id: str, identity: str) -> dict[str, Any]:
-        return await bridge.status(service_id, identity, cancel=True)
+        return await _request_deadline(bridge.status(service_id, identity, cancel=True))
 
     return router

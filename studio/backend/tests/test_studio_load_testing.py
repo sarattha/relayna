@@ -593,3 +593,55 @@ def test_nullable_default_does_not_bypass_expansion_bound():
                 "items": {"type": "array", "minItems": 100, "maxItems": 100, "items": {"type": "string"}},
             }
         )
+
+
+@pytest.mark.parametrize(
+    "constraint", [{"minimum": 2**53 + 1}, {"maximum": 2**63 - 1}, {"default": 2**53 + 1}, {"enum": [2**53 + 1]}]
+)
+def test_unsafe_integer_schemas_are_rejected(constraint):
+    with pytest.raises(ValueError):
+        _check_schema({"type": "integer", **constraint})
+
+
+def test_unbounded_integer_fields_gain_exact_browser_limits():
+    from jsonschema import Draft202012Validator
+
+    schema = {"type": "integer"}
+    _check_schema(schema)
+    validator = Draft202012Validator(schema)
+    assert validator.is_valid(2**53 - 1)
+    assert not validator.is_valid(2**53)
+    assert not validator.is_valid(-(2**53))
+
+
+def test_plan_deadline_cancels_slow_work_before_browser_timeout(configured, monkeypatch):
+    import asyncio
+
+    import relayna_studio.load_testing as module
+
+    assert module._REQUEST_TIMEOUT_SECONDS < 20
+    monkeypatch.setattr(module, "_REQUEST_TIMEOUT_SECONDS", 0.01)
+    cancelled = []
+
+    async def slow_upstream(request):
+        try:
+            await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+        return httpx.Response(200, json={"run_id": "late-plan"})
+
+    registry = SimpleNamespace(
+        get_service=AsyncMock(return_value=SimpleNamespace(environment="staging", status="healthy"))
+    )
+    app = FastAPI()
+    app.include_router(
+        _create_load_testing_router(
+            registry, fakeredis.aioredis.FakeRedis(), httpx.AsyncClient(transport=httpx.MockTransport(slow_upstream))
+        )
+    )
+    client = TestClient(app)
+    response = client.post(f"{BASE}/plans", json=PAYLOAD)
+    assert response.status_code == 504 and "recent runs" in response.json()["detail"]
+    assert cancelled == [True]
+    assert client.get(BASE).json()["items"] == []

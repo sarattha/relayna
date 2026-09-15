@@ -119,8 +119,8 @@ export function RequestField({ schema, value, onChange, label, required = true }
           const multiple = schema.multipleOf;
           const quotient = typeof value === "number" && multiple ? value / multiple : 0;
           const invalidMultiple = multiple !== undefined && Math.abs(quotient - Math.round(quotient)) > Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
-          const invalidInteger = schema.type === "integer" && typeof value === "number" && !Number.isInteger(value);
-          element?.setCustomValidity(invalid ? "Value must be strictly inside the displayed bounds." : invalidInteger ? "Enter a whole number." : invalidMultiple ? `Enter a multiple of ${multiple}.` : "");
+          const invalidInteger = schema.type === "integer" && typeof value === "number" && !Number.isSafeInteger(value);
+          element?.setCustomValidity(invalid ? "Value must be strictly inside the displayed bounds." : invalidInteger ? "Enter a whole number between -9007199254740991 and 9007199254740991." : invalidMultiple ? `Enter a multiple of ${multiple}.` : "");
         }} onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))} />}
     {schema.description && <small>{schema.description}</small>}
     {schema.exclusiveMinimum !== undefined && <small>Must be greater than {schema.exclusiveMinimum}.</small>}{schema.exclusiveMaximum !== undefined && <small>Must be less than {schema.exclusiveMaximum}.</small>}
