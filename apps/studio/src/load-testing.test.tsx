@@ -158,3 +158,24 @@ it("blocks rounded integer input outside the exact supported range", () => {
   fireEvent.change(field, { target: { value: "9007199254740991" } });
   expect(field).toBeValid();
 });
+
+it("validates decimal multiples exactly at large and fractional magnitudes", () => {
+  function Form({ multiple }: { multiple: number }) {
+    const [value, setValue] = useState<unknown>(1);
+    return <RequestField schema={{ type: "number", multipleOf: multiple }} value={value} onChange={setValue} label="Amount" />;
+  }
+  const { rerender } = render(<Form multiple={1} />);
+  const field = screen.getByLabelText("Amount *");
+  fireEvent.change(field, { target: { value: "1000000000000000.5" } });
+  expect(field).toBeInvalid();
+  fireEvent.change(field, { target: { value: "1000000000000000" } });
+  expect(field).toBeValid();
+  rerender(<Form multiple={0.1} />);
+  fireEvent.change(field, { target: { value: "0.3" } });
+  expect(field).toBeValid();
+  rerender(<Form multiple={0.2} />);
+  expect(field).toBeInvalid();
+  rerender(<Form multiple={1e-20} />);
+  fireEvent.change(field, { target: { value: "3e-20" } });
+  expect(field).toBeValid();
+});

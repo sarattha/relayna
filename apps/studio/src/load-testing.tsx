@@ -25,6 +25,20 @@ export type LoadRun = {
   tasks?: { task_id: string; terminal_status: string; success: boolean; total_duration_ms: number }[];
 };
 export const terminalLoadStates = new Set(["completed", "failed", "cancelled"]);
+function isDecimalMultiple(value: number, multiple: number): boolean {
+  if (!Number.isFinite(value) || !Number.isFinite(multiple) || multiple <= 0) return false;
+  function decimal(number: number) {
+    const [coefficient, exponent = "0"] = number.toString().split("e");
+    const fraction = coefficient.split(".")[1]?.length ?? 0;
+    return { coefficient: BigInt(coefficient.replace(".", "")), exponent: Number(exponent) - fraction };
+  }
+  const left = decimal(value), right = decimal(multiple);
+  const difference = left.exponent - right.exponent;
+  return difference >= 0
+    ? (left.coefficient * 10n ** BigInt(difference)) % right.coefficient === 0n
+    : left.coefficient % (right.coefficient * 10n ** BigInt(-difference)) === 0n;
+}
+
 function initialNumber(schema: InputSchema): number {
   const lower = Math.max(schema.minimum ?? -Infinity, schema.exclusiveMinimum ?? -Infinity);
   const upper = Math.min(schema.maximum ?? Infinity, schema.exclusiveMaximum ?? Infinity);
@@ -117,8 +131,7 @@ export function RequestField({ schema, value, onChange, label, required = true }
         : <input id={id} style={inputStyle} type="number" required={required} value={value === undefined ? "" : Number(value)} min={schema.minimum ?? schema.exclusiveMinimum} max={schema.maximum ?? schema.exclusiveMaximum} step="any" ref={(element) => {
           const invalid = typeof value === "number" && ((schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) || (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum));
           const multiple = schema.multipleOf;
-          const quotient = typeof value === "number" && multiple ? value / multiple : 0;
-          const invalidMultiple = multiple !== undefined && Math.abs(quotient - Math.round(quotient)) > Number.EPSILON * Math.max(1, Math.abs(quotient)) * 4;
+          const invalidMultiple = multiple !== undefined && typeof value === "number" && !isDecimalMultiple(value, multiple);
           const invalidInteger = schema.type === "integer" && typeof value === "number" && !Number.isSafeInteger(value);
           element?.setCustomValidity(invalid ? "Value must be strictly inside the displayed bounds." : invalidInteger ? "Enter a whole number between -9007199254740991 and 9007199254740991." : invalidMultiple ? `Enter a multiple of ${multiple}.` : "");
         }} onChange={(event) => onChange(event.target.value === "" ? undefined : Number(event.target.value))} />}

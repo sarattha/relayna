@@ -7,8 +7,9 @@ import copy
 import json
 import os
 import time
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Iterator
 from datetime import UTC, datetime
+from fractions import Fraction
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,9 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError
 from jsonschema.exceptions import SchemaError
+from jsonschema.validators import extend
 from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
 
@@ -51,6 +53,20 @@ _SCHEMA_KEYS = {
     "exclusiveMinimum",
     "exclusiveMaximum",
 }
+
+
+def _decimal_multiple_of(validator: Any, divisor: Any, instance: Any, schema: Any) -> Iterator[ValidationError]:
+    if not validator.is_type(instance, "number"):
+        return
+    try:
+        valid = Fraction(str(instance)) % Fraction(str(divisor)) == 0
+    except (ValueError, ZeroDivisionError):
+        valid = False
+    if not valid:
+        yield ValidationError(f"Value is not a multiple of {divisor}")
+
+
+_RequestValidator = extend(Draft202012Validator, {"multipleOf": _decimal_multiple_of})
 
 
 class _LoadRequest(BaseModel):
@@ -114,9 +130,9 @@ def _check_schema(schema: dict[str, Any], depth: int = 0) -> None:
         if type(minimum) is not int or not 0 <= minimum <= schema["maxItems"]:
             raise ValueError("Array schemas need 0 <= minItems <= maxItems <= 100")
         _check_schema(schema.get("items", {}), depth + 1)
-    if "default" in schema and not Draft202012Validator(schema).is_valid(schema["default"]):
+    if "default" in schema and not _RequestValidator(schema).is_valid(schema["default"]):
         raise ValueError("Request default does not match its schema")
-    if any(not Draft202012Validator(schema).is_valid(item) for item in schema.get("enum", [])):
+    if any(not _RequestValidator(schema).is_valid(item) for item in schema.get("enum", [])):
         raise ValueError("Enum choices must match the supported request schema")
     if _form_size(schema) > 1000:
         raise ValueError("Request form initialization exceeds 1000 values")
@@ -424,7 +440,7 @@ class _Chamber:
         if input_size > 65536:
             raise HTTPException(422, "Request inputs exceed 64 KiB.")
         errors = list(
-            Draft202012Validator(profile["input_schema"], format_checker=FormatChecker()).iter_errors(payload.inputs)
+            _RequestValidator(profile["input_schema"], format_checker=FormatChecker()).iter_errors(payload.inputs)
         )
         if errors:
             error = errors[0]

@@ -157,3 +157,11 @@ These corrections preserve recorded targets and authorization by immutable servi
 ID within the approved unreleased load-testing interface.
 
 Seventh-review fixes pass mandatory verification, 419 database-backed backend tests at 98.13% coverage, 129 frontend tests and frontend/docs builds. All eighteen reported findings are addressed. Request another Codex pass and continue monitoring without bypassing pending merge approval.
+
+Eighth review: replace magnitude-scaled multiple tolerance with exact decimal
+multiple validation in both the form and backend, and flatten nested local
+allOf references before schema normalization. Preserve closed-object composition
+checks and cap recursive composition depth/work. Add boundary/decimal and nested
+composition regressions; these correct unreleased request-schema behavior.
+
+Eighth-review verification passed: mandatory SDK/backend checks, 427 database-backed backend tests at 98.11% coverage, 130 frontend tests and production/docs builds. The user explicitly directed landing after this review and stopping further review requests; this supersedes the earlier pending administrator-merge decision. Resolve the two addressed findings and merge the verified head once CI passes, using the administrator override if required. Deployment remains deferred to the operator’s Azure build/deploy sequence.

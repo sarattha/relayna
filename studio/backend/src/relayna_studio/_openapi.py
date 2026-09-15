@@ -61,9 +61,19 @@ def _schema(document: dict[str, Any], value: Any, depth: int = 0, budget: list[i
         raise ValueError("OpenAPI request schema exceeds 1000 fields")
     if depth > 8:
         raise ValueError("Recursive or deeply nested schemas need an explicit input_schema")
-    schema = _resolve(document, value)
-    for part in schema.pop("allOf", []):
-        schema = _merge(schema, _resolve(document, part))
+
+    def compose(value: Any, level: int) -> dict[str, Any]:
+        if level > 8:
+            raise ValueError("Recursive or deeply nested composition needs an explicit input_schema")
+        combined = _resolve(document, value)
+        for part in combined.pop("allOf", []):
+            budget[0] += 1
+            if budget[0] > 1000:
+                raise ValueError("OpenAPI request schema exceeds 1000 fields")
+            combined = _merge(combined, compose(part, level + 1))
+        return combined
+
+    schema = compose(value, depth)
     # FastAPI/Pydantic emits anyOf [T, null] for optional values.
     if "anyOf" in schema:
         variants = [_resolve(document, item) for item in schema.pop("anyOf")]

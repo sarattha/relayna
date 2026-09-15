@@ -414,3 +414,31 @@ def test_imported_enum_union_preserves_null_without_widening_outer_constraints()
     union["anyOf"][1]["enum"] = ["impossible"]
     schema = _request_schema(document({"type": "object", "properties": {"mode": union}}), JOURNEY)
     assert not Draft202012Validator(schema).is_valid({"mode": None})
+
+
+def test_nested_allof_references_are_flattened_without_closing_each_branch():
+    doc = document({"allOf": [{"$ref": "#/components/schemas/Derived"}]})
+    doc["components"]["schemas"]["Base"] = {
+        "type": "object",
+        "properties": {"id": {"type": "string"}},
+        "required": ["id"],
+    }
+    doc["components"]["schemas"]["Derived"] = {
+        "allOf": [
+            {"$ref": "#/components/schemas/Base"},
+            {"properties": {"mode": {"type": "string"}}, "required": ["mode"]},
+        ]
+    }
+    schema = _request_schema(doc, JOURNEY)
+    _check_schema(schema)
+    assert set(schema["properties"]) == {"id", "mode"}
+    assert schema["required"] == ["id", "mode"]
+    assert "allOf" not in schema
+    doc["components"]["schemas"]["Base"] = {"allOf": [{"$ref": "#/components/schemas/Derived"}]}
+    with pytest.raises(ValueError, match="composition"):
+        _request_schema(doc, JOURNEY)
+
+
+def test_composition_work_is_bounded():
+    with pytest.raises(ValueError, match="1000 fields"):
+        _request_schema(document({"allOf": [{"type": "object"} for _ in range(1001)]}), JOURNEY)

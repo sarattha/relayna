@@ -660,3 +660,25 @@ def test_environment_edit_preserves_started_run_history_status_and_cancellation(
     assert client.post(f"{BASE}/{identity}/start").status_code == 409
     assert client.post(f"{BASE}/plans", json=PAYLOAD).status_code == 409
     assert len([request for request in calls if request.url.path == "/api/v1/runs"]) == 1
+
+
+@pytest.mark.parametrize(
+    "value,multiple,valid",
+    [
+        (1000000000000000.5, 1, False),
+        (1000000000000000, 1, True),
+        (0.3, 0.1, True),
+        (0.3, 0.2, False),
+        (3e-20, 1e-20, True),
+    ],
+)
+def test_decimal_multiples_do_not_depend_on_float_division(value, multiple, valid):
+    from relayna_studio.load_testing import _RequestValidator
+
+    assert _RequestValidator({"type": "number", "multipleOf": multiple}).is_valid(value) is valid
+
+
+def test_decimal_multiple_defaults_are_validated_consistently():
+    _check_schema({"type": "number", "multipleOf": 0.1, "default": 0.3})
+    with pytest.raises(ValueError):
+        _check_schema({"type": "number", "multipleOf": 1, "default": 1000000000000000.5})
