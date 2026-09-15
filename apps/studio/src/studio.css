@@ -1219,3 +1219,15 @@ summary { cursor: pointer; font-weight: 650; padding: 12px 4px; }
 .load-log-list article > div:first-child { display: flex; flex-wrap: wrap; gap: 12px; color: var(--studio-muted); font-size: 12px; margin-bottom: 8px; }
 @media (max-width: 1100px) { .load-layout { grid-template-columns: minmax(0, 1fr); } .load-history { position: static; } }
 @media (max-width: 640px) { .load-heading { align-items: start; flex-direction: column; } .load-context { text-align: left; } .load-controls, .load-summary, .load-metrics { grid-template-columns: minmax(0, 1fr); } .load-input-group { padding: 12px; } .load-log-filter { flex-direction: column; align-items: stretch; } }
+
+.load-profile-manager { margin: 1rem 0; }
+.load-profile-panel { margin-top: 1rem; padding: 1rem; border: 1px solid var(--border, #d5dce4); border-radius: 12px; }
+.load-profile-panel label { display: grid; gap: .4rem; margin: .75rem 0; }
+.load-profile-panel select { width: 100%; min-width: 0; }
+.load-profile-panel .load-import-confirm { display: flex; align-items: flex-start; gap: .6rem; }
+.load-profile-panel .load-import-confirm input { width: auto; margin-top: .25rem; }
+.load-profile-panel .load-target { overflow-wrap: anywhere; margin: .75rem 0; }
+.load-import-search { display: flex; align-items: flex-end; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.load-import-search label { flex: 1 1 15rem; margin: 0; }
+.load-import-search button { min-height: 40px; }
+.load-import-pagination { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin: .75rem 0; }

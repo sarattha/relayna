@@ -260,6 +260,7 @@ def test_full_login_rbac_and_local_logout(monkeypatch: pytest.MonkeyPatch, tmp_p
         )
         assert missing_user.status_code == 404
         assert admin_client.post("/studio/services", json={}).status_code == 403
+        assert admin_client.post("/studio/services/svc/load-tests/profile-import", json={}).status_code == 403
 
         repeated_session = _login(admin_client, "admin", authorization_queries)
         assert repeated_session["user"]["user_id"] == "tenant-1:admin-oid"  # type: ignore[index]
@@ -278,6 +279,7 @@ def test_full_login_rbac_and_local_logout(monkeypatch: pytest.MonkeyPatch, tmp_p
         assert activated.status_code == 200
         assert reader_client.get("/studio/services").status_code == 200
         assert reader_client.get("/studio/admin/users").status_code == 403
+        assert reader_client.get("/studio/services/svc/load-tests/profile-import/sources").status_code == 403
         assert (
             reader_client.post(
                 "/studio/services",

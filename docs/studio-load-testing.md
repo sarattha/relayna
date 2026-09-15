@@ -31,7 +31,7 @@ if the provider has ingestion delay.
 
 ## Deployment
 
-Relayna Studio **1.8.2** targets **Ampule Chamber 1.10.0**, the version identified in its
+Relayna Studio **1.9.0** targets **Ampule Chamber 1.10.0**, the version identified in its
 Studio preparation artifact. Chamber remains an internal service; only the
 Studio hostname is exposed. Studio renders native React forms, run views and
 its existing log/metric components, consuming Chamber's execution and evidence
@@ -184,6 +184,48 @@ For subsequent environments:
 5. If acceptance fails, disable new testing and retain workspace/run evidence
    while diagnosing. Cancel active runs before removing the Studio connection.
 
+## Import profiles as an administrator
+
+Open **Services → a service → Load testing → Manage profiles**. Search Chamber's
+saved plans and runs, select a source and operation, then choose **Preview import**.
+Studio reads the configuration through its internal Chamber connection and imports
+typed request fields from the selected Studio service's OpenAPI. Verify the Studio
+environment, Kubernetes context, namespace, workload, service port and file fixtures.
+Set the approved load limits, confirm the binding, and select **Save imported profile**.
+The operation becomes available immediately, without a restart or ConfigMap edit.
+Importing does not plan or start a load test.
+
+This imports complete configurations from saved Kubernetes attach-mode plans/runs.
+Chamber's named environment profiles alone do not include an HTTP request contract.
+Multi-suite/experiment configurations, SDK control endpoints and custom-header
+operations are not imported. Unsupported OpenAPI schemas display a setup error;
+use an approved deployment profile with a constrained schema for those operations.
+Import does not expose a free-form configuration editor or accept new file paths.
+
+Source request values and runtime credentials are discarded. Faults, cleanup and
+agents are disabled. Existing multipart fixtures are retained. Named Chamber
+bindings remain attached so Chamber still enforces their admission budgets when
+planning and starting traffic; Studio's load limits do not override those budgets.
+
+Import previews expire after 30 minutes and are bound to the service, its environment
+and base URL. Saving checks the request schema again. Profiles are stored durably in
+PostgreSQL, scoped to the immutable service ID and exact environment. Existing
+ConfigMap profiles remain available alongside imported profiles. Repeating an
+identical save is safe; to replace an imported operation, remove it in the manager
+and import again. Removing it does not remove already-reviewed plans or runs.
+
+Before deploying this feature, stop old backend replicas during a maintenance
+window, back up PostgreSQL and run `alembic upgrade head`
+from `studio/backend` with `RELAYNA_STUDIO_DATABASE_URL` set. Revision
+`0002_load_profiles` adds `studio_load_profiles`; it does not migrate or remove
+ConfigMap profiles. Deploy matching 1.9.0 backend/frontend images together; do not mix backends
+expecting different schema revisions. Downgrading
+the schema removes imported profiles, so export/back up the database first.
+Read-only members can use the normal profile/run views but cannot browse import
+sources, preview, save or remove profiles. Mutations retain Studio's CSRF and audit
+protection. The source catalog is paginated; a bounded upstream response that is
+too large or unavailable produces an error rather than a partial import.
+
 ## Service profiles
 
 Copy [the example profile](examples/studio-chamber-profiles.json) and replace its
@@ -194,7 +236,7 @@ ID**, not the display name. Add one entry per service, and one profile per
 operation. Profile namespaces must match the target of that service's metrics
 and log selectors. The backend loads and validates profiles at startup.
 
-Profiles are operator-owned deployment configuration. A service name or topology
+Profiles may be administrator-imported PostgreSQL records or operator-owned deployment configuration. A service name or topology
 alone does not define an HTTP request body or Kubernetes deployment. Studio's
 current capability document does not publish request schemas, so onboarding
 can obtain the schema from the service’s OpenAPI document.

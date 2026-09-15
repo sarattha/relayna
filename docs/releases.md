@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.8.2/relayna-1.8.2-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.9.0/relayna-1.9.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.8.2/relayna-1.8.2.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.9.0/relayna-1.9.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.8.2.tar.gz`
-- `dist/relayna-1.8.2-py3-none-any.whl`
+- `dist/relayna-1.9.0.tar.gz`
+- `dist/relayna-1.9.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,25 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.9.0
+
+Studio administrators can import complete Kubernetes attach-mode configurations
+from saved Chamber plans/runs, review typed OpenAPI inputs and targets, and save
+approved service profiles without a ConfigMap edit or restart. Existing
+ConfigMap profiles and reviewed load-test plans remain supported. See
+[profile import](studio-load-testing.md#import-profiles-as-an-administrator).
+
+Use a maintenance window: stop old Studio backend replicas, back up PostgreSQL,
+run `alembic upgrade head` from `studio/backend` with
+`RELAYNA_STUDIO_DATABASE_URL` configured, and deploy matching backend/frontend
+1.9.0 images. Revision `0002_load_profiles` adds the profile table. Both versions
+check their exact schema revision, so do not mix 1.8.x and 1.9.0 backends during
+the upgrade. No SDK or broker wire-format change is introduced.
+
+To roll back, stop the new backends, back up any imported profiles, downgrade
+Alembic to `0001_studio_postgres`, and restore matching 1.8.x images. Downgrading
+removes imported profiles; deployment-configured profiles are unchanged.
 
 ### Upgrading to 1.8.2
 

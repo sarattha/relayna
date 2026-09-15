@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.9.0 - 2026-09-15
+
+### Added
+
+- Administrators can import a service operation from a saved Ampule Chamber plan/run, preview typed OpenAPI fields and targets, set load limits, and save or remove persistent profiles without restarting Studio. Existing ConfigMap profiles remain supported. Apply PostgreSQL migration `0002_load_profiles` before deployment.
+
 ## 1.8.2 - 2026-09-15
 
 ### Documentation
