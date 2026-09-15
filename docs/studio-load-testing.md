@@ -15,6 +15,9 @@ does not extend that deadline. Retained terminal runs remain readable during
 Chamber outages using their last stored snapshot. Administrators can plan, start and cancel;
 active read-only members can inspect. Cancellation remains pending until
 Chamber reports a terminal state, and cleanup warnings remain visible.
+Started runs remain visible and cancellable if the service environment changes;
+new starts from old plans are blocked. Their original environment/target stays
+pinned, and current service telemetry is hidden when its environment differs.
 
 The workspace includes retained runner output, exact task links from Chamber's
 Relayna evidence, service/task logs, and per-pod CPU, memory, restart, OOM and
@@ -162,7 +165,7 @@ load limits, task lifecycle mapping and file fixtures. OpenAPI `servers` and
 security definitions do not change execution targets or supply credentials.
 The document must be readable by the Studio backend and the registered service
 host must satisfy Studio's existing capability-refresh outbound allowlist.
-Requests have a 10-second timeout and a 2-MiB response limit; redirects and
+Requests have a five-second upstream timeout and a 2-MiB response limit; redirects and
 external references are not followed. No Chamber bearer token is sent to services.
 
 Studio focuses on service endpoints such as `/translations`, `/ocr` and `/tasks`.

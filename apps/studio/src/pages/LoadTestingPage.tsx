@@ -154,7 +154,7 @@ function ServiceLoadTesting({ serviceId }: { serviceId: string }) {
           <SectionCard title="Test tasks" subtitle="Exact task IDs reported by Chamber link directly to task logs, events and metrics.">
             {run.tasks?.length ? <div className="load-task-list">{run.tasks.map((task) => <Link key={task.task_id} to={`/tasks/${encodeURIComponent(serviceId)}/${encodeURIComponent(task.task_id)}`}><strong>{task.task_id}</strong><span>{task.terminal_status || "Pending"}</span></Link>)}</div> : <p>Task evidence has not arrived. Service logs below remain available during execution.</p>}
           </SectionCard>
-          <RunTelemetry key={run.id} service={service} run={run} />
+          {run.environment === service.environment ? <RunTelemetry key={run.id} service={service} run={run} /> : <NoticeBanner tone="info">This run targets {run.environment}; the service is now registered in {service.environment}. Runner output and cancellation remain available. Current service telemetry is hidden because it may describe another environment.</NoticeBanner>}
         </>}
       </> : <p role="status">Loading load test…</p>}
     </div><aside className="load-history"><SectionCard title="Recent load tests" subtitle="Latest 20 plans and runs · retained for 30 days">

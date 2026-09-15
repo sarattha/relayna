@@ -281,7 +281,7 @@ class _Chamber:
         if not raw:
             raise HTTPException(404, "Load test not found for this service, or its 30-day retention expired.")
         record = json.loads(raw)
-        if record["environment"] != service.environment:
+        if record["environment"] != service.environment and (mutate or not record.get("job_id")):
             raise HTTPException(409, "The service environment changed after this plan was created.")
         return record
 
@@ -609,7 +609,13 @@ def _create_load_testing_router(
             else []
         )
         parsed = [json.loads(item) for item in records if item]
-        return {"items": [bridge.public(item) for item in parsed if item["environment"] == service.environment]}
+        return {
+            "items": [
+                bridge.public(item)
+                for item in parsed
+                if item["environment"] == service.environment or item.get("job_id")
+            ]
+        }
 
     @router.post("/plans", status_code=201)
     async def plan(service_id: str, payload: _LoadRequest) -> dict[str, Any]:

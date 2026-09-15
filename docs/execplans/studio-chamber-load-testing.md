@@ -148,3 +148,12 @@ unbounded integer fields and prevent unsafe integer entry. Add regressions;
 these amend unreleased behavior inside the approved perimeter.
 
 Sixth-review fixes pass mandatory verification, all 418 backend tests with temporary PostgreSQL/Redis at 98.13% coverage, 128 frontend tests and frontend/docs builds. All sixteen findings are addressed; request another Codex pass and keep CI monitoring active while merge approval remains outstanding.
+
+Seventh review: retain history/status/cancellation for started runs after service
+environment edits, while continuing to block starts of old plans. Hide telemetry
+from the service's new environment instead of misattributing it to the old run.
+Correct the documented OpenAPI upstream timeout from ten to five seconds.
+These corrections preserve recorded targets and authorization by immutable service
+ID within the approved unreleased load-testing interface.
+
+Seventh-review fixes pass mandatory verification, 419 database-backed backend tests at 98.13% coverage, 129 frontend tests and frontend/docs builds. All eighteen reported findings are addressed. Request another Codex pass and continue monitoring without bypassing pending merge approval.

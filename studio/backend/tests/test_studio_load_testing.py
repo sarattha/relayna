@@ -645,3 +645,18 @@ def test_plan_deadline_cancels_slow_work_before_browser_timeout(configured, monk
     assert response.status_code == 504 and "recent runs" in response.json()["detail"]
     assert cancelled == [True]
     assert client.get(BASE).json()["items"] == []
+
+
+def test_environment_edit_preserves_started_run_history_status_and_cancellation(harness):
+    client, calls, _, registry, _ = harness
+    identity = client.post(f"{BASE}/plans", json=PAYLOAD).json()["id"]
+    assert client.post(f"{BASE}/{identity}/start").status_code == 202
+    registry.get_service.return_value.environment = "production"
+    status = client.get(f"{BASE}/{identity}")
+    assert status.status_code == 200 and status.json()["environment"] == "staging"
+    assert client.get(BASE).json()["items"][0]["id"] == identity
+    assert client.post(f"{BASE}/{identity}/cancel").status_code == 200
+    assert calls[-2].url.path == "/api/v1/jobs/job-1/cancel"
+    assert client.post(f"{BASE}/{identity}/start").status_code == 409
+    assert client.post(f"{BASE}/plans", json=PAYLOAD).status_code == 409
+    assert len([request for request in calls if request.url.path == "/api/v1/runs"]) == 1

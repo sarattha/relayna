@@ -119,3 +119,14 @@ it("shows OpenAPI provenance and submits its revision with the request", async (
   await screen.findByRole("button", { name: "Start load test" });
   expect(JSON.parse(mocks.requestJson.mock.calls.find(([path]) => path.endsWith("/plans"))![1].body).schema_revision).toBe("revision-1");
 });
+
+it("keeps cancellation available across an environment edit without querying new-environment telemetry", async () => {
+  current = { ...planned, state: "running", environment: "previous-environment", output: "Original run output" };
+  show("/services/svc/load-tests?run=plan-1");
+  expect(await screen.findByText("Original run output")).toBeInTheDocument();
+  expect(screen.getByText(/Current service telemetry is hidden/)).toBeInTheDocument();
+  expect(mocks.fetchServiceMetrics).not.toHaveBeenCalled();
+  expect(mocks.fetchServiceLogs).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel load test" }));
+  expect(await screen.findByText("Cancelled")).toBeInTheDocument();
+});
