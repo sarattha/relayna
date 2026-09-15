@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.8.2 - 2026-09-15
+
+### Documentation
+
+- Document the completed sandbox rollout of Studio 1.8.1 and Ampule Chamber 1.10.0, including operator login, service profiles, logs and AKS pod metrics validation.
+- Add reusable ConfigMap, Secret and backend mount guidance for other environments; distinguish Studio login credentials from the internal Chamber token and clarify authentication and PostgreSQL migration prerequisites.
+- Refresh installation references and coordinated release metadata to 1.8.2; runtime behavior is unchanged from 1.8.1.
+
 ## 1.8.1 - 2026-09-15
 
 ### Added

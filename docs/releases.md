@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.8.0/relayna-1.8.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.8.2/relayna-1.8.2-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.8.0/relayna-1.8.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.8.2/relayna-1.8.2.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.8.0.tar.gz`
-- `dist/relayna-1.8.0-py3-none-any.whl`
+- `dist/relayna-1.8.2.tar.gz`
+- `dist/relayna-1.8.2-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,19 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.8.2
+
+Deploy matching Studio backend/frontend 1.8.2 images. This patch updates release
+metadata and deployment documentation; it does not change runtime behavior or
+require a migration from 1.8.1. Version 1.8.1 introduced opt-in shared
+operator-token login for sandbox environments; Entra remains the default.
+See [authentication](studio-entra-auth.md) and the
+[ConfigMap and Secret inventory](studio-load-testing.md#configmaps-and-secrets).
+
+When upgrading Studio from before 1.6.0, complete the PostgreSQL migration below
+before starting new replicas. The completed sandbox rollout runs Studio 1.8.1
+with Chamber 1.10.0; this documentation release does not redeploy that environment.
 
 ### Upgrading to 1.8.0
 
