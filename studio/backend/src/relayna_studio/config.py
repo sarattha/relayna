@@ -41,7 +41,7 @@ class StudioAppKwargs(TypedDict):
     failed_task_email_dedupe_ttl_seconds: int
     failed_task_email_title_prefix: str
     failed_task_email_batch_wait_seconds: int
-    entra_config: StudioEntraConfig
+    entra_config: StudioEntraConfig | None
 
 
 def _env_required(name: str) -> str:
@@ -156,6 +156,8 @@ class StudioBackendSettings:
     failed_task_email_dedupe_ttl_seconds: int = 604800
     failed_task_email_title_prefix: str = "[Relayna] Failed task"
     failed_task_email_batch_wait_seconds: int = 0
+    auth_mode: str = "entra"
+    operator_token: str = ""
     entra_application_id: str = ""
     entra_tenant_id: str = ""
     entra_issuer: str = ""
@@ -170,6 +172,16 @@ class StudioBackendSettings:
     session_cookie_secure: bool = True
 
     def __post_init__(self) -> None:
+        if self.auth_mode not in {"entra", "operator"}:
+            raise RuntimeError("RELAYNA_STUDIO_AUTH_MODE must be entra or operator.")
+        if self.auth_mode == "operator" and (
+            not self.operator_token.startswith("op_live_") or len(self.operator_token) < 24
+        ):
+            raise RuntimeError(
+                "RELAYNA_STUDIO_OPERATOR_TOKEN must start with op_live_ and contain at least 24 characters."
+            )
+        if self.session_ttl_seconds <= 0:
+            raise RuntimeError("RELAYNA_STUDIO_SESSION_TTL_SECONDS must be positive.")
         if self.database_pool_size <= 0:
             raise RuntimeError("RELAYNA_STUDIO_DATABASE_POOL_SIZE must be positive.")
         if self.database_pool_max_overflow < 0:
@@ -198,7 +210,11 @@ class StudioBackendSettings:
 
     @classmethod
     def from_env(cls) -> StudioBackendSettings:
+        auth_mode = _env_str("RELAYNA_STUDIO_AUTH_MODE", "entra")
+        entra_value = _env_required if auth_mode == "entra" else lambda name: ""
         return cls(
+            auth_mode=auth_mode,
+            operator_token=_env_str("RELAYNA_STUDIO_OPERATOR_TOKEN", ""),
             redis_url=_env_required("RELAYNA_STUDIO_REDIS_URL"),
             database_url=_env_required("RELAYNA_STUDIO_DATABASE_URL"),
             database_pool_size=_env_int("RELAYNA_STUDIO_DATABASE_POOL_SIZE", 10),
@@ -249,13 +265,13 @@ class StudioBackendSettings:
                 "[Relayna] Failed task",
             ),
             failed_task_email_batch_wait_seconds=_env_int("RELAYNA_STUDIO_FAILED_TASK_EMAIL_BATCH_WAIT_SECONDS", 0),
-            entra_application_id=_env_required("RELAYNA_STUDIO_ENTRA_APPLICATION_ID"),
-            entra_tenant_id=_env_required("RELAYNA_STUDIO_ENTRA_TENANT_ID"),
-            entra_issuer=_env_required("RELAYNA_STUDIO_ENTRA_ISSUER"),
-            entra_oidc_discovery_url=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL"),
-            entra_oidc_redirect_uri=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI"),
-            entra_oidc_private_key_path=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH"),
-            entra_oidc_certificate_path=_env_required("RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH"),
+            entra_application_id=entra_value("RELAYNA_STUDIO_ENTRA_APPLICATION_ID"),
+            entra_tenant_id=entra_value("RELAYNA_STUDIO_ENTRA_TENANT_ID"),
+            entra_issuer=entra_value("RELAYNA_STUDIO_ENTRA_ISSUER"),
+            entra_oidc_discovery_url=entra_value("RELAYNA_STUDIO_ENTRA_OIDC_DISCOVERY_URL"),
+            entra_oidc_redirect_uri=entra_value("RELAYNA_STUDIO_ENTRA_OIDC_REDIRECT_URI"),
+            entra_oidc_private_key_path=entra_value("RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH"),
+            entra_oidc_certificate_path=entra_value("RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH"),
             entra_admin_emails=_env_csv("RELAYNA_STUDIO_ENTRA_ADMIN_EMAILS") or (),
             entra_admin_object_ids=_env_csv("RELAYNA_STUDIO_ENTRA_ADMIN_OBJECT_IDS") or (),
             session_ttl_seconds=_env_int("RELAYNA_STUDIO_SESSION_TTL_SECONDS", 28_800),
@@ -311,7 +327,9 @@ class StudioBackendSettings:
                 session_ttl_seconds=self.session_ttl_seconds,
                 login_ttl_seconds=self.login_ttl_seconds,
                 session_cookie_secure=self.session_cookie_secure,
-            ),
+            )
+            if self.auth_mode == "entra"
+            else None,
         }
 
 

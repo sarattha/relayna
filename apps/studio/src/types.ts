@@ -22,6 +22,7 @@ export type StudioMember = {
 };
 
 export type StudioSession = {
+  auth_mode?: "entra" | "operator";
   user: StudioMember;
   csrf_token: string;
 };
