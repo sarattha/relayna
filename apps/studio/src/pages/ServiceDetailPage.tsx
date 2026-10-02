@@ -5,6 +5,7 @@ import { Link } from "../scoped-link";
 import { fetchServiceEvents, fetchServiceLogs, fetchServiceMetrics, requestJson } from "../api";
 import { useStudioAuth } from "../auth-context";
 import { useStudioServices } from "../services-context";
+import { MonitorWorkspace, WorkspaceNavigation, useWorkspaceView } from "../monitor-workspace";
 import {
   ConfirmationDialog,
   HealthBadge,
@@ -542,6 +543,9 @@ export function MetricLineChart({ series, podLabel }: { series: StudioMetricSeri
 }
 
 export function ServiceDetailPage() {
+  const workspaceView = useWorkspaceView();
+  const workspaceViewRef = useRef(workspaceView);
+  workspaceViewRef.current = workspaceView;
   const { isAdmin } = useStudioAuth();
   const navigate = useNavigate();
   const { serviceId = "" } = useParams();
@@ -555,6 +559,7 @@ export function ServiceDetailPage() {
   const podsInFlight = useRef<{ serviceId: string } | null>(null);
   const [showServiceConfig, setShowServiceConfig] = useState(false);
   const location = useLocation();
+  useEffect(() => { if (workspaceView === "configure") setShowServiceConfig(true); }, [workspaceView]);
   useEffect(() => {
     if (location.hash !== "#service-configure") return;
     setShowServiceConfig(true);
@@ -663,7 +668,7 @@ export function ServiceDetailPage() {
     }
     void loadServicePods(service);
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void loadServicePods(service, { quiet: true });
+      if (workspaceViewRef.current === "overview" && document.visibilityState === "visible") void loadServicePods(service, { quiet: true });
     }, 10000);
     return () => window.clearInterval(interval);
   }, [serviceMetricsConfigKey]);
@@ -1062,7 +1067,7 @@ export function ServiceDetailPage() {
 
   return (
     <div className="studio-stack-lg">
-      <p role="status" style={mutedTextStyle}>{streamState}</p>
+      <p hidden={workspaceView === "monitor"} role="status" style={mutedTextStyle}>{streamState}</p>
       {servicesState.notice ? <NoticeBanner>{servicesState.notice}</NoticeBanner> : null}
 
       <SectionCard
@@ -1076,11 +1081,8 @@ export function ServiceDetailPage() {
           </div>
         }
       >
-        <nav className="studio-workspace-tabs" aria-label="Service workspace">
-          <a href="#service-overview">Overview</a>
-          <a href="#service-observe">Observe</a>
-          <a href="#service-configure" onClick={() => setShowServiceConfig(true)}>Configure</a>
-        </nav>
+        <WorkspaceNavigation service />
+        <div hidden={workspaceView === "monitor"}>
         <div className="studio-action-row">
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             <StudioIcon name="back" />
@@ -1214,7 +1216,11 @@ export function ServiceDetailPage() {
             </details>
           </div>
         </div></details>
+        </div>
       </SectionCard>
+
+      <div hidden={workspaceView !== "monitor"}><MonitorWorkspace key={service.service_id} service={service} active={workspaceView === "monitor"} /></div>
+      <div className="studio-stack-lg" hidden={workspaceView !== "overview"}>
 
       <div id="service-observe" />
       <SectionCard
@@ -1730,6 +1736,7 @@ export function ServiceDetailPage() {
             </button>
           }
         >
+        <p style={mutedTextStyle}><Link to={`?view=monitor&layout=logs`}>Open full logs workspace</Link></p>
         {service.log_config ? <>
           <div className="studio-log-filter-grid">
             <label className="studio-filter-field">
@@ -1892,6 +1899,7 @@ export function ServiceDetailPage() {
           ) : null}
         </> : <p style={mutedTextStyle}>No log provider configured. <a href="#service-configure" onClick={() => setShowServiceConfig(true)}>View configuration</a> or <Link to="/services">edit this service</Link> to connect telemetry.</p>}
       </SectionCard>
+      </div>
       </div>
       {confirmation ? (
         <ConfirmationDialog

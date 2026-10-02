@@ -177,6 +177,55 @@ This section explains the visible buttons, filters, status actions, and page
 configuration controls. Disabled buttons indicate that the capability or
 required selection is unavailable.
 
+### Service and task monitoring workspaces
+
+Service detail keeps **Overview** for existing health, metrics, pods, activity,
+and log controls. **Configure** opens service details and configuration. Task
+detail keeps **Overview** for status, execution, traces, and related evidence.
+Both have **Monitor**, and their existing log panels link to the full workspace.
+
+Monitor has three dedicated layout buttons:
+
+| Layout | Use |
+| --- | --- |
+| **Task explorer** | Page through service tasks beside the log reader. Search uses an exact task ID and an optional status filter. Pages contain at most 50 tasks. |
+| **Logs focus** | Give the log reader the full width. |
+| **Investigation** | Inspect the selected task's event timeline beside its logs, with pod CPU below. Selecting an event sets logs and CPU to the same ±30-second window. **Reset window** restores the chosen time window. |
+
+Layout switches preserve the selected task, log filters, time window, expanded
+log details, and reader scroll position. Paging the task list preserves the
+selected task even when it is on another page. **Scope** chooses the selected
+task or the entire service; service logs can include traffic from other tasks.
+The timeline and CPU require selected-task scope.
+
+The reader supports keyword, level, and source filters, task lifetime, rolling
+15-minute/one-hour/24-hour windows, and custom bounds. Custom values use the
+browser's local timezone and must form a valid range. Task lifetime includes
+two minutes of context on each side; active tasks extend through the current
+time. Matching logs are bounded to the latest 200 entries and displayed oldest
+first. **Wrap** makes long messages readable, and a row with structured details
+opens a separate inspector with **Copy message** and **Close**.
+
+**Refresh** fetches new evidence. **Auto-refresh** polls every five seconds while
+the page is visible, waits for pending reads, and becomes **Pause** when active.
+Failed refreshes retain the last evidence and show an error with its fetch time.
+New results preserve reader position and offer **Jump to latest**. CPU values
+are shown in cores; shared worker CPU does not establish a task's individual
+resource use. Missing providers and empty windows have explicit messages.
+
+**Expand** opens a focused workspace; Escape exits and restores keyboard focus.
+The pane-width slider applies to desktop split layouts (20–40%). Narrow screens
+stack the list or timeline above logs, wrap controls, and show source names
+inside each log message. The global header scrolls away to leave room for logs.
+
+Existing service/task URLs still open Overview. `view=monitor` opens Monitor;
+`layout=explorer`, `logs`, or `investigation` selects its layout. Task selection,
+scope, filters, window bounds, and selected event are reflected in optional
+`monitor_*` query parameters. The browser remembers layout, pane width, wrapping,
+and refresh preference in `studio:monitor-preferences`; unavailable or malformed
+storage falls back to defaults. No service configuration or backend schema
+change is required. See [UI verification evidence](qa/studio-monitor-workspace/README.md).
+
 ### Overview
 
 | Control | Effect |

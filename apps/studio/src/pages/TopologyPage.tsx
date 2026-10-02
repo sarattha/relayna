@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Link } from "../scoped-link";
 
@@ -23,24 +23,30 @@ export function TopologyPage() {
   const [topology, setTopology] = useState<WorkflowTopologyResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
 
   useEffect(() => {
     if (!serviceId) {
       return;
     }
     void load();
+    return () => { requestVersion.current++; };
   }, [serviceId]);
 
   async function load() {
+    const version = ++requestVersion.current;
     setLoading(true);
+    setTopology(null);
     setError(null);
     try {
       const payload = await fetchTopology(serviceId);
+      if (version !== requestVersion.current) return;
       setTopology(payload);
     } catch (fetchError) {
+      if (version !== requestVersion.current) return;
       setError(fetchError instanceof Error ? fetchError.message : "Unable to load workflow topology.");
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }
 

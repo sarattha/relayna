@@ -2551,6 +2551,43 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Register Service" })).not.toBeInTheDocument();
   });
 
+  it("invalidates an in-flight service search when Clear is clicked", async () => {
+    window.history.replaceState({}, "", "/services");
+    const base = fetchMock.getMockImplementation()!;
+    let finish!: (value: Response) => void;
+    fetchMock.mockImplementation((input, init) => String(input).startsWith("/studio/services/search?")
+      ? new Promise((resolve) => { finish = resolve; }) : base(input, init));
+    render(<App />);
+    const section = within((await screen.findByRole("heading", { name: "Service Search" })).closest("section")!);
+    fireEvent.change(section.getByLabelText("Keyword"), { target: { value: "payments" } });
+    fireEvent.click(section.getByRole("button", { name: "Search Services" }));
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.click(section.getByRole("button", { name: "Clear" }));
+    await act(async () => finish(jsonResponse({ count: 1, items: [{ service_id: "late-result", name: "Late result", environment: "prod", status: "healthy", tags: [], base_url: "https://example.test", auth_mode: "none", matched_fields: [] }], next_cursor: null })));
+    expect(section.queryByText("Late result")).not.toBeInTheDocument();
+    expect(section.getByLabelText("Keyword")).toHaveValue("");
+    expect(section.getByRole("button", { name: "Search Services" })).not.toBeDisabled();
+  });
+
+  it("ignores a previous service topology response after route navigation", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/topology");
+    const base = fetchMock.getMockImplementation()!;
+    const original = await (await base("/studio/services/payments-api/workflow/topology", { method: "GET" })).json();
+    let finish!: (value: Response) => void;
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input) === "/studio/services/payments-api/workflow/topology") return new Promise((resolve) => { finish = resolve; });
+      if (String(input) === "/studio/services/orders-api/workflow/topology") return Promise.resolve(jsonResponse(JSON.parse(JSON.stringify(original).replace(/validate/g, "current-stage"))));
+      return base(input, init);
+    });
+    render(<App />);
+    await waitFor(() => expect(finish).toBeDefined());
+    act(() => { window.history.pushState({}, "", "/services/orders-api/topology"); window.dispatchEvent(new PopStateEvent("popstate")); });
+    expect(await screen.findByText("current-stage")).toBeInTheDocument();
+    await act(async () => finish(jsonResponse(original)));
+    expect(screen.getByText("current-stage")).toBeInTheDocument();
+    expect(screen.queryByText("validate")).not.toBeInTheDocument();
+  });
+
   it("covers service search result, empty, and non-error failure states", async () => {
     window.history.replaceState({}, "", "/services");
     const baseImpl = fetchMock.getMockImplementation();

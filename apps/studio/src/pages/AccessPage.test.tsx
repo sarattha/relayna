@@ -87,5 +87,6 @@ describe("AccessPage", () => {
     mocks.listStudioUsers.mockResolvedValue({ count: 0, users: [] });
     render(<AccessPage />);
     expect(screen.getByText("Studio administrator access is required.")).toBeInTheDocument();
+    expect(mocks.listStudioUsers).not.toHaveBeenCalled();
   });
 });

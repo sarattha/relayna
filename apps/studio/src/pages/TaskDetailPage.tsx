@@ -1,6 +1,7 @@
 import { lazy, startTransition, Suspense, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Link } from "../scoped-link";
+import { MonitorWorkspace, WorkspaceNavigation, useWorkspaceView } from "../monitor-workspace";
 
 import { fetchTaskDetail, fetchTaskEvents, fetchTaskLogs, fetchTaskMetrics, fetchTaskTracePath } from "../api";
 import {
@@ -607,6 +608,7 @@ function TracePathExplorer({
 }
 
 export function TaskDetailPage() {
+  const workspaceView = useWorkspaceView();
   const { serviceId = "", taskId = "" } = useParams();
   const [taskDetail, setTaskDetail] = useState<StudioTaskDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -970,6 +972,11 @@ export function TaskDetailPage() {
       <div className="studio-stack-lg">
       {error ? <NoticeBanner tone="error">{error}</NoticeBanner> : null}
 
+      {workspaceView === "monitor" && <SectionCard className="studio-service-workspace-header" title={taskDetail?.service.name || "Task monitor"} subtitle={`${taskId} · ${taskDetail?.service.environment || serviceId}`}><WorkspaceNavigation /></SectionCard>}
+      <div hidden={workspaceView === "monitor"}><WorkspaceNavigation /></div>
+      {taskDetail ? <div hidden={workspaceView !== "monitor"}><MonitorWorkspace key={`${serviceId}:${taskId}`} service={taskDetail.service} initialTaskId={taskId} active={workspaceView === "monitor"} /></div> : null}
+      <div hidden={workspaceView === "monitor"}>
+
       <SectionCard
         title="Task Detail"
         subtitle="Inspect task status, failure evidence and related activity."
@@ -1172,7 +1179,7 @@ export function TaskDetailPage() {
                   ) : null}
                 </SectionCard>
 
-                <details onToggle={(event) => { if (event.currentTarget.open && !taskLogs && taskDetail.service.log_config) { void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, getTaskLogWindow()); } }}><summary>Task Logs</summary>{taskDetail.service.log_config ? <SectionCard title="Task Logs" action={
+                <details onToggle={(event) => { if (event.currentTarget.open && !taskLogs && taskDetail.service.log_config) { void loadTaskLogs(taskDetail.service_id, taskDetail.task_id, taskDetail.task_ref.correlation_id || null, getTaskLogWindow()); } }}><summary>Task Logs</summary><p style={mutedTextStyle}><Link to="?view=monitor&layout=logs">Open full logs workspace</Link></p>{taskDetail.service.log_config ? <SectionCard title="Task Logs" action={
                   <button
                     disabled={!taskDetail.service.log_config}
                     type="button"
@@ -1619,6 +1626,7 @@ export function TaskDetailPage() {
           </div>
         ) : null}
       </SectionCard>
+      </div>
       </div>
 
       {selectedTraceSpan ? (

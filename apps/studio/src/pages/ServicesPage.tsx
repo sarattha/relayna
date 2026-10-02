@@ -60,6 +60,7 @@ export function ServicesPage() {
 
   useEffect(() => {
     searchVersion.current++;
+    setSearchLoading(false);
     setSearchDraft((current) => ({ ...current, environment }));
     setSearchResults(null);
   }, [environment]);
@@ -148,6 +149,8 @@ export function ServicesPage() {
   }
 
   function clearServiceSearch() {
+    searchVersion.current++;
+    setSearchLoading(false);
     setSearchDraft({
       query: "",
       environment,
