@@ -18,7 +18,7 @@ loop, cleared-search race, and topology route race in the same focused frontend 
 - [x] (2026-10-03) Applied Color Designer palette; 148 frontend tests/build and full SDK/backend verification pass. Coverage remains below existing gates.
 - [x] (2026-10-03) Computer Use verified 1440×1000 and 390×844; final combined comparisons pass in `design-qa.md`.
 - [x] (2026-10-03) Updated operator documentation and saved normalized UI evidence.
-- [ ] Commit, push, open and attach the draft PR.
+- [x] (2026-10-03) Committed and pushed `codex/studio-monitor-workspace`; opened and attached draft PR #131.
 
 ## Surprises & Discoveries
 
@@ -45,7 +45,7 @@ narrow CPU charts show three ticks. These decisions followed Computer Use QA.
 
 ## Outcomes & Retrospective
 
-All three layouts and bug fixes are implemented. SDK: 686 passed, 9 skipped; backend: 442 passed, 19 skipped; frontend: 148 passed, production build passed. Final UI comparisons passed after fixing header density, mobile sticky space, error-panel bounds, and CPU tick overlap. Frontend coverage remains below its pre-existing gates: head 92.04% statements, 85.01% branches, 90.20% functions, 94.78% lines. Draft PR publication is the remaining handoff step.
+All three layouts and bug fixes are implemented. SDK: 686 passed, 9 skipped; backend: 442 passed, 19 skipped; frontend: 148 passed, production build passed. Final UI comparisons passed after fixing header density, mobile sticky space, error-panel bounds, and CPU tick overlap. Frontend coverage remains below its pre-existing gates: head 92.04% statements, 85.01% branches, 90.20% functions, 94.78% lines. Draft PR https://github.com/sarattha/relayna/pull/131 is open and attached to this task; the loopback preview remains running for review.
 
 ## Context and Orientation
 
