@@ -16,7 +16,7 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 - [x] (2026-10-03) Integrate existing monitor layouts, fix target/duration review, profile density and telemetry freshness.
 - [x] (2026-10-03) Add behavioral and compatibility coverage; intentionally record approved Studio route perimeter additions.
 - [x] (2026-10-03) Run mandatory verification in both repositories and validate core UI functions with Computer Use.
-- [ ] Document configuration/deployment, compatibility and acceptance evidence; commit and open draft PRs.
+- [x] (2026-10-03) Document configuration/deployment, compatibility and acceptance evidence; commit and open draft PRs.
 
 ## Surprises & Discoveries
 
@@ -39,7 +39,7 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 
 ## Outcomes & Retrospective
 
-Delivered native Studio connection, full assessment, monitoring, results and recovery workflows, plus Chamber 1.11 API completion. Mandatory SDK/backend checks pass; PostgreSQL integration 21 tests; Studio backend coverage 495 tests / 98.13%; frontend 166 tests / production build; Chamber 316 tests / 90% coverage / complete make check. Actual ASGI integration passed 23 operations with 305 exact tasks. Computer Use validated connection save/test, multi-journey capacity review and explicit start/cancel, exact task pagination/search, reusable target creation and three monitor layouts, including 390-pixel responsive checks. The execution supervisor was stubbed to prevent process/Kubernetes traffic; live target execution remains deployment acceptance. Chamber draft PR: https://github.com/sarattha/ampule-chamber/pull/43. Studio draft PR creation pending.
+Delivered native Studio connection, full assessment, monitoring, results and recovery workflows, plus Chamber 1.11 API completion. Mandatory SDK/backend checks pass; PostgreSQL integration 21 tests; Studio backend coverage 495 tests / 98.13%; frontend 166 tests / production build; Chamber 316 tests / 90% coverage / complete make check. Actual ASGI integration passed 23 operations with 305 exact tasks. Computer Use validated connection save/test, multi-journey capacity review and explicit start/cancel, exact task pagination/search, reusable target creation and three monitor layouts, including 390-pixel responsive checks. The execution supervisor was stubbed to prevent process/Kubernetes traffic; live target execution remains deployment acceptance. Draft PRs: https://github.com/sarattha/relayna/pull/132 (stacked on PR 131) and https://github.com/sarattha/ampule-chamber/pull/43. GitHub check status is tracked on the PRs.
 
 ## Context and Orientation
 
