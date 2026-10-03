@@ -14,14 +14,14 @@ new reviewed follow-up PR after checks and review finish.
   create `codex/studio-review-fixes` from current `origin/main` with a clean tree.
 - [x] (2026-10-03) Read implementation, freeze, verification, comment-handling,
   security-fix and PR skills. Launch the required read-only security investigation.
-- [ ] Fix credential redaction, including retained records; cover equivalent
+- [x] Fix credential redaction, including retained records; cover equivalent
   field names and legitimate environment/upload references with regressions.
-- [ ] Give managed uploads a bounded longer deadline across browser, bridge and
+- [x] Give managed uploads a bounded longer deadline across browser, bridge and
   deployed reverse proxy; preserve normal request limits and cancellation.
-- [ ] Recognize all supported terminal task aliases and keep their windows fixed.
-- [ ] Add exact key generation, Secret/Deployment wiring, local setup, validation,
+- [x] Recognize all supported terminal task aliases and keep their windows fixed.
+- [x] Add exact key generation, Secret/Deployment wiring, local setup, validation,
   backup and rotation guidance; prepare coordinated patch version 1.10.1.
-- [ ] Run focused regressions, security candidate review, full mandatory checks,
+- [x] Run focused regressions, security candidate review, full mandatory checks,
   unchanged coverage gates, production/package builds and strict documentation.
 - [ ] Push and open a follow-up PR, monitor reviews/CI, address confirmed issues,
   then land the verified head under the user's maintainer authorization.
@@ -46,6 +46,11 @@ Use the existing recursive redactor and shared secret predicate; preserve
 schema-declared environment-variable references and signed upload pathToken.
 Apply the redactor to stored public views as well as new writes. Managed upload
 requests receive a separate finite budget, while ordinary reads keep 20 seconds.
+
+The independent security candidate review identified encoded raw form bodies and
+URL query/fragment parameters as additional paths through the same redactor.
+Handle these supported encodings recursively and cover them through the API,
+including retained records, diagnostics and nonsecret preservation controls.
 
 ## Compatibility Boundary
 
@@ -82,5 +87,16 @@ verified head; confirm post-merge CI/documentation publication.
 
 ## Outcomes & Retrospective
 
-Implementation and verification pending. No live Kubernetes target execution or
-user secrets are needed for these fixes.
+All three review findings are fixed with 19 backend and 20 frontend regression
+cases. The mandatory verification stack passes: SDK 686 passed with 9 optional
+skips, Studio backend 514 passed, and frontend 253 passed. Unchanged coverage
+gates pass at SDK 97.94%, backend 98.13%, and frontend statements 98.07% (Node 26).
+Production frontend and Python package builds, release metadata validation and
+strict MkDocs compilation pass. A real Nginx deployment accepted a 2 MiB managed
+upload and rejected oversized managed uploads and ordinary requests.
+
+A fresh read-only investigator established the credential boundary; the fresh
+candidate reviewer exposed encoding bypasses, now covered by passing regressions.
+Environment references, pathToken and original upstream requests are preserved.
+No live Kubernetes target execution or user secrets were needed. PR creation,
+CI/review monitoring and landing remain pending.
