@@ -112,4 +112,16 @@ P3: additional fractional timestamp precision could match the mock's dense log
 presentation. Provider latency/retention and real incident volume still require
 staging acceptance; synthetic evidence does not establish production performance.
 
+**Service-control spacing follow-up — 3 October 2026**
+
+The user's screenshot showed the observation label touching the action row and
+the telemetry button stretching across the label and selector. Restored the
+existing 18px section stack and bottom-aligned the normal-height button with the
+selector; narrow screens place the button on its own row with a 12px gap.
+Computer Use confirmed desktop alignment and clean wrapping at 390×844, including
+the configuration disclosure below the controls. The supplied cropped screenshot
+and implementation are compared qualitatively (the source viewport is unknown):
+[before/after](docs/qa/studio-monitor-workspace/service-controls-spacing-comparison.jpg).
+Frontend validation remains 148 tests passed and production build passed.
+
 final result: passed

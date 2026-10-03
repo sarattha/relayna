@@ -19,6 +19,7 @@ loop, cleared-search race, and topology route race in the same focused frontend 
 - [x] (2026-10-03) Computer Use verified 1440×1000 and 390×844; final combined comparisons pass in `design-qa.md`.
 - [x] (2026-10-03) Updated operator documentation and saved normalized UI evidence.
 - [x] (2026-10-03) Committed and pushed `codex/studio-monitor-workspace`; opened and attached draft PR #131.
+- [x] (2026-10-03) Follow-up: restored service-control spacing and selector/button alignment; Computer Use desktop and 390×844 checks, 148 frontend tests, and production build passed.
 
 ## Surprises & Discoveries
 
@@ -30,6 +31,11 @@ Computer Use and Color Designer's palette-picker are now available in this sessi
 until tick density followed available chart width. Browser extension messages
 were observed; no application render failure was seen. Synthetic fixtures do not
 verify real provider latency or retention.
+
+The Overview/Configure wrapper removed SectionCard's direct-child spacing from
+the action row, observation controls, and configuration disclosure. Restore the
+existing 18px stack gap inside that wrapper. Bottom-align the observation button
+with the selector and use a full-width field below 600px; no API or type changes.
 
 ## Decision Log
 

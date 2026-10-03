@@ -1082,7 +1082,7 @@ export function ServiceDetailPage() {
         }
       >
         <WorkspaceNavigation service />
-        <div hidden={workspaceView === "monitor"}>
+        <div className="studio-stack-md" hidden={workspaceView === "monitor"}>
         <div className="studio-action-row">
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             <StudioIcon name="back" />
@@ -1135,7 +1135,7 @@ export function ServiceDetailPage() {
         </div>
 
         {!service.log_config || !service.metrics_config ? <NoticeBanner>Telemetry setup is incomplete. Configure {(!service.log_config ? ["logs"] : []).concat(!service.metrics_config ? ["metrics"] : []).join(" and ")} to inspect this service. <Link to="/services">Open service settings</Link>.</NoticeBanner> : null}
-        <div className="studio-action-row">
+        <div className="studio-action-row studio-service-observation-controls">
           <label className="studio-filter-field"><span>Shared observation window ({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><select style={inputStyle} defaultValue="" onChange={(event) => {
             const mode = event.target.value as TimeWindowMode;
             if (!mode) return;

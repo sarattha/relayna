@@ -27,6 +27,7 @@ unit. These are functional adaptations, not claims of exact pixel matching.
 - [Investigation desktop](investigation-desktop.jpg) · [source comparison](investigation-comparison.jpg) · [reader detail](investigation-detail-comparison.jpg)
 - [Mobile task entry](mobile-task-top.jpg) · [task explorer](mobile-explorer.jpg) · [logs](mobile-logs.jpg) · [investigation](mobile-investigation.jpg)
 - [Mobile chart correction, before/after](mobile-chart-comparison.jpg)
+- Service-control spacing follow-up: [user screenshot above / fixed UI below](service-controls-spacing-comparison.jpg), [desktop](service-controls-desktop.jpg), [390×844 mobile](service-controls-mobile.jpg). Computer Use confirmed 18px section spacing, bottom-aligned selector/button, and mobile wrapping with a 12px row gap. The supplied screenshot is cropped, so the comparison is qualitative. Re-ran frontend tests (148 passed) and production build (passed).
 
 Validation results:
 

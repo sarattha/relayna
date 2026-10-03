@@ -581,6 +581,26 @@ button:hover {
   scroll-margin-top: 88px;
 }
 
+.studio-service-observation-controls {
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.studio-service-observation-controls > .studio-filter-field {
+  flex: 0 1 360px;
+  max-width: 100%;
+}
+
+.studio-service-observation-controls > button {
+  min-height: 44px;
+}
+
+@media (max-width: 600px) {
+  .studio-service-observation-controls > .studio-filter-field {
+    flex-basis: 100%;
+  }
+}
+
 .studio-workspace-tabs {
   display: flex;
   gap: 5px;
