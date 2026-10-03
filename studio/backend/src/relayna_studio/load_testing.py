@@ -24,6 +24,8 @@ from jsonschema.validators import extend
 from pydantic import BaseModel, ConfigDict, Field
 from redis.asyncio import Redis
 
+from ._chamber_api import _StartConfirmation
+from ._chamber_connection import _chamber_json, _ConnectionStore
 from ._openapi import _is_sdk_operation, _request_schema
 from .database import StudioDatabase
 from .registry import OutboundUrlPolicyError, ServiceNotFoundError, ServiceRegistryService, StudioOutboundUrlPolicy
@@ -243,6 +245,7 @@ class _Chamber:
                 raise ValueError("Chamber URL must be an HTTP origin without credentials, query or fragment")
             if not self.token:
                 raise ValueError("RELAYNA_STUDIO_CHAMBER_TOKEN is required when Chamber is enabled")
+        self.connections = _ConnectionStore(database, self.url, self.token, self.url_policy)
         self.profiles = _load_profiles()
         from ._profile_import import _ProfileStore
 
@@ -258,39 +261,19 @@ class _Chamber:
         settings["profiles"].extend(await self.profile_store.get_profiles(service_id, environment))
         return settings
 
-    async def call(self, method: str, path: str, payload: Any = None, key: str | None = None) -> dict[str, Any]:
-        if not self.url:
-            raise HTTPException(503, "Load testing is not configured. Ask an administrator to connect Ampule Chamber.")
-        headers = {"Authorization": f"Bearer {self.token}"}
-        if key:
-            headers["Idempotency-Key"] = key
-        try:
-            async with self.client.stream(
-                method,
-                f"{self.url}/api/v1/{path}",
-                json=payload,
-                headers=headers,
-                timeout=5,
-                follow_redirects=False,
-            ) as response:
-                if response.status_code >= 300:
-                    status = 409 if response.status_code in {400, 409, 422} else 502
-                    raise HTTPException(
-                        status, "Chamber rejected the request. Check its configuration and runner logs."
-                    )
-                chunks = bytearray()
-                async for chunk in response.aiter_bytes():
-                    chunks.extend(chunk)
-                    if len(chunks) > 2 * 1024 * 1024:
-                        raise HTTPException(502, "Chamber response exceeded the supported size.")
-                data = json.loads(chunks)
-                if not isinstance(data, dict):
-                    raise ValueError("Expected an object")
-                return data
-        except (httpx.HTTPError, ValueError) as exc:
-            raise HTTPException(
-                502, "Chamber is unavailable or returned an invalid response. You can retry safely."
-            ) from exc
+    async def call(
+        self,
+        method: str,
+        path: str,
+        payload: Any = None,
+        key: str | None = None,
+        *,
+        connection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self.connections.deployment_url = self.url
+        self.connections.deployment_token = self.token
+        current = connection if connection is not None else await self.connections.current()
+        return await _chamber_json(self.client, self.connections, current, method, path, payload, key)
 
     def key(self, service_id: str, identity: str) -> str:
         return f"studio:load-testing:v1:{quote(service_id, safe='')}:{identity}"
@@ -371,7 +354,13 @@ class _Chamber:
                     if isinstance(exc, ValueError)
                     else "OpenAPI discovery failed; check the service connection and outbound allowlist."
                 )
+        active_origin = (
+            (await self.connections.current()).get("url") if any(p.get("chamber_origin") for p in configured) else None
+        )
         for original in configured:
+            if original.get("chamber_origin") and original["chamber_origin"] != active_origin:
+                errors.append(f"{original['name']}: imported from another Chamber endpoint. Import it again here.")
+                continue
             if _is_sdk_operation(original["config"]["traffic"]["journeys"][0]["path"]):
                 errors.append(f"{original['name']}: Relayna SDK control endpoints are excluded.")
                 continue
@@ -403,8 +392,11 @@ class _Chamber:
     async def options(self, service_id: str) -> dict[str, Any]:
         service = await self.service(service_id)
         configured = await self.settings(service_id, service.environment)
+        connection = await self.connections.current()
         enabled = bool(
-            self.url and configured.get("environment") == service.environment and service.status != "disabled"
+            connection.get("url")
+            and configured.get("environment") == service.environment
+            and service.status != "disabled"
         )
         profiles = []
         resolved, errors = await self.resolved_profiles(service_id, service, configured) if enabled else ([], [])
@@ -445,7 +437,8 @@ class _Chamber:
     async def plan(self, service_id: str, payload: _LoadRequest) -> dict[str, Any]:
         service = await self.service(service_id, mutate=True)
         settings = await self.settings(service_id, service.environment)
-        if not self.url or settings.get("environment") != service.environment:
+        connection = await self.connections.current()
+        if not connection.get("url") or settings.get("environment") != service.environment:
             raise HTTPException(409, "Load testing is not configured for this environment.")
         profiles, errors = await self.resolved_profiles(service_id, service, settings)
         if not any(item["id"] == payload.profile_id for item in profiles):
@@ -490,10 +483,14 @@ class _Chamber:
             for field in ("vus", "iterations", "durationSeconds"):
                 journey.pop(field, None)
             journey["stages"] = [{"duration": f"{payload.duration_seconds}s", "targetVus": payload.vus}]
-        response = await self.call("POST", "plans", {"config": config})
+        response = await self.call("POST", "plans", {"config": config}, connection=connection)
         if not isinstance(response.get("run_id"), str) or not response["run_id"]:
             raise HTTPException(502, "Chamber did not return a plan ID.")
+        from ._chamber_api import _target
+
         record = {
+            "connection": connection,
+            "target": _target(config),
             "id": uuid4().hex,
             "chamber_plan_id": response["run_id"],
             "environment": service.environment,
@@ -529,31 +526,54 @@ class _Chamber:
         ]
 
     def public(self, record: dict[str, Any]) -> dict[str, Any]:
-        return {
+        result = {
             key: value
             for key, value in record.items()
-            if key not in {"context", "prometheus_url", "chamber_plan_id", "job_id"}
+            if key not in {"context", "prometheus_url", "chamber_plan_id", "job_id", "connection"}
         }
+        result["chamber"] = {
+            "plan_id": record.get("chamber_plan_id"),
+            "job_id": record.get("job_id"),
+            "run_id": record.get("run_id"),
+            "connection_id": (record.get("connection") or {}).get("id"),
+        }
+        result["expires_at"] = (
+            datetime.fromtimestamp(
+                datetime.fromisoformat(record["created_at"]).timestamp() + _RETENTION, UTC
+            ).isoformat()
+            if record.get("created_at")
+            else None
+        )
+        return result
 
-    async def start(self, service_id: str, identity: str) -> dict[str, Any]:
+    async def start(
+        self, service_id: str, identity: str, *, confirmed_target: bool = False, confirmed_faults: bool = False
+    ) -> dict[str, Any]:
         record = await self.bound(service_id, identity, mutate=True)
         if record.get("job_id"):
             return self.public(record)
+        if record.get("requires_target_confirmation") and not confirmed_target:
+            raise HTTPException(422, "Confirm the reviewed target and load before starting this assessment.")
+        if record.get("requires_fault_confirmation") and not confirmed_faults:
+            raise HTTPException(422, "Confirm the explicitly selected faults and recovery before starting.")
         response = await self.call(
             "POST",
             "runs",
             {
                 "plan_id": record["chamber_plan_id"],
-                "mode": "kubernetes",
+                "mode": record.get("mode", "kubernetes"),
+                **({"origin": record["origin"]} if record.get("origin") else {}),
                 "context": record["context"],
                 "prometheus_url": record["prometheus_url"],
             },
             key=f"studio-{identity}",
+            connection=record.get("connection"),
         )
         if not response.get("job_id"):
             raise HTTPException(502, "Chamber did not return a job ID. Retry this plan to recover the same execution.")
         record.update(
             job_id=response["job_id"],
+            run_id=response.get("run_id"),
             started_at=response.get("created_at") or datetime.now(UTC).isoformat(),
             state=response.get("state", "queued"),
         )
@@ -569,14 +589,18 @@ class _Chamber:
             return self.public(record)
         job_path = f"jobs/{quote(str(record['job_id']), safe='')}"
         try:
-            job = await self.call("POST" if cancel else "GET", f"{job_path}/cancel" if cancel else job_path)
-        except HTTPException:
-            if cancel or record["state"] not in _TERMINAL:
+            job = await self.call(
+                "POST" if cancel else "GET",
+                f"{job_path}/cancel" if cancel else job_path,
+                connection=record.get("connection"),
+            )
+        except HTTPException as exc:
+            if cancel:
                 raise
             return self.public(
                 {
                     **record,
-                    "evidence_error": "Chamber is unavailable. Showing the last retained run snapshot.",
+                    "evidence_error": f"Showing the last retained run snapshot. {exc.detail}",
                 }
             )
         record.update({key: job.get(key) for key in ("state", "run_id", "cancel_requested", "cleanup_required")})
@@ -586,7 +610,11 @@ class _Chamber:
             record["finished_at"] = datetime.now(UTC).isoformat()
         if record.get("run_id"):
             try:
-                run = await self.call("GET", f"runs/{quote(str(record['run_id']), safe='')}")
+                run = await self.call(
+                    "GET",
+                    f"runs/{quote(str(record['run_id']), safe='')}?include_task_details=false",
+                    connection=record.get("connection"),
+                )
                 if record["state"] in _TERMINAL:
                     updated_at = (run.get("run") or {}).get("updated_at")
                     if isinstance(updated_at, str):
@@ -597,10 +625,33 @@ class _Chamber:
                         except ValueError:
                             pass
                 result = run.get("result") or {}
-                record["result"] = {
-                    key: result.get(key)
-                    for key in ("status", "readiness_score", "evidence_coverage_percent", "limitations")
-                }
+                from ._chamber_connection import _redact
+
+                record["result"] = _redact(
+                    {
+                        key: result.get(key)
+                        for key in (
+                            "status",
+                            "readiness_score",
+                            "evidence_coverage_percent",
+                            "limitations",
+                            "conclusive",
+                            "confidence",
+                            "verdict",
+                            "evidence_requirements",
+                            "tested_scope",
+                            "next_actions",
+                            "cleanup_verified",
+                            "rollback_verified",
+                        )
+                    }
+                )
+                record["task_count"] = (run.get("relayna") or {}).get(
+                    "total_task_count", len((run.get("relayna") or {}).get("tasks", []))
+                )
+                record["tasks_truncated"] = (
+                    bool((run.get("relayna") or {}).get("tasks_truncated")) or record["task_count"] > 200
+                )
                 record["tasks"] = [
                     {key: task.get(key) for key in ("task_id", "terminal_status", "success", "total_duration_ms")}
                     for task in (run.get("relayna") or {}).get("tasks", [])[:200]
@@ -630,8 +681,10 @@ def _create_load_testing_router(
     bridge = _Chamber(registry, redis, client, url_policy, database)
     router = APIRouter(prefix="/studio/services/{service_id}/load-tests", tags=["load-testing"])
 
+    from ._chamber_api import _workspace_router
     from ._profile_import import _import_router
 
+    router.include_router(_workspace_router(bridge))
     router.include_router(_import_router(bridge))
 
     @router.get("/profiles")
@@ -663,8 +716,16 @@ def _create_load_testing_router(
         return await _request_deadline(bridge.plan(service_id, payload))
 
     @router.post("/{identity}/start", status_code=202)
-    async def start(service_id: str, identity: str) -> dict[str, Any]:
-        return await _request_deadline(bridge.start(service_id, identity))
+    async def start(service_id: str, identity: str, payload: _StartConfirmation | None = None) -> dict[str, Any]:
+        confirmation = payload or _StartConfirmation()
+        return await _request_deadline(
+            bridge.start(
+                service_id,
+                identity,
+                confirmed_target=confirmation.confirmed_target,
+                confirmed_faults=confirmation.confirmed_faults,
+            )
+        )
 
     @router.get("/{identity}")
     async def status(service_id: str, identity: str) -> dict[str, Any]:

@@ -56,4 +56,47 @@ describe("Chamber profile manager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
     await waitFor(() => expect(saved).toHaveBeenCalledOnce());
   });
+  it("searches and pages sources, resets source selection and closes the manager", async () => {
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (url, options) => {
+      if (url.includes("/sources")) return { items: [{ run_id: "run-1", service_name: "Translation", state: "planned" }], pagination: { page: Number(new URLSearchParams(url.split("?")[1]).get("page")), total_pages: 3 } } as never;
+      return original(url, options);
+    });
+    render(<LoadProfileManager base={base} onSaved={vi.fn()} />); await choose(); await screen.findByText("Studio environment: staging");
+    fireEvent.change(screen.getByLabelText("Source plan or run"), { target: { value: "" } });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Preview import" })).not.toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Search Chamber plans"), { target: { value: "baseline" } }); fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() => expect(request).toHaveBeenCalledWith(expect.stringContaining("search=baseline&page=1")));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next" })).toBeEnabled()); fireEvent.click(screen.getByRole("button", { name: "Next" })); await screen.findByText("Page 2 of 3");
+    fireEvent.click(screen.getByRole("button", { name: "Previous" })); await screen.findByText("Page 1 of 3");
+    fireEvent.click(screen.getByRole("button", { name: "Close profile manager" })); expect(screen.queryByLabelText("Source plan or run")).not.toBeInTheDocument();
+  });
+  it("changes selected operations and applies every approved limit without copying source secrets", async () => {
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (url, options) => {
+      if (url.endsWith("/inspect")) return { operations: [{ index: 0, name: "Read", method: "GET", path: "/health" }, { index: 1, name: "Translate", method: "POST", path: "/translations" }] } as never;
+      if (url.endsWith("/preview")) return { ...preview, files: [{ field: "input", filename: "fixture.txt" }] } as never;
+      return original(url, options);
+    });
+    const saved = vi.fn(); render(<LoadProfileManager base={base} onSaved={saved} />); await choose(); await screen.findByText("Studio environment: staging");
+    fireEvent.change(screen.getByLabelText("Import operation"), { target: { value: "1" } }); expect(screen.queryByText("Review service binding")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" })); await screen.findByText("input: fixture.txt");
+    for (const [label, value] of [["Profile name", "Approved"], ["Maximum task iterations", "25"], ["Maximum scheduling window (seconds)", "60"]]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByLabelText("I have checked the target, operation, files and limits for this service.")); fireEvent.click(screen.getByRole("button", { name: "Save imported profile" }));
+    await waitFor(() => expect(saved).toHaveBeenCalledOnce()); const call = request.mock.calls.find(([url, options]) => url.endsWith("/profile-import") && options?.method === "POST")!;
+    expect(JSON.parse(String(call[1]?.body))).toMatchObject({ name: "Approved", max_iterations: 25, max_duration_seconds: 60 });
+    expect(JSON.parse(String(request.mock.calls.filter(([url]) => url.endsWith("/preview")).slice(-1)[0]![1]?.body))).toMatchObject({ operation: 1 });
+  });
+  it("handles empty operations, opaque errors and cancelled removal", async () => {
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (url, options) => {
+      if (url.endsWith("/inspect")) return { operations: [] } as never;
+      if (url === base + "/profile-import") return { profiles: [{ id: "saved", name: "Saved", max_vus: 4, max_iterations: 10, max_duration_seconds: 30 }] } as never;
+      return original(url, options);
+    });
+    render(<LoadProfileManager base={base} onSaved={vi.fn()} />); fireEvent.click(screen.getByRole("button", { name: "Manage profiles" })); await screen.findByRole("option", { name: /run-1/ });
+    await waitFor(() => expect(screen.getByLabelText("Source plan or run")).toBeEnabled()); fireEvent.change(screen.getByLabelText("Source plan or run"), { target: { value: "run-1" } }); await screen.findByText("This source has no request operations.");
+    fireEvent.click(screen.getByRole("button", { name: "Remove" })); fireEvent.click(screen.getByRole("button", { name: "Keep profile" })); expect(screen.queryByRole("button", { name: "Confirm removal" })).not.toBeInTheDocument();
+    request.mockRejectedValue("opaque"); fireEvent.click(screen.getByRole("button", { name: "Search" })); await screen.findByText("Profile request failed.");
+  });
 });

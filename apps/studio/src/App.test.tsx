@@ -489,11 +489,13 @@ function customPodLabelMetricsResponse() {
 
 async function openTaskTelemetry() {
   const summary = await screen.findByText("Task Logs", { selector: "summary" });
-  for (const name of ["Task Logs", "Task Kubernetes Metrics", "Trace path"]) {
-    const disclosure = (name === "Task Logs" ? summary : screen.getByText(name, { selector: "summary" })).closest("details")!;
-    disclosure.open = true;
-    fireEvent(disclosure, new Event("toggle"));
-  }
+  await act(async () => {
+    for (const name of ["Task Logs", "Task Kubernetes Metrics", "Trace path"]) {
+      // Opening details queues its native toggle; do not dispatch a second one.
+      fireEvent.click(name === "Task Logs" ? summary : screen.getByText(name, { selector: "summary" }));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 describe("App", () => {
@@ -2551,6 +2553,43 @@ describe("App", () => {
     expect(screen.queryByRole("heading", { name: "Register Service" })).not.toBeInTheDocument();
   });
 
+  it("invalidates an in-flight service search when Clear is clicked", async () => {
+    window.history.replaceState({}, "", "/services");
+    const base = fetchMock.getMockImplementation()!;
+    let finish!: (value: Response) => void;
+    fetchMock.mockImplementation((input, init) => String(input).startsWith("/studio/services/search?")
+      ? new Promise((resolve) => { finish = resolve; }) : base(input, init));
+    render(<App />);
+    const section = within((await screen.findByRole("heading", { name: "Service Search" })).closest("section")!);
+    fireEvent.change(section.getByLabelText("Keyword"), { target: { value: "payments" } });
+    fireEvent.click(section.getByRole("button", { name: "Search Services" }));
+    await waitFor(() => expect(finish).toBeDefined());
+    fireEvent.click(section.getByRole("button", { name: "Clear" }));
+    await act(async () => finish(jsonResponse({ count: 1, items: [{ service_id: "late-result", name: "Late result", environment: "prod", status: "healthy", tags: [], base_url: "https://example.test", auth_mode: "none", matched_fields: [] }], next_cursor: null })));
+    expect(section.queryByText("Late result")).not.toBeInTheDocument();
+    expect(section.getByLabelText("Keyword")).toHaveValue("");
+    expect(section.getByRole("button", { name: "Search Services" })).not.toBeDisabled();
+  });
+
+  it("ignores a previous service topology response after route navigation", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/topology");
+    const base = fetchMock.getMockImplementation()!;
+    const original = await (await base("/studio/services/payments-api/workflow/topology", { method: "GET" })).json();
+    let finish!: (value: Response) => void;
+    fetchMock.mockImplementation((input, init) => {
+      if (String(input) === "/studio/services/payments-api/workflow/topology") return new Promise((resolve) => { finish = resolve; });
+      if (String(input) === "/studio/services/orders-api/workflow/topology") return Promise.resolve(jsonResponse(JSON.parse(JSON.stringify(original).replace(/validate/g, "current-stage"))));
+      return base(input, init);
+    });
+    render(<App />);
+    await waitFor(() => expect(finish).toBeDefined());
+    act(() => { window.history.pushState({}, "", "/services/orders-api/topology"); window.dispatchEvent(new PopStateEvent("popstate")); });
+    expect(await screen.findByText("current-stage")).toBeInTheDocument();
+    await act(async () => finish(jsonResponse(original)));
+    expect(screen.getByText("current-stage")).toBeInTheDocument();
+    expect(screen.queryByText("validate")).not.toBeInTheDocument();
+  });
+
   it("covers service search result, empty, and non-error failure states", async () => {
     window.history.replaceState({}, "", "/services");
     const baseImpl = fetchMock.getMockImplementation();
@@ -3501,6 +3540,8 @@ describe("App", () => {
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(await screen.findByText("Loading task logs...")).toBeInTheDocument();
 
+    expect(taskLogCalls).toBe(1);
+
     await act(async () => {
       resolveTaskLogs?.(jsonResponse({ count: 0, items: [], next_cursor: null }));
       await Promise.resolve();
@@ -3687,6 +3728,188 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Health Check" }));
     await waitFor(() => expect(screen.getAllByText("Registry refresh unavailable").length).toBeGreaterThan(0));
     expect(screen.queryByText("Ran health check for 'payments-api'.")).not.toBeInTheDocument();
+  });
+
+  it("keeps shared service windows consistent and reports independent telemetry connection results", async () => {
+    services[0] = { ...services[0], metrics_config: { provider: "prometheus", base_url: "https://prometheus.example.test", service_selector_labels: { app: "payments-api" } } };
+    window.history.replaceState({}, "", "/services/payments-api#service-configure");
+    const scroll = vi.fn(); Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+    const baseFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input).includes("/metrics?") ? jsonResponse({ series: [], warnings: [] }) : baseFetch(input, init));
+    render(<App />); await screen.findByRole("heading", { name: "Payments API" });
+    const source = MockEventSource.instances.find(item => item.url.includes("/services/payments-api/events/stream"))!;
+    act(() => source.emitRaw("open", "")); await screen.findByText("Live updates connected");
+    act(() => source.emitRaw("error", "")); await screen.findByText(/Live updates disconnected/);
+    fireEvent.change(screen.getByLabelText(/Shared observation window/), { target: { value: "15m" } });
+    await waitFor(() => expect(screen.getByLabelText("Service log window mode")).toHaveValue("15m"));
+    fireEvent.click(screen.getByRole("button", { name: "Test telemetry connections" })); await screen.findByText("Logs: query succeeded · Metrics: query succeeded");
+    const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input).includes("/metrics?") ? Promise.reject(new Error("Metrics offline")) : original(input, init));
+    fireEvent.click(screen.getByRole("button", { name: "Test telemetry connections" })); await screen.findByText("Logs: query succeeded · Metrics: Metrics offline");
+    fireEvent.click(screen.getByRole("button", { name: "Overview" })); fireEvent.click(screen.getByRole("button", { name: "Reload Charts" })); await screen.findByText("Metrics offline");
+    fetchMock.mockImplementation(async (input, init) => String(input).includes("/metrics?") ? Promise.reject("opaque") : original(input, init));
+    fireEvent.click(screen.getByRole("button", { name: "Test telemetry connections" })); await screen.findByText("Logs: query succeeded · Metrics: query failed");
+  });
+
+  it("reloads task investigations, joins and filters while sharing telemetry windows", async () => {
+    services[0] = { ...services[0], metrics_config: { provider: "prometheus", base_url: "https://prometheus.example.test", service_selector_labels: { app: "payments-api" } } };
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123"); render(<App />); await openTaskTelemetry();
+    await screen.findByText("task log line"); await screen.findByText("Task Trace");
+    const source = MockEventSource.instances.find(item => item.url.includes("/tasks/payments-api/task-123/events/stream"))!;
+    act(() => source.emitRaw("open", "")); await screen.findByText("Live updates connected"); act(() => source.emitRaw("error", "")); await screen.findByText(/Live updates disconnected/);
+    fireEvent.click(screen.getByRole("button", { name: /gateway_timeout/ })); fireEvent.click(screen.getByRole("button", { name: /attempt-1/ })); fireEvent.click(screen.getByRole("button", { name: "Filter Logs" })); fireEvent.click(await screen.findByRole("button", { name: "View Span" })); await screen.findByRole("dialog", { name: "Span Details" });
+    fireEvent.click(document.querySelector('.studio-dialog-backdrop')!); expect(screen.queryByRole("dialog", { name: "Span Details" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Task log text filter"), { target: { value: "needle" } }); fireEvent.change(screen.getByLabelText("Task log level"), { target: { value: "error" } }); fireEvent.change(screen.getByLabelText("Task log limit"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Logs" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("query=needle") && String(url).includes("level=error") && String(url).includes("limit=10"))).toBe(true));
+    fireEvent.change(screen.getByLabelText(/Shared telemetry window/), { target: { value: "1h" } });
+    for (const name of ["Reload", "Reload Timeline", "Reload Trace", "Reload Metrics", "Load related tasks across services"]) { await waitFor(() => expect(screen.getByRole("button", { name })).toBeEnabled()); fireEvent.click(screen.getByRole("button", { name })); }
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("task-123?join=all"))).toBe(true));
+  });
+
+  it("saves, reloads and clears scoped task searches without leaking other environments", async () => {
+    const stored = new Map<string, string>(); vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value), removeItem: (key: string) => stored.delete(key) });
+    localStorage.setItem("studio:saved-searches", JSON.stringify([false, "service_id=payments-api&task_id=old"]));
+    window.history.replaceState({}, "", "/tasks/search?environment=prod&task_id=task-123"); render(<App />); await screen.findByText("Matches:");
+    for (const [placeholder, value] of [["service_id", "payments-api"], ["correlation_id", "corr-123"], ["status", "failed"], ["stage", "charge"]]) fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value } });
+    fireEvent.change(screen.getByLabelText("From (local time)"), { target: { value: "2026-04-08T09:00" } }); fireEvent.change(screen.getByLabelText("To (local time)"), { target: { value: "2026-04-08T10:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" })); await waitFor(() => expect(window.location.search).toContain("correlation_id=corr-123"));
+    fireEvent.click(screen.getByRole("button", { name: "Save search" })); const saved = JSON.parse(localStorage.getItem("studio:saved-searches")!); expect(saved).toEqual(expect.arrayContaining([expect.stringContaining("correlation_id=corr-123")]));
+    fireEvent.change(screen.getByLabelText("Saved searches"), { target: { value: "service_id=payments-api&task_id=old" } }); await waitFor(() => expect(window.location.search).toContain("task_id=old"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear" })); expect(screen.queryByText("Matches:")).not.toBeInTheDocument();
+    localStorage.removeItem("studio:saved-searches");
+  });
+
+  it("bulk reviews only selected failures, reports partial mutations and retries service reads", async () => {
+    services.push({ ...buildMockService(), service_id: "shipping-api", name: "Shipping" });
+    window.history.replaceState({}, "", "/failed-tasks?environment=prod"); const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith("/studio/failed-tasks?") && url.includes("service_id=shipping-api")) throw new Error("Shipping offline");
+      if (url.startsWith("/studio/failed-tasks?")) return jsonResponse({ items: ["failure-1", "failure-2"].map(failure_id => ({ service_id: "payments-api", failure_id, task_id: failure_id, status: "DLQ", queue_name: "q", dlq_name: "dlq" })), errors: [{ service_id: "payments-api", detail: "Partial provider" }], scanned_services: ["payments-api"], next_cursor: null });
+      if (url.endsWith("failure-1/mark-investigated")) return jsonResponse({});
+      if (url.endsWith("failure-2/mark-investigated")) return jsonResponse({ detail: "Cannot update" }, 503);
+      return original(input, init);
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false); render(<App />); await screen.findByLabelText("Select failure-1");
+    fireEvent.click(screen.getByLabelText("Select failure-1")); fireEvent.click(screen.getByLabelText("Select failure-1")); fireEvent.click(screen.getByLabelText("Select failure-1")); fireEvent.click(screen.getByLabelText("Select failure-2"));
+    fireEvent.click(screen.getByRole("button", { name: "Mark selected investigated (2/20)" })); expect(fetchMock.mock.calls.some(([url]) => String(url).includes("mark-investigated"))).toBe(false);
+    confirm.mockReturnValue(true); fireEvent.click(screen.getByRole("button", { name: "Mark selected investigated (2/20)" })); await screen.findByText(/1 reviewed.*Cannot update/);
+    fireEvent.click(screen.getByRole("button", { name: "Retry service reads" })); await waitFor(() => expect(screen.getByLabelText("Select failure-1")).not.toBeChecked()); confirm.mockRestore();
+  });
+
+  it("loads the integrated assessment route through application navigation", async () => {
+    window.history.replaceState({}, "", "/services/payments-api/load-tests"); const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input); if (url.endsWith("/load-tests/profiles")) return jsonResponse({ profiles: [], message: "No approved operations" });
+      if (url.endsWith("/load-tests")) return jsonResponse({ items: [] });
+      return original(input, init);
+    });
+    render(<App />); await screen.findByText("No approved operations"); expect(screen.getByRole("navigation", { name: "Load testing workspace" })).toBeInTheDocument();
+  });
+
+  it("reports failed-task mutation and clipboard failures while retaining investigation context", async () => {
+    window.history.replaceState({}, "", "/failed-tasks"); const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (init?.method === "POST" && String(input).includes("failure-1/")) return jsonResponse({ detail: "Mutation rejected" }, 503);
+      if (init?.method === "DELETE") return jsonResponse({ detail: "Deletion rejected" }, 503);
+      return original(input, init);
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true); Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    render(<App />); fireEvent.click(await screen.findByRole("button", { name: "View" })); await screen.findByText("Failure Detail");
+    fireEvent.click(screen.getByRole("button", { name: "Copy Error" })); await screen.findByText("Clipboard unavailable. Use Download JSON instead.");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockRejectedValue("blocked") } });
+    fireEvent.click(screen.getByRole("button", { name: "Copy Payload" })); await screen.findByText("Unable to copy. Use Download JSON instead.");
+    for (const name of ["Mark Investigated", "Mark Unreviewed", "Retry"]) { await waitFor(() => expect(screen.getByRole("button", { name })).toBeEnabled()); fireEvent.click(screen.getByRole("button", { name })); await screen.findByText("Mutation rejected"); }
+    await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled()); fireEvent.click(screen.getByRole("button", { name: "Delete" })); await screen.findByText("Deletion rejected"); expect(screen.getByText("Failure Detail")).toBeInTheDocument(); confirm.mockRestore();
+  });
+
+  it("finishes bulk review successfully after explicit confirmation", async () => {
+    window.history.replaceState({}, "", "/failed-tasks"); const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input).endsWith("mark-investigated") ? jsonResponse({}) : original(input, init));
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true); render(<App />); fireEvent.click(await screen.findByLabelText("Select failure-1"));
+    fireEvent.click(screen.getByRole("button", { name: "Mark selected investigated (1/20)" })); await screen.findByText("Reviewed 1 failures."); confirm.mockRestore();
+  });
+
+  it("leaves pending task provider reads harmless after navigation away", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123"); services[0] = { ...services[0], metrics_config: { provider: "prometheus", base_url: "https://prometheus.example.test" } };
+    const original = fetchMock.getMockImplementation()!; let paused = false, removed = false;
+    const pending: Array<() => void> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (paused && url.includes("/studio/tasks/payments-api/task-123")) return removed ? jsonResponse({}) : new Promise<Response>(resolve => pending.push(() => resolve(jsonResponse({}))));
+      if (url.includes("/metrics?")) return jsonResponse({ warnings: [], series: [] });
+      return original(input, init);
+    });
+    const view = render(<App />); await openTaskTelemetry(); await screen.findByText("task log line"); await screen.findByText("payments.process_payment");
+    paused = true;
+    for (const name of ["Reload Timeline", "Reload Logs", "Reload Metrics", "Reload Trace", "Reload"]) fireEvent.click(screen.getByRole("button", { name }));
+    await waitFor(() => expect(pending.length).toBeGreaterThan(0)); view.unmount(); removed = true;
+    await act(async () => { pending.forEach(resolve => resolve()); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(screen.queryByText("Task Detail")).not.toBeInTheDocument();
+  });
+
+  it("invalidates rejected task reads after a route is removed", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123"); const original = fetchMock.getMockImplementation()!;
+    let paused = false; const failures: Array<() => void> = [];
+    fetchMock.mockImplementation(async (input, init) => paused && String(input).includes("/studio/tasks/payments-api/task-123") ? new Promise<Response>((_, reject) => failures.push(() => reject(new Error("Late provider error")))) : original(input, init));
+    const view = render(<App />); await openTaskTelemetry(); await screen.findByText("task log line"); paused = true;
+    for (const name of ["Reload Timeline", "Reload Trace", "Reload"]) fireEvent.click(screen.getByRole("button", { name }));
+    await waitFor(() => expect(failures.length).toBe(3)); view.unmount(); await act(async () => { failures.forEach(reject => reject()); }); expect(screen.queryByText("Late provider error")).not.toBeInTheDocument();
+  });
+
+  it("renders telemetry configuration links and waits for registry deletion before resetting the editor", async () => {
+    services[0] = { ...services[0], log_config: null, metrics_config: null }; window.history.replaceState({}, "", "/services/payments-api"); const view = render(<App />);
+    await screen.findByRole("heading", { name: "Payments API" });
+    for (const link of screen.getAllByRole("link", { name: "View configuration" })) { link.addEventListener("click", event => event.preventDefault(), { once: true }); fireEvent.click(link); }
+    expect(document.getElementById("service-overview")).toHaveAttribute("open"); view.unmount();
+    window.history.replaceState({}, "", "/services"); const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => init?.method === "DELETE" ? new Response(null, { status: 204 }) : original(input, init));
+    render(<App />); fireEvent.click(await screen.findByRole("button", { name: "Edit payments-api" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Service" })); const dialog = await screen.findByRole("dialog", { name: "Delete service" }); fireEvent.change(within(dialog).getByLabelText("Type payments-api to confirm deletion"), { target: { value: "payments-api" } }); fireEvent.click(within(dialog).getByRole("button", { name: "Delete Service" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument()); expect(screen.getByLabelText("Service id")).toHaveValue("");
+  });
+
+  it.each([false, true])("ignores superseded task searches (failure=%s)", async (fails) => {
+    const old = fails ? "old-failure" : "old-success"; window.history.replaceState({}, "", `/tasks/search?task_id=${old}`); const original = fetchMock.getMockImplementation()!;
+    let release!: () => void;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).includes("/tasks/search?") && String(input).includes(`task_id=${old}`)) return new Promise<Response>((resolve, reject) => { release = () => fails ? reject(new Error("Late old search")) : resolve(jsonResponse({ count: 1, items: [{ service_id: "payments-api", task_id: old }] })); });
+      if (String(input).includes("/tasks/search?") && String(input).includes("task_id=new")) return jsonResponse({ count: 0, items: [] });
+      return original(input, init);
+    });
+    render(<App />); await waitFor(() => expect(release).toBeDefined()); fireEvent.change(screen.getByPlaceholderText("task_id"), { target: { value: "new" } }); fireEvent.click(screen.getByRole("button", { name: "Search" })); await screen.findByText("Matches:");
+    await act(async () => release()); expect(screen.queryByText("Late old search")).not.toBeInTheDocument(); expect(screen.queryByRole("link", { name: "old" })).not.toBeInTheDocument(); expect(screen.getByText("Matches:")).toBeInTheDocument();
+  });
+
+  it("reports partial scoped task searches and unavailable browser storage", async () => {
+    const stored = new Map<string, string>(); vi.stubGlobal("localStorage", { getItem: (key: string) => stored.get(key) ?? null, setItem: () => { throw new Error("Storage blocked"); } });
+    services.push({ ...buildMockService(), service_id: "shipping-api", name: "Shipping" }); window.history.replaceState({}, "", "/tasks/search?environment=prod&task_id=task-123"); const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input).includes("/tasks/search?") && String(input).includes("shipping-api") ? Promise.reject(new Error("Shipping offline")) : original(input, init));
+    render(<App />); await screen.findByText("Partial search: shipping-api: Shipping offline"); expect(screen.getByText("Matches:")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save search" })); await screen.findByText("Browser storage is unavailable.");
+    fireEvent.click(screen.getByRole("button", { name: "Search" })); await screen.findByText("Partial search: shipping-api: Shipping offline");
+  });
+
+  it("clears environment scope and signs out from the application header", async () => {
+    window.history.replaceState({}, "", "/services?environment=prod"); const original = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/studio/auth/logout" ? jsonResponse({}) : original(input, init));
+    render(<App />); await screen.findByRole("banner"); const scope = within(screen.getByRole("banner")).getByLabelText("Environment"); fireEvent.change(scope, { target: { value: "" } }); await waitFor(() => expect(window.location.search).toBe(""));
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" })); await screen.findByText("Sign in to Studio");
+  });
+
+  it.each([false, true])("invalidates service telemetry reads after unmount (failure=%s)", async (fails) => {
+    window.history.replaceState({}, "", "/services/payments-api"); services[0] = { ...services[0], metrics_config: { provider: "prometheus", base_url: "https://prometheus.example.test" } };
+    const original = fetchMock.getMockImplementation()!; let paused = false; const pending: Array<() => void> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (paused && /payments-api\/(events|logs|metrics)\?/.test(url)) return new Promise<Response>((resolve, reject) => pending.push(() => fails ? reject(new Error("Late service read")) : resolve(jsonResponse({}))));
+      if (url.includes("/metrics?")) return jsonResponse({ series: [], warnings: [] });
+      return original(input, init);
+    });
+    const view = render(<App />); await screen.findByRole("heading", { name: "Payments API" }); await screen.findByText("service log line", { exact: false }); await waitFor(() => expect(screen.getByRole("button", { name: "Reload Metrics" })).toBeEnabled());
+    paused = true; fireEvent.change(screen.getByLabelText(/Shared observation window/), { target: { value: "24h" } }); await waitFor(() => expect(pending.length).toBe(4));
+    view.unmount(); await act(async () => { pending.forEach(release => release()); }); expect(screen.queryByText("Late service read")).not.toBeInTheDocument();
   });
 
 });

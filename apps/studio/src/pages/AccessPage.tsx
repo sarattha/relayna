@@ -12,6 +12,7 @@ export function AccessPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
+    if (!auth.isAdmin) return;
     setLoading(true);
     try {
       const payload = await listStudioUsers();
@@ -25,8 +26,8 @@ export function AccessPage() {
   }
 
   useEffect(() => {
-    void load();
-  }, []);
+    if (auth.isAdmin) void load();
+  }, [auth.isAdmin]);
 
   async function update(user: StudioMember, updatePayload: { role?: StudioRole; status?: StudioMemberStatus }) {
     try {

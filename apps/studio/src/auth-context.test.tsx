@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect, useState } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setStudioCsrfToken, updateStudioUser } from "./api";
@@ -158,4 +159,23 @@ it("signs in with an operator token without Entra and handles invalid tokens", a
   expect(new Headers(login?.[1]?.headers).get("X-CSRF-Token")).toBe("operator-login");
   window.dispatchEvent(new CustomEvent("relayna:api-error",{detail:{status:401,input:"/studio/services",authMode:"operator"}}));
   expect(await screen.findByLabelText("Operator token")).toBeInTheDocument();
+});
+
+it("preserves mounted workspace inputs during a forbidden-response session refresh", async () => {
+  vi.stubGlobal("fetch", fetchMock);
+  let finish!: (value: Response) => void;
+  const mounted = vi.fn();
+  function Workspace() {
+    const [query, setQuery] = useState("");
+    useEffect(() => { mounted(); }, []);
+    return <input aria-label="Workspace query" value={query} onChange={(event) => setQuery(event.target.value)} />;
+  }
+  fetchMock.mockResolvedValueOnce(response(session())).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  render(<StudioAuthProvider><Workspace /></StudioAuthProvider>);
+  fireEvent.change(await screen.findByLabelText("Workspace query"), { target: { value: "timeout" } });
+  act(() => window.dispatchEvent(new CustomEvent("relayna:api-error", { detail: { status: 403, input: "/studio/admin/users" } })));
+  expect(screen.getByLabelText("Workspace query")).toHaveValue("timeout");
+  await act(async () => finish(response(session())));
+  expect(screen.getByLabelText("Workspace query")).toHaveValue("timeout");
+  expect(mounted).toHaveBeenCalledTimes(1);
 });

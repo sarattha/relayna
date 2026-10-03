@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.9.0/relayna-1.9.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.10.0/relayna-1.10.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.9.0/relayna-1.9.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.10.0/relayna-1.10.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.9.0.tar.gz`
-- `dist/relayna-1.9.0-py3-none-any.whl`
+- `dist/relayna-1.10.0.tar.gz`
+- `dist/relayna-1.10.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,42 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.10.0
+
+Deploy matching SDK, Studio backend and frontend 1.10.0 packages/images. Studio
+adds the responsive Monitor workspace with Task explorer, Logs focus and
+Investigation layouts, shared event windows, and pod CPU/memory charts. Existing
+Overview, configuration and approved-operation flows remain available.
+
+The complete native load-test workspace requires Ampule Chamber 1.11.0. Studio
+uses its backend to reach Chamber's private Service; Chamber needs no browser
+hostname. When both processes run locally, the backend can use a local
+port-forward. An AKS backend cannot reach a port-forward on an operator's laptop.
+Older Chamber versions retain their supported approved-operation workflow;
+capability negotiation disables unavailable native features.
+
+No new PostgreSQL migration is needed from 1.9.0: UI connection overrides reuse
+operator settings at schema revision `0002_load_profiles`. Back up PostgreSQL
+and deploy matching Studio images together. For administrator-managed credentials,
+provide a stable Fernet `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY` in the backend
+Secret and allow the private Chamber endpoint in the outbound policy. Tokens are
+encrypted and hidden from browser responses; retain the encryption key while
+saved connections and reviewed runs are needed. Existing deployment URL/token
+and ConfigMap profiles remain supported. See [native Chamber setup and
+operations](studio-load-testing.md#native-chamber-workspace).
+
+This user-approved minor release intentionally advances the freeze manifests to
+1.10.0 and records additive Studio routes. SDK exports, existing API responses,
+profile records and broker formats remain compatible. To roll back to 1.9.0,
+stop new replicas and restore matching 1.9.0 images without downgrading the
+PostgreSQL schema. Existing advanced assessment references require 1.10.0 Studio
+and their original Chamber endpoint/key for inspection or cancellation; complete
+or cancel active assessments before rollback and preserve connection settings.
+
+Validate credentials, target admission, Kubernetes access, telemetry and cleanup
+with a reviewed staging assessment before wider use. Local UI/API validation used
+synthetic data and a stubbed execution supervisor.
 
 ### Upgrading to 1.9.0
 

@@ -268,3 +268,11 @@ def test_import_uses_configured_openapi_path(imported):
     assert {request.url.path for request in calls if request.url.host == "translation.internal"} == {
         "/api/openapi.json"
     }
+
+
+def test_connection_edit_invalidates_import_preview_and_foreign_endpoint_profiles(imported):
+    client, bridge, *_ = imported
+    preview = client.post(BASE + "/preview", json={"run_id": "run-1"}).json()
+    bridge.url = "http://other.internal"
+    bridge.connections.deployment_url = bridge.url
+    assert client.post(BASE, json=save_payload(preview)).status_code == 409

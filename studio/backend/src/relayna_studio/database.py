@@ -1851,7 +1851,14 @@ class StudioMutationAuditMiddleware(BaseHTTPMiddleware):
             r"/studio/services/(?P<service_id>[^/]+)/load-tests/profile-import(?:/(?P<profile_id>[^/]+))?",
             request.url.path,
         )
-        if profile_match is not None and request.method in {"POST", "DELETE"}:
+        chamber_match = re.fullmatch(
+            r"/studio/services/(?P<service_id>[^/]+)/load-tests/chamber/(?P<operation>.+)", request.url.path
+        )
+        if chamber_match is not None and request.method in {"POST", "PUT", "DELETE"}:
+            operation = chamber_match.group("operation").replace("/", ".")
+            target_type = "chamber"
+            target_id = chamber_match.group("service_id")
+        elif profile_match is not None and request.method in {"POST", "DELETE"}:
             operation = "remove" if request.method == "DELETE" else profile_match.group("profile_id") or "import"
             target_type = "load_profile"
             target_id = profile_match.group("service_id")

@@ -65,8 +65,9 @@ export function StudioAuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
 
-  const loadSession = useCallback(async () => {
-    setLoading(true);
+  const loadSession = useCallback(async (background = false) => {
+    // Permission refreshes must preserve the mounted workspace and its inputs.
+    if (!background) setLoading(true);
     setError(null);
     try {
       const session = await fetchStudioSession();
@@ -106,7 +107,7 @@ export function StudioAuthProvider({ children }: { children: ReactNode }) {
       }
       if (status === 403) {
         setPermissionMessage(detail?.message || "You do not have permission to perform that action.");
-        void loadSession();
+        void loadSession(true);
       }
     }
     window.addEventListener("relayna:api-error", handleApiError);

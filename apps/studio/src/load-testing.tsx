@@ -19,9 +19,14 @@ export type LoadRun = {
   method: string; path: string; adapter: string; state: string; created_at: string;
   started_at?: string; finished_at?: string; output?: string; error?: string;
   cancel_requested?: boolean; cleanup_required?: boolean; evidence_error?: string;
+  kind?: string; mode?: string; expires_at?: string; task_count?: number; tasks_truncated?: boolean;
+  target?: { context?: string; namespace?: string; service?: string; port?: number; workloads?: string[]; runtime_mode?: string; provider?: string; prometheus_configured?: boolean };
+  chamber?: { plan_id?: string; job_id?: string; run_id?: string; connection_id?: string };
+  origin?: Record<string, string>; review_config?: Record<string, unknown>; load_summary?: Record<string, unknown>;
+  requires_target_confirmation?: boolean; requires_fault_confirmation?: boolean;
   files?: { field: string; filename: string; content_type: string }[];
   request: { profile_id: string; inputs: Record<string, unknown>; vus: number; iterations: number; duration_seconds: number };
-  result?: { status?: string; readiness_score?: number; evidence_coverage_percent?: number; limitations?: string[] };
+  result?: { status?: string; readiness_score?: number; evidence_coverage_percent?: number; limitations?: string[]; conclusive?: boolean; confidence?: unknown; verdict?: unknown; evidence_requirements?: unknown; tested_scope?: unknown; next_actions?: unknown; cleanup_verified?: unknown; rollback_verified?: unknown };
   tasks?: { task_id: string; terminal_status: string; success: boolean; total_duration_ms: number }[];
 };
 export const terminalLoadStates = new Set(["completed", "failed", "cancelled"]);

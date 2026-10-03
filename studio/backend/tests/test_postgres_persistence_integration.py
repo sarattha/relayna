@@ -10,11 +10,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from relayna_studio import app as studio_app_module
 from relayna_studio import backfill as backfill_module
+from relayna_studio._chamber_connection import _ConnectionStore, _ConnectionUpdate
 from relayna_studio.app import create_studio_app, get_studio_runtime
 from relayna_studio.auth import (
     StudioEntraConfig,
@@ -45,6 +47,7 @@ from relayna_studio.database import (
     health_history,
     metadata,
     notification_deliveries,
+    operator_settings,
     outbox,
     services,
     task_projections,
@@ -64,7 +67,13 @@ from relayna_studio.health import (
     WorkerHealthState,
     WorkerHealthSummary,
 )
-from relayna_studio.registry import DuplicateServiceError, LokiLogConfig, ServiceNotFoundError, ServiceRecord
+from relayna_studio.registry import (
+    DuplicateServiceError,
+    LokiLogConfig,
+    ServiceNotFoundError,
+    ServiceRecord,
+    StudioOutboundUrlPolicy,
+)
 from relayna_studio.search import (
     StudioRetentionWorker,
     StudioSearchService,
@@ -108,6 +117,26 @@ async def redis() -> AsyncIterator[Redis]:
     yield redis
     await redis.flushdb()
     await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chamber_connection_is_encrypted_durable_and_audited(database, monkeypatch):
+    monkeypatch.setenv("RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    policy = StudioOutboundUrlPolicy(allowed_hosts=[".internal"])
+    store = _ConnectionStore(database, "http://deployment.internal", "deployment-token", policy)
+    await store.update(_ConnectionUpdate(mode="ui", url="http://chamber.internal", token="synthetic-private-token"))
+    restarted = _ConnectionStore(database, "http://deployment.internal", "deployment-token", policy)
+    snapshot = await restarted.current()
+    assert restarted.token(snapshot) == "synthetic-private-token"
+    async with database.sessions() as session:
+        stored = await session.scalar(select(operator_settings.c.value))
+        audit = (await session.execute(select(audit_log))).mappings().all()
+    assert "synthetic-private-token" not in json.dumps(stored)
+    assert "synthetic-private-token" not in json.dumps([dict(row) for row in audit], default=str)
+    assert audit[-1]["action"] == "settings.chamber.update"
+    await restarted.update(_ConnectionUpdate(mode="deployment"))
+    assert (await restarted.current())["url"] == "http://deployment.internal"
+    assert restarted.token(snapshot) == "synthetic-private-token"
 
 
 def service_record(
@@ -1264,3 +1293,29 @@ async def test_service_deletion_revokes_profiles_before_id_reuse(database):
     # A new explicit import after registration is supported.
     await store.save(original.service_id, original.environment, profile)
     assert await store.get_profiles(original.service_id, original.environment) == [profile]
+
+
+@pytest.mark.asyncio
+async def test_chamber_mutations_audit_actor_and_outcome_without_credentials(database):
+    from relayna_studio.audit_context import reset_actor_user_id, set_actor_user_id
+
+    app = FastAPI()
+    path = "/studio/services/payments-api/load-tests/chamber/connection"
+
+    @app.put(path)
+    async def update_connection():
+        return {"source": "ui"}
+
+    app.add_middleware(StudioMutationAuditMiddleware, database=database)
+    actor = set_actor_user_id("connection-admin")
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://studio.test") as client:
+            assert (await client.put(path, json={"token": "never-log-this-credential"})).status_code == 200
+    finally:
+        reset_actor_user_id(actor)
+    async with database.sessions() as session:
+        rows = (await session.execute(select(audit_log).order_by(audit_log.c.id))).mappings().all()
+    assert [row["action"] for row in rows] == ["chamber.connection.requested", "chamber.connection.succeeded"]
+    assert {row["actor_user_id"] for row in rows} == {"connection-admin"}
+    assert {row["target_id"] for row in rows} == {"payments-api"}
+    assert "never-log-this-credential" not in str(rows)
