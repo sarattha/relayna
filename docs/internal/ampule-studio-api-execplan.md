@@ -17,8 +17,12 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 - [x] (2026-10-03) Add behavioral and compatibility coverage; intentionally record approved Studio route perimeter additions.
 - [x] (2026-10-03) Run mandatory verification in both repositories and validate core UI functions with Computer Use.
 - [x] (2026-10-03) Document configuration/deployment, compatibility and acceptance evidence; commit and open draft PRs.
+- [x] (2026-10-03) Add 67 further Studio behavior regressions and satisfy unchanged frontend gates: 233 tests, 98.07% statements locally (98.04% under CI Node 20) / 89.02% branches / 99.36% functions / 98.67% lines. Recheck SDK (97.94%) and backend (495 tests / 98.13%). Chamber adds 78 tests, reaches 394 tests / 97.79% global branch-and-statement coverage, and enforces a 96% floor.
+- [ ] (2026-10-03) Enforce SDK and frontend coverage in CI, run final verification, consolidate into user-selected PR 131, retire superseded PR 132, and refresh PR descriptions/checks.
 
 ## Surprises & Discoveries
+
+- Whole-source frontend coverage revealed untested advanced builder, result-management and legacy controls. Initial frontend coverage is 86.88% statements / 79.23% branches / 80.76% functions / 93.63% lines. Existing gates are 98/89/98/98; the backend already measures 98.13%, and SDK whole-package coverage is 97.94% (98% rounded). Chamber is raising global branch-inclusive coverage from 90% to an enforced 96% floor.
 
 - Chamber 1.10.0 has comprehensive plan, execution, scenario, discovery, evidence and comparison APIs, but archive, tags, managed uploads and cleanup verification require API additions.
 - Studio's existing backend uses one deployment token and strips plan/job identity from records. Imported operation profiles intentionally reject suites and experiments; the full assessment builder must be a separate path preserving their complete configurations.
@@ -31,6 +35,8 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 
 ## Decision Log
 
+- Decision: on the user's follow-up, consolidate Studio PR 132 into PR 131 by a fast-forward of its branch; retain the existing Chamber draft PR 43. Preserve coverage scopes and existing stronger gates. Add behavior tests for uncovered failures and workflows rather than exclude code. Date/Author: 2026-10-03 Codex.
+
 - Decision: user explicitly authorizes all audited findings and the Studio connection/API/storage perimeter additions; keep SDK contracts untouched. Date/Author: 2026-10-03 Codex.
 - Decision: preserve v1.9.0 released behavior and existing deployment variables; strict historical boundary is v1.4.30. Add reviewed routes and backwards reads rather than replace existing operation endpoints. Freeze-manifest additions are intentional review items. Date/Author: 2026-10-03 Codex.
 - Decision: retain secret-only deployment fallback; encrypt UI tokens with a separate deployment-provided Fernet key and never return plaintext credentials. Pin the chosen connection to saved plans so changing the active connection cannot silently retarget an existing execution. Date/Author: 2026-10-03 Codex.
@@ -39,7 +45,7 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 
 ## Outcomes & Retrospective
 
-Delivered native Studio connection, full assessment, monitoring, results and recovery workflows, plus Chamber 1.11 API completion. Mandatory SDK/backend checks pass; PostgreSQL integration 21 tests; Studio backend coverage 495 tests / 98.13%; frontend 166 tests / production build; Chamber 316 tests / 90% coverage / complete make check. Actual ASGI integration passed 23 operations with 305 exact tasks. Computer Use validated connection save/test, multi-journey capacity review and explicit start/cancel, exact task pagination/search, reusable target creation and three monitor layouts, including 390-pixel responsive checks. The execution supervisor was stubbed to prevent process/Kubernetes traffic; live target execution remains deployment acceptance. Draft PRs: https://github.com/sarattha/relayna/pull/132 (stacked on PR 131) and https://github.com/sarattha/ampule-chamber/pull/43. GitHub check status is tracked on the PRs.
+Delivered native Studio connection, full assessment, monitoring, results and recovery workflows, plus Chamber 1.11 API completion. Mandatory SDK/backend checks pass; PostgreSQL integration 21 tests; Studio backend coverage 495 tests / 98.13%; frontend 233 tests / 98.07% statements / 89.02% branches / 99.36% functions / 98.67% lines / production build; SDK 97.94% whole-package coverage; Chamber 394 tests / 97.79% global branch-and-statement coverage / enforced 96% floor / complete make check. Coverage scopes and exclusions remain unchanged. Actual ASGI integration passed 23 operations with 305 exact tasks. Computer Use validated connection save/test, multi-journey capacity review and explicit start/cancel, exact task pagination/search, reusable target creation and three monitor layouts, including 390-pixel responsive checks. The execution supervisor was stubbed to prevent process/Kubernetes traffic; live target execution remains deployment acceptance. User-selected draft PRs: https://github.com/sarattha/relayna/pull/131 and https://github.com/sarattha/ampule-chamber/pull/43. PR 132 is superseded by consolidating its additive Studio workspace into PR 131. GitHub check status is tracked on the PRs.
 
 ## Context and Orientation
 
@@ -58,7 +64,7 @@ Add a connection settings store and bounded transport in the Studio backend, reu
 From `/Users/jobz/Works/relayna` run focused backend/frontend tests while iterating, then:
 
     bash .codex/skills/code-change-verification/scripts/run.sh
-    make -C apps/studio test
+    make -C apps/studio coverage
     make -C apps/studio build
 
 From `/Users/jobz/Works/ampule-chamber` run:

@@ -45,4 +45,37 @@ describe("scoped task reads", () => {
       await third;
     } finally { vi.unstubAllGlobals(); }
   });
+  it("preserves empty cursor positions and rejects malformed scopes without hiding read errors", async () => {
+    const read = vi.fn(async (sid: string, cursor: string | null) => {
+      if (sid === "offline") throw "opaque";
+      if (!cursor) return { items: [], next_cursor: "next" };
+      return { items: ["found"], next_cursor: "next" };
+    });
+    const first = await scopedResults(["available", "offline"], null, 5, read, String);
+    expect(first.items).toEqual([]); expect(first.errors).toEqual([{ service_id: "offline", detail: "Service read failed." }]);
+    const next = await scopedResults(["available"], first.next_cursor, 5, read, String); expect(next.items).toEqual(["found"]); expect(next.next_cursor).toBeNull();
+    await expect(scopedResults(["available"], "not-json", 5, read, String)).rejects.toThrow();
+  });
+  it("propagates cancellation that arrives after a request has started", async () => {
+    let release!: (response: Response) => void;
+    const fetch = vi.fn((_input: string, init: RequestInit) => new Promise<Response>((resolve) => { release = resolve; expect(init.signal?.aborted).toBe(false); }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const controller = new AbortController(); const pending = requestJson("/studio/later-cancel", { signal: controller.signal });
+      controller.abort("superseded"); expect(fetch.mock.calls[0][1].signal?.aborted).toBe(true); expect(fetch.mock.calls[0][1].signal?.reason).toBe("superseded");
+      release(new Response("{}")); await pending;
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("ends empty service cursors rather than repeatedly loading the same page", async () => {
+    const read = vi.fn(async () => ({ items: [], next_cursor: null }));
+    const result = await scopedResults(["empty"], null, 5, read, String); expect(result.items).toEqual([]); expect(result.next_cursor).toBeNull(); expect(read).toHaveBeenCalledOnce();
+  });
+  it("aborts a hung provider request at the bounded request deadline", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", (_input: string, init: RequestInit) => new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason))));
+    try {
+      const pending = requestJson("/studio/hung-provider"); const rejected = expect(pending).rejects.toThrow("Request timed out. Please retry.");
+      await vi.advanceTimersByTimeAsync(20001); await rejected;
+    } finally { vi.useRealTimers(); vi.unstubAllGlobals(); }
+  });
 });

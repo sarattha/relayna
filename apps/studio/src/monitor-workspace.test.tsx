@@ -355,6 +355,8 @@ it("expands, traps keyboard focus, and returns focus on Escape", async () => {
   first.focus();
   fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
   expect(screen.getByLabelText("Log entries")).toHaveFocus();
+  fireEvent.keyDown(screen.getByLabelText("Log entries"), { key: "Tab" });
+  expect(first).toHaveFocus();
   fireEvent.keyDown(window, { key: "Escape" });
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(button).toHaveFocus();
@@ -522,4 +524,30 @@ it("navigates legacy configuration hashes through Monitor and Overview while ret
     "environment=prod&monitor_task=order-7842",
   );
   expect(screen.getByLabelText("URL")).not.toHaveTextContent("#");
+});
+
+
+it("applies exact task and log filters, sorts evidence and pages back without losing selection", async () => {
+  vi.mocked(api.searchTasks).mockImplementation(async (query) => ({ count: 1, items: [task], next_cursor: query.cursor ? null : "page2" }));
+  vi.mocked(api.fetchTaskEvents).mockResolvedValue({ count: 2, items: [event, { ...event, dedupe_key: "earlier", timestamp: "2026-10-02T07:32:03Z", event_type: "task_started" }] });
+  vi.mocked(api.fetchTaskLogs).mockResolvedValue({ count: 2, items: [logs().items[0], { ...logs("Earlier").items[0], timestamp: "2026-10-02T07:32:03Z" }] });
+  mount(); await screen.findByText("Payment timed out");
+  fireEvent.change(screen.getByLabelText("Find service task"), { target: { value: "order-7842" } }); fireEvent.click(screen.getByRole("button", { name: "Find" }));
+  await waitFor(() => expect(api.searchTasks).toHaveBeenLastCalledWith(expect.objectContaining({ task_id: "order-7842", cursor: null })));
+  fireEvent.change(screen.getByLabelText("Task list status"), { target: { value: "failed" } });
+  await waitFor(() => expect(api.searchTasks).toHaveBeenLastCalledWith(expect.objectContaining({ status: "failed" })));
+  fireEvent.click(screen.getByRole("button", { name: "Next" })); await screen.findByText("Page 2"); fireEvent.click(screen.getByRole("button", { name: "Previous" })); await screen.findByText("Page 1");
+  fireEvent.change(screen.getByLabelText("Log level"), { target: { value: "ERROR" } }); fireEvent.change(screen.getByLabelText("Log source"), { target: { value: "worker" } });
+  await waitFor(() => expect(api.fetchTaskLogs).toHaveBeenLastCalledWith("orders", task.task_id, expect.objectContaining({ level: "ERROR", source: "worker" })));
+  expect(document.body.textContent!.indexOf("Earlier")).toBeLessThan(document.body.textContent!.indexOf("Payment timed out"));
+});
+
+it("keeps scroll position for new logs and jumps only when the operator requests it", async () => {
+  mount(); await screen.findByText("Payment timed out");
+  const reader = screen.getByLabelText("Log entries");
+  Object.defineProperty(reader, "scrollHeight", { configurable: true, value: 900 }); reader.scrollTop = 100;
+  vi.mocked(api.fetchTaskLogs).mockResolvedValue({ count: 2, items: [logs().items[0], { ...logs("New result").items[0], timestamp: "2026-10-02T07:33:00Z" }] });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" })); await screen.findByText("New result");
+  expect(reader.scrollTop).toBe(100); fireEvent.click(screen.getByRole("button", { name: "New log results · Jump to latest" })); expect(reader.scrollTop).toBe(900);
+  expect(screen.queryByRole("button", { name: "New log results · Jump to latest" })).not.toBeInTheDocument();
 });

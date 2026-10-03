@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { act, render, screen, within } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
 import { MonitorResourceChart } from "./monitor-chart";
 import type { StudioMetricSeries } from "./types";
 
@@ -67,4 +67,16 @@ it("preserves memory gaps and ignores invalid values", () => {
   const chart = screen.getByRole("img", { name: "Pod memory in MiB" });
   expect(chart.querySelector("path")?.getAttribute("d")).toMatch(/^M48,65\s+M978,30$/);
   expect(within(chart).getByText("512.0")).toBeInTheDocument();
+});
+
+it("reduces time ticks after container resize and disconnects observation on unmount", () => {
+  let resized!: ResizeObserverCallback;
+  const disconnect = vi.fn();
+  vi.stubGlobal("ResizeObserver", class { constructor(callback: ResizeObserverCallback) { resized = callback; } observe() {} disconnect = disconnect; });
+  const view = render(<MonitorResourceChart metric="cpu_usage" series={series} from={from} to={to} selectedTime={from} />);
+  const chart = screen.getByRole("img", { name: /Pod CPU/ });
+  act(() => resized([{ contentRect: { width: 390 } } as ResizeObserverEntry], {} as ResizeObserver));
+  expect(chart).toHaveAttribute("viewBox", "0 0 390 140");
+  expect(chart.querySelectorAll('text[text-anchor="middle"]')).toHaveLength(2);
+  view.unmount(); expect(disconnect).toHaveBeenCalledOnce(); vi.unstubAllGlobals();
 });

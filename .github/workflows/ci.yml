@@ -54,8 +54,8 @@ jobs:
       - name: Run SDK typecheck
         run: make typecheck
 
-      - name: Run SDK tests
-        run: make test
+      - name: Enforce SDK tests and coverage
+        run: make coverage
 
       - name: Build SDK artifacts
         run: uv build
@@ -368,8 +368,8 @@ jobs:
       - name: Sync Studio frontend dependencies
         run: make -C apps/studio sync
 
-      - name: Run Studio frontend tests
-        run: make -C apps/studio test
+      - name: Enforce Studio frontend tests and coverage
+        run: make -C apps/studio coverage
 
       - name: Build Studio frontend bundle
         run: make -C apps/studio build

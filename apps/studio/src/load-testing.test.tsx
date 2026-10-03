@@ -4,6 +4,11 @@ import { describe, expect, it } from "vitest";
 import { initialInput, RequestField, type InputSchema } from "./load-testing";
 
 describe("structured service inputs", () => {
+  it("initializes nullable fields from their non-null type and removes excluded optional values", () => {
+    expect(initialInput({ type: ["null", "integer"], minimum: 2 })).toBe(2);
+    function Form() { const schema: InputSchema = { type: "object", properties: { note: { type: "string" } } }; const [value, setValue] = useState(initialInput(schema)); return <><RequestField schema={schema} value={value} onChange={setValue} label="Inputs" /><output>{JSON.stringify(value)}</output></>; }
+    render(<Form />); fireEvent.click(screen.getByLabelText("Include note")); fireEvent.change(screen.getByLabelText("note *"), { target: { value: "temporary" } }); fireEvent.click(screen.getByLabelText("Include note")); expect(screen.getByText("{}")).toBeInTheDocument();
+  });
   it("handles nested arrays, numeric and boolean fields without a JSON editor", () => {
     const schema: InputSchema = { type: "object", required: ["enabled", "weights"], properties: {
       enabled: { type: "boolean" },
