@@ -18,7 +18,7 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 - [x] (2026-10-03) Run mandatory verification in both repositories and validate core UI functions with Computer Use.
 - [x] (2026-10-03) Document configuration/deployment, compatibility and acceptance evidence; commit and open draft PRs.
 - [x] (2026-10-03) Add 67 further Studio behavior regressions and satisfy unchanged frontend gates: 233 tests, 98.07% statements locally (98.04% under CI Node 20) / 89.02% branches / 99.36% functions / 98.67% lines. Recheck SDK (97.94%) and backend (495 tests / 98.13%). Chamber adds 78 tests, reaches 394 tests / 97.79% global branch-and-statement coverage, and enforces a 96% floor.
-- [ ] (2026-10-03) Enforce SDK and frontend coverage in CI, run final verification, consolidate into user-selected PR 131, retire superseded PR 132, and refresh PR descriptions/checks.
+- [x] (2026-10-03) Enforce SDK and frontend coverage in CI, run final verification, consolidate into user-selected PR 131, retire superseded PR 132, and refresh PR descriptions. GitHub checks are tracked on the active drafts.
 
 ## Surprises & Discoveries
 
