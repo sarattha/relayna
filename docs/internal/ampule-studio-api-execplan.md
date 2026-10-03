@@ -20,6 +20,9 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 - [x] (2026-10-03) Add 67 further Studio behavior regressions and satisfy unchanged frontend gates: 233 tests, 98.07% statements locally (98.04% under CI Node 20) / 89.02% branches / 99.36% functions / 98.67% lines. Recheck SDK (97.94%) and backend (495 tests / 98.13%). Chamber adds 78 tests, reaches 394 tests / 97.79% global branch-and-statement coverage, and enforces a 96% floor.
 - [x] (2026-10-03) Enforce SDK and frontend coverage in CI, run final verification, consolidate into user-selected PR 131, retire superseded PR 132, and refresh PR descriptions. GitHub checks are tracked on the active drafts.
 
+- [x] (2026-10-03) Prepare coordinated 1.10.0 metadata, lockfiles, manifest version labels, changelog and upgrade/rollback guidance. Mandatory verification passes (686 SDK / 495 backend), frontend 233 tests and unchanged coverage gates pass, production/package builds and strict docs build pass. Maintainer review finds no blocking issue.
+- [ ] (2026-10-03) Wait for release-commit CI, mark PR 131 ready and land it using the user-authorized maintainer review override if required. PR 132 is already merged into its branch.
+
 ## Surprises & Discoveries
 
 - Whole-source frontend coverage revealed untested advanced builder, result-management and legacy controls. Initial frontend coverage is 86.88% statements / 79.23% branches / 80.76% functions / 93.63% lines. Existing gates are 98/89/98/98; the backend already measures 98.13%, and SDK whole-package coverage is 97.94% (98% rounded). Chamber is raising global branch-inclusive coverage from 90% to an enforced 96% floor.
@@ -35,6 +38,8 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 
 ## Decision Log
 
+- Decision: the user authorizes landing PRs 131/132 and bumping the release. Use 1.10.0 for the additive Studio feature set on the shared SDK/backend/frontend line. Advance only manifest version labels and matching assertions; retain SDK export/signature entries and the intentionally added Studio routes. Use maintainer judgement while Codex review is unavailable, without disabling branch protection. Date/Author: 2026-10-03 Codex.
+
 - Decision: on the user's follow-up, consolidate Studio PR 132 into PR 131 by a fast-forward of its branch; retain the existing Chamber draft PR 43. Preserve coverage scopes and existing stronger gates. Add behavior tests for uncovered failures and workflows rather than exclude code. Date/Author: 2026-10-03 Codex.
 
 - Decision: user explicitly authorizes all audited findings and the Studio connection/API/storage perimeter additions; keep SDK contracts untouched. Date/Author: 2026-10-03 Codex.
@@ -46,6 +51,8 @@ Operators use Relayna Studio to configure, run and investigate all Ampule Chambe
 ## Outcomes & Retrospective
 
 Delivered native Studio connection, full assessment, monitoring, results and recovery workflows, plus Chamber 1.11 API completion. Mandatory SDK/backend checks pass; PostgreSQL integration 21 tests; Studio backend coverage 495 tests / 98.13%; frontend 233 tests / 98.07% statements / 89.02% branches / 99.36% functions / 98.67% lines / production build; SDK 97.94% whole-package coverage; Chamber 394 tests / 97.79% global branch-and-statement coverage / enforced 96% floor / complete make check. Coverage scopes and exclusions remain unchanged. Actual ASGI integration passed 23 operations with 305 exact tasks. Computer Use validated connection save/test, multi-journey capacity review and explicit start/cancel, exact task pagination/search, reusable target creation and three monitor layouts, including 390-pixel responsive checks. The execution supervisor was stubbed to prevent process/Kubernetes traffic; live target execution remains deployment acceptance. User-selected draft PRs: https://github.com/sarattha/relayna/pull/131 and https://github.com/sarattha/ampule-chamber/pull/43. PR 132 is superseded by consolidating its additive Studio workspace into PR 131. GitHub check status is tracked on the PRs.
+
+Release preparation: shared SDK/backend/frontend version 1.10.0, synchronized local-package locks, new changelog entry and upgrade/rollback guide. Only freeze-version labels and their assertions advance in this release-preparation commit; no additional perimeter, schema or runtime change. Existing PR 131 includes PR 132. Release-commit CI and landing remain pending.
 
 ## Context and Orientation
 

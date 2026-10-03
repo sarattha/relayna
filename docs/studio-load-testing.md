@@ -288,7 +288,7 @@ Before deploying this feature, stop old backend replicas during a maintenance
 window, back up PostgreSQL and run `alembic upgrade head`
 from `studio/backend` with `RELAYNA_STUDIO_DATABASE_URL` set. Revision
 `0002_load_profiles` adds `studio_load_profiles`; it does not migrate or remove
-ConfigMap profiles. Deploy matching 1.9.0 backend/frontend images together; do not mix backends
+ConfigMap profiles. Deploy matching 1.10.0 backend/frontend images together; do not mix backends
 expecting different schema revisions. Downgrading
 the schema removes imported profiles, so export/back up the database first.
 Read-only members can use the normal profile/run views but cannot browse import

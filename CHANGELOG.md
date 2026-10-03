@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.10.0 - 2026-10-03
+
+### Added
+
+- Responsive service/task Monitor workspace with dedicated Task explorer, Logs
+  focus and Investigation layouts, retained selection/filters, expanded log
+  readers, shared observation windows and pod CPU/memory charts.
+- Complete native Ampule Chamber workspace: multi-journey HTTP/Relayna scenarios,
+  YAML/JSON import, uploads, suites, performance gates, experiments and agents;
+  exact task pagination, evidence/reports, comparison, tags/archive, reviewed
+  reruns and cleanup recovery.
+- Administrator-managed encrypted Chamber connections, deployment fallback,
+  disable-new-assessments mode and authenticated API status. Studio's backend
+  reaches Chamber privately, including local port-forward setups.
+
+### Fixed
+
+- Access permission refresh loops, cleared-search and topology-navigation races,
+  service-control spacing, chart labels on mobile and stale monitor windows.
+- Vulnerable AnyIO, urllib3 and PyJWT lock entries without audit suppressions.
+
+### Changed
+
+- Bumped the coordinated SDK/Studio packages, locks and freeze manifest versions
+  to 1.10.0; existing SDK exports and broker contracts are unchanged.
+- Added 67 Studio regression tests and enforced SDK/frontend coverage in CI,
+  retaining all existing coverage thresholds and source scopes.
+
+### Compatibility and operations
+
+- Native APIs require Ampule Chamber 1.11.0; older capabilities retain supported
+  operation workflows. Existing ConfigMap profiles and deployment credentials
+  remain available. The new Studio routes are an explicitly approved additive
+  production-perimeter extension.
+- No migration from Studio 1.9.0. UI credentials reuse PostgreSQL operator
+  settings and require a stable `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY` Secret
+  plus a permitted backend-reachable endpoint. Saved runs retain their original
+  connection. See the release upgrade/rollback guide and Studio load-test docs.
+- Desktop/mobile UI and API acceptance used isolated synthetic services; real
+  Kubernetes execution remains staging deployment acceptance.
+
 ## 1.9.0 - 2026-09-15
 
 ### Added
