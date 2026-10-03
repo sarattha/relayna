@@ -551,3 +551,11 @@ it("keeps scroll position for new logs and jumps only when the operator requests
   expect(reader.scrollTop).toBe(100); fireEvent.click(screen.getByRole("button", { name: "New log results · Jump to latest" })); expect(reader.scrollTop).toBe(900);
   expect(screen.queryByRole("button", { name: "New log results · Jump to latest" })).not.toBeInTheDocument();
 });
+
+
+it.each(["complete", "completed", "succeeded", "success", "failed", "failure", "error", "errored", "cancelled", "canceled", "dead_lettered", "dead-lettered", "dlq", "timeout", "timed_out", "timed-out", "expired", "lease_expired", " ERRORED "])("keeps the task window fixed for terminal status %s", (status) => {
+  const first = monitorTimeWindow("task", Date.parse("2026-10-02T08:00:00Z"), { ...task, status }, [event]);
+  const later = monitorTimeWindow("task", Date.parse("2026-10-03T08:00:00Z"), { ...task, status }, [event]);
+  expect(first.to).toBe("2026-10-02T07:34:09.000Z");
+  expect(later).toEqual(first);
+});

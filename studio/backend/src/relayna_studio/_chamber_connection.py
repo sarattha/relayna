@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, quote, quote_plus, unquote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
@@ -21,6 +22,12 @@ from sqlalchemy.dialects.postgresql import insert
 from .audit_context import current_actor_user_id
 from .database import StudioDatabase, _append_audit, operator_settings
 from .registry import OutboundUrlPolicyError, StudioOutboundUrlPolicy
+
+_REDACTION_MAX_DEPTH = 32
+_REDACTION_MAX_STRING = 2 * 1024 * 1024
+_DIAGNOSTIC_MAX_NODES = 4096
+_DIAGNOSTIC_MAX_VALUES = 512
+_DIAGNOSTIC_MAX_BYTES = 64 * 1024
 
 
 class _ConnectionUpdate(BaseModel):
@@ -183,19 +190,57 @@ class _ConnectionStore:
         return self.public(connection)
 
 
-def _redact(value: Any) -> Any:
+def _redact(value: Any, depth: int = 0) -> Any:
+    if depth >= _REDACTION_MAX_DEPTH:
+        return "[redacted]"
     if isinstance(value, list):
-        return [_redact(item) for item in value]
+        return [_redact(item, depth + 1) for item in value]
     if isinstance(value, dict):
         return {
             key: _environment_references(key, item)
             if key in {"secretEnv", "headersFromEnv"}
             else "[redacted]"
             if _secret_key(key)
-            else _redact(item)
+            else _redact(item, depth + 1)
             for key, item in value.items()
             if key not in {"config_path", "run_dir"}
         }
+    if isinstance(value, str):
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                document = json.loads(value)
+            except RecursionError:
+                return "[redacted]"
+            except ValueError:
+                pass
+            else:
+                masked = _redact(document, depth + 1)
+                result = json.dumps(masked) if masked != document else value
+                return result if len(result) <= _REDACTION_MAX_STRING else "[redacted]"
+        candidate = value.strip()
+        if candidate.lower().startswith(("http://", "https://")):
+            try:
+                parts = urlsplit(candidate)
+            except ValueError:
+                return "[redacted]"
+            query = _redact_pairs(parts.query, depth + 1)
+            fragment = _redact_pairs(parts.fragment, depth + 1)
+            if parts.username is not None or query != parts.query or fragment != parts.fragment:
+                result = urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, query, fragment))
+                return result if len(result) <= _REDACTION_MAX_STRING else "[redacted]"
+        else:
+            return _redact_pairs(value, depth + 1)
+    return value
+
+
+def _redact_pairs(value: str, depth: int) -> str:
+    if "=" not in value:
+        return value
+    pairs = parse_qsl(value, keep_blank_values=True)
+    masked = [(key, "[redacted]" if _secret_key(key) else _redact(item, depth + 1)) for key, item in pairs]
+    if masked != pairs:
+        result = urlencode(masked)
+        return result if len(result) <= _REDACTION_MAX_STRING else "[redacted]"
     return value
 
 
@@ -216,7 +261,7 @@ def _secret_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]", "", key.lower())
     return (
         normalized in {"secretenv", "secret", "tokencipher"}
-        or normalized.endswith(("authorization", "password", "apikey", "cookie", "token"))
+        or normalized.endswith(("authorization", "password", "apikey", "cookie", "token", "clientsecret"))
         and normalized != "pathtoken"
     )
 
@@ -231,23 +276,98 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
         )
     if not isinstance(detail, str):
         return ""
-    secrets = [credential]
+    secrets: list[str] = []
+    known: set[str] = set()
+    collected_bytes = 0
+    inspected_nodes = 0
 
-    def collect(value: Any) -> None:
+    def remember(value: str) -> None:
+        nonlocal collected_bytes
+        if not value:
+            return
+        collected_bytes += len(value.encode())
+        if len(secrets) >= _DIAGNOSTIC_MAX_VALUES or collected_bytes > _DIAGNOSTIC_MAX_BYTES:
+            raise RecursionError("Chamber diagnostic inspection limit")
+        secrets.append(value)
+        known.add(value)
+
+    def inspect(depth: int) -> None:
+        nonlocal inspected_nodes
+        inspected_nodes += 1
+        if depth >= _REDACTION_MAX_DEPTH or inspected_nodes > _DIAGNOSTIC_MAX_NODES:
+            raise RecursionError("Chamber diagnostic inspection limit")
+
+    def collect(value: Any, depth: int = 0) -> None:
+        inspect(depth)
         if isinstance(value, dict):
             for key, item in value.items():
-                if _secret_key(key) and isinstance(item, str):
-                    secrets.append(item)
+                if _secret_key(key):
+                    collect_secret(item, depth + 1)
                 else:
-                    collect(item)
+                    collect(item, depth + 1)
         elif isinstance(value, list):
             for item in value:
-                collect(item)
+                collect(item, depth + 1)
+        elif isinstance(value, str):
+            if value.lstrip().startswith(("{", "[")):
+                try:
+                    document = json.loads(value)
+                except ValueError:
+                    pass
+                else:
+                    collect(document, depth + 1)
+            candidate = value.strip()
+            if candidate.lower().startswith(("http://", "https://")):
+                try:
+                    parts = urlsplit(candidate)
+                except ValueError:
+                    return
+                for item in (parts.username, parts.password):
+                    if item:
+                        collect_secret(item, depth + 1)
+                        collect_secret(unquote(item), depth + 1)
+                for component in (parts.query, parts.fragment):
+                    collect_pairs(component, depth + 1)
+            else:
+                collect_pairs(value, depth + 1)
 
-    collect(payload)
-    for secret in secrets:
-        if secret:
-            detail = detail.replace(secret, "[redacted]")
+    def collect_pairs(value: str, depth: int) -> None:
+        for part in value.split("&"):
+            for key, item in parse_qsl(part, keep_blank_values=True):
+                before = len(secrets)
+                if _secret_key(key):
+                    collect_secret(item, depth + 1)
+                else:
+                    collect(item, depth + 1)
+                if len(secrets) > before:
+                    nested = secrets[before:]
+                    if "=" in part:
+                        remember(part.split("=", 1)[1])
+                    for secret in set(nested):
+                        for encoded in (quote(secret, safe=""), quote_plus(secret, safe="")):
+                            if encoded not in known:
+                                remember(encoded)
+
+    def collect_secret(value: Any, depth: int) -> None:
+        inspect(depth)
+        if isinstance(value, str):
+            remember(value)
+            remember(json.dumps(value)[1:-1])
+        elif isinstance(value, list):
+            for item in value:
+                collect_secret(item, depth + 1)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect_secret(item, depth + 1)
+
+    try:
+        remember(credential)
+        collect(payload)
+    except RecursionError:
+        return "Diagnostic omitted: configuration exceeds the safe inspection limit."
+    if known:
+        pattern = "|".join(re.escape(secret) for secret in sorted(known, key=lambda value: len(value), reverse=True))
+        detail = re.sub(pattern, "[redacted]", detail)
     return re.sub(r"[\x00-\x1f\x7f]", " ", detail)[:1500]
 
 
@@ -281,14 +401,17 @@ async def _chamber_response(
         kwargs = {"files": {"file": upload}, "data": {"field": field}}
     limit = 32 * 1024 * 1024 if binary else 2 * 1024 * 1024
     try:
-        async with client.stream(
-            method,
-            f"{url}/api/v1/{path}",
-            headers=headers,
-            timeout=30 if binary or upload else 5,
-            follow_redirects=False,
-            **kwargs,
-        ) as response:
+        async with (
+            asyncio.timeout(240 if upload else None),
+            client.stream(
+                method,
+                f"{url}/api/v1/{path}",
+                headers=headers,
+                timeout=240 if upload else 30 if binary else 5,
+                follow_redirects=False,
+                **kwargs,
+            ) as response,
+        ):
             if response.status_code >= 300:
                 category = {
                     401: "unauthorized",
@@ -342,7 +465,7 @@ async def _chamber_response(
                         ),
                     )
             return bytes(chunks), response.headers.get("content-type", "application/octet-stream")
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, TimeoutError) as exc:
         raise HTTPException(
             502,
             f"Chamber is unavailable or returned an invalid response. You can retry safely. Reference: {request_id}",

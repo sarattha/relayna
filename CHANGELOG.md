@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.10.1 - 2026-10-03
+
+### Fixed
+
+- Mask client-secret credential fields, including separator/case variants and
+  prefixed client-secret names, in advanced plan reviews, readonly run/config
+  responses, retained snapshots, cached capabilities and validation diagnostics.
+  Normalize URL scheme case and surrounding whitespace when removing userinfo,
+  query and fragment credentials, including URLs and structured documents
+  nested in encoded form values.
+  Bound public inspection depth and expanded string size; mask excessive
+  sections and omit unsafe diagnostics instead of failing after plan creation.
+  Bound diagnostic collection breadth, value count and bytes, and use single-pass
+  substitution to avoid quadratic membership scans and repeated marker rewriting.
+  Environment references, client IDs and signed upload descriptors are preserved.
+- Give managed multipart uploads a bounded five-minute browser deadline and
+  four-minute total forwarding deadline, even for progressing responses, with
+  upstream stream cleanup on expiry. Allow 129 MiB bodies only on the bundled
+  frontend's upload route; retain normal request limits and cancellation.
+- Recognize `errored`, `dead-lettered` and `timed-out`, plus existing terminal
+  aliases including SDK `success`, `failure`, `dlq`, `expired` and `lease_expired`,
+  so completed task windows stop expanding into unrelated telemetry.
+
+### Documentation
+
+- Add copyable Fernet generation, AKS Secret and Deployment wiring, rollout,
+  local-backend setup and UI verification instructions. Document key backup,
+  single-key rotation limits, shared replica keys and external ingress limits.
+
+### Changed
+
+- Bump coordinated SDK/Studio package, lockfile and freeze-version metadata to
+  1.10.1. No exported SDK/API signature, route, schema or wire-format change.
+- Add credential-disclosure, timeout/cancellation and terminal-alias regression
+  tests while preserving all existing coverage gates and source scopes.
+
 ## 1.10.0 - 2026-10-03
 
 ### Added

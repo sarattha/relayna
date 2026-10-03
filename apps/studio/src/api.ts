@@ -74,7 +74,9 @@ async function performRequest<T>(input: string, init?: RequestInit): Promise<T> 
   const abort = () => controller.abort(init?.signal?.reason);
   if (init?.signal?.aborted) abort();
   else init?.signal?.addEventListener("abort", abort, { once: true });
-  const timeout = window.setTimeout(() => controller.abort(new Error("Request timed out. Please retry.")), 20_000);
+  const managedUpload = method === "POST" && init?.body instanceof FormData &&
+    /^\/studio\/services\/[^/]+\/load-tests\/chamber\/uploads$/.test(input);
+  const timeout = window.setTimeout(() => controller.abort(new Error("Request timed out. Please retry.")), managedUpload ? 300_000 : 20_000);
   try {
     const response = await fetch(input, { ...resolvedInit, signal: controller.signal });
     const payload = (await response.json().catch(() => null)) as { detail?: string; auth_mode?: string } | null;

@@ -202,7 +202,7 @@ def _workspace_router(bridge: Any) -> APIRouter:
         result = bridge.connections.public(current)
         stored = await bridge.redis.get("studio:chamber:health:" + str(current["id"]))
         if stored:
-            result.update(json.loads(stored))
+            result.update(_redact(json.loads(stored)))
         return result
 
     @router.put("/connection", dependencies=[Depends(_admin)])

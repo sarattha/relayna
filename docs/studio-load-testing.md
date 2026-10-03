@@ -41,7 +41,24 @@ and configure agents. Advanced editors preserve the complete Chamber document.
 Credentials masked in saved documents must be replaced with environment
 references; Studio preserves `secretEnv` and `headersFromEnv` variable names.
 Managed upload path tokens are temporary and may need re-uploading after Chamber
-restarts. Planning validates configuration and creates a review; starting is a
+restarts. Managed uploads support up to 128 MiB per file and 256 MiB per plan.
+Public credential masking inspects up to 32 nested container/encoding levels and
+limits expanded strings to 2 MiB. Sections beyond these inspection limits use
+`[redacted]`; validation details that cannot be safely inspected are explicitly
+omitted. Original configuration sent to Chamber is unaffected by these public
+projection limits.
+Diagnostic inspection also stops at 4,096 nodes, 512 collected values or 64 KiB
+of collected credential representations; exceeding any budget produces the same
+explicit omission message instead of relaying an unsafe upstream detail.
+The browser gives this upload endpoint a bounded five-minute request deadline;
+ordinary API requests retain their 20-second deadline. Studio's forwarding leg
+has a four-minute total deadline for sending the file and reading the response,
+including responses that continue making progress. The bundled frontend proxy
+accepts up to 129 MiB on that route to allow multipart overhead. If an external ingress is present, align
+its body-size and timeout limits with these values. A timed-out upload can have
+reached Chamber without returning its signed reference; re-upload to obtain a
+usable descriptor rather than assuming it was attached to a plan.
+Planning validates configuration and creates a review; starting is a
 separate action. Plans pin their target, environment and connection.
 
 Monitor offers the existing Task explorer, Logs focus and Investigation layouts.
@@ -85,6 +102,90 @@ requires re-saving the active override, and old run snapshots require the origin
 key for inspection/cancellation. Deployment-token rotation uses the current token
 only while the original deployment URL still matches. Returning to deployment
 settings does not erase already pinned run snapshots.
+
+### Set up the settings encryption key
+
+The key belongs to the **Studio backend**, where it encrypts saved Chamber
+credentials in PostgreSQL. It is distinct from the Chamber integration token and
+Studio login token. All backend replicas must receive the same key. PostgreSQL
+and matching Studio backend/frontend versions must already be configured.
+
+Generate a key only for the initial setup. If settings or saved run connections
+already exist, reuse their original key instead of generating a replacement.
+From the Relayna repository root, run:
+
+```bash
+umask 077
+studio_key_file="$(mktemp)"
+uv run --directory studio/backend python -c \
+  'import sys; from cryptography.fernet import Fernet; sys.stdout.write(Fernet.generate_key().decode())' \
+  > "$studio_key_file"
+```
+
+The file contains the URL-safe base64 Fernet key, with no trailing newline.
+Store a backup through your approved secret-management workflow, such as Azure
+Key Vault. Never commit the file, print the key into CI logs, or put it in a
+ConfigMap or frontend variable. Keep this file only until the key is safely
+backed up and injected; then remove the temporary copy.
+
+For AKS, create a dedicated Secret in the Studio namespace. Replace `relayna`
+with your deployment namespace if different. This command creates a new Secret
+without replacing existing runtime credentials:
+
+```bash
+kubectl -n relayna create secret generic relayna-studio-settings-encryption \
+  --from-file=RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY="$studio_key_file"
+```
+
+Add the following entry to the existing backend container's `env` list in the
+Deployment manifest, retaining its other environment entries. Apply the manifest
+through your normal deployment pipeline. Secret and backend must share a
+namespace:
+
+```yaml
+env:
+  - name: RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY
+    valueFrom:
+      secretKeyRef:
+        name: relayna-studio-settings-encryption
+        key: RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY
+```
+
+The pod-template change rolls out new replicas. If you instead add the key to a
+Secret already referenced by `envFrom`, restart the existing backend pods so
+they receive it. Replace `YOUR_BACKEND_DEPLOYMENT` with the actual Deployment:
+
+```bash
+kubectl -n relayna rollout restart deployment/YOUR_BACKEND_DEPLOYMENT
+kubectl -n relayna rollout status deployment/YOUR_BACKEND_DEPLOYMENT
+```
+
+For a local backend, use the same generated file in the same shell instead of
+the Kubernetes Secret:
+
+```bash
+export RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY="$(cat "$studio_key_file")"
+uv run --directory studio/backend relayna-studio
+```
+
+Supply the backend's other database, Redis and authentication variables as usual.
+If using Docker or Compose, pass this variable explicitly to the backend
+container; exporting it on the host alone does not inject it into a container.
+
+After rollout, sign in as an administrator and open a service's **Load testing →
+Connection** tab. Select **Administrator settings**, enter a backend-reachable
+Chamber URL and its integration token, save, and choose **Check saved connection**.
+A `ready` status confirms authenticated Chamber API access; target and Kubernetes
+readiness are checked separately. A storage warning indicates missing PostgreSQL
+or an invalid/missing encryption key. A host-allowlist error requires updating
+the backend outbound policy. Check the deployment configuration without printing
+the Secret value or asking the frontend to expose it.
+
+Keep the key stable across restarts, replicas and Chamber-token rotation. Studio
+currently accepts one settings key; it does not automatically re-encrypt old
+snapshots when that key changes. Losing the original key makes those saved
+credentials unavailable. Restore it to inspect/cancel existing runs; deliberately
+re-saving an active connection with a new key does not repair older snapshots.
 
 Native Chamber history has its own workspace retention. Studio references last
 30 days; archiving a native run changes its history visibility and does not extend
@@ -145,7 +246,8 @@ backend contract. Secrets must be supplied through your deployment secret store.
 | --- | --- | --- |
 | `relayna` | ConfigMap `relayna-studio-config` | Authentication mode, internal Chamber URL, profile path, outbound host allowlist and worker settings. |
 | `relayna` | ConfigMap `relayna-studio-chamber-profiles` | `profiles.json`: approved profiles keyed by immutable Studio service ID, with the exact registered environment. |
-| `relayna` | Secret `relayna-studio-runtime-secrets` | `RELAYNA_STUDIO_DATABASE_URL`, `RELAYNA_STUDIO_REDIS_URL`, `RELAYNA_STUDIO_CHAMBER_TOKEN`, `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY`; also `RELAYNA_STUDIO_OPERATOR_TOKEN` when using operator login. |
+| `relayna` | Secret `relayna-studio-runtime-secrets` | `RELAYNA_STUDIO_DATABASE_URL`, `RELAYNA_STUDIO_REDIS_URL`, `RELAYNA_STUDIO_CHAMBER_TOKEN`; also `RELAYNA_STUDIO_OPERATOR_TOKEN` when using operator login. Existing deployments may keep their settings key here through `envFrom`. |
+| `relayna` | Secret `relayna-studio-settings-encryption` | `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY`, injected into the backend as shown in [key setup](#set-up-the-settings-encryption-key). |
 | `ampule-system` | Secret `ampule-ampule-chamber-auth` | `admin-token`: Chamber's operator credential. Copy its value into Studio's `RELAYNA_STUDIO_CHAMBER_TOKEN` using your secret-management workflow; Kubernetes Secret references cannot cross namespaces. |
 | `ampule-system` | ConfigMap `ampule-ampule-chamber` | Helm-managed Chamber runtime configuration, including Kubernetes context and discovery namespaces. Preserve its chart-generated service-account and workspace wiring. |
 
@@ -288,7 +390,7 @@ Before deploying this feature, stop old backend replicas during a maintenance
 window, back up PostgreSQL and run `alembic upgrade head`
 from `studio/backend` with `RELAYNA_STUDIO_DATABASE_URL` set. Revision
 `0002_load_profiles` adds `studio_load_profiles`; it does not migrate or remove
-ConfigMap profiles. Deploy matching 1.10.0 backend/frontend images together; do not mix backends
+ConfigMap profiles. Deploy matching 1.10.1 backend/frontend images together; do not mix backends
 expecting different schema revisions. Downgrading
 the schema removes imported profiles, so export/back up the database first.
 Read-only members can use the normal profile/run views but cannot browse import

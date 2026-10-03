@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.0/relayna-1.10.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.10.1/relayna-1.10.1-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.0/relayna-1.10.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.10.1/relayna-1.10.1.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.10.0.tar.gz`
-- `dist/relayna-1.10.0-py3-none-any.whl`
+- `dist/relayna-1.10.1.tar.gz`
+- `dist/relayna-1.10.1-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,24 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.10.1
+
+Deploy matching Studio backend/frontend 1.10.1 images and use the aligned SDK
+package. This patch fixes the three findings from the 1.10.0 Studio review:
+client-secret fields are masked in current and retained JSON views/validation
+errors; managed uploads have a longer bounded deadline and a scoped frontend
+proxy body allowance; all supported terminal task aliases freeze the monitor
+window at the task's final timestamp.
+
+No PostgreSQL migration or SDK/wire-format change is required. Retain your
+existing settings encryption key across replicas and restarts. For initial
+setup, use the [complete local and AKS key guide](studio-load-testing.md#set-up-the-settings-encryption-key),
+including generation, Secret/Deployment wiring, verification, backup and rotation
+limits. Existing stored configurations are sanitized on read; they need no
+rewrite. Replace masked credentials with environment references before replanning.
+If you use another ingress in front of Studio, align its upload body/timeout
+limits with the [managed upload limits](studio-load-testing.md#native-chamber-workspace).
 
 ### Upgrading to 1.10.0
 
