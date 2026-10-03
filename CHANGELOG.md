@@ -12,7 +12,8 @@ All notable changes to this project will be documented in this file.
   prefixed client-secret names, in advanced plan reviews, readonly run/config
   responses, retained snapshots, cached capabilities and validation diagnostics.
   Normalize URL scheme case and surrounding whitespace when removing userinfo,
-  query and fragment credentials.
+  query and fragment credentials, including URLs and structured documents
+  nested in encoded form values.
   Environment references, client IDs and signed upload descriptors are preserved.
 - Give managed multipart uploads a bounded five-minute browser deadline and
   four-minute total forwarding deadline, even for progressing responses, with

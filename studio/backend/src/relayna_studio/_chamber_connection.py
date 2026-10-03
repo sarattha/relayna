@@ -9,7 +9,7 @@ import re
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, quote_plus, unquote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
@@ -225,8 +225,9 @@ def _redact_pairs(value: str) -> str:
     if "=" not in value:
         return value
     pairs = parse_qsl(value, keep_blank_values=True)
-    if any(_secret_key(key) for key, _ in pairs):
-        return urlencode([(key, "[redacted]" if _secret_key(key) else item) for key, item in pairs])
+    masked = [(key, "[redacted]" if _secret_key(key) else _redact(item)) for key, item in pairs]
+    if masked != pairs:
+        return urlencode(masked)
     return value
 
 
@@ -298,10 +299,19 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
     def collect_pairs(value: str) -> None:
         for part in value.split("&"):
             for key, item in parse_qsl(part, keep_blank_values=True):
+                before = len(secrets)
                 if _secret_key(key):
-                    secrets.append(item)
+                    collect_secret(item)
+                else:
+                    collect(item)
+                if len(secrets) > before:
+                    nested = secrets[before:]
                     if "=" in part:
                         secrets.append(part.split("=", 1)[1])
+                    for secret in set(nested):
+                        for encoded in (quote(secret, safe=""), quote_plus(secret, safe="")):
+                            if encoded not in secrets:
+                                secrets.append(encoded)
 
     def collect_secret(value: Any) -> None:
         if isinstance(value, str):

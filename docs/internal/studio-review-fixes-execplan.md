@@ -24,12 +24,19 @@ new reviewed follow-up PR after checks and review finish.
 - [x] Run focused regressions, security candidate review, full mandatory checks,
   unchanged coverage gates, production/package builds and strict documentation.
 - [x] Push and open follow-up PR 133; initial CI and Codex review complete.
-- [x] Address both additional confirmed review findings and rerun mandatory checks,
-  backend coverage/build and strict docs. Backend 521 passed at 98.13%.
+- [x] Address all additional confirmed review findings and rerun mandatory checks,
+  backend coverage/build and strict docs. Backend 526 passed at 98.14%.
 - [ ] Monitor the updated head and land it after final CI/review under the user's
   maintainer authorization.
 
 ## Surprises & Discoveries
+
+The second Codex review of PR 133 confirmed credential-bearing URLs and
+structured content nested inside form values. All five added source-to-sink
+cases reproduced before correction. Pair values now recurse through the shared
+redactor; diagnostics collect nested credentials and encoded representations.
+Unchanged nonsecret forms retain their original bytes and upstream submissions
+remain untouched. Include five additional regressions and rerun required checks.
 
 PR 133 Codex review on d569bc7 confirmed two further cases: uppercase/padded
 URLs bypass userinfo masking, and HTTPX inactivity budgets do not establish a
@@ -99,10 +106,10 @@ verified head; confirm post-merge CI/documentation publication.
 
 ## Outcomes & Retrospective
 
-All three review findings are fixed with 26 backend and 20 frontend regression
+All three review findings are fixed with 31 backend and 20 frontend regression
 cases. The mandatory verification stack passes: SDK 686 passed with 9 optional
-skips, Studio backend 521 passed, and frontend 253 passed. Unchanged coverage
-gates pass at SDK 97.94%, backend 98.13%, and frontend statements 98.07% (Node 26).
+skips, Studio backend 526 passed, and frontend 253 passed. Unchanged coverage
+gates pass at SDK 97.94%, backend 98.14%, and frontend statements 98.07% (Node 26).
 Production frontend and Python package builds, release metadata validation and
 strict MkDocs compilation pass. A real Nginx deployment accepted a 2 MiB managed
 upload and rejected oversized managed uploads and ordinary requests.

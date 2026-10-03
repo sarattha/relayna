@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from urllib.parse import urlencode
 
 import fakeredis.aioredis
 import httpx
@@ -621,6 +622,9 @@ def test_redaction_preserves_plaintext_and_noncredential_encoded_controls():
         "https://metrics.internal/path?target=worker#overview",
         " \t HTTPS://metrics.internal/path?target=worker#overview \n",
         "{not-json}",
+        urlencode({"endpoint": " HTTPS://metrics.internal/path?target=worker ", "client_id": "public"}),
+        urlencode({"body": '{ "client_id": "public", "pathToken": "signed-token" }'}),
+        urlencode({"body": "client_id=public&text=hello+world"}),
     ]
     for value in values:
         assert _redact({"body": value}) == {"body": value}
@@ -734,3 +738,33 @@ def test_upload_total_deadline_cancels_progress_and_releases_upstream(workspace,
     state["response"] = httpx.Response(200, json={"state": "completed"})
     assert client.get(API + "/runs/run-1").status_code == 200
     assert budgets[-1] is None
+
+
+@pytest.mark.parametrize(
+    "nested",
+    [
+        "https://user:synthetic-nested-credential@metrics.internal",
+        " HTTPS://user:synthetic%2Dnested%2Dcredential@metrics.internal ",
+        '{"clientSecret":"synthetic-nested-credential","client_id":"public"}',
+        "client_secret=synthetic-nested-credential&client_id=public",
+        urlencode({"endpoint": "https://user:synthetic-nested-credential@metrics.internal"}),
+    ],
+)
+def test_nested_form_credentials_are_masked_without_changing_upstream(workspace, nested):
+    client, bridge, _, member, calls, state, config, _ = workspace
+    body = urlencode({"endpoint": nested, "client_id": "public"})
+    config["traffic"]["journeys"][0].update(requestEncoding="raw", body=body)
+    planned = client.post(API + "/plans", json={"config": config})
+    assert planned.status_code == 201, planned.text
+    assert "synthetic" not in planned.text
+    assert json.loads(calls[-1].content)["config"] == config
+    assert "synthetic" not in json.dumps(bridge.public({"review_config": config}))
+    member.role = StudioRole.READONLY
+    state["response"] = httpx.Response(200, json={"config": config})
+    read = client.get(API + "/runs/run-1")
+    assert read.status_code == 200 and "synthetic" not in read.text
+    member.role = StudioRole.ADMIN
+    state["response"] = httpx.Response(422, json={"detail": "invalid synthetic-nested-credential; body=" + body})
+    error = client.post(API + "/actions/validate", json={"body": body})
+    assert error.status_code == 409 and "synthetic" not in error.text
+    assert "invalid" in error.text
