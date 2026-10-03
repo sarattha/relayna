@@ -12,6 +12,7 @@ loop, cleared-search race, and topology route race in the same focused frontend 
 
 ## Progress
 
+- [x] (2026-10-03) CI repair: inspected latest security job 111084037114; upgraded vulnerable lock entries only. SDK/backend audits and frontend audit pass; mandatory Python verification passes (686 SDK and 442 backend tests). Replacement CI is tracked on PR #131 after pushing.
 - [x] (2026-10-03) Follow-up: added Pod memory beside CPU using existing `memory_usage` group; shared-window markers, independent empty states, desktop/mobile Computer Use, 151 frontend tests, and production build passed.
 - [x] (2026-10-02) Created `codex/studio-monitor-workspace`; inspected skills, freeze tests, and selected visual targets.
 - [x] (2026-10-03) Fixed all three findings; regression tests pass.
@@ -40,6 +41,15 @@ with the selector and use a full-width field below 600px; no API or type changes
 
 ## Decision Log
 
+CI security repair: GitHub SDK audit reports two AnyIO findings fixed in 4.14.2
+and three urllib3 findings fixed in 2.8.0. Upgrade only those packages in the SDK
+lock and AnyIO in the backend lock (currently 4.13.0). The reproduced backend
+audit additionally found 13 PyJWT 2.13.0 advisories; upgrade its lock to 2.15.0,
+after which the backend audit reports no known vulnerabilities. Preserve dependency ranges,
+API contracts, freeze manifests and audit enforcement; no migration is needed.
+The user explicitly authorized this CI repair and commit/push. Verify both Python
+audits, frontend audit, and the mandatory Python stack after syncing both locks.
+
 Retain React and existing CSS rather than migrate frameworks. Use shared internal
 components outside `pages/` and additive query parameters on existing URLs;
 preserve API/types exports and page perimeter. The user explicitly approved the
@@ -57,6 +67,12 @@ separate empty states plus shared provider warnings. Stack the two charts below
 800px. No API/type exports, freeze manifests, or backend behavior change.
 
 ## Outcomes & Retrospective
+
+Security CI repair changes only the SDK/backend locks: AnyIO 4.14.2 in both,
+urllib3 2.8.0 in SDK, and PyJWT 2.15.0 in backend. SDK/backend dependency audits
+and frontend security audit pass. Mandatory format/lint/typecheck/test sequence
+passes: SDK 686 passed/9 skipped; backend 442 passed/19 skipped. No audit bypass,
+public contract change, or unrelated package upgrade was introduced.
 
 Pod memory follow-up is complete: memory bytes display in MiB beside CPU cores,
 with identical time bounds and selected-event markers. Charts stack below 800px.
