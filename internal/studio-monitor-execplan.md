@@ -13,6 +13,7 @@ loop, cleared-search race, and topology route race in the same focused frontend 
 ## Progress
 
 - [x] (2026-10-03) CI repair: inspected latest security job 111084037114; upgraded vulnerable lock entries only. SDK/backend audits and frontend audit pass; mandatory Python verification passes (686 SDK and 442 backend tests). Replacement CI is tracked on PR #131 after pushing.
+- [x] (2026-10-03) Both security jobs pass on 53cbccb. Corrected duplicate disclosure toggles in the task-log test helper; native events settle before returning, one pending log read is asserted. Frontend: 151 tests/build passed, failing case passed five focused runs. Final replacement CI is tracked on PR #131.
 - [x] (2026-10-03) Follow-up: added Pod memory beside CPU using existing `memory_usage` group; shared-window markers, independent empty states, desktop/mobile Computer Use, 151 frontend tests, and production build passed.
 - [x] (2026-10-02) Created `codex/studio-monitor-workspace`; inspected skills, freeze tests, and selected visual targets.
 - [x] (2026-10-03) Fixed all three findings; regression tests pass.
@@ -49,6 +50,14 @@ after which the backend audit reports no known vulnerabilities. Preserve depende
 API contracts, freeze manifests and audit enforcement; no migration is needed.
 The user explicitly authorized this CI repair and commit/push. Verify both Python
 audits, frontend audit, and the mandatory Python stack after syncing both locks.
+
+Replacement run 37082163496 passed security hardening, but frontend job
+111084841448 failed its task-log loading test. The shared test helper both sets
+`details.open` (queuing a native toggle) and dispatches a synthetic toggle. While
+the first log read is deferred, the duplicate read can return an error and end
+the loading state. Use one summary click, settle its native event in `act`, and
+assert one request while pending;
+no runtime behavior or timeout threshold changes.
 
 Retain React and existing CSS rather than migrate frameworks. Use shared internal
 components outside `pages/` and additive query parameters on existing URLs;

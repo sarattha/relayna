@@ -489,11 +489,13 @@ function customPodLabelMetricsResponse() {
 
 async function openTaskTelemetry() {
   const summary = await screen.findByText("Task Logs", { selector: "summary" });
-  for (const name of ["Task Logs", "Task Kubernetes Metrics", "Trace path"]) {
-    const disclosure = (name === "Task Logs" ? summary : screen.getByText(name, { selector: "summary" })).closest("details")!;
-    disclosure.open = true;
-    fireEvent(disclosure, new Event("toggle"));
-  }
+  await act(async () => {
+    for (const name of ["Task Logs", "Task Kubernetes Metrics", "Trace path"]) {
+      // Opening details queues its native toggle; do not dispatch a second one.
+      fireEvent.click(name === "Task Logs" ? summary : screen.getByText(name, { selector: "summary" }));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 describe("App", () => {
@@ -3537,6 +3539,8 @@ describe("App", () => {
 
     expect(await screen.findByText("Task Detail")).toBeInTheDocument();
     expect(await screen.findByText("Loading task logs...")).toBeInTheDocument();
+
+    expect(taskLogCalls).toBe(1);
 
     await act(async () => {
       resolveTaskLogs?.(jsonResponse({ count: 0, items: [], next_cursor: null }));
