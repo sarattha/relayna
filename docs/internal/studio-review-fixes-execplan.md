@@ -25,11 +25,22 @@ new reviewed follow-up PR after checks and review finish.
   unchanged coverage gates, production/package builds and strict documentation.
 - [x] Push and open follow-up PR 133; initial CI and Codex review complete.
 - [x] Address all additional confirmed review findings and rerun mandatory checks,
-  backend coverage/build and strict docs. Backend 530 passed at 98.12%.
-- [ ] Monitor the updated head and land it after final CI/review under the user's
-  maintainer authorization.
+  backend coverage/build and strict docs. Backend 534 passed at 98.14%.
+- [x] User explicitly waives further Codex review after the current findings;
+  fix both P2 findings and complete manual review plus mandatory checks.
+- [ ] Monitor final-head CI and land the exact passing commit under the user's
+  maintainer authorization, then verify main publication.
 
 ## Surprises & Discoveries
+
+Review of f44f8f5 identified five additional terminal aliases from the SDK graph
+normalizer and excessive breadth in diagnostic collection. Focused tests
+reproduced all five alias errors and all three missing diagnostic budgets, plus
+repeated substitution into newly inserted masking markers. Include SDK terminal
+aliases in the existing frontend predicate. Cap diagnostic traversal at 4,096
+nodes, 512 collected values and 64 KiB; use a set for membership and one escaped,
+longest-first substitution pass. Budget exhaustion retains the explicit omission
+message. Add four backend and five frontend regressions and rerun required checks.
 
 The next PR review confirmed a RecursionError for hundreds of raw nested form
 assignments. A focused API reproduction failed before correction. Bound public
@@ -114,10 +125,10 @@ verified head; confirm post-merge CI/documentation publication.
 
 ## Outcomes & Retrospective
 
-All three review findings are fixed with 35 backend and 20 frontend regression
+All three review findings are fixed with 39 backend and 25 frontend regression
 cases. The mandatory verification stack passes: SDK 686 passed with 9 optional
-skips, Studio backend 530 passed, and frontend 253 passed. Unchanged coverage
-gates pass at SDK 97.94%, backend 98.12%, and frontend statements 98.07% (Node 26).
+skips, Studio backend 534 passed, and frontend 258 passed. Unchanged coverage
+gates pass at SDK 97.94%, backend 98.14%, and frontend statements 98.07% (Node 26).
 Production frontend and Python package builds, release metadata validation and
 strict MkDocs compilation pass. A real Nginx deployment accepted a 2 MiB managed
 upload and rejected oversized managed uploads and ordinary requests.
@@ -127,3 +138,6 @@ candidate reviewer exposed encoding bypasses, now covered by passing regressions
 Environment references, pathToken and original upstream requests are preserved.
 No live Kubernetes target execution or user secrets were needed. PR 133 is open. Initial CI passed and all subsequent Codex findings are fixed;
 updated-head CI/review monitoring and landing remain pending.
+
+The user explicitly instructed: after the current round, do not call Codex review
+again; proceed to land. Honor this instruction after all final-head checks pass.

@@ -16,7 +16,7 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from relayna_studio._chamber_api import _StartConfirmation, _workspace_router
-from relayna_studio._chamber_connection import _origin, _redact
+from relayna_studio._chamber_connection import _origin, _redact, _validation_detail
 from relayna_studio.auth import StudioMemberStatus, StudioRole
 from relayna_studio.load_testing import _Chamber
 from relayna_studio.registry import StudioOutboundUrlPolicy
@@ -803,3 +803,26 @@ def test_expanded_url_projection_has_a_finite_size_limit():
     query = "a=" * 5 + "endpoint=https://user:synthetic-limit-credential@metrics.internal/" + "!" * 120_000
     url = "https://metrics.internal/" + "x" * 600_000 + "?" + query
     assert _redact(url) == "[redacted]"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"body": "&".join(f"client_secret=synthetic-wide-{index}" for index in range(1000))},
+        {f"field_{index}": "visible" for index in range(5000)},
+        {"client_secret": "synthetic-wide-credential" + "x" * 65_536},
+    ],
+    ids=["secret-count", "inspection-breadth", "collected-bytes"],
+)
+def test_excessive_diagnostic_collection_is_explicitly_omitted(workspace, payload):
+    client, _, _, _, calls, state, *_ = workspace
+    state["response"] = httpx.Response(422, json={"detail": "invalid synthetic-wide-credential"})
+    response = client.post(API + "/actions/validate", json=payload)
+    assert response.status_code == 409
+    assert "inspection limit" in response.text and "synthetic" not in response.text
+    assert json.loads(calls[-1].content) == payload
+
+
+def test_diagnostic_masking_does_not_rewrite_inserted_markers_and_keeps_plain_reasons():
+    assert _validation_detail("a redacted", {"client_secret": ["a", "redacted"]}, "") == "[redacted] [redacted]"
+    assert _validation_detail("field.required: missing value", {}, "") == "field.required: missing value"

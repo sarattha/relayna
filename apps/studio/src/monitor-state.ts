@@ -83,7 +83,7 @@ export function monitorTimeWindow(
       )
       .map(Date.parse);
     const terminal =
-      /^(completed?|succeeded|failed|error(?:ed)?|cancelled|canceled|dead[-_]lettered|timeout|timed[-_]out)$/i.test(
+      /^(completed?|succeeded|success|failed|failure|error(?:ed)?|cancelled|canceled|dead[-_]lettered|dlq|timeout|timed[-_]out|expired|lease_expired)$/i.test(
         (task.status || "").trim(),
       );
     if (timestamps.length)

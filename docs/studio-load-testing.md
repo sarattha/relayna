@@ -47,6 +47,9 @@ limits expanded strings to 2 MiB. Sections beyond these inspection limits use
 `[redacted]`; validation details that cannot be safely inspected are explicitly
 omitted. Original configuration sent to Chamber is unaffected by these public
 projection limits.
+Diagnostic inspection also stops at 4,096 nodes, 512 collected values or 64 KiB
+of collected credential representations; exceeding any budget produces the same
+explicit omission message instead of relaying an unsafe upstream detail.
 The browser gives this upload endpoint a bounded five-minute request deadline;
 ordinary API requests retain their 20-second deadline. Studio's forwarding leg
 has a four-minute total deadline for sending the file and reading the response,

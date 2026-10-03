@@ -25,6 +25,9 @@ from .registry import OutboundUrlPolicyError, StudioOutboundUrlPolicy
 
 _REDACTION_MAX_DEPTH = 32
 _REDACTION_MAX_STRING = 2 * 1024 * 1024
+_DIAGNOSTIC_MAX_NODES = 4096
+_DIAGNOSTIC_MAX_VALUES = 512
+_DIAGNOSTIC_MAX_BYTES = 64 * 1024
 
 
 class _ConnectionUpdate(BaseModel):
@@ -273,11 +276,29 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
         )
     if not isinstance(detail, str):
         return ""
-    secrets = [credential]
+    secrets: list[str] = []
+    known: set[str] = set()
+    collected_bytes = 0
+    inspected_nodes = 0
+
+    def remember(value: str) -> None:
+        nonlocal collected_bytes
+        if not value:
+            return
+        collected_bytes += len(value.encode())
+        if len(secrets) >= _DIAGNOSTIC_MAX_VALUES or collected_bytes > _DIAGNOSTIC_MAX_BYTES:
+            raise RecursionError("Chamber diagnostic inspection limit")
+        secrets.append(value)
+        known.add(value)
+
+    def inspect(depth: int) -> None:
+        nonlocal inspected_nodes
+        inspected_nodes += 1
+        if depth >= _REDACTION_MAX_DEPTH or inspected_nodes > _DIAGNOSTIC_MAX_NODES:
+            raise RecursionError("Chamber diagnostic inspection limit")
 
     def collect(value: Any, depth: int = 0) -> None:
-        if depth >= _REDACTION_MAX_DEPTH:
-            raise RecursionError("Chamber diagnostic inspection limit")
+        inspect(depth)
         if isinstance(value, dict):
             for key, item in value.items():
                 if _secret_key(key):
@@ -321,20 +342,17 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
                 if len(secrets) > before:
                     nested = secrets[before:]
                     if "=" in part:
-                        secrets.append(part.split("=", 1)[1])
+                        remember(part.split("=", 1)[1])
                     for secret in set(nested):
                         for encoded in (quote(secret, safe=""), quote_plus(secret, safe="")):
-                            if len(encoded) > _REDACTION_MAX_STRING:
-                                raise RecursionError("Chamber diagnostic inspection limit")
-                            if encoded not in secrets:
-                                secrets.append(encoded)
+                            if encoded not in known:
+                                remember(encoded)
 
     def collect_secret(value: Any, depth: int) -> None:
-        if depth >= _REDACTION_MAX_DEPTH:
-            raise RecursionError("Chamber diagnostic inspection limit")
+        inspect(depth)
         if isinstance(value, str):
-            secrets.append(value)
-            secrets.append(json.dumps(value)[1:-1])
+            remember(value)
+            remember(json.dumps(value)[1:-1])
         elif isinstance(value, list):
             for item in value:
                 collect_secret(item, depth + 1)
@@ -343,12 +361,13 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
                 collect_secret(item, depth + 1)
 
     try:
+        remember(credential)
         collect(payload)
     except RecursionError:
         return "Diagnostic omitted: configuration exceeds the safe inspection limit."
-    for secret in secrets:
-        if secret:
-            detail = detail.replace(secret, "[redacted]")
+    if known:
+        pattern = "|".join(re.escape(secret) for secret in sorted(known, key=lambda value: len(value), reverse=True))
+        detail = re.sub(pattern, "[redacted]", detail)
     return re.sub(r"[\x00-\x1f\x7f]", " ", detail)[:1500]
 
 
