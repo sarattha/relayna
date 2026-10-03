@@ -431,7 +431,7 @@ export function formatChartOffset(milliseconds: number) {
   return `+${days}d`;
 }
 
-export function MetricLineChart({ series, podLabel }: { series: StudioMetricSeries[]; podLabel?: string | null }) {
+export function MetricLineChart({ series, podLabel, label = "Pod metric graph" }: { series: StudioMetricSeries[]; podLabel?: string | null; label?: string }) {
   const width = 640;
   const height = 220;
   const paddingTop = 28;
@@ -471,7 +471,7 @@ export function MetricLineChart({ series, podLabel }: { series: StudioMetricSeri
   }
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Pod metric graph" style={{ width: "100%", height: 220 }}>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} style={{ width: "100%", height: 220 }}>
       <line
         x1={paddingLeft}
         y1={height - paddingBottom}

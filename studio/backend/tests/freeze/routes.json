@@ -1,6 +1,21 @@
 {
   "freeze_version": "v1.9.0",
   "route_declarations": [
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/connection'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "put", "path_expression": "'/connection'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/connection/test'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/catalog/{kind}'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/scenarios/{source}/{scenario_id}'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/scenarios/{source}/{scenario_id}/document'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/actions/{action}'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/plans'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/runs'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/runs/{run_id}'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/runs/{run_id}/{section}'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/runs/{run_id}/{operation}'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/jobs/{job_id}/cleanup-verified'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/uploads'"},
+    {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/download/{run_id}/{kind}'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "get", "path_expression": "'/studio/auth/config'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "get", "path_expression": "'/studio/auth/login'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "post", "path_expression": "'/studio/auth/login'"},
@@ -70,5 +85,6 @@
     {"file": "studio/backend/src/relayna_studio/search.py", "method": "get", "path_expression": "f'{prefix}/services/search'"},
     {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/traces'"},
     {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/trace-path'"}
-  ]
+  ],
+  "compatibility_note": "2026-10-03: User explicitly approved additive native Chamber workspace and administrator connection routes. Existing released SDK and Studio routes remain present; new service-scoped routes are intentional production perimeter additions."
 }

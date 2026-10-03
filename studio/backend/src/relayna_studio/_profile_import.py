@@ -275,7 +275,8 @@ def _import_router(bridge: _Chamber) -> APIRouter:
     async def preview_impl(service_id: str, payload: _Preview) -> dict[str, Any]:
         service = await bridge.service(service_id, mutate=True)
         bridge.profile_store.required()
-        data = await bridge.call("GET", f"runs/{quote(payload.run_id, safe='')}")
+        connection = await bridge.connections.current()
+        data = await bridge.call("GET", f"runs/{quote(payload.run_id, safe='')}", connection=connection)
         try:
             config = _config(data["config"], payload.operation)
             journey = config["traffic"]["journeys"][0]
@@ -286,6 +287,7 @@ def _import_router(bridge: _Chamber) -> APIRouter:
                 "max_iterations": 20,
                 "max_duration_seconds": 300,
                 "config": config,
+                "chamber_origin": connection.get("url"),
             }
             settings = {**await bridge.settings(service_id, service.environment), "profiles": [profile]}
             _validate_profiles({service_id: settings})
@@ -304,6 +306,7 @@ def _import_router(bridge: _Chamber) -> APIRouter:
                     "base_url": service.base_url,
                     "profile": profile,
                     "schema_revision": schema["schema_revision"],
+                    "connection_id": connection.get("id"),
                 }
             ),
             ex=1800,
@@ -337,6 +340,9 @@ def _import_router(bridge: _Chamber) -> APIRouter:
         if not raw:
             raise HTTPException(409, "Import preview expired or belongs to another service. Preview again.")
         snapshot = json.loads(raw)
+        connection = await bridge.connections.current()
+        if snapshot.get("connection_id") and snapshot["connection_id"] != connection.get("id"):
+            raise HTTPException(409, "The Chamber connection changed. Preview the import again.")
         if snapshot["environment"] != service.environment or snapshot["base_url"] != service.base_url:
             raise HTTPException(409, "The service target changed. Preview again.")
         profile = snapshot["profile"]

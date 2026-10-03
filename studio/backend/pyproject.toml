@@ -9,6 +9,8 @@ authors = [
 ]
 dependencies = [
     "fastapi>=0.115.11",
+    "cryptography>=50.0.0",
+    "python-multipart>=0.0.20",
     "httpx>=0.28.1",
     "jsonschema>=4.23.0",
     "opentelemetry-api>=1.28.0",

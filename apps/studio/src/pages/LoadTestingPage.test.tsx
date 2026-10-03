@@ -52,7 +52,7 @@ describe("service load testing", () => {
     expect(await screen.findByText("Load started")).toBeInTheDocument();
     expect(await screen.findByText("Task accepted")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "task-1" })).toHaveAttribute("href", "/tasks/svc/task-1");
-    expect(screen.getByRole("img", { name: "Pod metric graph" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Cpu Usage graph" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Cancel load test" }));
     expect(await screen.findByText("Cancelled")).toBeInTheDocument();
     await waitFor(() => expect(mocks.fetchServiceMetrics).toHaveBeenLastCalledWith("svc", expect.objectContaining({ from: planned.created_at, to: "2026-09-14T01:01:00Z", split_by_pod: true })));

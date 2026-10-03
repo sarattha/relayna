@@ -528,7 +528,7 @@ async def test_polling_does_not_extend_retention_or_resurrect_expired_runs(confi
 
 
 @pytest.mark.asyncio
-async def test_terminal_snapshots_survive_outage_but_running_and_cancel_errors_surface(configured):
+async def test_active_and_terminal_snapshots_survive_outage_but_cancel_errors_surface(configured):
     from fastapi import HTTPException
     from relayna_studio.load_testing import _LoadRequest
 
@@ -541,8 +541,9 @@ async def test_terminal_snapshots_survive_outage_but_running_and_cancel_errors_s
     bridge.call.return_value = {"job_id": "job", "state": "running"}
     await bridge.start("translation-staging", identity)
     bridge.call.side_effect = HTTPException(502, "offline")
-    with pytest.raises(HTTPException):
-        await bridge.status("translation-staging", identity)
+    interrupted = await bridge.status("translation-staging", identity)
+    assert interrupted["state"] == "running"
+    assert "snapshot" in interrupted["evidence_error"]
     bridge.call.side_effect = [
         {"state": "completed", "run_id": "run", "output": "finished"},
         {"result": {"status": "passed"}, "relayna": {"tasks": [{"task_id": "task-1", "success": True}]}},

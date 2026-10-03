@@ -39,6 +39,8 @@ import type {
   ServiceRecord,
   StudioLogEntry,
   StudioTaskSearchItem,
+  StudioTaskSearchQuery,
+  StudioTaskSearchResponse,
 } from "./types";
 
 const modes: Array<{ value: MonitorLayout; label: string }> = [
@@ -97,10 +99,16 @@ export function MonitorWorkspace({
   service,
   initialTaskId = "",
   active = true,
+  taskSearch = searchTasks,
+  taskSource = "Service tasks",
+  taskSourceKey = "service",
 }: {
   service: ServiceRecord;
   initialTaskId?: string;
   active?: boolean;
+  taskSearch?: (query: StudioTaskSearchQuery) => Promise<StudioTaskSearchResponse>;
+  taskSource?: string;
+  taskSourceKey?: string;
 }) {
   const [params, setParams] = useSearchParams();
   const [preferences, setPreferences] = useState(readMonitorPreferences);
@@ -238,6 +246,7 @@ export function MonitorWorkspace({
   );
   const listKey = JSON.stringify([
     service.service_id,
+    taskSourceKey,
     taskFilter,
     status,
     cursors[page],
@@ -248,7 +257,7 @@ export function MonitorWorkspace({
     active && layout === "explorer",
     revision,
     () =>
-      searchTasks({
+      taskSearch({
         service_id: service.service_id,
         task_id: taskFilter,
         status,
@@ -610,7 +619,7 @@ export function MonitorWorkspace({
       <div className={`monitor-canvas monitor-canvas--${layout}`}>
         <aside className="monitor-sidebar" hidden={layout !== "explorer"}>
           <header>
-            <h2>Tasks</h2>
+            <h2>{taskSource === "Service tasks" ? "Tasks" : taskSource}</h2>
             <button type="button" onClick={refresh} aria-label="Refresh tasks">
               <StudioIcon name="refresh" />
             </button>
@@ -628,7 +637,7 @@ export function MonitorWorkspace({
               className="studio-sr-only"
               htmlFor={`monitor-tasks-${service.service_id}`}
             >
-              Find service task
+              Find {taskSource === "Service tasks" ? "service" : "run"} task
             </label>
             <input
               id={`monitor-tasks-${service.service_id}`}
@@ -683,7 +692,7 @@ export function MonitorWorkspace({
             <NoticeBanner tone="error">{tasks.error}</NoticeBanner>
           )}
           {tasks.loading && <p role="status">Loading tasks…</p>}
-          <div className="monitor-task-list" aria-label="Service tasks">
+          <div className="monitor-task-list" aria-label={taskSource}>
             {tasks.data?.items.map((item) => (
               <button
                 type="button"

@@ -5,8 +5,8 @@ fill in its typed request fields (automatically imported from OpenAPI when enabl
 **Review load test**. Review creates a Chamber plan without sending traffic.
 **Start load test** executes that plan against the named environment. A lost
 start response can be retried on the same plan without starting duplicate work.
-Chamber-backed requests have a 15-second server deadline, below Studio’s
-20-second browser timeout. Check recent runs before retrying a timed-out plan;
+Chamber-backed JSON requests have a five-second upstream deadline and a
+15-second adapter deadline, below Studio’s 20-second browser timeout. Check recent runs before retrying a timed-out plan;
 planning itself does not generate load.
 
 The run URL can be bookmarked. Recent plans and runs remain in Studio for
@@ -29,10 +29,74 @@ traffic; it is not presented as exact per-test attribution. Empty samples and
 unavailable providers are shown explicitly. Refresh telemetry after completion
 if the provider has ingestion delay.
 
+## Native Chamber workspace
+
+The five tabs are **Configure**, **Monitor**, **Results**, **Profiles** and
+**Connection**. Configure preserves the approved-operation form and adds a
+**Full assessment** builder. Administrators can select or discover targets,
+inspect repositories, propose traffic from goals, import/save complete YAML or
+JSON scenarios, add multiple HTTP or Relayna journeys, upload multipart files,
+configure arrival/capacity/soak suites, set performance gates, select experiments
+and configure agents. Advanced editors preserve the complete Chamber document.
+Credentials masked in saved documents must be replaced with environment
+references; Studio preserves `secretEnv` and `headersFromEnv` variable names.
+Managed upload path tokens are temporary and may need re-uploading after Chamber
+restarts. Planning validates configuration and creates a review; starting is a
+separate action. Plans pin their target, environment and connection.
+
+Monitor offers the existing Task explorer, Logs focus and Investigation layouts.
+Its task source uses paginated exact Chamber task identities. Results separates
+execution state from assessment verdict, score, evidence coverage and limitations;
+it exposes findings, timeline, filtered evidence, complete configuration, agents,
+report/evidence downloads, history, comparison, tags, archive and reviewed reruns.
+Task pagination retains tasks beyond the bounded 25-item summary. Large documents
+and evidence previews disclose truncation; download the retained report/evidence
+for their complete contents. Studio JSON transport is limited to 2 MiB and
+attachment downloads to 32 MiB. Reports are attachments, including HTML; Studio
+does not execute upstream report markup. Cleanup verification requires an explicit
+operator confirmation after actual restoration. Reusable targets expose admission
+budgets, occupancy and readiness separately.
+
+### Administrator connection settings
+
+Connection lets an administrator test a draft, save an encrypted override, check
+the saved API, return to deployment settings, or disable new assessments. The API
+status distinguishes unset, authentication, network, incompatible, limited and
+ready states, with last-check and last-success timestamps. API readiness does not
+claim Kubernetes, target or telemetry readiness. All mutations require Studio
+administrator authorization and normal CSRF protection and produce metadata-only
+audit records. Active read-only members can inspect results and settings.
+
+Use the private Chamber Kubernetes Service in AKS. A laptop port-forward works
+only when the Studio backend can reach that laptop address, typically with both
+running locally. A port-forward available only to the browser cannot serve a
+remote Studio backend. The URL must satisfy Studio’s backend outbound allowlist;
+literal IP addresses require an explicitly allowed network. No public Chamber
+hostname or browser token is needed.
+
+UI credentials require PostgreSQL and `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY`.
+Generate a Fernet key with `cryptography.fernet.Fernet.generate_key()` and inject it
+through your deployment secret-management workflow. Never put keys or tokens in a
+ConfigMap or frontend variable. Blank credentials retain the token only for the
+same saved endpoint; changing the URL requires a new token. Existing plans retain
+the encrypted connection snapshot and cannot silently move to another Chamber.
+Keep the encryption key when rotating connection credentials. Changing that key
+requires re-saving the active override, and old run snapshots require the original
+key for inspection/cancellation. Deployment-token rotation uses the current token
+only while the original deployment URL still matches. Returning to deployment
+settings does not erase already pinned run snapshots.
+
+Native Chamber history has its own workspace retention. Studio references last
+30 days; archiving a native run changes its history visibility and does not extend
+retention. Filters/pagination expose at most the Chamber history index limit of
+1,000 entries. Telemetry shows last successful refresh and retained samples during
+provider outages; service/pod measurements may include unrelated traffic.
+
 ## Deployment
 
-Relayna Studio **1.9.0** targets **Ampule Chamber 1.10.0**, the version identified in its
-Studio preparation artifact. Chamber remains an internal service; only the
+The complete native workspace targets **Ampule Chamber 1.11.0**. Older
+1.10 connections retain the approved-operation flow; capability checks identify
+missing workspace features. Chamber remains an internal service; only the
 Studio hostname is exposed. Studio renders native React forms, run views and
 its existing log/metric components, consuming Chamber's execution and evidence
 APIs. Chamber does not provide a reusable React component package.
@@ -42,11 +106,14 @@ Set these variables on the **Studio backend** deployment:
 | Variable | Purpose |
 | --- | --- |
 | `RELAYNA_STUDIO_CHAMBER_URL` | Internal HTTP(S) base URL for Chamber, e.g. `http://ampule-chamber.reliability.svc:8765`. |
-| `RELAYNA_STUDIO_CHAMBER_TOKEN` | Chamber operator bearer token, injected from a Kubernetes Secret. Required when URL is set. |
+| `RELAYNA_STUDIO_CHAMBER_TOKEN` | Chamber integration bearer token, injected from a Kubernetes Secret. Required when URL is set. Prefer Chamber’s dedicated `AMPULE_CHAMBER_STUDIO_TOKEN`; an existing operator token remains supported. |
+| `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY` | Fernet key injected from a separate backend Secret, required for encrypted administrator overrides. Keep stable across restarts and all backend replicas. |
 | `RELAYNA_STUDIO_CHAMBER_PROFILES_PATH` | Absolute path to the mounted service-profile JSON file. |
 
-Mount the profile file read-only, configure the matching operator token in
-Chamber, and restart Studio after profile changes. Never put the bearer token
+Mount deployment profiles read-only, configure the matching integration token
+in Chamber, and restart Studio after deployment configuration changes.
+Administrator overrides are stored in the existing PostgreSQL operator-settings
+table and take effect immediately. Never put the bearer token
 in frontend variables. Existing Studio authentication, CSRF and mutation audit
 middleware protects these routes. Planning, starting and cancelling record
 `load_test.plan`, `load_test.start` and `load_test.cancel` request/outcome audit
@@ -61,8 +128,9 @@ attach profiles can use `kubernetes://in-cluster/<namespace>/<workload>` as
 `service.repo`; profiles using a local repository path require that repository
 to be mounted inside the Chamber container. Attach-mode permissions must cover target
 workload observation and service port-forwarding. Studio does not need Kubernetes
-credentials. Retain the existing Chamber safety gates; this integration creates
-observe-only tests with faults and cleanup disabled. Do not expose Chamber's
+credentials. Retain the existing Chamber safety gates. Approved-operation tests remain
+observe-only; full assessments may enable experiments and cleanup explicitly,
+with separate reviewed-target and fault confirmations before execution. Do not expose Chamber's
 operator API publicly. Existing Studio ingress `/studio` routing also covers
 `/studio/services/{service_id}/load-tests`, so no new hostname or ingress path is
 necessary.
@@ -77,7 +145,7 @@ backend contract. Secrets must be supplied through your deployment secret store.
 | --- | --- | --- |
 | `relayna` | ConfigMap `relayna-studio-config` | Authentication mode, internal Chamber URL, profile path, outbound host allowlist and worker settings. |
 | `relayna` | ConfigMap `relayna-studio-chamber-profiles` | `profiles.json`: approved profiles keyed by immutable Studio service ID, with the exact registered environment. |
-| `relayna` | Secret `relayna-studio-runtime-secrets` | `RELAYNA_STUDIO_DATABASE_URL`, `RELAYNA_STUDIO_REDIS_URL`, `RELAYNA_STUDIO_CHAMBER_TOKEN`; also `RELAYNA_STUDIO_OPERATOR_TOKEN` when using operator login. |
+| `relayna` | Secret `relayna-studio-runtime-secrets` | `RELAYNA_STUDIO_DATABASE_URL`, `RELAYNA_STUDIO_REDIS_URL`, `RELAYNA_STUDIO_CHAMBER_TOKEN`, `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY`; also `RELAYNA_STUDIO_OPERATOR_TOKEN` when using operator login. |
 | `ampule-system` | Secret `ampule-ampule-chamber-auth` | `admin-token`: Chamber's operator credential. Copy its value into Studio's `RELAYNA_STUDIO_CHAMBER_TOKEN` using your secret-management workflow; Kubernetes Secret references cannot cross namespaces. |
 | `ampule-system` | ConfigMap `ampule-ampule-chamber` | Helm-managed Chamber runtime configuration, including Kubernetes context and discovery namespaces. Preserve its chart-generated service-account and workspace wiring. |
 
@@ -355,6 +423,7 @@ Studio stores service-bound plans/job references under `studio:load-testing:v1:`
 in its existing Redis connection, with 30-day retention. Persist Redis if run
 bookmarks must survive restarts. Chamber separately persists jobs and evidence
 in its workspace. Both stores are needed to recover a started job. The adapter
-uses a stable `Idempotency-Key` per Studio plan and never accepts a browser-supplied
-Chamber job or plan ID. Profile changes apply to new plans; previously reviewed
+uses a stable `Idempotency-Key` per Studio plan. Bound execution and job IDs are
+validated against the saved reference; native Chamber history can also be
+inspected through the active administrator connection. Profile changes apply to new plans; previously reviewed
 plans retain their snapshot. Revoke a service by disabling its registry entry.
