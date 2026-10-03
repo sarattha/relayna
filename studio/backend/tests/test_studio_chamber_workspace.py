@@ -49,6 +49,74 @@ def test_full_documents_preserve_environment_references_but_mask_credentials():
     }
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "client_secret",
+        "clientSecret",
+        "client-secret",
+        "CLIENT_SECRET",
+        "client.secret",
+        "client secret",
+        "oauth_client_secret",
+    ],
+)
+def test_client_secret_variants_are_redacted_in_nested_documents_and_validation_errors(workspace, key):
+    client, _, _, member, calls, state, config, _ = workspace
+    credential = "synthetic-client-credential"
+    config["agents"] = {"oauth": [{key: credential, "client_id": "visible-client"}]}
+    config["traffic"]["journeys"][0]["body"] = {key: credential}
+    config["runtime"]["secretEnv"] = ["OAUTH_CLIENT_SECRET"]
+    config["traffic"]["journeys"][0]["headersFromEnv"] = {"Authorization": "API_TOKEN"}
+    planned = client.post(API + "/plans", json={"config": config, "mode": "kubernetes"})
+    assert planned.status_code == 201, planned.text
+    assert credential not in planned.text
+    assert planned.json()["review_config"]["agents"]["oauth"][0]["client_id"] == "visible-client"
+    assert planned.json()["review_config"]["runtime"]["secretEnv"] == ["OAUTH_CLIENT_SECRET"]
+    assert json.loads(calls[-1].content)["config"] == config
+
+    state["response"] = httpx.Response(200, json={"config": config, "file": {"pathToken": "signed-descriptor"}})
+    member.role = StudioRole.READONLY
+    readable = client.get(API + "/runs/run-1")
+    assert readable.status_code == 200 and credential not in readable.text
+    assert readable.json()["file"]["pathToken"] == "signed-descriptor"
+    assert readable.json()["config"]["traffic"]["journeys"][0]["headersFromEnv"] == {"Authorization": "API_TOKEN"}
+
+    member.role = StudioRole.ADMIN
+    state["response"] = httpx.Response(422, json={"detail": "invalid " + credential})
+    invalid = client.post(API + "/actions/validate", json={"nested": [{key: credential}]})
+    assert invalid.status_code == 409 and credential not in invalid.text
+    assert "invalid [redacted]" in invalid.text
+
+
+def test_retained_public_snapshots_are_sanitized_without_rewriting_stored_state(workspace):
+    _, bridge, *_ = workspace
+    record = {
+        "id": "old-run",
+        "review_config": {"clientSecret": "legacy-credential"},
+        "load_summary": {"journeys": [{"client_secret": "legacy-credential"}]},
+        "result": {"nested": [{"client-secret": "legacy-credential"}]},
+        "connection": {"id": "old-connection", "token_cipher": "encrypted-private"},
+    }
+    before = copy.deepcopy(record)
+    result = bridge.public(record)
+    assert "legacy-credential" not in json.dumps(result)
+    assert "encrypted-private" not in json.dumps(result)
+    assert result["chamber"]["connection_id"] == "old-connection"
+    assert record == before
+
+
+def test_readonly_cached_connection_capabilities_are_sanitized_on_read(workspace, monkeypatch):
+    client, bridge, _, member, *_ = workspace
+    member.role = StudioRole.READONLY
+    stored = json.dumps({"status": "ready", "capabilities": {"client_secret": "legacy-capability-secret"}})
+    monkeypatch.setattr(bridge.redis, "get", AsyncMock(return_value=stored))
+    response = client.get(API + "/connection")
+    assert response.status_code == 200 and "legacy-capability-secret" not in response.text
+    assert response.json()["capabilities"]["client_secret"] == "[redacted]"
+    assert response.json()["token_configured"] is True
+
+
 class SettingsDatabase:
     """Exercise the store's SQL values and transaction behavior without a live database."""
 
@@ -343,6 +411,7 @@ def test_upload_download_recovery_and_rerun_are_native_and_bounded(workspace):
     )
     assert upload.status_code == 200 and upload.json()["file"]["pathToken"] == "signed-token"
     assert calls[-1].url.path.endswith("/uploads") and b"hello" in calls[-1].content
+    assert calls[-1].extensions["timeout"]["write"] == 240
     assert (
         client.post(API + "/uploads", data={"field": "../secret"}, files={"file": ("f.txt", b"x")}).status_code == 422
     )
@@ -508,3 +577,89 @@ def test_workspace_requires_member_and_rejects_invalid_chamber_identity(workspac
     with pytest.raises(HTTPException):
         _identity("../foreign")
     assert _redact({"secretEnv": "actual credential"}) == {"secretEnv": "[redacted]"}
+
+
+@pytest.mark.parametrize(
+    "encoded",
+    [
+        "client_secret=synthetic-encoded-credential&client_id=public",
+        "client%5Fsecret=synthetic%2Dencoded%2Dcredential&client_id=public",
+        '{"clientSecret":"synthetic-encoded-credential","client_id":"public"}',
+        "https://prometheus.internal?client_secret=synthetic-encoded-credential&target=worker",
+        "https://prometheus.internal#client_secret=synthetic-encoded-credential",
+    ],
+)
+def test_encoded_client_secrets_are_masked_in_review_readonly_and_validation_paths(workspace, encoded):
+    client, _, _, member, calls, state, config, _ = workspace
+    config["traffic"]["journeys"][0].update(
+        requestEncoding="raw", contentType="application/x-www-form-urlencoded", body=encoded
+    )
+    config["runtime"]["prometheusUrl"] = encoded
+    planned = client.post(API + "/plans", json={"config": config, "mode": "kubernetes"})
+    assert planned.status_code == 201, planned.text
+    assert "synthetic-encoded-credential" not in planned.text
+    assert "synthetic%2Dencoded%2Dcredential" not in planned.text
+    assert json.loads(calls[-1].content)["config"] == config
+    member.role = StudioRole.READONLY
+    state["response"] = httpx.Response(200, json={"config": config})
+    read = client.get(API + "/runs/run-1")
+    assert read.status_code == 200 and "synthetic-encoded-credential" not in read.text
+    assert "synthetic%2Dencoded%2Dcredential" not in read.text
+    member.role = StudioRole.ADMIN
+    state["response"] = httpx.Response(422, json={"detail": "invalid synthetic-encoded-credential"})
+    error = client.post(API + "/actions/validate", json={"body": encoded})
+    assert error.status_code == 409 and "synthetic-encoded-credential" not in error.text
+
+
+def test_redaction_preserves_plaintext_and_noncredential_encoded_controls():
+    values = [
+        "client_secret",
+        "Ordinary request body",
+        '{ "client_id": "public" }',
+        "client_id=public&text=hello+world",
+        "https://metrics.internal/path?target=worker#overview",
+        "{not-json}",
+    ]
+    for value in values:
+        assert _redact({"body": value}) == {"body": value}
+    assert _redact({"body": "https://[invalid"}) == {"body": "[redacted]"}
+
+
+def test_diagnostics_mask_secret_arrays_and_duplicate_encoded_fields(workspace):
+    client, _, _, _, _, state, *_ = workspace
+    state["response"] = httpx.Response(422, json={"detail": "invalid first-secret second-secret array-secret"})
+    result = client.post(
+        API + "/actions/validate",
+        json={
+            "url": "https://metrics.internal?client_secret=first-secret&client_secret=second-secret",
+            "client_secret": ["array-secret"],
+        },
+    )
+    assert result.status_code == 409
+    assert not any(secret in result.text for secret in ("first-secret", "second-secret", "array-secret"))
+
+
+def test_diagnostics_handle_malformed_encoded_inputs_and_nested_secret_values(workspace):
+    client, _, _, _, _, state, *_ = workspace
+    state["response"] = httpx.Response(422, json={"detail": "configuration invalid: nested-private-value"})
+    error = client.post(
+        API + "/actions/validate",
+        json={"client_secret": {"value": "nested-private-value"}, "body": "{not-json}", "url": "https://[invalid"},
+    )
+    assert error.status_code == 409
+    assert "configuration invalid: [redacted]" in error.text
+    assert "nested-private-value" not in error.text
+
+
+def test_diagnostics_mask_raw_percent_encoded_and_json_escaped_credential_echoes(workspace):
+    client, _, _, _, _, state, *_ = workspace
+    state["response"] = httpx.Response(
+        422, json={"detail": 'invalid synthetic%2Dencoded%2Dcredential or quoted\\"credential'}
+    )
+    error = client.post(
+        API + "/actions/validate",
+        json={"body": "client%5Fsecret=synthetic%2Dencoded%2Dcredential", "client_secret": 'quoted"credential'},
+    )
+    assert error.status_code == 409
+    assert "synthetic%2Dencoded%2Dcredential" not in error.text
+    assert "quoted" not in error.text

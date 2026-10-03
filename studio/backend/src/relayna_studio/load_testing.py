@@ -526,11 +526,15 @@ class _Chamber:
         ]
 
     def public(self, record: dict[str, Any]) -> dict[str, Any]:
-        result = {
-            key: value
-            for key, value in record.items()
-            if key not in {"context", "prometheus_url", "chamber_plan_id", "job_id", "connection"}
-        }
+        from ._chamber_connection import _redact
+
+        result = _redact(
+            {
+                key: value
+                for key, value in record.items()
+                if key not in {"context", "prometheus_url", "chamber_plan_id", "job_id", "connection"}
+            }
+        )
         result["chamber"] = {
             "plan_id": record.get("chamber_plan_id"),
             "job_id": record.get("job_id"),

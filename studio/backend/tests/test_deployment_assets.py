@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -11,6 +12,19 @@ def test_frontend_nginx_template_preserves_single_origin_routing() -> None:
     assert "location /studio/" in template
     assert "proxy_pass http://${STUDIO_BACKEND_UPSTREAM};" in template
     assert "try_files $uri $uri/ /index.html;" in template
+
+
+def test_frontend_managed_upload_limits_are_scoped_and_allow_multipart_overhead() -> None:
+    template = (REPO_ROOT / "apps/studio/nginx/default.conf.template").read_text()
+    upload = re.search(
+        r"location ~ \^/studio/services/\[\^/\]\+/load-tests/chamber/uploads\$ \{(.*?)\n    \}", template, re.DOTALL
+    )
+    assert upload is not None
+    policy = upload.group(1)
+    assert "client_max_body_size 129m;" in policy
+    assert "proxy_read_timeout 300;" in policy
+    assert "proxy_send_timeout 240;" in policy
+    assert template.count("client_max_body_size") == 1
 
 
 def test_dockerfiles_exist_for_backend_and_frontend_images() -> None:

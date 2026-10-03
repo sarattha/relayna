@@ -8,7 +8,7 @@ import re
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
@@ -196,6 +196,35 @@ def _redact(value: Any) -> Any:
             for key, item in value.items()
             if key not in {"config_path", "run_dir"}
         }
+    if isinstance(value, str):
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                document = json.loads(value)
+            except ValueError:
+                pass
+            else:
+                masked = _redact(document)
+                return json.dumps(masked) if masked != document else value
+        if value.startswith(("http://", "https://")):
+            try:
+                parts = urlsplit(value)
+            except ValueError:
+                return "[redacted]"
+            query = _redact_pairs(parts.query)
+            fragment = _redact_pairs(parts.fragment)
+            if parts.username is not None or query != parts.query or fragment != parts.fragment:
+                return urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, query, fragment))
+        else:
+            return _redact_pairs(value)
+    return value
+
+
+def _redact_pairs(value: str) -> str:
+    if "=" not in value:
+        return value
+    pairs = parse_qsl(value, keep_blank_values=True)
+    if any(_secret_key(key) for key, _ in pairs):
+        return urlencode([(key, "[redacted]" if _secret_key(key) else item) for key, item in pairs])
     return value
 
 
@@ -216,7 +245,7 @@ def _secret_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]", "", key.lower())
     return (
         normalized in {"secretenv", "secret", "tokencipher"}
-        or normalized.endswith(("authorization", "password", "apikey", "cookie", "token"))
+        or normalized.endswith(("authorization", "password", "apikey", "cookie", "token", "clientsecret"))
         and normalized != "pathtoken"
     )
 
@@ -236,13 +265,47 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
     def collect(value: Any) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
-                if _secret_key(key) and isinstance(item, str):
-                    secrets.append(item)
+                if _secret_key(key):
+                    collect_secret(item)
                 else:
                     collect(item)
         elif isinstance(value, list):
             for item in value:
                 collect(item)
+        elif isinstance(value, str):
+            if value.lstrip().startswith(("{", "[")):
+                try:
+                    collect(json.loads(value))
+                except ValueError:
+                    pass
+            if value.startswith(("http://", "https://")):
+                try:
+                    parts = urlsplit(value)
+                except ValueError:
+                    return
+                for component in (parts.query, parts.fragment):
+                    collect_pairs(component)
+            else:
+                collect_pairs(value)
+
+    def collect_pairs(value: str) -> None:
+        for part in value.split("&"):
+            for key, item in parse_qsl(part, keep_blank_values=True):
+                if _secret_key(key):
+                    secrets.append(item)
+                    if "=" in part:
+                        secrets.append(part.split("=", 1)[1])
+
+    def collect_secret(value: Any) -> None:
+        if isinstance(value, str):
+            secrets.append(value)
+            secrets.append(json.dumps(value)[1:-1])
+        elif isinstance(value, list):
+            for item in value:
+                collect_secret(item)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect_secret(item)
 
     collect(payload)
     for secret in secrets:
@@ -285,7 +348,7 @@ async def _chamber_response(
             method,
             f"{url}/api/v1/{path}",
             headers=headers,
-            timeout=30 if binary or upload else 5,
+            timeout=240 if upload else 30 if binary else 5,
             follow_redirects=False,
             **kwargs,
         ) as response:
