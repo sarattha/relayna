@@ -44,8 +44,9 @@ Managed upload path tokens are temporary and may need re-uploading after Chamber
 restarts. Managed uploads support up to 128 MiB per file and 256 MiB per plan.
 The browser gives this upload endpoint a bounded five-minute request deadline;
 ordinary API requests retain their 20-second deadline. Studio's forwarding leg
-allows four minutes, and the bundled frontend proxy accepts up to 129 MiB on
-that route to allow multipart overhead. If an external ingress is present, align
+has a four-minute total deadline for sending the file and reading the response,
+including responses that continue making progress. The bundled frontend proxy
+accepts up to 129 MiB on that route to allow multipart overhead. If an external ingress is present, align
 its body-size and timeout limits with these values. A timed-out upload can have
 reached Chamber without returning its signed reference; re-upload to obtain a
 usable descriptor rather than assuming it was attached to a plan.

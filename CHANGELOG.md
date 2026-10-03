@@ -11,9 +11,12 @@ All notable changes to this project will be documented in this file.
 - Mask client-secret credential fields, including separator/case variants and
   prefixed client-secret names, in advanced plan reviews, readonly run/config
   responses, retained snapshots, cached capabilities and validation diagnostics.
+  Normalize URL scheme case and surrounding whitespace when removing userinfo,
+  query and fragment credentials.
   Environment references, client IDs and signed upload descriptors are preserved.
 - Give managed multipart uploads a bounded five-minute browser deadline and
-  four-minute forwarding deadline. Allow 129 MiB bodies only on the bundled
+  four-minute total forwarding deadline, even for progressing responses, with
+  upstream stream cleanup on expiry. Allow 129 MiB bodies only on the bundled
   frontend's upload route; retain normal request limits and cancellation.
 - Recognize `errored`, `dead-lettered` and `timed-out`, plus existing terminal
   aliases, so completed task windows stop expanding into unrelated telemetry.

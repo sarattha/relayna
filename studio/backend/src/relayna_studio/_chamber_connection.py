@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 import httpx
@@ -205,9 +206,10 @@ def _redact(value: Any) -> Any:
             else:
                 masked = _redact(document)
                 return json.dumps(masked) if masked != document else value
-        if value.startswith(("http://", "https://")):
+        candidate = value.strip()
+        if candidate.lower().startswith(("http://", "https://")):
             try:
-                parts = urlsplit(value)
+                parts = urlsplit(candidate)
             except ValueError:
                 return "[redacted]"
             query = _redact_pairs(parts.query)
@@ -278,11 +280,16 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
                     collect(json.loads(value))
                 except ValueError:
                     pass
-            if value.startswith(("http://", "https://")):
+            candidate = value.strip()
+            if candidate.lower().startswith(("http://", "https://")):
                 try:
-                    parts = urlsplit(value)
+                    parts = urlsplit(candidate)
                 except ValueError:
                     return
+                for item in (parts.username, parts.password):
+                    if item:
+                        collect_secret(item)
+                        collect_secret(unquote(item))
                 for component in (parts.query, parts.fragment):
                     collect_pairs(component)
             else:
@@ -344,14 +351,17 @@ async def _chamber_response(
         kwargs = {"files": {"file": upload}, "data": {"field": field}}
     limit = 32 * 1024 * 1024 if binary else 2 * 1024 * 1024
     try:
-        async with client.stream(
-            method,
-            f"{url}/api/v1/{path}",
-            headers=headers,
-            timeout=240 if upload else 30 if binary else 5,
-            follow_redirects=False,
-            **kwargs,
-        ) as response:
+        async with (
+            asyncio.timeout(240 if upload else None),
+            client.stream(
+                method,
+                f"{url}/api/v1/{path}",
+                headers=headers,
+                timeout=240 if upload else 30 if binary else 5,
+                follow_redirects=False,
+                **kwargs,
+            ) as response,
+        ):
             if response.status_code >= 300:
                 category = {
                     401: "unauthorized",
@@ -405,7 +415,7 @@ async def _chamber_response(
                         ),
                     )
             return bytes(chunks), response.headers.get("content-type", "application/octet-stream")
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, TimeoutError) as exc:
         raise HTTPException(
             502,
             f"Chamber is unavailable or returned an invalid response. You can retry safely. Reference: {request_id}",

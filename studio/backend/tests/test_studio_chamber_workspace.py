@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from contextlib import asynccontextmanager
@@ -618,6 +619,7 @@ def test_redaction_preserves_plaintext_and_noncredential_encoded_controls():
         '{ "client_id": "public" }',
         "client_id=public&text=hello+world",
         "https://metrics.internal/path?target=worker#overview",
+        " \t HTTPS://metrics.internal/path?target=worker#overview \n",
         "{not-json}",
     ]
     for value in values:
@@ -663,3 +665,72 @@ def test_diagnostics_mask_raw_percent_encoded_and_json_escaped_credential_echoes
     assert error.status_code == 409
     assert "synthetic%2Dencoded%2Dcredential" not in error.text
     assert "quoted" not in error.text
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "HTTPS://user:synthetic-url-credential@metrics.internal",
+        " \t HTTPS://user:synthetic-url-credential@metrics.internal \n",
+        "HtTp://user:synthetic-url-credential@metrics.internal/path?target=worker",
+        "HTTPS://user:synthetic%2Durl%2Dcredential@metrics.internal",
+        "HTTPS://metrics.internal?client_secret=synthetic-url-credential",
+        " HTTPS://metrics.internal#client_secret=synthetic-url-credential ",
+    ],
+)
+def test_url_credentials_are_masked_across_scheme_case_and_whitespace(workspace, url):
+    client, bridge, _, member, calls, state, config, _ = workspace
+    config["runtime"]["prometheusUrl"] = url
+    planned = client.post(API + "/plans", json={"config": config})
+    assert planned.status_code == 201, planned.text
+    assert "synthetic-url-credential" not in planned.text
+    assert "synthetic%2Durl%2Dcredential" not in planned.text
+    assert json.loads(calls[-1].content)["config"] == config
+    assert "synthetic" not in json.dumps(bridge.public({"review_config": config}))
+    member.role = StudioRole.READONLY
+    state["response"] = httpx.Response(200, json={"config": config})
+    read = client.get(API + "/runs/run-1")
+    assert read.status_code == 200 and "synthetic" not in read.text
+    member.role = StudioRole.ADMIN
+    state["response"] = httpx.Response(422, json={"detail": "invalid URL " + url})
+    error = client.post(API + "/actions/validate", json={"url": url})
+    assert error.status_code == 409 and "synthetic" not in error.text
+    assert "invalid URL" in error.text
+
+
+def test_upload_total_deadline_cancels_progress_and_releases_upstream(workspace, monkeypatch):
+    client, _, _, _, calls, state, *_ = workspace
+    timeout = asyncio.timeout
+    budgets = []
+
+    def accelerated_deadline(seconds):
+        budgets.append(seconds)
+        return timeout(0.03 if seconds == 240 else None)
+
+    monkeypatch.setattr("relayna_studio._chamber_connection.asyncio.timeout", accelerated_deadline)
+
+    class ProgressStream(httpx.AsyncByteStream):
+        closed = False
+        parts = 0
+
+        async def __aiter__(self):
+            for _ in range(100):
+                self.parts += 1
+                yield b" "
+                await asyncio.sleep(0.001)
+
+        async def aclose(self):
+            self.closed = True
+
+    stream = ProgressStream()
+    state["response"] = httpx.Response(200, stream=stream)
+    response = client.post(API + "/uploads", files={"file": ("input.txt", b"hello", "text/plain")})
+    assert response.status_code == 502
+    assert response.headers["X-Chamber-Error"] == "unreachable"
+    assert response.headers["X-Request-ID"]
+    assert stream.parts > 1 and stream.closed
+    assert budgets == [240]
+    assert calls[-1].extensions["timeout"]["read"] == 240
+    state["response"] = httpx.Response(200, json={"state": "completed"})
+    assert client.get(API + "/runs/run-1").status_code == 200
+    assert budgets[-1] is None

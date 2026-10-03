@@ -23,10 +23,22 @@ new reviewed follow-up PR after checks and review finish.
   backup and rotation guidance; prepare coordinated patch version 1.10.1.
 - [x] Run focused regressions, security candidate review, full mandatory checks,
   unchanged coverage gates, production/package builds and strict documentation.
-- [ ] Push and open a follow-up PR, monitor reviews/CI, address confirmed issues,
-  then land the verified head under the user's maintainer authorization.
+- [x] Push and open follow-up PR 133; initial CI and Codex review complete.
+- [x] Address both additional confirmed review findings and rerun mandatory checks,
+  backend coverage/build and strict docs. Backend 521 passed at 98.13%.
+- [ ] Monitor the updated head and land it after final CI/review under the user's
+  maintainer authorization.
 
 ## Surprises & Discoveries
+
+PR 133 Codex review on d569bc7 confirmed two further cases: uppercase/padded
+URLs bypass userinfo masking, and HTTPX inactivity budgets do not establish a
+total upload deadline. Four URL cases reproduced before correction. Normalize
+only the parsing input (preserving original nonsecret strings), cover retained
+and readonly views plus diagnostics, and wrap upload request/response streaming
+in `asyncio.timeout(240)` while leaving ordinary requests without this budget.
+Seven additional regressions cover these cases, including stream cleanup while
+response chunks keep arriving. Re-run mandatory checks and coverage before push.
 
 Codex review completed after PR 131 was merged. All three findings remain present
 on main. The deployed frontend proxy also defaults to a 1 MiB request-body cap;
@@ -87,9 +99,9 @@ verified head; confirm post-merge CI/documentation publication.
 
 ## Outcomes & Retrospective
 
-All three review findings are fixed with 19 backend and 20 frontend regression
+All three review findings are fixed with 26 backend and 20 frontend regression
 cases. The mandatory verification stack passes: SDK 686 passed with 9 optional
-skips, Studio backend 514 passed, and frontend 253 passed. Unchanged coverage
+skips, Studio backend 521 passed, and frontend 253 passed. Unchanged coverage
 gates pass at SDK 97.94%, backend 98.13%, and frontend statements 98.07% (Node 26).
 Production frontend and Python package builds, release metadata validation and
 strict MkDocs compilation pass. A real Nginx deployment accepted a 2 MiB managed
@@ -98,5 +110,5 @@ upload and rejected oversized managed uploads and ordinary requests.
 A fresh read-only investigator established the credential boundary; the fresh
 candidate reviewer exposed encoding bypasses, now covered by passing regressions.
 Environment references, pathToken and original upstream requests are preserved.
-No live Kubernetes target execution or user secrets were needed. PR creation,
-CI/review monitoring and landing remain pending.
+No live Kubernetes target execution or user secrets were needed. PR 133 is open. Initial CI passed and both subsequent Codex findings are fixed;
+updated-head CI/review monitoring and landing remain pending.
