@@ -190,13 +190,13 @@ Monitor has three dedicated layout buttons:
 | --- | --- |
 | **Task explorer** | Page through service tasks beside the log reader. Search uses an exact task ID and an optional status filter. Pages contain at most 50 tasks. |
 | **Logs focus** | Give the log reader the full width. |
-| **Investigation** | Inspect the selected task's event timeline beside its logs, with pod CPU below. Selecting an event sets logs and CPU to the same ±30-second window. **Reset window** restores the chosen time window. |
+| **Investigation** | Inspect the selected task's event timeline beside its logs, with pod CPU and memory side by side below (stacked on narrow screens). Selecting an event sets logs and both resource charts to the same ±30-second window. **Reset window** restores the chosen time window. |
 
 Layout switches preserve the selected task, log filters, time window, expanded
 log details, and reader scroll position. Paging the task list preserves the
 selected task even when it is on another page. **Scope** chooses the selected
 task or the entire service; service logs can include traffic from other tasks.
-The timeline and CPU require selected-task scope.
+The timeline and resource charts require selected-task scope.
 
 The reader supports keyword, level, and source filters, task lifetime, rolling
 15-minute/one-hour/24-hour windows, and custom bounds. Custom values use the
@@ -210,7 +210,8 @@ opens a separate inspector with **Copy message** and **Close**.
 the page is visible, waits for pending reads, and becomes **Pause** when active.
 Failed refreshes retain the last evidence and show an error with its fetch time.
 New results preserve reader position and offer **Jump to latest**. CPU values
-are shown in cores; shared worker CPU does not establish a task's individual
+are shown in cores and memory in MiB (converted from bytes); shared worker
+resource measurements do not establish a task's individual
 resource use. Missing providers and empty windows have explicit messages.
 
 **Expand** opens a focused workspace; Escape exits and restores keyboard focus.

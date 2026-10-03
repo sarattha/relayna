@@ -1278,7 +1278,15 @@ summary { cursor: pointer; font-weight: 650; padding: 12px 4px; }
 .monitor-event strong { overflow-wrap: anywhere; }
 .monitor-event[aria-pressed="true"] { background: var(--studio-danger-soft) !important; border-color: var(--studio-danger) !important; }
 .monitor-event[aria-pressed="true"] small { color: var(--studio-danger); }
-.monitor-metrics { padding-bottom: 12px; border-top: 1px solid var(--studio-border); }
+.monitor-resource-metrics { border-top: 1px solid var(--studio-border); }
+.monitor-resource-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.monitor-metrics { padding-bottom: 12px; min-width: 0; }
+.monitor-metrics + .monitor-metrics { border-left: 1px solid var(--studio-border); }
+.monitor-metrics-warnings { padding: 0 18px; font-size: 13px; }
+@media (max-width: 800px) {
+  .monitor-resource-grid { grid-template-columns: minmax(0, 1fr); }
+  .monitor-metrics + .monitor-metrics { border-left: 0; border-top: 1px solid var(--studio-border); }
+}
 .monitor-metrics > p { padding: 0 18px; font-size: 13px; }
 .monitor-metrics svg { max-height: 180px; }
 .monitor-workspace--expanded { position: fixed; inset: 12px; z-index: 60; overflow: auto; box-shadow: var(--studio-shadow); }
@@ -1324,9 +1332,9 @@ summary { cursor: pointer; font-weight: 650; padding: 12px 4px; }
   .monitor-canvas--investigation .monitor-event-list { max-height: 240px; }
 }
 .monitor-canvas--investigation .monitor-log-scroll { min-height: 200px; max-height: 260px; }
-.monitor-cpu-chart { padding: 0 18px; min-width: 0; }
-.monitor-cpu-chart svg { display: block; width: 100%; height: auto; max-height: none; }
-.monitor-cpu-legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--studio-text-muted); font-size: 11px; }
+.monitor-resource-chart { padding: 0 18px; min-width: 0; }
+.monitor-resource-chart svg { display: block; width: 100%; height: auto; max-height: none; }
+.monitor-resource-legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--studio-text-muted); font-size: 11px; }
 .monitor-event time { grid-row: 1 / 5; }
 .monitor-event strong, .monitor-event span, .monitor-event small { grid-column: 2; }
 .monitor-event strong { text-transform: capitalize; }

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { StudioMetricSeries } from "./types";
 
-export function MonitorCpuChart({
+export function MonitorResourceChart({
   series,
+  metric,
   from,
   to,
   selectedTime,
 }: {
   series: StudioMetricSeries[];
+  metric: "cpu_usage" | "memory_usage";
   from: string;
   to: string;
   selectedTime: string;
@@ -22,8 +24,12 @@ export function MonitorCpuChart({
     observer.observe(frame.current);
     return () => observer.disconnect();
   }, []);
-  const cpu = series.filter((item) => item.metric === "cpu_usage");
-  const samples = cpu
+  const memory = metric === "memory_usage";
+  const name = memory ? "memory" : "CPU";
+  const unit = memory ? "MiB" : "cores";
+  const scale = memory ? 1024 ** 2 : 1;
+  const resources = series.filter((item) => item.metric === metric);
+  const samples = resources
     .flatMap((item) => item.points)
     .filter(
       (point) =>
@@ -40,21 +46,24 @@ export function MonitorCpuChart({
     start >= end
   )
     return (
-      <div ref={frame} className="monitor-cpu-chart">
-        <p>No CPU samples reported in this window.</p>
+      <div ref={frame} className="monitor-resource-chart">
+        <p>No {name} samples reported in this window.</p>
       </div>
     );
-  const maximum = Math.max(0.01, ...samples.map((point) => point.value!));
+  const maximum = Math.max(
+    memory ? 1 : 0.01,
+    ...samples.map((point) => point.value! / scale),
+  );
   const x = (time: number) =>
     48 + ((time - start) / (end - start)) * (width - 70);
   const y = (value: number) => 100 - (value / maximum) * 70;
   const selected = Date.parse(selectedTime);
   return (
-    <div ref={frame} className="monitor-cpu-chart">
+    <div ref={frame} className="monitor-resource-chart">
       <svg
         viewBox={`0 0 ${width} 140`}
         role="img"
-        aria-label={`Pod CPU in cores${selectedTime ? "; selected event marked" : ""}`}
+        aria-label={`Pod ${name} in ${unit}${selectedTime ? "; selected event marked" : ""}`}
       >
         {[0, maximum / 2, maximum].map((value) => (
           <g key={value}>
@@ -71,7 +80,7 @@ export function MonitorCpuChart({
               fill="var(--studio-text-muted)"
               fontSize={11}
             >
-              {value.toFixed(2)}
+              {value.toFixed(memory ? 1 : 2)}
             </text>
           </g>
         ))}
@@ -100,7 +109,7 @@ export function MonitorCpuChart({
             </g>
           );
         })}
-        {cpu.map((item, index) => (
+        {resources.map((item, index) => (
           <path
             key={index}
             d={(() => {
@@ -118,7 +127,7 @@ export function MonitorCpuChart({
                   }
                   const command = segmentStart ? "M" : "L";
                   segmentStart = false;
-                  return `${command}${x(time)},${y(point.value)}`;
+                  return `${command}${x(time)},${y(point.value / scale)}`;
                 })
                 .join(" ");
             })()}
@@ -161,11 +170,11 @@ export function MonitorCpuChart({
           </g>
         )}
       </svg>
-      <div className="monitor-cpu-legend">
-        {cpu.map((item, index) => (
+      <div className="monitor-resource-legend">
+        {resources.map((item, index) => (
           <span key={index}>
             {item.labels.pod || item.labels.container || `Series ${index + 1}`}{" "}
-            · cores
+            · {unit}
           </span>
         ))}
       </div>

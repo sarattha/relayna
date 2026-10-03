@@ -395,7 +395,7 @@ it("handles corrupt preferences and terminal/active/rolling window boundaries", 
   expect(validCustomWindow("", "2026-10-02T08:00:00Z")).toBe(true);
 });
 
-it("renders CPU in the selected event window, expands log details and handles clipboard feedback", async () => {
+it("renders CPU and memory in the selected event window, expands log details and handles clipboard feedback", async () => {
   vi.mocked(api.fetchTaskMetrics).mockResolvedValue({
     service_id: "orders",
     from: "",
@@ -411,6 +411,15 @@ it("renders CPU in the selected event window, expands log details and handles cl
         points: [
           { timestamp: "2026-10-02T07:32:00Z", value: 0.2 },
           { timestamp: "2026-10-02T07:32:10Z", value: 0.5 },
+        ],
+      },
+      {
+        metric: "memory_usage",
+        unit: "bytes",
+        labels: { pod: "worker-1" },
+        points: [
+          { timestamp: "2026-10-02T07:32:00Z", value: 256 * 1024 ** 2 },
+          { timestamp: "2026-10-02T07:32:10Z", value: 512 * 1024 ** 2 },
         ],
       },
     ],
@@ -442,6 +451,11 @@ it("renders CPU in the selected event window, expands log details and handles cl
       name: "Pod CPU in cores; selected event marked",
     }),
   ).toBeInTheDocument();
+  expect(
+    screen.getByRole("img", {
+      name: "Pod memory in MiB; selected event marked",
+    }),
+  ).toBeInTheDocument();
   expect(screen.getByText("Shared worker CPU")).toBeInTheDocument();
   await waitFor(() =>
     expect(api.fetchTaskMetrics).toHaveBeenLastCalledWith(
@@ -450,6 +464,7 @@ it("renders CPU in the selected event window, expands log details and handles cl
       expect.objectContaining({
         from: "2026-10-02T07:31:38.000Z",
         to: "2026-10-02T07:32:38.000Z",
+        groups: ["cpu_usage", "memory_usage"],
       }),
     ),
   );

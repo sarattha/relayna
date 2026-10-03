@@ -12,6 +12,7 @@ loop, cleared-search race, and topology route race in the same focused frontend 
 
 ## Progress
 
+- [x] (2026-10-03) Follow-up: added Pod memory beside CPU using existing `memory_usage` group; shared-window markers, independent empty states, desktop/mobile Computer Use, 151 frontend tests, and production build passed.
 - [x] (2026-10-02) Created `codex/studio-monitor-workspace`; inspected skills, freeze tests, and selected visual targets.
 - [x] (2026-10-03) Fixed all three findings; regression tests pass.
 - [x] (2026-10-03) Integrated shared responsive Monitor with retained Overview and Configure.
@@ -49,7 +50,18 @@ waits for pending reads; a slow provider cannot starve the displayed result.
 Desktop long-error inspection bounds the reader to keep the stack visible;
 narrow CPU charts show three ticks. These decisions followed Computer Use QA.
 
+Pod memory uses the existing released `memory_usage` request/response contract
+(bytes), converted to MiB only for display. Reuse the branch-local resource chart
+with an internal metric selector, request CPU and memory together, and retain
+separate empty states plus shared provider warnings. Stack the two charts below
+800px. No API/type exports, freeze manifests, or backend behavior change.
+
 ## Outcomes & Retrospective
+
+Pod memory follow-up is complete: memory bytes display in MiB beside CPU cores,
+with identical time bounds and selected-event markers. Charts stack below 800px.
+The expanded frontend suite has 151 passing tests and the build passes. The
+existing provider API and production-freeze manifests are unchanged.
 
 All three layouts and bug fixes are implemented. SDK: 686 passed, 9 skipped; backend: 442 passed, 19 skipped; frontend: 148 passed, production build passed. Final UI comparisons passed after fixing header density, mobile sticky space, error-panel bounds, and CPU tick overlap. Frontend coverage remains below its pre-existing gates: head 92.04% statements, 85.01% branches, 90.20% functions, 94.78% lines. Draft PR https://github.com/sarattha/relayna/pull/131 is open and attached to this task; the loopback preview remains running for review.
 

@@ -31,6 +31,7 @@ unit. These are functional adaptations, not claims of exact pixel matching.
 
 Validation results:
 
+- Pod memory follow-up: 151 frontend tests and production build passed. [Desktop](pod-resources-desktop.jpg) and [390×844 mobile](pod-resources-mobile.jpg) Computer Use evidence shows matching event markers/time windows, CPU in cores and memory in MiB. A temporary fixture supplies memory bytes; production uses the existing `memory_usage` group. Automated coverage includes independent missing-memory behavior and gaps/invalid samples.
 - Frontend: 148 tests passed, including the unchanged production-freeze checks.
 - Production build and TypeScript checking passed.
 - Mandatory verification script passed in sequence: SDK format/lint/typecheck,

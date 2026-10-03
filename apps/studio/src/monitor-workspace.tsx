@@ -15,7 +15,7 @@ import {
   fetchTaskMetrics,
   searchTasks,
 } from "./api";
-import { MonitorCpuChart } from "./monitor-chart";
+import { MonitorResourceChart } from "./monitor-chart";
 import { useMonitorRead } from "./monitor-data";
 import {
   eventTime,
@@ -349,7 +349,7 @@ export function MonitorWorkspace({
     () =>
       fetchTaskMetrics(service.service_id, selectedTaskId, {
         ...windowBounds,
-        groups: ["cpu_usage"],
+        groups: ["cpu_usage", "memory_usage"],
       }),
   );
   // Slow providers must finish before the next automatic refresh starts.
@@ -953,37 +953,44 @@ export function MonitorWorkspace({
       </div>
       {layout === "investigation" && taskScope && (
         <section
-          className="monitor-metrics"
+          className="monitor-resource-metrics"
           aria-label="Metrics in shared time window"
         >
-          <header>
-            <h2>Pod CPU</h2>
-            <span>
-              {formatTimestamp(windowBounds.from)} –{" "}
-              {formatTimestamp(windowBounds.to)}
-            </span>
-          </header>
-          {!service.metrics_config ? (
-            <p>No metrics provider configured.</p>
-          ) : metrics.error ? (
-            <NoticeBanner tone="error">
-              Metrics unavailable: {metrics.error}
-            </NoticeBanner>
-          ) : metrics.loading ? (
-            <p role="status">Loading metrics…</p>
-          ) : metrics.data?.series.length ? (
-            <MonitorCpuChart
-              series={metrics.data.series}
-              from={windowBounds.from}
-              to={windowBounds.to}
-              selectedTime={selectedTime}
-            />
-          ) : (
-            <p>No CPU samples reported in this window.</p>
-          )}
-          {metrics.data?.warnings.map((warning) => (
-            <p key={warning}>{warning}</p>
-          ))}
+          <div className="monitor-resource-grid">
+            {(["cpu_usage", "memory_usage"] as const).map((metric) => (
+              <section className="monitor-metrics" key={metric}>
+                <header>
+                  <h2>Pod {metric === "cpu_usage" ? "CPU" : "memory"}</h2>
+                  <span>
+                    {formatTimestamp(windowBounds.from)} –{" "}
+                    {formatTimestamp(windowBounds.to)}
+                  </span>
+                </header>
+                {!service.metrics_config ? (
+                  <p>No metrics provider configured.</p>
+                ) : metrics.error ? (
+                  <NoticeBanner tone="error">
+                    Metrics unavailable: {metrics.error}
+                  </NoticeBanner>
+                ) : metrics.loading ? (
+                  <p role="status">Loading metrics…</p>
+                ) : (
+                  <MonitorResourceChart
+                    metric={metric}
+                    series={metrics.data?.series || []}
+                    from={windowBounds.from}
+                    to={windowBounds.to}
+                    selectedTime={selectedTime}
+                  />
+                )}
+              </section>
+            ))}
+          </div>
+          <div className="monitor-metrics-warnings">
+            {metrics.data?.warnings.map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
         </section>
       )}
     </section>

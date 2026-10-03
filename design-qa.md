@@ -124,4 +124,15 @@ and implementation are compared qualitatively (the source viewport is unknown):
 [before/after](docs/qa/studio-monitor-workspace/service-controls-spacing-comparison.jpg).
 Frontend validation remains 148 tests passed and production build passed.
 
+**Pod memory follow-up — 3 October 2026**
+
+Added memory beside CPU as requested. Computer Use verified matching pod labels,
+time bounds and selected-event markers on both charts, with independent cores
+and MiB scales. At 390×844 the charts stack and show three legible time ticks.
+Evidence: [desktop](docs/qa/studio-monitor-workspace/pod-resources-desktop.jpg),
+[mobile](docs/qa/studio-monitor-workspace/pod-resources-mobile.jpg). Tests verify
+byte conversion, metric separation, missing memory without hiding CPU, invalid
+samples/gaps, and requesting both groups for the selected-event window.
+Frontend: 151 passed; production build passed. No backend contract change.
+
 final result: passed
