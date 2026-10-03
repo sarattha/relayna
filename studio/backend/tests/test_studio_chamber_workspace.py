@@ -768,3 +768,38 @@ def test_nested_form_credentials_are_masked_without_changing_upstream(workspace,
     error = client.post(API + "/actions/validate", json={"body": body})
     assert error.status_code == 409 and "synthetic" not in error.text
     assert "invalid" in error.text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "a=" * 500 + "client_secret=synthetic-depth-credential",
+        "[" * 1500 + '{"client_secret":"synthetic-depth-credential"}' + "]" * 1500,
+        "a=" * 5 + "endpoint=HTTPS://user:synthetic-depth-credential@metrics.internal/" + "!" * 400_000,
+    ],
+    ids=["deep-form", "deep-json", "expanded-form"],
+)
+def test_deep_form_projection_is_bounded_and_diagnostics_fail_closed(workspace, body):
+    client, bridge, _, member, calls, state, config, _ = workspace
+    config["traffic"]["journeys"][0].update(requestEncoding="raw", body=body)
+    planned = client.post(API + "/plans", json={"config": config})
+    assert planned.status_code == 201, planned.text
+    assert "synthetic" not in planned.text
+    assert len(planned.text) < 20_000
+    assert json.loads(calls[-1].content)["config"] == config
+    assert "synthetic" not in json.dumps(bridge.public({"review_config": config}))
+    member.role = StudioRole.READONLY
+    state["response"] = httpx.Response(200, json={"config": config})
+    read = client.get(API + "/runs/run-1")
+    assert read.status_code == 200 and "synthetic" not in read.text
+    member.role = StudioRole.ADMIN
+    state["response"] = httpx.Response(422, json={"detail": "invalid synthetic-depth-credential"})
+    error = client.post(API + "/actions/validate", json={"body": body})
+    assert error.status_code == 409 and "synthetic" not in error.text
+    assert "inspection limit" in error.text
+
+
+def test_expanded_url_projection_has_a_finite_size_limit():
+    query = "a=" * 5 + "endpoint=https://user:synthetic-limit-credential@metrics.internal/" + "!" * 120_000
+    url = "https://metrics.internal/" + "x" * 600_000 + "?" + query
+    assert _redact(url) == "[redacted]"

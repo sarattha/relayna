@@ -23,6 +23,9 @@ from .audit_context import current_actor_user_id
 from .database import StudioDatabase, _append_audit, operator_settings
 from .registry import OutboundUrlPolicyError, StudioOutboundUrlPolicy
 
+_REDACTION_MAX_DEPTH = 32
+_REDACTION_MAX_STRING = 2 * 1024 * 1024
+
 
 class _ConnectionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -184,16 +187,18 @@ class _ConnectionStore:
         return self.public(connection)
 
 
-def _redact(value: Any) -> Any:
+def _redact(value: Any, depth: int = 0) -> Any:
+    if depth >= _REDACTION_MAX_DEPTH:
+        return "[redacted]"
     if isinstance(value, list):
-        return [_redact(item) for item in value]
+        return [_redact(item, depth + 1) for item in value]
     if isinstance(value, dict):
         return {
             key: _environment_references(key, item)
             if key in {"secretEnv", "headersFromEnv"}
             else "[redacted]"
             if _secret_key(key)
-            else _redact(item)
+            else _redact(item, depth + 1)
             for key, item in value.items()
             if key not in {"config_path", "run_dir"}
         }
@@ -201,33 +206,38 @@ def _redact(value: Any) -> Any:
         if value.lstrip().startswith(("{", "[")):
             try:
                 document = json.loads(value)
+            except RecursionError:
+                return "[redacted]"
             except ValueError:
                 pass
             else:
-                masked = _redact(document)
-                return json.dumps(masked) if masked != document else value
+                masked = _redact(document, depth + 1)
+                result = json.dumps(masked) if masked != document else value
+                return result if len(result) <= _REDACTION_MAX_STRING else "[redacted]"
         candidate = value.strip()
         if candidate.lower().startswith(("http://", "https://")):
             try:
                 parts = urlsplit(candidate)
             except ValueError:
                 return "[redacted]"
-            query = _redact_pairs(parts.query)
-            fragment = _redact_pairs(parts.fragment)
+            query = _redact_pairs(parts.query, depth + 1)
+            fragment = _redact_pairs(parts.fragment, depth + 1)
             if parts.username is not None or query != parts.query or fragment != parts.fragment:
-                return urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, query, fragment))
+                result = urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, query, fragment))
+                return result if len(result) <= _REDACTION_MAX_STRING else "[redacted]"
         else:
-            return _redact_pairs(value)
+            return _redact_pairs(value, depth + 1)
     return value
 
 
-def _redact_pairs(value: str) -> str:
+def _redact_pairs(value: str, depth: int) -> str:
     if "=" not in value:
         return value
     pairs = parse_qsl(value, keep_blank_values=True)
-    masked = [(key, "[redacted]" if _secret_key(key) else _redact(item)) for key, item in pairs]
+    masked = [(key, "[redacted]" if _secret_key(key) else _redact(item, depth + 1)) for key, item in pairs]
     if masked != pairs:
-        return urlencode(masked)
+        result = urlencode(masked)
+        return result if len(result) <= _REDACTION_MAX_STRING else "[redacted]"
     return value
 
 
@@ -265,22 +275,26 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
         return ""
     secrets = [credential]
 
-    def collect(value: Any) -> None:
+    def collect(value: Any, depth: int = 0) -> None:
+        if depth >= _REDACTION_MAX_DEPTH:
+            raise RecursionError("Chamber diagnostic inspection limit")
         if isinstance(value, dict):
             for key, item in value.items():
                 if _secret_key(key):
-                    collect_secret(item)
+                    collect_secret(item, depth + 1)
                 else:
-                    collect(item)
+                    collect(item, depth + 1)
         elif isinstance(value, list):
             for item in value:
-                collect(item)
+                collect(item, depth + 1)
         elif isinstance(value, str):
             if value.lstrip().startswith(("{", "[")):
                 try:
-                    collect(json.loads(value))
+                    document = json.loads(value)
                 except ValueError:
                     pass
+                else:
+                    collect(document, depth + 1)
             candidate = value.strip()
             if candidate.lower().startswith(("http://", "https://")):
                 try:
@@ -289,42 +303,49 @@ def _validation_detail(detail: Any, payload: Any, credential: str) -> str:
                     return
                 for item in (parts.username, parts.password):
                     if item:
-                        collect_secret(item)
-                        collect_secret(unquote(item))
+                        collect_secret(item, depth + 1)
+                        collect_secret(unquote(item), depth + 1)
                 for component in (parts.query, parts.fragment):
-                    collect_pairs(component)
+                    collect_pairs(component, depth + 1)
             else:
-                collect_pairs(value)
+                collect_pairs(value, depth + 1)
 
-    def collect_pairs(value: str) -> None:
+    def collect_pairs(value: str, depth: int) -> None:
         for part in value.split("&"):
             for key, item in parse_qsl(part, keep_blank_values=True):
                 before = len(secrets)
                 if _secret_key(key):
-                    collect_secret(item)
+                    collect_secret(item, depth + 1)
                 else:
-                    collect(item)
+                    collect(item, depth + 1)
                 if len(secrets) > before:
                     nested = secrets[before:]
                     if "=" in part:
                         secrets.append(part.split("=", 1)[1])
                     for secret in set(nested):
                         for encoded in (quote(secret, safe=""), quote_plus(secret, safe="")):
+                            if len(encoded) > _REDACTION_MAX_STRING:
+                                raise RecursionError("Chamber diagnostic inspection limit")
                             if encoded not in secrets:
                                 secrets.append(encoded)
 
-    def collect_secret(value: Any) -> None:
+    def collect_secret(value: Any, depth: int) -> None:
+        if depth >= _REDACTION_MAX_DEPTH:
+            raise RecursionError("Chamber diagnostic inspection limit")
         if isinstance(value, str):
             secrets.append(value)
             secrets.append(json.dumps(value)[1:-1])
         elif isinstance(value, list):
             for item in value:
-                collect_secret(item)
+                collect_secret(item, depth + 1)
         elif isinstance(value, dict):
             for item in value.values():
-                collect_secret(item)
+                collect_secret(item, depth + 1)
 
-    collect(payload)
+    try:
+        collect(payload)
+    except RecursionError:
+        return "Diagnostic omitted: configuration exceeds the safe inspection limit."
     for secret in secrets:
         if secret:
             detail = detail.replace(secret, "[redacted]")

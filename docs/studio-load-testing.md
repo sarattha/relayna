@@ -42,6 +42,11 @@ Credentials masked in saved documents must be replaced with environment
 references; Studio preserves `secretEnv` and `headersFromEnv` variable names.
 Managed upload path tokens are temporary and may need re-uploading after Chamber
 restarts. Managed uploads support up to 128 MiB per file and 256 MiB per plan.
+Public credential masking inspects up to 32 nested container/encoding levels and
+limits expanded strings to 2 MiB. Sections beyond these inspection limits use
+`[redacted]`; validation details that cannot be safely inspected are explicitly
+omitted. Original configuration sent to Chamber is unaffected by these public
+projection limits.
 The browser gives this upload endpoint a bounded five-minute request deadline;
 ordinary API requests retain their 20-second deadline. Studio's forwarding leg
 has a four-minute total deadline for sending the file and reading the response,

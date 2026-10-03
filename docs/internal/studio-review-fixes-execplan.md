@@ -25,11 +25,19 @@ new reviewed follow-up PR after checks and review finish.
   unchanged coverage gates, production/package builds and strict documentation.
 - [x] Push and open follow-up PR 133; initial CI and Codex review complete.
 - [x] Address all additional confirmed review findings and rerun mandatory checks,
-  backend coverage/build and strict docs. Backend 526 passed at 98.14%.
+  backend coverage/build and strict docs. Backend 530 passed at 98.12%.
 - [ ] Monitor the updated head and land it after final CI/review under the user's
   maintainer authorization.
 
 ## Surprises & Discoveries
+
+The next PR review confirmed a RecursionError for hundreds of raw nested form
+assignments. A focused API reproduction failed before correction. Bound public
+inspection to 32 container/encoding levels and expanded strings to 2 MiB; use an
+explicit masked section when a budget or JSON parser depth is exceeded. Omit
+upstream diagnostics with an explicit inspection-limit reason if their payload
+cannot be safely inspected. Preserve original upstream submissions. Regressions
+cover deep forms, parser-deep JSON, expansion-heavy forms and combined URL size.
 
 The second Codex review of PR 133 confirmed credential-bearing URLs and
 structured content nested inside form values. All five added source-to-sink
@@ -106,10 +114,10 @@ verified head; confirm post-merge CI/documentation publication.
 
 ## Outcomes & Retrospective
 
-All three review findings are fixed with 31 backend and 20 frontend regression
+All three review findings are fixed with 35 backend and 20 frontend regression
 cases. The mandatory verification stack passes: SDK 686 passed with 9 optional
-skips, Studio backend 526 passed, and frontend 253 passed. Unchanged coverage
-gates pass at SDK 97.94%, backend 98.14%, and frontend statements 98.07% (Node 26).
+skips, Studio backend 530 passed, and frontend 253 passed. Unchanged coverage
+gates pass at SDK 97.94%, backend 98.12%, and frontend statements 98.07% (Node 26).
 Production frontend and Python package builds, release metadata validation and
 strict MkDocs compilation pass. A real Nginx deployment accepted a 2 MiB managed
 upload and rejected oversized managed uploads and ordinary requests.
@@ -117,5 +125,5 @@ upload and rejected oversized managed uploads and ordinary requests.
 A fresh read-only investigator established the credential boundary; the fresh
 candidate reviewer exposed encoding bypasses, now covered by passing regressions.
 Environment references, pathToken and original upstream requests are preserved.
-No live Kubernetes target execution or user secrets were needed. PR 133 is open. Initial CI passed and both subsequent Codex findings are fixed;
+No live Kubernetes target execution or user secrets were needed. PR 133 is open. Initial CI passed and all subsequent Codex findings are fixed;
 updated-head CI/review monitoring and landing remain pending.
