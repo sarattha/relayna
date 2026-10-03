@@ -103,7 +103,7 @@ These choices preserve the approved layout intent and released data contracts.
 - [x] Check mobile controls, long-message wrapping, sources, chart labels,
   Expand/Tab/Escape and focus restoration through Computer Use.
 - [x] Run frontend tests/build and the mandatory SDK/backend verification stack.
-- [x] Record existing coverage-gate failure and synthetic-provider limitations in
+- [x] Record the initial coverage gap, its resolution, and synthetic-provider limitations in
   [verification notes](docs/qa/studio-monitor-workspace/README.md).
 
 **Follow-up polish**
@@ -133,6 +133,15 @@ Evidence: [desktop](docs/qa/studio-monitor-workspace/pod-resources-desktop.jpg),
 [mobile](docs/qa/studio-monitor-workspace/pod-resources-mobile.jpg). Tests verify
 byte conversion, metric separation, missing memory without hiding CPU, invalid
 samples/gaps, and requesting both groups for the selected-event window.
-Frontend: 151 passed; production build passed. No backend contract change.
+Initial pod-memory validation: 151 passed; production build passed. This follow-up changed no backend contract.
+
+**Consolidated regression coverage — 3 October 2026**
+
+PR #131 now includes native Ampule workflows and 233 passing frontend tests.
+Whole-source coverage under CI's Node 20 is 98.04% statements, 89.02% branches,
+99.36% functions, and 98.67% lines. All original gates pass and coverage is
+enforced in CI. Both Studio PR #131 and Chamber PR #43 have green CI. See the
+[Ampule ExecPlan](docs/internal/ampule-studio-api-execplan.md) for connection UI
+validation, additive backend changes, and deployment requirements.
 
 final result: passed

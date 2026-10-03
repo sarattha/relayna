@@ -32,15 +32,19 @@ unit. These are functional adaptations, not claims of exact pixel matching.
 Validation results:
 
 - Pod memory follow-up: 151 frontend tests and production build passed. [Desktop](pod-resources-desktop.jpg) and [390×844 mobile](pod-resources-mobile.jpg) Computer Use evidence shows matching event markers/time windows, CPU in cores and memory in MiB. A temporary fixture supplies memory bytes; production uses the existing `memory_usage` group. Automated coverage includes independent missing-memory behavior and gaps/invalid samples.
-- Frontend: 148 tests passed, including the unchanged production-freeze checks.
+- Final consolidated frontend suite: 233 tests passed, including the production-freeze checks.
 - Production build and TypeScript checking passed.
 - Mandatory verification script passed in sequence: SDK format/lint/typecheck,
-  686 tests passed and 9 skipped; backend format/lint/typecheck, 442 tests passed
-  and 19 skipped. No Python or backend contract was changed.
-- Whole-source frontend coverage remains below existing gates. Baseline main:
-  92.12% statements, 84.72% branches, 90.15% functions, 95.15% lines. This branch:
-  92.04%, 85.01%, 90.20%, 94.78%, respectively. Required gates remain
-  98%/89%/98%/98%; no thresholds or freeze manifests were changed.
+  686 tests passed and 9 skipped; backend format/lint/typecheck, 495 tests passed,
+  including real PostgreSQL integration tests. SDK coverage is 97.94%; backend
+  coverage is 98.13%. Native Ampule backend additions are documented in the
+  [Ampule ExecPlan](../../internal/ampule-studio-api-execplan.md).
+- The initial frontend coverage gap is resolved by 67 additional Studio regression
+  tests. Whole-source coverage under CI's Node 20 is 98.04% statements, 89.02%
+  branches, 99.36% functions, and 98.67% lines. Required gates remain
+  98%/89%/98%/98%; no coverage thresholds or exclusions were relaxed. SDK and
+  frontend coverage are now enforced in CI. Studio PR #131 and companion Chamber
+  PR #43 both have green CI; Chamber has 394 tests and 97.80% CI coverage.
 - Console inspected through Chrome UI: an unload-policy message points to a
   Chrome extension. A connection-to-receiving-end message also appeared (consistent
   with extension messaging; its source was not conclusively resolved). No React

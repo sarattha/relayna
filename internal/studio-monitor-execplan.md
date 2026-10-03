@@ -18,18 +18,19 @@ loop, cleared-search race, and topology route race in the same focused frontend 
 - [x] (2026-10-02) Created `codex/studio-monitor-workspace`; inspected skills, freeze tests, and selected visual targets.
 - [x] (2026-10-03) Fixed all three findings; regression tests pass.
 - [x] (2026-10-03) Integrated shared responsive Monitor with retained Overview and Configure.
-- [x] (2026-10-03) Applied Color Designer palette; 148 frontend tests/build and full SDK/backend verification pass. Coverage remains below existing gates.
+- [x] (2026-10-03) Applied Color Designer palette; initial 148 frontend tests/build and full SDK/backend verification pass. The initial coverage gap was resolved in the consolidated follow-up below.
 - [x] (2026-10-03) Computer Use verified 1440×1000 and 390×844; final combined comparisons pass in `design-qa.md`.
 - [x] (2026-10-03) Updated operator documentation and saved normalized UI evidence.
 - [x] (2026-10-03) Committed and pushed `codex/studio-monitor-workspace`; opened and attached draft PR #131.
 - [x] (2026-10-03) Follow-up: restored service-control spacing and selector/button alignment; Computer Use desktop and 390×844 checks, 148 frontend tests, and production build passed.
+- [x] (2026-10-03) Consolidated native Ampule workflows into PR #131 and added 67 Studio regression tests. All original frontend coverage gates pass; SDK/frontend coverage is now enforced in CI. Companion Chamber PR #43 adds 78 regression tests and a 96% coverage floor. Both drafts have green CI.
 
 ## Surprises & Discoveries
 
 The repository guide names v1.4.30 as the original strict freeze boundary, while
 the current frontend manifest and latest release are v1.9.0. Existing frontend
-coverage gates fail on main (92.12% statements, 84.72% branches, 90.15% functions,
-95.15% lines). Do not lower thresholds or change freeze manifests to pass checks.
+coverage gates initially failed on main (92.12% statements, 84.72% branches, 90.15% functions,
+95.15% lines). The follow-up closes that gap without lowering thresholds or changing coverage scope.
 Computer Use and Color Designer's palette-picker are now available in this session. Mobile CPU labels overlapped
 until tick density followed available chart width. Browser extension messages
 were observed; no application render failure was seen. Synthetic fixtures do not
@@ -85,10 +86,12 @@ public contract change, or unrelated package upgrade was introduced.
 
 Pod memory follow-up is complete: memory bytes display in MiB beside CPU cores,
 with identical time bounds and selected-event markers. Charts stack below 800px.
-The expanded frontend suite has 151 passing tests and the build passes. The
+The initial expanded frontend suite had 151 passing tests and the build passed. The
 existing provider API and production-freeze manifests are unchanged.
 
-All three layouts and bug fixes are implemented. SDK: 686 passed, 9 skipped; backend: 442 passed, 19 skipped; frontend: 148 passed, production build passed. Final UI comparisons passed after fixing header density, mobile sticky space, error-panel bounds, and CPU tick overlap. Frontend coverage remains below its pre-existing gates: head 92.04% statements, 85.01% branches, 90.20% functions, 94.78% lines. Draft PR https://github.com/sarattha/relayna/pull/131 is open and attached to this task; the loopback preview remains running for review.
+All three layouts, bug fixes, and native Ampule workflows are implemented in draft PR https://github.com/sarattha/relayna/pull/131. Final verification: SDK 686 passed/9 skipped with 97.94% coverage; backend 495 passed with 98.13% coverage, including real PostgreSQL integration tests; frontend 233 passed and production build passed. Whole-source frontend coverage under CI's Node 20 is 98.04% statements, 89.02% branches, 99.36% functions, and 98.67% lines, passing all unchanged gates. SDK and frontend coverage are now enforced in CI. Companion Chamber draft PR https://github.com/sarattha/ampule-chamber/pull/43 has 394 tests and 97.80% CI coverage with a 96% floor. Both drafts have green CI. PR #132 was consolidated into PR #131's branch; nothing was merged to main.
+
+Desktop/mobile Computer Use comparisons passed after correcting header density, mobile sticky space, error-panel bounds, CPU tick overlap, and the native Ampule flows. Synthetic-provider UI evidence verifies layout and interaction; staging provider performance and real target execution remain operational acceptance work. See [the Ampule ExecPlan](../docs/internal/ampule-studio-api-execplan.md) for the additive backend contracts, deployment requirements, and saved validation evidence.
 
 ## Context and Orientation
 
