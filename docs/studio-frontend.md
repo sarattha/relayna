@@ -370,10 +370,20 @@ Key dependencies include:
 
 ## Development Mode
 
-Install dependencies:
+Use Node.js 24.22.1 or a newer patched 24.x release for frontend development,
+tests, and builds. Node 24.22.1 includes the CVE-2026-111497 Brotli decoder fix.
+The Docker builder and CI use the version pinned in `apps/studio/.nvmrc`.
+The package engine requirement is enforced by `apps/studio/.npmrc`.
+Frontend npm commands and the dependency-audit entrypoint also check the running
+Node version, including when dependencies were installed before switching Node.
+
+With [nvm](https://github.com/nvm-sh/nvm), select the pinned version and install
+dependencies:
 
 ```bash
 cd apps/studio
+nvm install
+nvm use
 npm ci
 ```
 

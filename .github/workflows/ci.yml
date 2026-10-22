@@ -114,7 +114,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: apps/studio/.nvmrc
           cache: npm
           cache-dependency-path: apps/studio/package-lock.json
 
@@ -361,7 +361,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version-file: apps/studio/.nvmrc
           cache: npm
           cache-dependency-path: apps/studio/package-lock.json
 
