@@ -27,8 +27,10 @@ classifiers = [
 ]
 dependencies = [
     "aio-pika>=9.4.1",
+    "certifi>=2026.10.19",
     "fastapi>=0.115.11",
     "httpx>=0.28.1",
+    "multidict>=6.9.1",
     "opentelemetry-api>=1.28.0",
     "prometheus-client>=0.21.0",
     "pydantic>=2.11.0",

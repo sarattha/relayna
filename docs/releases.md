@@ -67,6 +67,12 @@ dependencies to resolve the security-audit blockers. No PostgreSQL migration,
 SDK/API change, wire-format change or data rewrite is required. Existing freeze
 snapshots retain their v1.10.1 baseline because the public perimeter is unchanged.
 
+The SDK wheel also declares `certifi>=2026.10.19` and `multidict>=6.9.1` as
+runtime requirements, so a normal pip upgrade replaces older installed versions
+without requiring the repository lockfile. The Studio backend inherits these
+floors through `relayna>=1.10.2`. Retain normal dependency resolution when
+upgrading; `--no-deps` skips these requirements.
+
 ### Upgrading to 1.10.1
 
 Deploy matching Studio backend/frontend 1.10.1 images and use the aligned SDK

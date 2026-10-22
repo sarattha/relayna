@@ -1066,8 +1066,10 @@ version = "1.10.2"
 source = { editable = "../../" }
 dependencies = [
     { name = "aio-pika" },
+    { name = "certifi" },
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "multidict" },
     { name = "opentelemetry-api" },
     { name = "prometheus-client" },
     { name = "pydantic" },
@@ -1078,6 +1080,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aio-pika", specifier = ">=9.4.1" },
+    { name = "certifi", specifier = ">=2026.10.19" },
     { name = "click", marker = "extra == 'dev'", specifier = ">=8.3.3" },
     { name = "coverage", extras = ["toml"], marker = "extra == 'dev'", specifier = ">=7.10.0" },
     { name = "cryptography", marker = "extra == 'dev'", specifier = ">=50.0.0" },
@@ -1087,6 +1090,7 @@ requires-dist = [
     { name = "mkdocs-material", marker = "extra == 'dev'", specifier = ">=9.6.0" },
     { name = "mkdocs-static-i18n", marker = "extra == 'dev'" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'dev'", specifier = ">=0.28.0" },
+    { name = "multidict", specifier = ">=6.9.1" },
     { name = "opentelemetry-api", specifier = ">=1.28.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'benchmark'", specifier = "==1.41.1" },
     { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = "==1.41.1" },

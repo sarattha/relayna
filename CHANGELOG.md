@@ -16,6 +16,9 @@ All notable changes to this project will be documented in this file.
   and Vite to 8.3.5/source-map-js to 1.2.2 with compatible frontend tooling
   dependencies, resolving the SDK/backend and high-severity frontend audit
   blockers without additional suppressions.
+- Publish the patched certifi and multidict minimum versions in SDK dependency
+  metadata so pip wheel upgrades also replace vulnerable installed versions.
+  Studio inherits these requirements through its aligned SDK dependency.
 
 ### Changed
 
