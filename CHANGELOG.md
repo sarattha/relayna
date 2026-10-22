@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.10.2 - 2026-10-22
+
+### Security
+
+- Replace the Studio frontend's end-of-life Node 20 builder and CI toolchain
+  with patched Node.js 24.22.1 for CVE-2026-111497. Share a pinned local/CI
+  version and reject unsupported runtimes during installation and frontend
+  commands, including after switching Node with dependencies already installed.
+- Refresh certifi to 2026.10.19 and multidict to 6.9.1 in both Python locks,
+  and Vite to 8.3.5/source-map-js to 1.2.2 with compatible frontend tooling
+  dependencies, resolving the SDK/backend and high-severity frontend audit
+  blockers without additional suppressions.
+
+### Changed
+
+- Bump the coordinated SDK/Studio packages and lock metadata to 1.10.2.
+  Public SDK/API contracts, routes, persisted schemas and wire formats are
+  unchanged; freeze snapshots retain the v1.10.1 perimeter baseline.
+- Add runtime-version regression coverage and document the frontend Node
+  upgrade, custom image rebuilds, aligned installation and release steps.
+
 ## 1.10.1 - 2026-10-03
 
 ### Fixed

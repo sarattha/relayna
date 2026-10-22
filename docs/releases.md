@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.1/relayna-1.10.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.10.2/relayna-1.10.2-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.1/relayna-1.10.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.10.2/relayna-1.10.2.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.10.1.tar.gz`
-- `dist/relayna-1.10.1-py3-none-any.whl`
+- `dist/relayna-1.10.2.tar.gz`
+- `dist/relayna-1.10.2-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,31 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.10.2
+
+Deploy matching SDK, Studio backend and frontend 1.10.2 packages/images. This
+security-maintenance release pins frontend builds and CI to Node.js 24.22.1,
+which fixes CVE-2026-111497 in the Brotli decoder. The production frontend still
+serves static assets through Nginx and the backend runs Python.
+
+For local frontend work, run `cd apps/studio && nvm install && nvm use` before
+`npm ci`, or select Node 24.22.1 or a newer patched 24.x release with your version
+manager. Installation and frontend commands reject unsupported runtimes, even
+if dependencies were installed before switching Node. From the repository root,
+rebuild custom frontend images with the patched builder:
+
+```bash
+docker build --pull -f apps/studio/Dockerfile -t relayna-studio-frontend:1.10.2 .
+```
+
+See [frontend setup](studio-frontend.md#development-mode).
+
+The Python locks refresh certifi to 2026.10.19 and multidict to 6.9.1; the frontend
+lock refreshes Vite to 8.3.5 and source-map-js to 1.2.2 with compatible tooling
+dependencies to resolve the security-audit blockers. No PostgreSQL migration,
+SDK/API change, wire-format change or data rewrite is required. Existing freeze
+snapshots retain their v1.10.1 baseline because the public perimeter is unchanged.
 
 ### Upgrading to 1.10.1
 
