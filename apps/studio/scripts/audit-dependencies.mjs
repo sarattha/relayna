@@ -1,3 +1,5 @@
+import "./check-node-version.mjs";
+
 import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";

@@ -1,8 +1,8 @@
-FROM node:20-alpine AS build
+FROM node:24.22.1-alpine AS build
 
 WORKDIR /app
 
-COPY apps/studio/package.json apps/studio/package-lock.json ./
+COPY apps/studio/package.json apps/studio/package-lock.json apps/studio/.npmrc ./
 RUN npm ci
 
 COPY apps/studio/ ./

@@ -110,7 +110,7 @@ security-sdk: ## Audit SDK Python dependencies
 	$(PIP_AUDIT) --skip-editable
 
 security-frontend: ## Audit Studio frontend npm dependencies
-	cd apps/studio && node --test scripts/audit-dependencies.node-test.mjs
+	cd apps/studio && node --test scripts/*.node-test.mjs
 	cd apps/studio && node scripts/audit-dependencies.mjs
 
 security-fs: ## Run repository filesystem, secret, and static-analysis checks
