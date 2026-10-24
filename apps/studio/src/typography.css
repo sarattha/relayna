@@ -1,0 +1,16 @@
+/* Owner-selected Studio UI family; original Portico 0.101 exports, as in Gateway. */
+@font-face {
+  font-family: "Relayna Portico";
+  src: url("./assets/brand/fonts/RelaynaPortico-Variable.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Relayna Portico";
+  src: url("./assets/brand/fonts/RelaynaPortico-VariableItalic.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: italic;
+  font-display: swap;
+}

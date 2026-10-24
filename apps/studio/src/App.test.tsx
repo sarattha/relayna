@@ -976,6 +976,24 @@ describe("App", () => {
     vi.unstubAllGlobals();
   });
 
+  it("switches the header theme and keeps it through navigation and reload", async () => {
+    localStorage.removeItem("relayna.studio.theme");
+    const view = render(<App />);
+    await screen.findByRole("link", { name: "Relayna Studio overview" });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to dark mode" }));
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "dark");
+    expect(screen.getByRole("img", { name: "Relayna Studio" })).toHaveAttribute("src", expect.stringContaining("relayna-studio-dark.svg"));
+    fireEvent.click(screen.getByRole("link", { name: /^Overview/ }));
+    await screen.findByRole("heading", { name: "What needs attention now" });
+    expect(screen.getByRole("button", { name: "Switch to light mode" })).toBeInTheDocument();
+    view.unmount();
+    render(<App />);
+    await screen.findByRole("link", { name: "Relayna Studio overview" });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to light mode" }));
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    localStorage.removeItem("relayna.studio.theme");
+  });
+
   it("renders the incident-first overview at the default route", async () => {
     window.history.replaceState({}, "", "/");
     services[0] = {
@@ -998,7 +1016,8 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: /^Overview/ })).toHaveAttribute("aria-current", "page");
     expect(within(screen.getByText("Unknown").closest("article")!).getByText("1")).toBeInTheDocument();
     const brandLink = screen.getByRole("link", { name: "Relayna Studio overview" });
-    expect(brandLink.querySelector("img.studio-brand__mark")).toHaveAttribute("src", expect.stringContaining("relayna-mark"));
+    expect(within(brandLink).getByRole("img", { name: "Relayna Studio" })).toHaveAttribute("src", expect.stringContaining("relayna-studio-light.svg"));
+    expect(brandLink.querySelector("source")).toBeNull();
     fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "prod" } });
     await waitFor(() => expect(window.location.search).toBe("?environment=prod"));
     fireEvent.change(screen.getByLabelText("Find task"), { target: { value: "task-123" } });

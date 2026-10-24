@@ -35,3 +35,19 @@ regexes = [
     '''relayna_live_placeholder_token''',
     '''studio_live_placeholder_token''',
 ]
+
+# Extend only the inherited generic rule; supported by CI's Gitleaks 8.24.3.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Verified public design-token SHA256 in the two brand provenance manifests"
+condition = "AND"
+paths = [
+    '''^apps/studio/src/assets/brand/manifest\.json$''',
+    '''^docs/assets/brand/manifest\.json$''',
+]
+regexTarget = "line"
+regexes = [
+    '''^\s*"css/tokens\.css": "5470cf5c4da1064201161a712ba46a4ff8ae2139934e03ce3da608e3fe8dd7c8",?\s*$''',
+]

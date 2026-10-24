@@ -1,0 +1,196 @@
+# Release Relayna 1.11.0 with the refreshed Studio interface
+
+This living ExecPlan follows `PLANS.md` and continues the implementation record
+in `docs/execplans/studio-design-system.md`.
+
+## Purpose / Big Picture
+
+Publish a coordinated minor SDK/Studio release containing the approved Relayna
+identity, Portico typography, light/dark toggle, Gateway-aligned emphasis, and
+monitor task-list height fix. Update the changelog and documentation with
+current-version screenshots, open a ready-for-review PR, address feedback and
+checks, merge it, and publish the release through the existing tag workflow.
+The user explicitly authorized PR creation/review, up to two additional Codex
+reviews, merging, a minor version bump, and release creation.
+
+## Progress
+
+- [x] (2026-10-25) Inspect release workflows and current remote state.
+- [x] (2026-10-25) Start independent Codex review of the committed frontend diff.
+- [x] (2026-10-25) Coordinate all package/lock versions at 1.11.0 and update release notes.
+- [x] (2026-10-25) Replace nine historical guide screenshots and add desktop
+  light/dark and mobile Monitor captures (12 inspected PNGs).
+- [x] (2026-10-25) Complete mandatory Python verification, frontend coverage/build,
+  release metadata validation and wheel/sdist checks.
+- [x] (2026-10-25) Strict docs build passed; the rendered guide loads all 12
+  versioned images and the Linen canvas without horizontal overflow.
+- [x] (2026-10-25) Second Codex review of immutable head `1a68a40` found no
+  actionable issues and confirmed the ANSI fix.
+- [x] (2026-10-25) Open and link [PR #135](https://github.com/sarattha/relayna/pull/135)
+  ready for review. CI/review monitoring is the next publication gate.
+- [x] (2026-10-25) Resolve OpenTelemetry audit blocker; both Python audits,
+  frontend dependency audit, full Python verification, metadata, rebuilt
+  wheel/sdist and strict docs checks pass. Remote revalidation follows push.
+- [x] (2026-10-25) Validate the narrowly scoped public-checksum exception with
+  Gitleaks 8.24.3 history scan and five positive/negative canaries.
+- [ ] Merge once ready, tag the merged commit, and verify the published release
+  and its artifacts/images. Stop watching the completed PR.
+
+## Surprises & Discoveries
+
+PR CI found `opentelemetry-api 1.41.1` affected by CVE-2026-114603, with upstream
+fix 1.45.1. The first security audit blocked publication. Under the user's
+end-to-end CI/release authorization, raise both runtime dependency floors to
+1.45.1, align dev/benchmark SDK pins, regenerate only the affected dependency
+family in both locks, rerun full Python verification/audits/build metadata, and
+push the correction. No public perimeter change or advisory suppression.
+The new upstream test SDK can set W3C's random-trace-ID flag (0x02) on an
+unsampled span. The old test incorrectly required the entire flag byte to be
+zero; assert the sampling bit instead, retaining valid context propagation and
+no-export checks. Relayna tracing implementation and envelope shape are unchanged.
+Remove the benchmark comparison report's hardcoded old OpenTelemetry version;
+the comparison already requires matching resolved package versions.
+
+The next CI security scan passed dependency audits and Trivy, then Gitleaks
+classified the same public token-CSS SHA256 as an API key in both provenance
+manifests. Verified each file against that digest. Add a narrow AND-condition
+allowlist requiring one of those two exact manifest paths and the exact public
+`css/tokens.css` checksum entry; other values/paths and all real token rules
+remain active. Use a rule-level allowlist on the inherited `generic-api-key` rule, compatible
+with CI's pinned 8.24.3 (global allowlist arrays require newer versions). The
+exact-version PR history scan passes. Both allowed manifests pass canaries;
+the same checksum outside those paths, a changed checksum in a manifest, and a
+live-shaped synthetic token in the same manifest are all still detected.
+
+The latest published release/tag is v1.10.1. Main already contains prepared
+1.10.2 security metadata and notes but that version was not released. Consolidate
+those pending notes into 1.11.0 instead of documenting a nonexistent release.
+The release workflow creates the GitHub Release, SDK artifacts, signed Studio
+images, provenance and SBOMs after a `v*` tag is pushed.
+
+## Decision Log
+
+- Decision: Use coordinated version 1.11.0 for SDK, backend, frontend and locks;
+  update the backend SDK dependency floor accordingly. Rationale: The user
+  requested a minor release and packages share one version line. Includes
+  pending security work from main. Date/Author: 2026-10-25 / Codex.
+- Decision: Preserve v1.10.1 freeze manifests. Rationale: Typography, theme
+  preference, layout and release metadata do not add API/type exports, routes,
+  schemas or wire contracts. The user approved these visual changes; there is
+  no production perimeter or migration change. Implementation-strategy and
+  production-freeze-guard apply; packaging changes require the full
+  code-change-verification skill. Date/Author: 2026-10-25 / Codex.
+- Decision: Capture the production frontend with synthetic fixture services,
+  label the captures as 1.11.0 examples, and retain approved brand assets and
+  semantic documentation colors. Rationale: Screenshots must represent the
+  final UI without displaying secrets or production data. Date/Author:
+  2026-10-25 / Codex.
+
+## Outcomes & Retrospective
+
+Release metadata, screenshots and both independent code reviews are complete.
+PR #135 is ready for review; remote checks and publication are pending. Do not claim the release is published until
+the tag workflow and release artifacts have been verified.
+
+## Context and Orientation
+
+Versions live in `pyproject.toml`, `uv.lock`, `studio/backend/pyproject.toml`,
+`studio/backend/uv.lock`, `apps/studio/package.json` and `package-lock.json`.
+`scripts/validate-release-metadata.py` enforces coordinated versions.
+`CHANGELOG.md`, `README.md`, and `docs/releases.md` describe installation and
+upgrade. `docs/studio-frontend.md` embeds the operator guide screenshots.
+`.github/workflows/ci.yml` runs Python/frontend coverage, builds and security
+checks; `.github/workflows/docs.yml` deploys docs after merging to main.
+`.github/workflows/release.yml` owns artifact/image publication and release
+creation. T3 PR watch owns asynchronous check/review notifications.
+
+## Compatibility Boundary
+
+Released baseline: v1.10.1. Maintain SDK/Studio API, route, durable data, and
+wire contracts. Only package version/dependency alignment and the approved
+frontend presentation/preferences change. No schema migration or freeze
+manifest revision. Browsers without a saved theme default to light.
+
+## Plan of Work
+
+Update coordinated metadata and regenerate lock metadata without upgrading
+unrelated dependencies. Consolidate unpublished security notes with the Studio
+minor-release notes, update current installation links, and document upgrade
+and rollback behavior. Capture light/dark, desktop/mobile and operational
+screens using the final production frontend; replace old screenshot references.
+Run required checks and two read-only Codex reviews as useful, resolve findings,
+then open/link the PR ready for review. Use the T3 watcher and resume on events.
+Merge normally after readiness is established and publish an annotated v1.11.0
+tag on the merged main commit. Verify the release workflow output, SDK assets,
+SBOMs, image tags and release notes; never bypass failing required checks.
+
+## Concrete Steps
+
+    make sync
+    make -C studio/backend sync
+    bash .codex/skills/code-change-verification/scripts/run.sh
+    make -C apps/studio coverage
+    make -C apps/studio build
+    uv run --frozen --extra dev mkdocs build --strict
+    python3 scripts/validate-release-metadata.py v1.11.0
+    uv build
+    uv run twine check dist/relayna-1.11.0*
+
+Use Node ^24.22.1 for frontend commands. Keep transient logs and fixture scripts
+under ignored `reports/`; commit only selected, inspected screenshots under
+`docs/assets/images/studio/v1.11.0/`. Use structured PR text or `gh --body-file`.
+
+## Validation and Acceptance
+
+All required checks and relevant coverage gates pass. Current screenshots show
+Portico, approved colors and working theme/layout controls with no clipping.
+The ready PR is linked to this thread; findings are resolved or explicitly
+assessed. The merged main commit carries v1.11.0. Release notes, wheel/sdist,
+SBOMs and both Studio images exist, and the release workflow succeeds.
+
+## Idempotence and Recovery
+
+Preserve unrelated work. Do not rewrite existing release tags or force-push
+main. Inspect remote state before retrying PR/tag/release writes. Fix failures
+on the review branch or a focused follow-up as needed; never publish a second
+release just to hide a failed job. No production deployment is requested.
+
+## Artifacts and Notes
+
+Review 1 inspected immutable head `0b55fde54cbca1d6a24c6828ff00e97ca99875d7`
+(task client ID `studio-design-system-review-1-0b55fde`). It found P2 dark ANSI
+log contrast; fixed with theme-dependent foreground tokens, existing parser
+regression assertions, and a rendered audit of all 16 colors. Minimum measured
+contrast is 5.03:1 light / 6.34:1 dark. The latest released comparison is v1.10.1;
+the review prompt's initial v1.10.2 assumption was corrected in this plan.
+
+Review 2 (`studio-design-system-review-2-1a68a40`) reviewed the complete range
+`c7fc37a..1a68a40c15ad94bc88b296f38012b60947f824db`, including coordinated
+metadata/docs and unchanged freeze manifests. It returned no actionable findings
+and confirmed the first finding resolved. Both user-authorized review rounds
+are complete. The subsequent commit records this evidence only.
+
+After the CI dependency correction, the complete Python verification stack was
+rerun successfully (688 SDK tests, 513 backend tests, same integration skips).
+Both Python dependency audits report no known vulnerabilities; frontend audit
+and its Node tooling tests also pass. New wheel metadata enforces
+`opentelemetry-api>=1.45.1` and SDK 1.45.1 optional extras. The new wheel/sdist,
+coordinated version validator and strict documentation build all pass.
+
+Verification: SDK format/lint/types and tests passed (688 passed, 9 skipped);
+backend format/lint/types and tests passed (513 passed, 21 skipped). Frontend
+coverage passed all gates: 267 tests in 19 files; statements 98.01%, branches
+89.13%, functions 99.36%, lines 98.65%. Production build, coordinated metadata
+validation and SDK wheel/sdist Twine checks passed. Browser task-list geometry
+confirmed zero desktop gap, last-task focus visibility, and a bounded mobile
+list without page overflow. T3 snapshots failed twice with
+`Preview automation snapshot timed out after 15000ms.`; the documented
+Playwright fallback captured the production bundle. Selected screenshots and
+their fixture limitations are recorded in the versioned image directory.
+
+ User-facing PR/release links belong in the final handoff.
+
+## Interfaces and Dependencies
+
+No new public API or dependency is introduced. Existing GitHub Actions, gh,
+uv, Node 24 and the approved design-system snapshot provide the workflow.

@@ -13,14 +13,14 @@ import type { ExecutionGraph } from "./types";
 import { frameStyle } from "./ui";
 
 const kindPalette: Record<string, { background: string; border: string; color: string }> = {
-  task: { background: "#fff3dd", border: "#cb7b2d", color: "#5d3110" },
-  aggregation_child: { background: "#e4f6f3", border: "#3b8f8d", color: "#184a49" },
-  task_attempt: { background: "#fff1e5", border: "#e08b48", color: "#663414" },
-  workflow_message: { background: "#e6f7f4", border: "#2d8a80", color: "#184841" },
-  stage_attempt: { background: "#eff3f2", border: "#6b8d8c", color: "#284443" },
-  status_event: { background: "#f9f8ef", border: "#b08a51", color: "#57411d" },
-  retry: { background: "#fff0eb", border: "#c46c56", color: "#6a2b1c" },
-  dlq_record: { background: "#233f45", border: "#ffb295", color: "#fff5ef" },
+  task: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
+  aggregation_child: { background: "var(--rn-color-info-surface)", border: "var(--rn-color-info)", color: "var(--rn-color-info)" },
+  task_attempt: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
+  workflow_message: { background: "var(--rn-color-info-surface)", border: "var(--rn-color-info)", color: "var(--rn-color-info)" },
+  stage_attempt: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
+  status_event: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
+  retry: { background: "var(--rn-color-warning-surface)", border: "var(--rn-color-warning)", color: "var(--rn-color-warning)" },
+  dlq_record: { background: "var(--rn-color-error-surface)", border: "var(--rn-color-error)", color: "var(--rn-color-error)" },
 };
 
 function buildFlowNodes(graph: ExecutionGraph): Node[] {
@@ -76,9 +76,9 @@ function buildFlowNodes(graph: ExecutionGraph): Node[] {
     columnNodes.sort((left, right) => left.id.localeCompare(right.id));
     columnNodes.forEach((node, row) => {
       const palette = kindPalette[node.kind] ?? {
-        background: "#f6f0e7",
-        border: "#8f7e65",
-        color: "#352d25",
+        background: "var(--rn-color-neutral-surface)",
+        border: "var(--rn-color-neutral)",
+        color: "var(--rn-color-neutral)",
       };
       const labelLines = [node.label || node.id, node.kind];
       if (node.timestamp) {
@@ -105,7 +105,7 @@ function buildFlowNodes(graph: ExecutionGraph): Node[] {
           background: palette.background,
           color: palette.color,
           padding: 12,
-          boxShadow: "0 10px 24px rgba(47, 39, 28, 0.08)",
+          boxShadow: "var(--rn-shadow-rest)",
         },
       });
     });
@@ -122,13 +122,14 @@ function buildFlowEdges(graph: ExecutionGraph): Edge[] {
     label: edge.kind,
     type: "smoothstep",
     animated: edge.kind === "retried_as" || edge.kind === "stage_transitioned_to",
+    labelBgStyle: { fill: "var(--studio-surface)" },
     labelStyle: {
-      fill: "#4a3f32",
+      fill: "var(--studio-text-muted)",
       fontSize: 11,
       fontWeight: 600,
     },
     style: {
-      stroke: edge.kind === "dead_lettered_to" ? "#a34848" : "#6d6251",
+      stroke: edge.kind === "dead_lettered_to" ? "var(--studio-danger)" : "var(--studio-border-strong)",
       strokeWidth: edge.kind === "stage_transitioned_to" ? 2.2 : 1.5,
     },
   }));
@@ -142,12 +143,12 @@ export function GraphSurface({ graph }: { graph: ExecutionGraph }) {
     <ReactFlowProvider>
       <div className="studio-card studio-flow-surface" style={frameStyle}>
         <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
-          <Background gap={20} color="rgba(15, 124, 123, 0.14)" />
+          <Background gap={20} color="var(--studio-border)" />
           <Controls />
           <MiniMap
             pannable
             zoomable
-            style={{ background: "rgba(250, 253, 252, 0.96)", border: "1px solid var(--studio-border)" }}
+            style={{ background: "var(--studio-surface)", border: "1px solid var(--studio-border)" }}
           />
           <Panel
             position="top-right"
@@ -157,7 +158,7 @@ export function GraphSurface({ graph }: { graph: ExecutionGraph }) {
               padding: "10px 12px",
               borderRadius: 14,
               fontSize: 12,
-              background: "rgba(255, 248, 236, 0.92)",
+              background: "var(--studio-surface-muted)",
             }}
           >
             <strong>{graph.topology_kind}</strong>

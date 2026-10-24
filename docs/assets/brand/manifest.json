@@ -1,0 +1,19 @@
+{
+  "package": "@relayna/design-system",
+  "version": "0.2.1",
+  "identity": "Natural Connection / Mulberry & Linen",
+  "font": "Relayna Round 0.100",
+  "source": "Owner-supplied relayna-design-system/dist snapshot (2026-10-25)",
+  "sha256": {
+    "USAGE-RIGHTS.md": "2cd73db19ca520eebc23b7fc7dd309adf7b196a205c9ad2d9b7f5ccaa5b00037",
+    "banners/relayna-sdk-wide-dark.png": "320fe39e2e2cdbd1d1525b729c877d1da1dc368599d256de43e112da884a914a",
+    "banners/relayna-sdk-wide-light.png": "f0ea54c3ea97049b4168e83f60df6ac1ec589999557c912371f40b6630c0347e",
+    "css/fonts-round.css": "4d254e8535032989c0cf1e0852685b232bc0ebbf47b3c6b1523a1b3ddb561163",
+    "css/tokens.css": "5470cf5c4da1064201161a712ba46a4ff8ae2139934e03ce3da608e3fe8dd7c8",
+    "fonts/RelaynaRound-Variable.woff2": "d848189921682ece1065404e1241e81e090e7658aca8ff6a453a03f1668b8e28",
+    "logos/mark-dark.svg": "6812dd3cdcfa00d8e504915b4803c32650a1db28cccd12a7a4167ba58b33b525",
+    "logos/mark-light.svg": "1c2a3641fd312301c26cb7c7ed500f9d665b573cbc2f3eb1ef2f9cb475d9964e",
+    "logos/relayna-sdk-dark.svg": "8383a3802f3a86e4da887d973f89b1457f8781f240153101ab536c450c9119f9",
+    "logos/relayna-sdk-light.svg": "aecb463ff0ff8ee072d6f24526e8513bb05545b7266afc39888c9b9e6304d8ec"
+  }
+}

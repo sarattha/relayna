@@ -1,0 +1,15 @@
+{
+  "package": "@relayna/design-system",
+  "version": "0.2.1",
+  "identity": "Natural Connection / Mulberry & Linen",
+  "font": "Relayna Portico 0.101",
+  "source": "Owner-supplied relayna-design-system/dist snapshot (2026-10-25)",
+  "sha256": {
+    "USAGE-RIGHTS.md": "2cd73db19ca520eebc23b7fc7dd309adf7b196a205c9ad2d9b7f5ccaa5b00037",
+    "css/tokens.css": "5470cf5c4da1064201161a712ba46a4ff8ae2139934e03ce3da608e3fe8dd7c8",
+    "fonts/RelaynaPortico-Variable.woff2": "1321f7482d48f1e04ef8b896a44b81cc9af8937eff01c8349446d7aeecf8a20e",
+    "fonts/RelaynaPortico-VariableItalic.woff2": "4efe5e5cdf0037745bee04449332e0f69c5e95222ba13cfb0f41b1ce6dd5d5ea",
+    "logos/relayna-studio-dark.svg": "5932cb3fc7557a38d50197288934af22483fcaeb2f60295a484fd61ad9530089",
+    "logos/relayna-studio-light.svg": "82cfcc70d21ae02ae57bc77656cfc9e3976090b28c335d08018d88487352e1ca"
+  }
+}

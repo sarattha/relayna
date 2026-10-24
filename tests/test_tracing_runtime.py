@@ -104,7 +104,9 @@ def test_unsampled_valid_missing_and_malformed_contexts_propagate_without_export
                 contexts.append(span.get_span_context())
                 injected = inject_trace_headers({"custom": "preserved"})
                 assert injected["custom"] == "preserved"
-                assert injected["traceparent"].endswith("-00")
+                # Other W3C flag bits (such as random trace IDs) are independent of sampling.
+                flags = TraceFlags(int(injected["traceparent"].rsplit("-", 1)[1], 16))
+                assert not flags.sampled
     finally:
         provider.shutdown()
 

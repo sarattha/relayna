@@ -10,7 +10,7 @@ import {
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Link } from "./scoped-link";
 
-import relaynaMarkUrl from "./assets/relayna-mark.png";
+import { StudioBrandLogo, StudioThemeToggle } from "./studio-theme";
 import type {
   ExecutionGraph,
   HealthStatus,
@@ -58,13 +58,13 @@ export const primaryButtonStyle: CSSProperties = {
   gap: 8,
   border: "none",
   borderRadius: 14,
-  background: "linear-gradient(135deg, var(--studio-primary) 0%, var(--studio-primary-strong) 100%)",
+  background: "var(--studio-primary)",
   color: "var(--studio-primary-contrast)",
   padding: "12px 16px",
   fontSize: 14,
-  fontWeight: 700,
+  fontWeight: 500,
   cursor: "pointer",
-  boxShadow: "0 14px 28px rgba(218, 107, 43, 0.24)",
+  boxShadow: "none",
 };
 
 export const secondaryButtonStyle: CSSProperties = {
@@ -74,11 +74,11 @@ export const secondaryButtonStyle: CSSProperties = {
   gap: 8,
   borderRadius: 14,
   border: "1px solid var(--studio-border)",
-  background: "var(--studio-surface-muted)",
-  color: "var(--studio-secondary-strong)",
+  background: "var(--studio-surface)",
+  color: "var(--studio-text)",
   padding: "10px 14px",
   fontSize: 13,
-  fontWeight: 600,
+  fontWeight: 500,
   cursor: "pointer",
 };
 
@@ -314,7 +314,7 @@ export function StudioIcon({
 
 export const destructiveButtonStyle: CSSProperties = {
   ...secondaryButtonStyle,
-  borderColor: "rgba(168, 60, 40, 0.26)",
+  borderColor: "var(--studio-danger)",
   background: "var(--studio-danger-soft)",
   color: "var(--studio-danger)",
 };
@@ -322,7 +322,7 @@ export const destructiveButtonStyle: CSSProperties = {
 export const insetSurfaceStyle: CSSProperties = {
   borderRadius: 16,
   border: "1px solid var(--studio-border)",
-  background: "linear-gradient(180deg, rgba(239, 250, 248, 0.92), rgba(255, 247, 236, 0.9))",
+  background: "var(--studio-surface)",
   padding: 14,
 };
 
@@ -470,19 +470,19 @@ export function ConfirmationDialog({
 }
 
 const statusPalette: Record<ServiceStatus, { background: string; border: string; color: string }> = {
-  registered: { background: "#fff2df", border: "#c67a2d", color: "#5f3410" },
-  healthy: { background: "#e4f7f2", border: "#27887e", color: "#154741" },
-  unavailable: { background: "#fff1e5", border: "#d2823b", color: "#6b3610" },
-  disabled: { background: "#edf3f2", border: "#7c8f8d", color: "#314544" },
+  registered: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
+  healthy: { background: "var(--rn-color-success-surface)", border: "var(--rn-color-success)", color: "var(--rn-color-success)" },
+  unavailable: { background: "var(--rn-color-warning-surface)", border: "var(--rn-color-warning)", color: "var(--rn-color-warning)" },
+  disabled: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
 };
 
 const healthPalette: Record<HealthStatus, { background: string; border: string; color: string }> = {
-  healthy: { background: "#e4f7f2", border: "#2b8e7f", color: "#145047" },
-  degraded: { background: "#fff2de", border: "#d38434", color: "#6b3d0f" },
-  stale: { background: "#fff0e8", border: "#cf7446", color: "#6f3117" },
-  unreachable: { background: "#fdebe6", border: "#bc5c48", color: "#69271e" },
-  disabled: { background: "#edf3f2", border: "#7a8c8b", color: "#304342" },
-  unknown: { background: "#edf5f4", border: "#6f9291", color: "#264645" },
+  healthy: { background: "var(--rn-color-success-surface)", border: "var(--rn-color-success)", color: "var(--rn-color-success)" },
+  degraded: { background: "var(--rn-color-warning-surface)", border: "var(--rn-color-warning)", color: "var(--rn-color-warning)" },
+  stale: { background: "var(--rn-color-warning-surface)", border: "var(--rn-color-warning)", color: "var(--rn-color-warning)" },
+  unreachable: { background: "var(--rn-color-error-surface)", border: "var(--rn-color-error)", color: "var(--rn-color-error)" },
+  disabled: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
+  unknown: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
 };
 
 export function parseLimit(value: string, fallback: number) {
@@ -621,7 +621,7 @@ export function StatusBadge({ status }: { status: ServiceStatus }) {
         background: palette.background,
         color: palette.color,
         fontSize: 12,
-        fontWeight: 700,
+        fontWeight: 500,
         textTransform: "uppercase",
         letterSpacing: 0.9,
       }}
@@ -645,7 +645,7 @@ export function HealthBadge({ status }: { status: HealthStatus }) {
         background: palette.background,
         color: palette.color,
         fontSize: 12,
-        fontWeight: 700,
+        fontWeight: 500,
         textTransform: "uppercase",
         letterSpacing: 0.9,
       }}
@@ -664,11 +664,11 @@ export function LogSourceBadge({ source }: { source?: string | null }) {
         justifyContent: "center",
         borderRadius: 999,
         padding: "4px 8px",
-        border: "1px solid rgba(39, 136, 126, 0.2)",
-        background: "rgba(228, 247, 242, 0.96)",
+        border: "1px solid var(--studio-border)",
+        background: "var(--studio-secondary-soft)",
         color: "var(--studio-secondary-strong)",
         fontSize: 11,
-        fontWeight: 700,
+        fontWeight: 500,
         letterSpacing: 0.4,
         maxWidth: "100%",
         overflowWrap: "anywhere",
@@ -689,8 +689,8 @@ const logMessageSurfaceStyle: CSSProperties = {
   marginTop: 10,
   padding: 12,
   borderRadius: 12,
-  background: "rgba(246, 251, 249, 0.96)",
-  border: "1px solid rgba(111, 146, 145, 0.18)",
+  background: "var(--studio-surface-muted)",
+  border: "1px solid var(--studio-border)",
   fontFamily: "'SFMono-Regular', Menlo, monospace",
   fontSize: 12,
   lineHeight: 1.6,
@@ -705,22 +705,22 @@ const logMessageSurfaceStyle: CSSProperties = {
 const ansiRegex = /\x1b\[([0-9;]*)m/g;
 const remainingAnsiRegex = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const ansiColorMap: Record<number, string> = {
-  30: "#2b2722",
-  31: "#a83c28",
-  32: "#1d7a63",
-  33: "#9f6a10",
-  34: "#2f64a8",
-  35: "#8d4d91",
-  36: "#0f7c7b",
-  37: "#d8ddd8",
-  90: "#6f7775",
-  91: "#d4553c",
-  92: "#24966f",
-  93: "#c68f1a",
-  94: "#4a7fd4",
-  95: "#aa66b0",
-  96: "#2c9c9a",
-  97: "#f4f7f4",
+  30: "var(--studio-text)",
+  31: "var(--studio-ansi-red)",
+  32: "var(--studio-ansi-green)",
+  33: "var(--studio-ansi-yellow)",
+  34: "var(--studio-ansi-blue)",
+  35: "var(--studio-ansi-magenta)",
+  36: "var(--studio-ansi-cyan)",
+  37: "var(--studio-text-muted)",
+  90: "var(--studio-text-muted)",
+  91: "var(--studio-ansi-red)",
+  92: "var(--studio-ansi-green)",
+  93: "var(--studio-ansi-yellow)",
+  94: "var(--studio-ansi-blue)",
+  95: "var(--studio-ansi-magenta)",
+  96: "var(--studio-ansi-cyan)",
+  97: "var(--studio-text)",
 };
 
 function stripAnsi(value: string) {
@@ -839,7 +839,7 @@ export function LogMessage({ message }: { message: string }) {
 export function MetadataRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-      <dt style={{ fontWeight: 700 }}>{label}</dt>
+      <dt style={{ fontWeight: 500 }}>{label}</dt>
       <dd style={{ margin: 0, opacity: 0.85, minWidth: 0, overflowWrap: "anywhere" }}>{value}</dd>
     </div>
   );
@@ -860,8 +860,8 @@ export function NoticeBanner({ tone = "info", children }: { tone?: "info" | "err
       style={{
         ...frameStyle,
         padding: 16,
-        borderColor: tone === "error" ? "rgba(168, 60, 40, 0.3)" : "rgba(15, 124, 123, 0.24)",
-        color: tone === "error" ? "var(--studio-danger)" : "var(--studio-secondary-strong)",
+        borderColor: tone === "error" ? "var(--studio-danger)" : "var(--rn-color-info)",
+        color: tone === "error" ? "var(--studio-danger)" : "var(--rn-color-info)",
         minWidth: 0,
         overflowWrap: "anywhere",
       }}
@@ -920,7 +920,7 @@ export function InlineCodeBox({ value, minHeight = 180, label }: { value: string
         resize: "vertical",
         fontFamily: "'SFMono-Regular', Menlo, monospace",
         fontSize: 12,
-        background: "rgba(249, 253, 252, 0.98)",
+        background: "var(--studio-surface-strong)",
       }}
     />
   );
@@ -956,9 +956,10 @@ export function AppHeader() {
   return (
     <header className="studio-header">
       <Link to={scopedPath("/")} className="studio-brand" aria-label="Relayna Studio overview">
-        <img className="studio-brand__mark" src={relaynaMarkUrl} alt="" aria-hidden="true" />
-        <span>
-          <strong>Relayna</strong>
+        <span className="studio-brand__identity">
+          <picture>
+            <StudioBrandLogo className="studio-brand__logo" />
+          </picture>
           <small title={servicesState.updatedAt ? `Registry updated ${new Date(servicesState.updatedAt).toLocaleString()}` : "Loading registry"}>{servicesState.error ? "Registry stale · refresh failed" : "Studio control plane"}</small>
         </span>
       </Link>
@@ -1010,6 +1011,7 @@ export function AppHeader() {
         </form>
         <div className="studio-user-menu">
           <span><strong>{auth.user.display_name}</strong><small>{auth.user.role === "admin" ? "Admin" : "Read-only"}</small></span>
+          <StudioThemeToggle />
           <button type="button" onClick={() => void auth.signOut()}>Sign out</button>
         </div>
       </div>
@@ -1027,7 +1029,7 @@ export function TaskRefLink({
   return (
     <Link
       to={`/tasks/${encodeURIComponent(taskRef.service_id)}/${encodeURIComponent(taskRef.task_id)}`}
-      style={{ color: "var(--studio-secondary-strong)", fontWeight: 700 }}
+      style={{ color: "var(--studio-secondary-strong)", fontWeight: 500 }}
     >
       {children || formatTaskPointer(taskRef)}
     </Link>

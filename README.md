@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/banners/relayna-sdk-wide-dark.png" />
+  <img src="docs/assets/brand/banners/relayna-sdk-wide-light.png" alt="Relayna SDK — Your logic. Connected execution." width="800" />
+</picture>
+
 # relayna
 
 `relayna` is a Python library for shared RabbitMQ, Redis, and FastAPI plumbing
@@ -34,13 +39,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.2/relayna-1.10.2-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.2/relayna-1.10.2.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0.tar.gz
 ```
 
 For local development in this repository:
@@ -247,7 +252,7 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.10.2`, and the backend requires `relayna>=1.10.2`.
+release version is `1.11.0`, and the backend requires `relayna>=1.11.0`.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).

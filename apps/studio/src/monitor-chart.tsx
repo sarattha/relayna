@@ -134,9 +134,9 @@ export function MonitorResourceChart({
             fill="none"
             stroke={
               [
-                "var(--studio-secondary-strong)",
-                "var(--studio-primary)",
-                "var(--studio-success)",
+                "var(--rn-color-chart-1)",
+                "var(--rn-color-chart-2)",
+                "var(--rn-color-chart-3)",
               ][index % 3]
             }
             strokeWidth={2}

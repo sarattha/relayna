@@ -403,9 +403,9 @@ describe("task detail helpers", () => {
   });
 
   it("orders trace nodes and calculates timing, width, palette, and preferred selection", () => {
-    expect(traceNodePalette("failed").color).toBe("#7a2621");
-    expect(traceNodePalette("missing").color).toBe("#4b453d");
-    expect(traceNodePalette(null).color).toBe("#4b453d");
+    expect(traceNodePalette("failed").color).toBe("var(--rn-color-error)");
+    expect(traceNodePalette("missing").color).toBe("var(--rn-color-neutral)");
+    expect(traceNodePalette(null).color).toBe("var(--rn-color-neutral)");
     expect(timestampMs(null)).toBeNull();
     expect(timestampMs("invalid")).toBeNull();
     expect(timestampMs("2026-01-01T00:00:00Z")).toBeTypeOf("number");
