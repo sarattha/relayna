@@ -14,6 +14,10 @@ for review. GitHub repository settings are outside the requested scope.
 
 ## Progress
 
+- [x] (2026-10-25) Match Gateway's contrast/emphasis using its current branded
+  source; verify both themes at 320/390/728/1440px, all 267 frontend tests,
+  production build, strict docs build, and prepare the branch update.
+
 - [x] (2026-10-25) Add the sun/moon toggle, saved light/dark preference,
   matching logos, keyboard access, cross-tab synchronization, and tests.
 - [x] (2026-10-25) All 267 frontend tests, production build, strict docs build,
@@ -50,6 +54,18 @@ for review. GitHub repository settings are outside the requested scope.
 
 ## Decision Log
 
+- Decision: Keep the six shared color anchors and Relayna Round, but align
+  Studio's consumer styles with the current branded Gateway worktree at
+  `/Users/jobz/.t3/worktrees/relayna-gateway/t3-08199965/`. Its adapter uses a flat
+  canvas, surface-colored controls, `color-text-muted` for secondary copy,
+  rest-level panel shadows, and 500/600 control/heading weights. Studio adds
+  heavier 700-weight text, deeper hover-colored labels, gradients and hover
+  shadows at rest. Replace those extra emphasis choices rather than fading text
+  or modifying generated tokens. Gateway is a read-only reference; do not modify
+  its checkout or local changes. This is user-authorized visual alignment and
+  leaves released APIs, persisted state and freeze manifests unchanged.
+  Date/Author: 2026-10-25 / Codex.
+
 - Decision: Add an internal React theme provider and a shared sun/moon button
   to the header and auth surfaces. Default to light when no valid preference is
   saved; store explicit light/dark choices in `relayna.studio.theme`. Apply the
@@ -81,6 +97,28 @@ for review. GitHub repository settings are outside the requested scope.
   Date/Author: 2026-10-25 / Codex.
 
 ## Outcomes & Retrospective
+
+Studio now matches the current branded Gateway's emphasis roles: 14px body
+text, 500-weight controls/navigation, 600-weight headings, muted secondary copy,
+flat canvas and primary actions, surface-colored secondary controls, rest-level
+panel shadows, and no heavy header/button shadow at rest. Panel/page heading
+scales now form a compact operational hierarchy. Relayna Round, exact brand
+anchors, functional statuses, theme persistence, and monitor task-list sizing
+are preserved. Generated token files are byte-for-byte identical between Studio
+and the current branded Gateway source.
+
+All 267 frontend tests, the production build, strict documentation build, and
+diff checks pass. Eight browser checks cover 320/390/728/1440px in both themes,
+including computed font weights, neutral surfaces, header elevation, keyboard
+switching, reload persistence, and auth controls. No horizontal overflow was
+found. The real local monitor still has zero unused gap below the task list.
+Artifacts are under ignored `reports/studio-gateway-contrast/`.
+
+The attached reference files are 65×41 thumbnails, so source styles provide the
+precise role/weight comparison. The running legacy Gateway instance still uses
+its older Inter/green theme; the branded Gateway source above is authoritative
+for this comparison. Gateway files and its unrelated working-tree edits were
+left untouched.
 
 The requested sun/moon control is available in the signed-in header and all
 sign-in/access surfaces. Light remains the default without a saved preference.

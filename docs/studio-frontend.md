@@ -22,6 +22,12 @@ the selected palette. Success, warning, error, info, and unknown states retain
 their own
 functional tones and visible status labels; logs and identifiers use monospace.
 
+Studio matches Gateway's visual emphasis with a flat canvas, surface-colored
+controls, muted secondary copy, medium control text, and semibold headings.
+Panel elevation uses the shared rest shadow; header and action controls avoid
+extra resting shadows or decorative gradients. The approved color anchors and
+functional status colors are unchanged; Studio retains Relayna Round.
+
 The portable assets are checked into `src/assets/brand/` and `public/favicon.ico`;
 no local package path or external font service is required. See
 [brand asset provenance](assets/brand/README.md) for source and usage notes.

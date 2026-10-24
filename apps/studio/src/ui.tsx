@@ -58,13 +58,13 @@ export const primaryButtonStyle: CSSProperties = {
   gap: 8,
   border: "none",
   borderRadius: 14,
-  background: "linear-gradient(135deg, var(--studio-primary) 0%, var(--studio-primary-strong) 100%)",
+  background: "var(--studio-primary)",
   color: "var(--studio-primary-contrast)",
   padding: "12px 16px",
   fontSize: 14,
-  fontWeight: 700,
+  fontWeight: 500,
   cursor: "pointer",
-  boxShadow: "var(--rn-shadow-hover)",
+  boxShadow: "none",
 };
 
 export const secondaryButtonStyle: CSSProperties = {
@@ -74,11 +74,11 @@ export const secondaryButtonStyle: CSSProperties = {
   gap: 8,
   borderRadius: 14,
   border: "1px solid var(--studio-border)",
-  background: "var(--studio-surface-muted)",
-  color: "var(--studio-secondary-strong)",
+  background: "var(--studio-surface)",
+  color: "var(--studio-text)",
   padding: "10px 14px",
   fontSize: 13,
-  fontWeight: 600,
+  fontWeight: 500,
   cursor: "pointer",
 };
 
@@ -322,7 +322,7 @@ export const destructiveButtonStyle: CSSProperties = {
 export const insetSurfaceStyle: CSSProperties = {
   borderRadius: 16,
   border: "1px solid var(--studio-border)",
-  background: "var(--studio-surface-muted)",
+  background: "var(--studio-surface)",
   padding: 14,
 };
 
@@ -621,7 +621,7 @@ export function StatusBadge({ status }: { status: ServiceStatus }) {
         background: palette.background,
         color: palette.color,
         fontSize: 12,
-        fontWeight: 700,
+        fontWeight: 500,
         textTransform: "uppercase",
         letterSpacing: 0.9,
       }}
@@ -645,7 +645,7 @@ export function HealthBadge({ status }: { status: HealthStatus }) {
         background: palette.background,
         color: palette.color,
         fontSize: 12,
-        fontWeight: 700,
+        fontWeight: 500,
         textTransform: "uppercase",
         letterSpacing: 0.9,
       }}
@@ -668,7 +668,7 @@ export function LogSourceBadge({ source }: { source?: string | null }) {
         background: "var(--studio-secondary-soft)",
         color: "var(--studio-secondary-strong)",
         fontSize: 11,
-        fontWeight: 700,
+        fontWeight: 500,
         letterSpacing: 0.4,
         maxWidth: "100%",
         overflowWrap: "anywhere",
@@ -839,7 +839,7 @@ export function LogMessage({ message }: { message: string }) {
 export function MetadataRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-      <dt style={{ fontWeight: 700 }}>{label}</dt>
+      <dt style={{ fontWeight: 500 }}>{label}</dt>
       <dd style={{ margin: 0, opacity: 0.85, minWidth: 0, overflowWrap: "anywhere" }}>{value}</dd>
     </div>
   );
@@ -1029,7 +1029,7 @@ export function TaskRefLink({
   return (
     <Link
       to={`/tasks/${encodeURIComponent(taskRef.service_id)}/${encodeURIComponent(taskRef.task_id)}`}
-      style={{ color: "var(--studio-secondary-strong)", fontWeight: 700 }}
+      style={{ color: "var(--studio-secondary-strong)", fontWeight: 500 }}
     >
       {children || formatTaskPointer(taskRef)}
     </Link>
