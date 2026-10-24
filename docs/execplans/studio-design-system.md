@@ -21,7 +21,8 @@ for review. GitHub repository settings are outside the requested scope.
 - [x] (2026-10-25) Update README and documentation branding.
 - [x] (2026-10-25) All 258 frontend tests, production build, strict docs build,
   asset hashes, and responsive light/dark visual checks pass.
-- [ ] Commit and push the review branch; provide the PR draft summary.
+- [x] (2026-10-25) Commit and push `t3/studio-design-system` to origin;
+  prepare the required PR draft handoff.
 
 ## Surprises & Discoveries
 
@@ -63,8 +64,11 @@ graph were checked at desktop/mobile sizes. Documentation was checked at
 1440/320 px. All checked pages fit their viewport. Operational browser checks
 used test fixtures intercepted by Playwright, without a live backend; no mock
 or authentication bypass is shipped. Historical operator-tour screenshots are
-explicitly identified as the earlier visual theme. Commit/push delivery is the
-remaining step.
+explicitly identified as the earlier visual theme. The implementation is committed as `e6aee85` and pushed to
+`origin/t3/studio-design-system`; this completion record is a documentation-only
+follow-up. The built production bundle also loads Round and the correct themed
+logo from hashed local assets. No deployment or GitHub settings changes were
+requested.
 
 ## Context and Orientation
 
@@ -123,6 +127,9 @@ targets. Roll back individual edits through a review commit if needed; no data
 migration or external deployment is part of this work.
 
 ## Artifacts and Notes
+
+Local screenshots and diagnostics are retained under ignored
+`reports/studio-branding/`; visual checks use fixture data.
 
 Checks: `make -C apps/studio test` (18 files, 258 tests),
 `make -C apps/studio build`, `uv run --frozen --extra dev mkdocs build --strict`,
