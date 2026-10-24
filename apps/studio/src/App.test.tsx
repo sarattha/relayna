@@ -998,7 +998,8 @@ describe("App", () => {
     expect(screen.getByRole("link", { name: /^Overview/ })).toHaveAttribute("aria-current", "page");
     expect(within(screen.getByText("Unknown").closest("article")!).getByText("1")).toBeInTheDocument();
     const brandLink = screen.getByRole("link", { name: "Relayna Studio overview" });
-    expect(brandLink.querySelector("img.studio-brand__mark")).toHaveAttribute("src", expect.stringContaining("relayna-mark"));
+    expect(within(brandLink).getByRole("img", { name: "Relayna Studio" })).toHaveAttribute("src", expect.stringContaining("relayna-studio-light.svg"));
+    expect(brandLink.querySelector('source[media="(prefers-color-scheme: dark)"]')).toHaveAttribute("srcset", expect.stringContaining("relayna-studio-dark.svg"));
     fireEvent.change(screen.getByLabelText("Environment"), { target: { value: "prod" } });
     await waitFor(() => expect(window.location.search).toBe("?environment=prod"));
     fireEvent.change(screen.getByLabelText("Find task"), { target: { value: "task-123" } });

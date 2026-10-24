@@ -3,7 +3,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import { fetchStudioSession, logoutStudio, setStudioCsrfToken, StudioApiError } from "./api";
 import type { StudioMember } from "./types";
-import relaynaMarkUrl from "./assets/relayna-mark.png";
+import studioLogoLight from "./assets/brand/logos/relayna-studio-light.svg";
+import studioLogoDark from "./assets/brand/logos/relayna-studio-dark.svg";
 
 type AuthContextValue = {
   user: StudioMember;
@@ -17,8 +18,11 @@ function AuthSurface({ title, body, action }: { title: string; body: string; act
   return (
     <main className="studio-auth-shell">
       <section className="studio-auth-card">
-        <img src={relaynaMarkUrl} alt="" aria-hidden="true" />
-        <span className="studio-auth-eyebrow">Relayna Studio</span>
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcSet={studioLogoDark} />
+          <img src={studioLogoLight} alt="Relayna Studio" />
+        </picture>
+        <span className="studio-auth-eyebrow">Make distributed work visible.</span>
         <h1>{title}</h1>
         <p>{body}</p>
         {action}
@@ -50,7 +54,7 @@ function OperatorLogin({ onSignedIn }: { onSignedIn: () => Promise<void> }) {
   }
   return <form onSubmit={(event) => void submit(event)} className="studio-stack-sm">
     <label htmlFor="operator-token">Operator token</label>
-    <input id="operator-token" type="password" required maxLength={4096} autoComplete="current-password" value={token} onChange={(event) => setToken(event.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "12px", borderRadius: "8px", border: "1px solid #64748b" }} />
+    <input id="operator-token" type="password" required maxLength={4096} autoComplete="current-password" value={token} onChange={(event) => setToken(event.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "12px", borderRadius: "8px", border: "1px solid var(--studio-border-strong)", background: "var(--studio-surface-strong)", color: "var(--studio-text)" }} />
     {error && <p role="alert">{error}</p>}
     <button className="studio-auth-button" disabled={busy} type="submit">{busy ? "Signing in…" : "Sign in"}</button>
   </form>;

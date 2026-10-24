@@ -6,6 +6,8 @@ repo_name: sarattha/relayna
 theme:
   name: material
   language: en
+  logo: assets/brand/logos/mark-light.svg
+  favicon: assets/brand/logos/mark-light.svg
   features:
     - navigation.instant
     - navigation.sections
@@ -17,10 +19,8 @@ theme:
   palette:
     scheme: default
     primary: white
-    accent: teal
-  font:
-    text: Manrope
-    code: JetBrains Mono
+    accent: custom
+  font: false
 nav:
   - Overview: index.md
   - Getting Started: getting-started.md

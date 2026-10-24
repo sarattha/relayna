@@ -6,6 +6,19 @@ how it is wired to the Studio backend in development and production.
 If you need to operate the backend or understand `/studio/*` endpoints first,
 see [Studio Backend](studio-backend.md).
 
+## Visual identity
+
+Studio uses the Natural Connection / Mulberry & Linen identity from
+`@relayna/design-system` 0.2.1: the supplied Slim Leaf lockup and self-hosted
+Relayna Round variable font (weights 300–700). System appearance selects the
+light Linen/Mulberry or dark Ink/Blossom tokens. Chamber inherits the same
+palette. Success, warning, error, info, and unknown states retain their own
+functional tones and visible status labels; logs and identifiers use monospace.
+
+The portable assets are checked into `src/assets/brand/` and `public/favicon.ico`;
+no local package path or external font service is required. See
+[brand asset provenance](assets/brand/README.md) for source and usage notes.
+
 ## Role In The Architecture
 
 The frontend is a React SPA. It does not talk directly to registered Relayna
@@ -27,7 +40,8 @@ backend instead of in the browser.
 
 ## Studio Operator Tour
 
-The screenshots in this guide come from the production Nginx frontend and
+The screenshots below show the earlier visual theme; their operational flows
+remain applicable. They come from the production Nginx frontend and
 Studio backend running with PostgreSQL, Redis, RabbitMQ, and mock Relayna services. Values
 such as `mock`, `orders-api`, and `host.docker.internal` are examples; use the
 addresses and environment names that are reachable from your Studio backend.

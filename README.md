@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/banners/relayna-sdk-wide-dark.png" />
+  <img src="docs/assets/brand/banners/relayna-sdk-wide-light.png" alt="Relayna SDK — Your logic. Connected execution." width="800" />
+</picture>
+
 # relayna
 
 `relayna` is a Python library for shared RabbitMQ, Redis, and FastAPI plumbing

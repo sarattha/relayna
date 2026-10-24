@@ -1,5 +1,7 @@
 # relayna docs
 
+![Relayna SDK — Your logic. Connected execution.](assets/brand/banners/relayna-sdk-wide-light.png)
+
 `relayna` is shared infrastructure for services that need RabbitMQ task
 delivery, Redis-backed status storage, and FastAPI endpoints for live status
 streaming.

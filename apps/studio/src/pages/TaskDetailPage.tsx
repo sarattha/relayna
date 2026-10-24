@@ -73,13 +73,13 @@ export type TaskLogWindowMode = "auto" | "15m" | "1h" | "24h" | "manual";
 export type TaskLogWindow = { from: string; to: string };
 
 const traceStatePalette: Record<string, { background: string; border: string; color: string }> = {
-  dead_lettered: { background: "#fff2f0", border: "#c65f55", color: "#7a2621" },
-  failed: { background: "#fff2f0", border: "#c65f55", color: "#7a2621" },
-  retrying: { background: "#fff7e6", border: "#c1832f", color: "#6a4312" },
-  running: { background: "#eef7ff", border: "#5e8fc4", color: "#204765" },
-  succeeded: { background: "#effaf1", border: "#5f9e6b", color: "#24552e" },
-  queued: { background: "#f3f1ff", border: "#8271ba", color: "#40346f" },
-  unknown: { background: "#f7f7f4", border: "#b8b0a2", color: "#4b453d" },
+  dead_lettered: { background: "var(--rn-color-error-surface)", border: "var(--rn-color-error)", color: "var(--rn-color-error)" },
+  failed: { background: "var(--rn-color-error-surface)", border: "var(--rn-color-error)", color: "var(--rn-color-error)" },
+  retrying: { background: "var(--rn-color-warning-surface)", border: "var(--rn-color-warning)", color: "var(--rn-color-warning)" },
+  running: { background: "var(--rn-color-info-surface)", border: "var(--rn-color-info)", color: "var(--rn-color-info)" },
+  succeeded: { background: "var(--rn-color-success-surface)", border: "var(--rn-color-success)", color: "var(--rn-color-success)" },
+  queued: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
+  unknown: { background: "var(--rn-color-neutral-surface)", border: "var(--rn-color-neutral)", color: "var(--rn-color-neutral)" },
 };
 
 export function isoToLocalDateTime(value: string) {
@@ -512,7 +512,7 @@ function TracePathExplorer({
                   position: "relative",
                   height: 12,
                   borderRadius: 999,
-                  background: "rgba(34, 43, 50, 0.08)",
+                  background: "var(--studio-surface-muted)",
                   overflow: "hidden",
                 }}
               >

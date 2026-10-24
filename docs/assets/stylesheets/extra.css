@@ -1,22 +1,39 @@
-:root {
-  --md-default-bg-color: #f6f7f5;
-  --md-default-fg-color: #18211d;
-  --md-default-fg-color--light: #51605a;
-  --md-default-fg-color--lighter: #7a8982;
-  --md-primary-fg-color: #f6f7f5;
-  --md-accent-fg-color: #0f766e;
-  --md-typeset-a-color: #0f766e;
-  --relayna-surface: #ffffff;
-  --relayna-border: rgba(24, 33, 29, 0.08);
-  --relayna-shadow: 0 16px 40px rgba(24, 33, 29, 0.06);
+@import "../brand/css/tokens.css";
+@import "../brand/css/fonts-round.css";
+
+:root:not([data-rn-theme]),
+[data-md-color-scheme="default"] {
+  color-scheme: light;
+  --rn-color-canvas: var(--rn-primitive-linen);
+  --rn-color-surface: var(--rn-primitive-porcelain);
+  --rn-color-surface-selected: var(--rn-primitive-selected);
+  --rn-color-surface-subtle: var(--rn-primitive-petal);
+  --rn-color-text: var(--rn-primitive-ink);
+  --rn-color-text-secondary: var(--rn-primitive-quiet);
+  --rn-color-text-muted: var(--rn-primitive-muted);
+  --rn-color-border: var(--rn-primitive-line);
+  --rn-color-link: var(--rn-primitive-mulberry);
+  --md-text-font: "Relayna Round";
+  --md-code-font: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --md-default-bg-color: var(--rn-color-canvas);
+  --md-default-fg-color: var(--rn-color-text);
+  --md-default-fg-color--light: var(--rn-color-text-secondary);
+  --md-default-fg-color--lighter: var(--rn-color-text-muted);
+  --md-primary-fg-color: var(--rn-color-canvas);
+  --md-primary-bg-color: var(--rn-color-text);
+  --md-accent-fg-color: var(--rn-color-link);
+  --md-typeset-a-color: var(--rn-color-link);
+  --relayna-surface: var(--rn-color-surface);
+  --relayna-border: var(--rn-color-border);
+  --relayna-shadow: 0 2px 8px rgb(44 31 46 / 0.05);
 }
 
 [data-md-color-scheme="default"] {
-  background: linear-gradient(180deg, #fbfcfa 0%, #f3f5f2 100%);
+  background: var(--rn-color-canvas);
 }
 
 .md-header {
-  background: rgba(246, 247, 245, 0.78);
+  background: var(--rn-color-canvas);
   backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--relayna-border);
   box-shadow: none;
@@ -29,7 +46,7 @@
 
 .md-main {
   background:
-    radial-gradient(circle at top right, rgba(15, 118, 110, 0.08), transparent 24rem),
+    radial-gradient(circle at top right, var(--rn-color-surface-selected), transparent 24rem),
     linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
 }
 
@@ -45,14 +62,14 @@
 }
 
 .md-content__inner {
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--rn-color-surface);
   border: 1px solid var(--relayna-border);
   box-shadow: var(--relayna-shadow);
   padding: 2rem 2.25rem;
 }
 
 .md-sidebar__inner {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--rn-color-surface);
   border: 1px solid var(--relayna-border);
   padding-top: 1rem;
 }
@@ -65,12 +82,12 @@
 }
 
 .md-typeset h1 {
-  font-weight: 800;
+  font-weight: 700;
   margin-bottom: 0.75rem;
 }
 
 .md-typeset h2 {
-  font-weight: 750;
+  font-weight: 700;
   margin-top: 2.4rem;
 }
 
@@ -96,13 +113,13 @@
 }
 
 .md-typeset table:not([class]) {
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--rn-color-surface);
   border: 1px solid var(--relayna-border);
   overflow: hidden;
 }
 
 .md-typeset table:not([class]) th {
-  background: rgba(15, 118, 110, 0.06);
+  background: var(--rn-color-surface-subtle);
 }
 
 .md-typeset a {
@@ -129,4 +146,13 @@
     padding: 1.5rem 1.2rem;
     border-radius: 16px;
   }
+}
+
+.md-footer {
+  background: var(--rn-primitive-ink);
+  color: var(--rn-primitive-linen);
+}
+
+.md-footer-meta {
+  background: transparent;
 }

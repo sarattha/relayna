@@ -290,7 +290,7 @@ export const serviceMetricSummaryGroups: StudioMetricGroup[] = [
   "observation_events_rate",
 ];
 
-const podMetricLineColors = ["#2f6fed", "#14966b", "#b7791f", "#9f4acb", "#d64545", "#506070"];
+const podMetricLineColors = ["var(--rn-color-chart-1)", "var(--rn-color-chart-2)", "var(--rn-color-chart-3)", "var(--rn-color-chart-4)", "var(--rn-color-chart-5)", "var(--rn-color-chart-6)"];
 
 export function seriesPodLabel(series: StudioMetricSeries, podLabel?: string | null) {
   const candidateLabels = [podLabel, "pod", "pod_name", "kubernetes_pod_name"].filter(
@@ -1533,12 +1533,12 @@ export function ServiceDetailPage() {
                     ...secondaryButtonStyle,
                     alignItems: "center",
                     background: selected
-                      ? "linear-gradient(135deg, rgba(15, 124, 123, 0.22), rgba(218, 107, 43, 0.12))"
+                      ? "var(--studio-secondary-soft)"
                       : "var(--studio-surface-muted)",
                     borderColor: selected ? "var(--studio-secondary-strong)" : "var(--studio-border)",
                     borderWidth: selected ? 2 : 1,
                     boxShadow: selected
-                      ? "0 0 0 2px rgba(15, 124, 123, 0.14), 0 8px 20px rgba(15, 85, 84, 0.14)"
+                      ? "0 0 0 2px var(--studio-focus), var(--rn-shadow-hover)"
                       : undefined,
                     color: selected ? "var(--studio-text)" : undefined,
                     display: "flex",
