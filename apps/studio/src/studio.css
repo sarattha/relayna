@@ -1,5 +1,5 @@
 @import "./assets/brand/css/tokens.css";
-@import "./assets/brand/css/fonts-round.css";
+@import "./typography.css";
 
 :root {
   --studio-bg-top: var(--rn-color-canvas);
@@ -110,7 +110,7 @@ h1, h2, h3, h4, strong, b {
 
 body {
   margin: 0;
-  font-family: var(--rn-font-family-round);
+  font-family: var(--rn-font-family-sans);
   font-size: 14px;
   font-synthesis: none;
   line-height: var(--rn-line-height-body);
@@ -159,7 +159,7 @@ button:hover {
   min-height: 100vh;
   padding: 0 22px 56px;
   color: var(--studio-text);
-  font-family: var(--rn-font-family-round);
+  font-family: var(--rn-font-family-sans);
 }
 
 .studio-shell {
@@ -326,7 +326,7 @@ button:hover {
 
 .studio-operations-header h1 {
   margin: 0;
-  font: 600 1.5rem/1.25 var(--rn-font-family-round);
+  font: 600 1.5rem/1.25 var(--rn-font-family-sans);
   letter-spacing: normal;
 }
 
@@ -1274,7 +1274,7 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 4px; }
 .monitor-log-toolbar button[aria-pressed="true"] { border-color: var(--studio-secondary-strong); color: var(--studio-secondary-strong); background: var(--studio-surface-muted); }
 .monitor-log-scroll { min-width: 0; max-height: 680px; min-height: 340px; overflow: auto; flex: 1; scrollbar-gutter: stable; }
 .monitor-log-table { width: 100%; border-collapse: collapse; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.monitor-log-table th { text-align: left; font: 500 12px/1.5 var(--rn-font-family-round); position: sticky; top: 0; z-index: 2; background: var(--studio-surface); }
+.monitor-log-table th { text-align: left; font: 500 12px/1.5 var(--rn-font-family-sans); position: sticky; top: 0; z-index: 2; background: var(--studio-surface); }
 .monitor-log-table td, .monitor-log-table th { padding: 3px 12px; border-bottom: 1px solid var(--studio-border); vertical-align: top; }
 .monitor-log-table td:first-child { white-space: nowrap; width: 82px; }
 .monitor-log-table td:nth-child(2) { width: 65px; }
@@ -1341,7 +1341,7 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 4px; }
   .monitor-workspace--expanded { inset: 4px; }
 }
 .monitor-mobile-source { display: none; }
-@media (max-width: 600px) { .monitor-mobile-source { display: block; color: var(--studio-text-muted); font: 11px var(--rn-font-family-round); margin-bottom: 4px; overflow-wrap: anywhere; } }
+@media (max-width: 600px) { .monitor-mobile-source { display: block; color: var(--studio-text-muted); font: 11px var(--rn-font-family-sans); margin-bottom: 4px; overflow-wrap: anywhere; } }
 
 .studio-service-workspace-header .studio-section-title { font-size: 24px; }
 .studio-monitor-active .studio-service-workspace-header { gap: 4px; }

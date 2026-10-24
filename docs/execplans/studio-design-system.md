@@ -6,13 +6,18 @@ Decision Log, and Outcomes & Retrospective current.
 ## Purpose / Big Picture
 
 Studio, Relayna's operational control plane, will use the approved Mulberry &
-Linen colors, Slim Leaf logo, and Relayna Round typeface from the owner's
+Linen colors, Slim Leaf logo, and owner-selected Relayna Portico typeface from
+the owner's
 `/Users/jobz/Works/relayna-design-system` package version 0.2.1. The repository
 README and hosted documentation will present the same approved SDK identity.
 The finished source will be committed and pushed on `t3/studio-design-system`
 for review. GitHub repository settings are outside the requested scope.
 
 ## Progress
+
+- [x] (2026-10-25) Replace Studio UI Round with Gateway's exact Portico 0.101
+  upright/italic webfonts. Verify all 267 tests, production/docs builds, font
+  hashes, and 14 responsive theme cases; prepare the review branch update.
 
 - [x] (2026-10-25) Match Gateway's contrast/emphasis using its current branded
   source; verify both themes at 320/390/728/1440px, all 267 frontend tests,
@@ -53,6 +58,16 @@ for review. GitHub repository settings are outside the requested scope.
   pinned Node 24 executable for installation and verification.
 
 ## Decision Log
+
+- Decision: Use Relayna Portico 0.101 for all Studio interface text, matching
+  Gateway, as explicitly requested by the owner. Copy both variable WOFF2 faces
+  from the supplied design system; retain the approved outlined Studio logo and
+  monospace logs. Remove obsolete app-only Round assets, use the shared sans
+  family token, and record new font checksums. SDK documentation retains Round.
+  This supersedes the earlier Round assignment without editing generated tokens
+  or source design-system assets. API/freeze contracts remain unchanged;
+  no migration is needed for this unreleased presentation change.
+  Date/Author: 2026-10-25 / Codex.
 
 - Decision: Keep the six shared color anchors and Relayna Round, but align
   Studio's consumer styles with the current branded Gateway worktree at
@@ -97,6 +112,23 @@ for review. GitHub repository settings are outside the requested scope.
   Date/Author: 2026-10-25 / Codex.
 
 ## Outcomes & Retrospective
+
+Studio interface text now uses Relayna Portico 0.101 throughout headings,
+controls, navigation, auth, and monitoring labels. The upright and italic WOFF2
+exports match Gateway byte-for-byte; their SHA-256 digests are recorded in the
+app's asset manifest. Obsolete app-only Round assets were removed. SDK docs and
+approved outlined logo artwork retain their own supplied assets.
+
+All 267 frontend tests, the production build, strict docs build, asset hashes,
+and diff checks pass. Fourteen browser checks cover both themes at
+320/390/728/960/1024/1280/1440px. Both normal and italic Portico faces load,
+interface text computes to Portico, there is no horizontal page overflow, and
+theme persistence, keyboard switching, and auth controls still work. The
+production bundle contains only the two Portico faces for Studio. Artifacts
+are under ignored `reports/studio-portico/`.
+
+The older Round notes below describe initial adoption and contrast alignment,
+which this owner-selected typeface change supersedes.
 
 Studio now matches the current branded Gateway's emphasis roles: 14px body
 text, 500-weight controls/navigation, 600-weight headings, muted secondary copy,
@@ -169,7 +201,8 @@ Strict production baseline: v1.4.30; latest released comparison: v1.10.1.
 Only the explicitly requested visual presentation changes. Preserve SDK exports,
 frontend API/type exports, route pages, backend responses, task/health semantics,
 configuration, and persisted/wire formats. No freeze manifest changes or data
-migrations are required. Relayna Round remains a development font (0.100).
+migrations are required. The owner-selected Studio UI font is now Relayna
+Portico 0.101; SDK documentation retains Relayna Round 0.100.
 
 ## Plan of Work
 
@@ -197,7 +230,7 @@ service cards, graphs, and Chamber where possible. Build docs with MkDocs.
 
 ## Validation and Acceptance
 
-Frontend tests and production build pass. The browser loads the bundled Round
+Frontend tests and production build pass. The browser loads the bundled Portico
 font and defaults to Mulberry/Linen under both system appearances, then switches
 to Ink/Blossom on request and restores that choice after reload. Logos
 retain aspect ratio and the approved outlines. Status text and distinct
@@ -224,7 +257,8 @@ the Python code-change-verification stack is outside this frontend-only scope.
 
 
 Source package: @relayna/design-system 0.2.1, Natural Connection / Mulberry &
-Linen, Slim Leaf, Open Signal campaign, Round 0.100. Approved Studio tagline:
+Linen, Slim Leaf, Open Signal campaign, Portico 0.101 (Studio UI) and Round
+0.100 (SDK docs). Approved Studio tagline:
 “Make distributed work visible.” Approved SDK tagline: “Your logic. Connected
 execution.” Existing operational screenshots may document older releases;
 clearly identify their historical appearance if retained.

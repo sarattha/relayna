@@ -10,8 +10,8 @@ see [Studio Backend](studio-backend.md).
 
 Studio uses the Natural Connection / Mulberry & Linen identity from
 `@relayna/design-system` 0.2.1: the supplied Slim Leaf lockup and self-hosted
-Relayna Round variable font (weights 300–700). Studio starts in the light
-Linen/Mulberry theme. Use the moon button to switch
+Relayna Portico 0.101 variable fonts (upright and italic, weights 300–700).
+Studio starts in the light Linen/Mulberry theme. Use the moon button to switch
 to dark Ink/Blossom, or the sun button to return to light. The toggle is available
 in the user menu and on sign-in screens, with a keyboard-accessible label and
 visible focus. Your choice is saved in browser storage as `relayna.studio.theme`
@@ -26,7 +26,8 @@ Studio matches Gateway's visual emphasis with a flat canvas, surface-colored
 controls, muted secondary copy, medium control text, and semibold headings.
 Panel elevation uses the shared rest shadow; header and action controls avoid
 extra resting shadows or decorative gradients. The approved color anchors and
-functional status colors are unchanged; Studio retains Relayna Round.
+functional status colors are unchanged. Studio uses the same Portico font files
+as Gateway, following the owner's typeface selection.
 
 The portable assets are checked into `src/assets/brand/` and `public/favicon.ico`;
 no local package path or external font service is required. See

@@ -3,7 +3,9 @@
 Selected, unmodified exports from the owner-supplied `@relayna/design-system`
 0.2.1 package, supplied on 2026-10-25. Identity: Natural Connection / Mulberry &
 Linen; Slim Leaf symbol; Open Signal campaign; Relayna Round 0.100 variable
-webfont. SDK and Studio use Round; the parent and Gateway use Portico.
+webfont. This documentation snapshot uses Round for the SDK. Studio's interface
+uses Portico at the owner's request, matching Gateway; its font exports live in
+`apps/studio/src/assets/brand/`.
 
 `manifest.json` records SHA-256 hashes for this snapshot. Generated CSS and
 artwork must remain unchanged. Refresh from the authoritative package exports,
