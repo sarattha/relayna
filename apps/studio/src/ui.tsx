@@ -10,7 +10,7 @@ import {
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Link } from "./scoped-link";
 
-import studioLogoLight from "./assets/brand/logos/relayna-studio-light.svg";
+import { StudioBrandLogo, StudioThemeToggle } from "./studio-theme";
 import type {
   ExecutionGraph,
   HealthStatus,
@@ -958,7 +958,7 @@ export function AppHeader() {
       <Link to={scopedPath("/")} className="studio-brand" aria-label="Relayna Studio overview">
         <span className="studio-brand__identity">
           <picture>
-            <img className="studio-brand__logo" src={studioLogoLight} alt="Relayna Studio" />
+            <StudioBrandLogo className="studio-brand__logo" />
           </picture>
           <small title={servicesState.updatedAt ? `Registry updated ${new Date(servicesState.updatedAt).toLocaleString()}` : "Loading registry"}>{servicesState.error ? "Registry stale · refresh failed" : "Studio control plane"}</small>
         </span>
@@ -1011,6 +1011,7 @@ export function AppHeader() {
         </form>
         <div className="studio-user-menu">
           <span><strong>{auth.user.display_name}</strong><small>{auth.user.role === "admin" ? "Admin" : "Read-only"}</small></span>
+          <StudioThemeToggle />
           <button type="button" onClick={() => void auth.signOut()}>Sign out</button>
         </div>
       </div>

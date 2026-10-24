@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { StudioServicesProvider } from "./services-context";
 import { StudioAuthProvider } from "./auth-context";
 import { AppChrome, AppHeader } from "./ui";
+import { StudioThemeProvider } from "./studio-theme";
 
 const DlqPage = lazy(() => import("./pages/DlqPage").then((module) => ({ default: module.DlqPage })));
 const FailedTasksPage = lazy(() =>
@@ -32,29 +33,31 @@ const AccessPage = lazy(() => import("./pages/AccessPage").then((module) => ({ d
 
 export function App() {
   return (
-    <StudioAuthProvider>
-      <BrowserRouter>
-        <StudioServicesProvider>
-          <AppChrome>
-            <AppHeader />
-            <Suspense fallback={<div className="studio-route-loading" role="status">Loading Studio workspace…</div>}>
-              <Routes>
-                <Route path="/" element={<OverviewPage />} />
-                <Route path="/services" element={<ServicesPage />} />
-                <Route path="/services/:serviceId" element={<ServiceDetailPage />} />
-                <Route path="/services/:serviceId/topology" element={<TopologyPage />} />
-                <Route path="/services/:serviceId/load-tests" element={<LoadTestingPage />} />
-                <Route path="/services/:serviceId/dlq" element={<DlqPage />} />
-                <Route path="/failed-tasks" element={<FailedTasksPage />} />
-                <Route path="/tasks/search" element={<TaskSearchPage />} />
-                <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
-                <Route path="/access" element={<AccessPage />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Suspense>
-          </AppChrome>
-        </StudioServicesProvider>
-      </BrowserRouter>
-    </StudioAuthProvider>
+    <StudioThemeProvider>
+      <StudioAuthProvider>
+        <BrowserRouter>
+          <StudioServicesProvider>
+            <AppChrome>
+              <AppHeader />
+              <Suspense fallback={<div className="studio-route-loading" role="status">Loading Studio workspace…</div>}>
+                <Routes>
+                  <Route path="/" element={<OverviewPage />} />
+                  <Route path="/services" element={<ServicesPage />} />
+                  <Route path="/services/:serviceId" element={<ServiceDetailPage />} />
+                  <Route path="/services/:serviceId/topology" element={<TopologyPage />} />
+                  <Route path="/services/:serviceId/load-tests" element={<LoadTestingPage />} />
+                  <Route path="/services/:serviceId/dlq" element={<DlqPage />} />
+                  <Route path="/failed-tasks" element={<FailedTasksPage />} />
+                  <Route path="/tasks/search" element={<TaskSearchPage />} />
+                  <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
+                  <Route path="/access" element={<AccessPage />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Suspense>
+            </AppChrome>
+          </StudioServicesProvider>
+        </BrowserRouter>
+      </StudioAuthProvider>
+    </StudioThemeProvider>
   );
 }

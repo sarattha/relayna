@@ -14,6 +14,12 @@ for review. GitHub repository settings are outside the requested scope.
 
 ## Progress
 
+- [x] (2026-10-25) Add the sun/moon toggle, saved light/dark preference,
+  matching logos, keyboard access, cross-tab synchronization, and tests.
+- [x] (2026-10-25) All 267 frontend tests, production build, strict docs build,
+  reload persistence, keyboard focus/activation, and 320–1440px browser checks
+  pass. Prepare the update for the existing review branch.
+
 - [x] (2026-10-25) Verify the explicit light default under light and dark
   system appearances; all 258 frontend tests, production build, and strict
   documentation build pass.
@@ -44,11 +50,22 @@ for review. GitHub repository settings are outside the requested scope.
 
 ## Decision Log
 
+- Decision: Add an internal React theme provider and a shared sun/moon button
+  to the header and auth surfaces. Default to light when no valid preference is
+  saved; store explicit light/dark choices in `relayna.studio.theme`. Apply the
+  document scope and browser chrome in a layout effect before React paint, and
+  select the logo from the same state. Synchronize storage changes across tabs;
+  retain an in-memory fallback when storage is blocked. Rationale: The owner
+  explicitly requested a light/dark control after the light-default follow-up.
+  This adds only frontend presentation and a new browser-local preference;
+  no released API/data contract or freeze manifest changes are required.
+  Date/Author: 2026-10-25 / Codex.
+
 - Decision: Default Studio to light mode using `data-rn-theme="light"` on the
   initial HTML document. Keep light logo sources and the Linen browser theme
   color independent of system appearance. Rationale: Owner requested light as
-  the default after local testing; no theme toggle or persisted preference is
-  needed. This directly replaces unreleased branch behavior and leaves all
+  the default after local testing; a theme toggle or persisted preference was not yet requested
+  (superseded by the toggle decision above). This directly replaces unreleased branch behavior and leaves all
   frozen contracts intact. Date/Author: 2026-10-25 / Codex.
 
 - Decision: Adopt existing semantic `--rn-*` tokens through Studio's existing
@@ -64,6 +81,17 @@ for review. GitHub repository settings are outside the requested scope.
   Date/Author: 2026-10-25 / Codex.
 
 ## Outcomes & Retrospective
+
+The requested sun/moon control is available in the signed-in header and all
+sign-in/access surfaces. Light remains the default without a saved preference.
+The selected theme persists across reloads and navigation, synchronizes between
+tabs, and keeps logos/browser chrome aligned. Storage-blocked browsers can
+still switch for the current page. All 267 tests and both builds pass. Real
+browser checks confirmed keyboard switching/focus and usable 44px targets at
+1440/728/390/320px in both themes without page overflow. T3 verified the real
+local login/header path; Playwright used test fixtures for responsive screenshots
+because T3 resize requests repeatedly left the measured viewport at 1440px.
+Screenshot artifacts are under ignored `reports/studio-theme-toggle/`.
 
 Follow-up: the owner requested a light default after testing locally. The
 initial HTML now explicitly resolves light tokens before first paint, with
@@ -132,7 +160,8 @@ service cards, graphs, and Chamber where possible. Build docs with MkDocs.
 ## Validation and Acceptance
 
 Frontend tests and production build pass. The browser loads the bundled Round
-font and renders Mulberry/Linen light colors under both system appearances. Logos
+font and defaults to Mulberry/Linen under both system appearances, then switches
+to Ink/Blossom on request and restores that choice after reload. Logos
 retain aspect ratio and the approved outlines. Status text and distinct
 functional tones remain available. No new page/API/type exports appear and
 freeze tests pass. README assets resolve from repository-relative paths.
@@ -165,5 +194,7 @@ clearly identify their historical appearance if retained.
 ## Interfaces and Dependencies
 
 Use existing React, Vite, and CSS facilities. No runtime package dependency,
-network font service, public API, or theme preference setting is added. Keep
-the supplied semantic tokens with an explicit light document scope.
+network font service, or public API is added. The internal React provider in
+`apps/studio/src/studio-theme.tsx` owns the browser-local `relayna.studio.theme`
+preference and explicit `data-rn-theme` document scope. Auth and header controls
+share this provider; the initial HTML remains light before the app mounts.

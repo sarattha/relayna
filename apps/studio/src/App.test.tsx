@@ -976,6 +976,24 @@ describe("App", () => {
     vi.unstubAllGlobals();
   });
 
+  it("switches the header theme and keeps it through navigation and reload", async () => {
+    localStorage.removeItem("relayna.studio.theme");
+    const view = render(<App />);
+    await screen.findByRole("link", { name: "Relayna Studio overview" });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to dark mode" }));
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "dark");
+    expect(screen.getByRole("img", { name: "Relayna Studio" })).toHaveAttribute("src", expect.stringContaining("relayna-studio-dark.svg"));
+    fireEvent.click(screen.getByRole("link", { name: /^Overview/ }));
+    await screen.findByRole("heading", { name: "What needs attention now" });
+    expect(screen.getByRole("button", { name: "Switch to light mode" })).toBeInTheDocument();
+    view.unmount();
+    render(<App />);
+    await screen.findByRole("link", { name: "Relayna Studio overview" });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to light mode" }));
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    localStorage.removeItem("relayna.studio.theme");
+  });
+
   it("renders the incident-first overview at the default route", async () => {
     window.history.replaceState({}, "", "/");
     services[0] = {

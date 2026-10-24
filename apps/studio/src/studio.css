@@ -66,6 +66,23 @@
 .studio-user-menu small { color: var(--studio-text-muted); }
 .studio-user-menu button { border: 1px solid var(--studio-border); border-radius: 10px; padding: 7px 10px; background: var(--studio-surface); color: var(--studio-text); cursor: pointer; }
 
+.studio-auth-tools { display: flex; justify-content: flex-end; }
+.studio-theme-toggle,
+.studio-user-menu .studio-theme-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  padding: 0;
+  border: 1px solid var(--studio-border);
+  border-radius: 12px;
+  background: var(--studio-surface-strong);
+  color: var(--studio-primary);
+  cursor: pointer;
+}
+.studio-theme-toggle:hover { background: var(--studio-secondary-soft); }
+
 .studio-access-user { display: grid; grid-template-columns: minmax(220px, 1fr) 180px 180px auto; gap: 14px; align-items: end; padding: 16px; }
 .studio-access-user > div, .studio-access-user label { display: grid; gap: 5px; }
 .studio-access-user span, .studio-access-user small, .studio-access-user label { color: var(--studio-text-muted); font-size: 12px; }

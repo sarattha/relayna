@@ -10,8 +10,16 @@ see [Studio Backend](studio-backend.md).
 
 Studio uses the Natural Connection / Mulberry & Linen identity from
 `@relayna/design-system` 0.2.1: the supplied Slim Leaf lockup and self-hosted
-Relayna Round variable font (weights 300–700). Studio defaults to the light Linen/Mulberry theme, including when the
-operating system uses dark appearance. Chamber inherits the same palette. Success, warning, error, info, and unknown states retain their own
+Relayna Round variable font (weights 300–700). Studio starts in the light
+Linen/Mulberry theme. Use the moon button to switch
+to dark Ink/Blossom, or the sun button to return to light. The toggle is available
+in the user menu and on sign-in screens, with a keyboard-accessible label and
+visible focus. Your choice is saved in browser storage as `relayna.studio.theme`
+and synchronized across tabs. If browser storage is blocked, switching still
+works for the current page. A browser without a saved choice starts in light
+mode regardless of system appearance. Logos, browser colors, and Chamber follow
+the selected palette. Success, warning, error, info, and unknown states retain
+their own
 functional tones and visible status labels; logs and identifiers use monospace.
 
 The portable assets are checked into `src/assets/brand/` and `public/favicon.ico`;

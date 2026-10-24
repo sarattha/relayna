@@ -1,9 +1,14 @@
-import { useEffect, useState } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect, useState, type ReactNode } from "react";
+import { act, fireEvent, render as renderWithoutTheme, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setStudioCsrfToken, updateStudioUser } from "./api";
 import { StudioAuthProvider, useStudioAuth } from "./auth-context";
+import { StudioThemeProvider } from "./studio-theme";
+
+function render(children: ReactNode) {
+  return renderWithoutTheme(<StudioThemeProvider>{children}</StudioThemeProvider>);
+}
 
 const fetchMock = vi.fn<typeof fetch>();
 
