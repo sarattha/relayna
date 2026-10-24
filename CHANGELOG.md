@@ -33,6 +33,10 @@ All notable changes to this project will be documented in this file.
 
 ### Security
 
+- Require OpenTelemetry API 1.45.1 or newer and align the test/benchmark SDK at
+  1.45.1 to resolve CVE-2026-114603 (unbounded `tracestate` parsing). Refresh both
+  Python locks without adding advisory suppressions.
+
 - Replace the Studio frontend's end-of-life Node 20 builder and CI toolchain
   with patched Node.js 24.22.1 for CVE-2026-111497. Share a pinned local/CI
   version and reject unsupported runtimes during installation and frontend

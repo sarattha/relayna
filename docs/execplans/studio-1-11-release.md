@@ -28,10 +28,26 @@ reviews, merging, a minor version bump, and release creation.
   actionable issues and confirmed the ANSI fix.
 - [x] (2026-10-25) Open and link [PR #135](https://github.com/sarattha/relayna/pull/135)
   ready for review. CI/review monitoring is the next publication gate.
+- [x] (2026-10-25) Resolve OpenTelemetry audit blocker; both Python audits,
+  frontend dependency audit, full Python verification, metadata, rebuilt
+  wheel/sdist and strict docs checks pass. Remote revalidation follows push.
 - [ ] Merge once ready, tag the merged commit, and verify the published release
   and its artifacts/images. Stop watching the completed PR.
 
 ## Surprises & Discoveries
+
+PR CI found `opentelemetry-api 1.41.1` affected by CVE-2026-114603, with upstream
+fix 1.45.1. The first security audit blocked publication. Under the user's
+end-to-end CI/release authorization, raise both runtime dependency floors to
+1.45.1, align dev/benchmark SDK pins, regenerate only the affected dependency
+family in both locks, rerun full Python verification/audits/build metadata, and
+push the correction. No public perimeter change or advisory suppression.
+The new upstream test SDK can set W3C's random-trace-ID flag (0x02) on an
+unsampled span. The old test incorrectly required the entire flag byte to be
+zero; assert the sampling bit instead, retaining valid context propagation and
+no-export checks. Relayna tracing implementation and envelope shape are unchanged.
+Remove the benchmark comparison report's hardcoded old OpenTelemetry version;
+the comparison already requires matching resolved package versions.
 
 The latest published release/tag is v1.10.1. Main already contains prepared
 1.10.2 security metadata and notes but that version was not released. Consolidate
@@ -140,6 +156,13 @@ Review 2 (`studio-design-system-review-2-1a68a40`) reviewed the complete range
 metadata/docs and unchanged freeze manifests. It returned no actionable findings
 and confirmed the first finding resolved. Both user-authorized review rounds
 are complete. The subsequent commit records this evidence only.
+
+After the CI dependency correction, the complete Python verification stack was
+rerun successfully (688 SDK tests, 513 backend tests, same integration skips).
+Both Python dependency audits report no known vulnerabilities; frontend audit
+and its Node tooling tests also pass. New wheel metadata enforces
+`opentelemetry-api>=1.45.1` and SDK 1.45.1 optional extras. The new wheel/sdist,
+coordinated version validator and strict documentation build all pass.
 
 Verification: SDK format/lint/types and tests passed (688 passed, 9 skipped);
 backend format/lint/types and tests passed (513 passed, 21 skipped). Frontend

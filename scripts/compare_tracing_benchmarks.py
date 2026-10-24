@@ -536,7 +536,7 @@ def _render_html(data: dict[str, Any]) -> str:
   </tr></thead><tbody>{_summary_rows(data["benchmark_summaries"], target=False)}</tbody></table></div>
   <h2>Methodology and comparability</h2>
   <p>Baseline and candidate use the same host, interpreter, environment controls, benchmark
-  matrices, canonical warmups/repetitions, OpenTelemetry API/SDK 1.41.1, samplers,
+  matrices, canonical warmups/repetitions, matching OpenTelemetry API/SDK versions, samplers,
   synchronous non-retaining exporter, default composite W3C TraceContext/baggage propagator,
   and resolved benchmark package versions. Consumer results report per-message CPU latency
   and public-loop throughput after delivery. Publish results include complete local public

@@ -67,6 +67,14 @@ published and is included in this minor release.
 
 #### Security baseline
 
+SDK and Studio backend require `opentelemetry-api>=1.45.1`; the development and
+benchmark SDK pins are aligned at 1.45.1. This resolves
+[CVE-2026-114603](https://github.com/open-telemetry/opentelemetry-python/security/advisories/GHSA-xcq7-p3pf-p88h)
+in upstream `tracestate` header parsing. Both Python locks include the fix, and
+wheel upgrades enforce the corrected runtime minimum. Applications with pinned
+OpenTelemetry SDK/exporter packages should upgrade that upstream package family
+together to versions compatible with API 1.45.1.
+
 Deploy matching SDK, Studio backend and frontend 1.11.0 packages/images. This
 minor release includes security maintenance and pins frontend builds and CI to
 Node.js 24.22.1,
