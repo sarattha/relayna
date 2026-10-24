@@ -31,6 +31,8 @@ reviews, merging, a minor version bump, and release creation.
 - [x] (2026-10-25) Resolve OpenTelemetry audit blocker; both Python audits,
   frontend dependency audit, full Python verification, metadata, rebuilt
   wheel/sdist and strict docs checks pass. Remote revalidation follows push.
+- [x] (2026-10-25) Validate the narrowly scoped public-checksum exception with
+  Gitleaks 8.24.3 history scan and five positive/negative canaries.
 - [ ] Merge once ready, tag the merged commit, and verify the published release
   and its artifacts/images. Stop watching the completed PR.
 
@@ -48,6 +50,17 @@ zero; assert the sampling bit instead, retaining valid context propagation and
 no-export checks. Relayna tracing implementation and envelope shape are unchanged.
 Remove the benchmark comparison report's hardcoded old OpenTelemetry version;
 the comparison already requires matching resolved package versions.
+
+The next CI security scan passed dependency audits and Trivy, then Gitleaks
+classified the same public token-CSS SHA256 as an API key in both provenance
+manifests. Verified each file against that digest. Add a narrow AND-condition
+allowlist requiring one of those two exact manifest paths and the exact public
+`css/tokens.css` checksum entry; other values/paths and all real token rules
+remain active. Use a rule-level allowlist on the inherited `generic-api-key` rule, compatible
+with CI's pinned 8.24.3 (global allowlist arrays require newer versions). The
+exact-version PR history scan passes. Both allowed manifests pass canaries;
+the same checksum outside those paths, a changed checksum in a manifest, and a
+live-shaped synthetic token in the same manifest are all still detected.
 
 The latest published release/tag is v1.10.1. Main already contains prepared
 1.10.2 security metadata and notes but that version was not released. Consolidate
