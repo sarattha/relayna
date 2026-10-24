@@ -22,12 +22,16 @@ the selected palette. Success, warning, error, info, and unknown states retain
 their own
 functional tones and visible status labels; logs and identifiers use monospace.
 
+### Shared interface patterns
+
 Studio matches Gateway's visual emphasis with a flat canvas, surface-colored
 controls, muted secondary copy, medium control text, and semibold headings.
 Panel elevation uses the shared rest shadow; header and action controls avoid
 extra resting shadows or decorative gradients. The approved color anchors and
 functional status colors are unchanged. Studio uses the same Portico font files
-as Gateway, following the owner's typeface selection.
+as Gateway, following the owner's typeface selection. ANSI log colors adapt to
+the selected log surface; normal and bright color variants retain readable
+foregrounds in either theme.
 
 The portable assets are checked into `src/assets/brand/` and `public/favicon.ico`;
 no local package path or external font service is required. See
@@ -54,13 +58,14 @@ backend instead of in the browser.
 
 ## Studio Operator Tour
 
-The screenshots below show the earlier visual theme; their operational flows
-remain applicable. They come from the production Nginx frontend and
-Studio backend running with PostgreSQL, Redis, RabbitMQ, and mock Relayna services. Values
-such as `mock`, `orders-api`, and `host.docker.internal` are examples; use the
-addresses and environment names that are reachable from your Studio backend.
+The screenshots below were captured from the production build of Studio
+**1.11.0**, using synthetic services and operational evidence. They show the
+current Portico typography, Mulberry & Linen palette, and interface patterns.
+Example hostnames under `example.test` are placeholders; use addresses reachable
+from your Studio backend. The [capture record](assets/images/studio/v1.11.0/README.md)
+describes the fixture setup, viewports, and verification.
 
-![Studio operational overview](assets/images/studio/overview.jpg)
+![Studio operational overview](assets/images/studio/v1.11.0/overview.png)
 
 The header is available on every page:
 
@@ -74,6 +79,7 @@ The header is available on every page:
 | **Environment** | Scopes service and task views. `All environments` removes the scope. |
 | **Find task** | Accepts a task ID and sends it to Task Search in the selected environment. |
 | Magnifying-glass button | Runs the global task-ID search. |
+| Moon / sun | Switches between light and dark appearance; the browser remembers your choice. |
 | **Access** | Admin-only member approval, role assignment, and blocking. |
 | User/role badge | Shows the current member and role; **Sign out** revokes only the local Studio session. |
 
@@ -100,7 +106,7 @@ Choose **Services**. Review **Registry Overview** and the registered-services
 table before creating a duplicate. Use **Service Search** when the registry is
 large.
 
-![Studio services registry](assets/images/studio/services-registry.jpg)
+![Studio services registry](assets/images/studio/v1.11.0/services-registry.png)
 
 Registry and runtime health are deliberately separate:
 
@@ -116,7 +122,7 @@ Choose **New Service**. Studio opens a registration form without changing the
 registry. **Close** abandons the visible draft; **Register Service** is the only
 action that creates the record.
 
-![Basic service registration fields](assets/images/studio/service-registration-basic.jpg)
+![Basic service registration fields](assets/images/studio/v1.11.0/service-registration-basic.png)
 
 Enter the core fields:
 
@@ -140,7 +146,7 @@ group and select its provider only when Studio should query that system for the
 service. Provider credentials remain a deployment/backend concern and should
 not be placed in these URL fields.
 
-![Loki, Prometheus, and Tempo registration configuration](assets/images/studio/service-registration-observability.jpg)
+![Expanded Loki log registration configuration](assets/images/studio/v1.11.0/service-registration-observability.png)
 
 #### Loki log configuration
 
@@ -206,6 +212,18 @@ configuration controls. Disabled buttons indicate that the capability or
 required selection is unavailable.
 
 ### Service and task monitoring workspaces
+
+![Desktop Task explorer with a full-height task list](assets/images/studio/v1.11.0/monitor-explorer-light.png)
+
+The task list and log reader share the available desktop height. The same
+workspace follows the selected dark palette:
+
+![Dark Task explorer and readable colored logs](assets/images/studio/v1.11.0/monitor-explorer-dark.png)
+
+On mobile the list remains bounded above the reader:
+
+![Mobile Task explorer](assets/images/studio/v1.11.0/monitor-mobile.png)
+
 
 Service detail keeps **Overview** for existing health, metrics, pods, activity,
 and log controls. **Configure** opens service details and configuration. Task
@@ -288,7 +306,7 @@ change is required. See [UI verification evidence](qa/studio-monitor-workspace/R
 
 ### Service detail
 
-![Service detail controls and operational panels](assets/images/studio/service-detail.jpg)
+![Service detail controls and operational panels](assets/images/studio/v1.11.0/service-detail.png)
 
 | Control | Effect |
 | --- | --- |
@@ -312,7 +330,7 @@ change is required. See [UI verification evidence](qa/studio-monitor-workspace/R
 
 ### Task Search
 
-![Task Search filters and results](assets/images/studio/task-search.jpg)
+![Task Search filters and results](assets/images/studio/v1.11.0/task-search.png)
 
 The filters cover task ID, service ID, environment, status, workflow ID,
 correlation ID, failure state, sort order, and page size. **Search** writes the
@@ -338,7 +356,7 @@ when search was opened from a service.
 
 ### Failed Tasks
 
-![Failed-task registry and incident actions](assets/images/studio/failed-tasks.jpg)
+![Failed-task registry and incident actions](assets/images/studio/v1.11.0/failed-tasks.png)
 
 | Control | Effect |
 | --- | --- |
@@ -357,7 +375,7 @@ when search was opened from a service.
 
 ### Workflow Topology
 
-![Workflow topology](assets/images/studio/topology.jpg)
+![Workflow topology](assets/images/studio/v1.11.0/topology.png)
 
 **Back to Service** returns to service detail. **Reload** fetches the topology
 again. Nodes, routes, stages, fan-in policy, and entry routes are read-only in
@@ -365,7 +383,7 @@ Studio; change the service's SDK topology declaration to change this view.
 
 ### DLQ Explorer
 
-![DLQ explorer](assets/images/studio/dlq.jpg)
+![DLQ explorer](assets/images/studio/v1.11.0/dlq.png)
 
 | Control | Effect |
 | --- | --- |

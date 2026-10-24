@@ -4,7 +4,32 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
-## 1.10.2 - 2026-10-22
+## 1.11.0 - 2026-10-25
+
+### Added
+
+- Studio moon/sun theme controls on sign-in and operational pages, with a light
+  default, saved browser preference, cross-tab synchronization, and an in-memory
+  fallback when browser storage is blocked.
+
+### Changed
+
+- Apply the approved Mulberry & Linen palette, Slim Leaf identity, and local
+  Relayna Portico 0.101 fonts throughout Studio. Align typography, neutral
+  controls, background surfaces and elevation with Gateway.
+- Refresh repository and documentation branding and replace the operator tour
+  with current-version desktop/mobile, light/dark and monitoring captures.
+- Publish the coordinated SDK/Studio minor release 1.11.0. It includes the
+  security maintenance prepared under the unpublished 1.10.2 version. Existing
+  API/type exports, routes, schemas, broker formats and freeze manifests remain
+  unchanged; no data migration is required.
+
+### Fixed
+
+- Let monitoring task lists use the sidebar's available height and scroll to
+  the final task without leaving a blank band, including expanded desktop
+  views. Preserve bounded mobile lists and existing pagination.
+- Keep ANSI log foregrounds readable on both light and dark log surfaces.
 
 ### Security
 
@@ -19,14 +44,6 @@ All notable changes to this project will be documented in this file.
 - Publish the patched certifi and multidict minimum versions in SDK dependency
   metadata so pip wheel upgrades also replace vulnerable installed versions.
   Studio inherits these requirements through its aligned SDK dependency.
-
-### Changed
-
-- Bump the coordinated SDK/Studio packages and lock metadata to 1.10.2.
-  Public SDK/API contracts, routes, persisted schemas and wire formats are
-  unchanged; freeze snapshots retain the v1.10.1 perimeter baseline.
-- Add runtime-version regression coverage and document the frontend Node
-  upgrade, custom image rebuilds, aligned installation and release steps.
 
 ## 1.10.1 - 2026-10-03
 

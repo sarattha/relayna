@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.2/relayna-1.10.2-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.10.2/relayna-1.10.2.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.10.2.tar.gz`
-- `dist/relayna-1.10.2-py3-none-any.whl`
+- `dist/relayna-1.11.0.tar.gz`
+- `dist/relayna-1.11.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -42,10 +42,34 @@ line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
 
-### Upgrading to 1.10.2
+### Upgrading to 1.11.0
 
-Deploy matching SDK, Studio backend and frontend 1.10.2 packages/images. This
-security-maintenance release pins frontend builds and CI to Node.js 24.22.1,
+Studio 1.11.0 adopts the Natural Connection / Mulberry & Linen identity and
+self-hosted Relayna Portico 0.101, matching Gateway's visual emphasis. The
+moon/sun button switches themes on sign-in and operational pages. Browsers
+without a saved `relayna.studio.theme` preference start in light mode; a saved
+choice survives reloads and synchronizes across tabs. Blocked storage still
+allows switching for the current page.
+
+Task explorer uses the sidebar's full remaining height and scrolls to the last
+task in normal and expanded desktop views. Mobile keeps the task list bounded
+above the logs. Task fetching and 50-item pagination are unchanged. See the
+[current operator tour](studio-frontend.md#studio-operator-tour) for release
+screenshots and [visual identity](studio-frontend.md#visual-identity) for the
+shared design patterns.
+
+No PostgreSQL migration, API/wire change, or freeze-perimeter update is needed;
+the v1.10.1 freeze baseline remains intact. Upgrade all three packages together.
+Rollback uses matching previous images/packages without a database downgrade;
+the browser-only appearance key can remain or be cleared to restore the light
+default. The pending security maintenance prepared as 1.10.2 was not separately
+published and is included in this minor release.
+
+#### Security baseline
+
+Deploy matching SDK, Studio backend and frontend 1.11.0 packages/images. This
+minor release includes security maintenance and pins frontend builds and CI to
+Node.js 24.22.1,
 which fixes CVE-2026-111497 in the Brotli decoder. The production frontend still
 serves static assets through Nginx and the backend runs Python.
 
@@ -56,7 +80,7 @@ if dependencies were installed before switching Node. From the repository root,
 rebuild custom frontend images with the patched builder:
 
 ```bash
-docker build --pull -f apps/studio/Dockerfile -t relayna-studio-frontend:1.10.2 .
+docker build --pull -f apps/studio/Dockerfile -t relayna-studio-frontend:1.11.0 .
 ```
 
 See [frontend setup](studio-frontend.md#development-mode).
@@ -70,7 +94,7 @@ snapshots retain their v1.10.1 baseline because the public perimeter is unchange
 The SDK wheel also declares `certifi>=2026.10.19` and `multidict>=6.9.1` as
 runtime requirements, so a normal pip upgrade replaces older installed versions
 without requiring the repository lockfile. The Studio backend inherits these
-floors through `relayna>=1.10.2`. Retain normal dependency resolution when
+floors through `relayna>=1.11.0`. Retain normal dependency resolution when
 upgrading; `--no-deps` skips these requirements.
 
 ### Upgrading to 1.10.1
