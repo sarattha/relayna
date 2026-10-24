@@ -116,7 +116,8 @@ describe("shared UI helpers", () => {
     rerender(<LogMessage message={'{"broken":'} />);
     expect(screen.getByText('{"broken":')).toBeInTheDocument();
     rerender(<LogMessage message={'\u001b[1;31mbold red\u001b[22;39m plain\u001b[0m\u001b[999m'} />);
-    expect(screen.getByText("bold red")).toHaveStyle({ fontWeight: "700" });
+    expect(screen.getByText("bold red")).toHaveStyle({ fontWeight: "700", color: "var(--studio-ansi-red)" });
+    expect(screen.getByText("plain").style.color).toBe("");
     expect(screen.getByText("plain")).toBeInTheDocument();
   });
 

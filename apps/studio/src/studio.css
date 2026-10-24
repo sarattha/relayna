@@ -30,6 +30,22 @@
   --studio-danger-soft: var(--rn-color-error-surface);
   --studio-info: var(--rn-color-info);
   --studio-shadow: var(--rn-shadow-rest);
+  /* ANSI foregrounds stay readable on the theme's muted log surface. */
+  --studio-ansi-red: #9B354B;
+  --studio-ansi-green: #256148;
+  --studio-ansi-yellow: #805600;
+  --studio-ansi-blue: #34578D;
+  --studio-ansi-magenta: #774174;
+  --studio-ansi-cyan: #21646A;
+}
+
+:root[data-rn-theme="dark"] {
+  --studio-ansi-red: #FF9FB0;
+  --studio-ansi-green: #8FD6AA;
+  --studio-ansi-yellow: #E8C176;
+  --studio-ansi-blue: #A6C5FF;
+  --studio-ansi-magenta: #DDB4EC;
+  --studio-ansi-cyan: #8FD6D4;
 }
 
 .studio-auth-shell {

@@ -705,22 +705,22 @@ const logMessageSurfaceStyle: CSSProperties = {
 const ansiRegex = /\x1b\[([0-9;]*)m/g;
 const remainingAnsiRegex = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const ansiColorMap: Record<number, string> = {
-  30: "#2b2722",
-  31: "#a83c28",
-  32: "#1d7a63",
-  33: "#9f6a10",
-  34: "#2f64a8",
-  35: "#8d4d91",
-  36: "#0f7c7b",
-  37: "#d8ddd8",
-  90: "#6f7775",
-  91: "#d4553c",
-  92: "#24966f",
-  93: "#c68f1a",
-  94: "#4a7fd4",
-  95: "#aa66b0",
-  96: "#2c9c9a",
-  97: "#f4f7f4",
+  30: "var(--studio-text)",
+  31: "var(--studio-ansi-red)",
+  32: "var(--studio-ansi-green)",
+  33: "var(--studio-ansi-yellow)",
+  34: "var(--studio-ansi-blue)",
+  35: "var(--studio-ansi-magenta)",
+  36: "var(--studio-ansi-cyan)",
+  37: "var(--studio-text-muted)",
+  90: "var(--studio-text-muted)",
+  91: "var(--studio-ansi-red)",
+  92: "var(--studio-ansi-green)",
+  93: "var(--studio-ansi-yellow)",
+  94: "var(--studio-ansi-blue)",
+  95: "var(--studio-ansi-magenta)",
+  96: "var(--studio-ansi-cyan)",
+  97: "var(--studio-text)",
 };
 
 function stripAnsi(value: string) {
