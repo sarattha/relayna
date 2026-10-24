@@ -14,6 +14,10 @@ for review. GitHub repository settings are outside the requested scope.
 
 ## Progress
 
+- [x] (2026-10-25) Verify the explicit light default under light and dark
+  system appearances; all 258 frontend tests, production build, and strict
+  documentation build pass.
+
 - [x] (2026-10-25) Read design-system guidance and inspect Studio styling.
 - [x] (2026-10-25) Apply production-freeze-guard and implementation-strategy.
 - [x] (2026-10-25) Copy portable assets/tokens with provenance and SHA-256 manifests.
@@ -40,8 +44,16 @@ for review. GitHub repository settings are outside the requested scope.
 
 ## Decision Log
 
+- Decision: Default Studio to light mode using `data-rn-theme="light"` on the
+  initial HTML document. Keep light logo sources and the Linen browser theme
+  color independent of system appearance. Rationale: Owner requested light as
+  the default after local testing; no theme toggle or persisted preference is
+  needed. This directly replaces unreleased branch behavior and leaves all
+  frozen contracts intact. Date/Author: 2026-10-25 / Codex.
+
 - Decision: Adopt existing semantic `--rn-*` tokens through Studio's existing
-  `--studio-*` variables, including system light/dark colors. Retain operational
+  `--studio-*` variables, initially including system light/dark colors (superseded by the explicit
+  light default above). Retain operational
   status meanings, monospace logs, existing routes and interactions.
   Rationale: The user authorized a visual identity change; no SDK, API, durable
   state, or wire behavior changes are needed. Date/Author: 2026-10-25 / Codex.
@@ -52,6 +64,13 @@ for review. GitHub repository settings are outside the requested scope.
   Date/Author: 2026-10-25 / Codex.
 
 ## Outcomes & Retrospective
+
+Follow-up: the owner requested a light default after testing locally. The
+initial HTML now explicitly resolves light tokens before first paint, with
+matching light logos and browser chrome. The original system-appearance checks
+below document the initial adoption; the follow-up is verified under both
+system appearances to confirm the default stays light (`#F7F0E8` canvas,
+`color-scheme: light`, light logo). All 258 tests and both builds pass again.
 
 Studio now uses the supplied Round font, outlined Studio lockups, and semantic
 Mulberry & Linen light/dark tokens. Chamber, shared controls, status badges,
@@ -113,7 +132,7 @@ service cards, graphs, and Chamber where possible. Build docs with MkDocs.
 ## Validation and Acceptance
 
 Frontend tests and production build pass. The browser loads the bundled Round
-font and renders Mulberry/Linen light colors and Ink/Blossom dark colors. Logos
+font and renders Mulberry/Linen light colors under both system appearances. Logos
 retain aspect ratio and the approved outlines. Status text and distinct
 functional tones remain available. No new page/API/type exports appear and
 freeze tests pass. README assets resolve from repository-relative paths.
@@ -147,4 +166,4 @@ clearly identify their historical appearance if retained.
 
 Use existing React, Vite, and CSS facilities. No runtime package dependency,
 network font service, public API, or theme preference setting is added. Keep
-the default system appearance behavior of the supplied semantic tokens.
+the supplied semantic tokens with an explicit light document scope.

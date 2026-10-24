@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { fetchStudioSession, logoutStudio, setStudioCsrfToken, StudioApiError } from "./api";
 import type { StudioMember } from "./types";
 import studioLogoLight from "./assets/brand/logos/relayna-studio-light.svg";
-import studioLogoDark from "./assets/brand/logos/relayna-studio-dark.svg";
 
 type AuthContextValue = {
   user: StudioMember;
@@ -19,7 +18,6 @@ function AuthSurface({ title, body, action }: { title: string; body: string; act
     <main className="studio-auth-shell">
       <section className="studio-auth-card">
         <picture>
-          <source media="(prefers-color-scheme: dark)" srcSet={studioLogoDark} />
           <img src={studioLogoLight} alt="Relayna Studio" />
         </picture>
         <span className="studio-auth-eyebrow">Make distributed work visible.</span>

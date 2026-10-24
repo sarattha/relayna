@@ -11,7 +11,6 @@ import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { Link } from "./scoped-link";
 
 import studioLogoLight from "./assets/brand/logos/relayna-studio-light.svg";
-import studioLogoDark from "./assets/brand/logos/relayna-studio-dark.svg";
 import type {
   ExecutionGraph,
   HealthStatus,
@@ -959,7 +958,6 @@ export function AppHeader() {
       <Link to={scopedPath("/")} className="studio-brand" aria-label="Relayna Studio overview">
         <span className="studio-brand__identity">
           <picture>
-            <source media="(prefers-color-scheme: dark)" srcSet={studioLogoDark} />
             <img className="studio-brand__logo" src={studioLogoLight} alt="Relayna Studio" />
           </picture>
           <small title={servicesState.updatedAt ? `Registry updated ${new Date(servicesState.updatedAt).toLocaleString()}` : "Loading registry"}>{servicesState.error ? "Registry stale · refresh failed" : "Studio control plane"}</small>
