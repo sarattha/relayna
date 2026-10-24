@@ -1250,7 +1250,7 @@ summary { cursor: pointer; font-weight: 650; padding: 12px 4px; }
 .monitor-sidebar > header { display: flex; justify-content: space-between; align-items: center; }
 .monitor-task-search { display: flex; gap: 6px; }
 .monitor-task-search input { width: 100%; }
-.monitor-task-list, .monitor-event-list { max-height: 620px; overflow-y: auto; }
+.monitor-event-list { max-height: 620px; overflow-y: auto; }
 .monitor-task-list > p, .monitor-timeline > p { margin: 18px; font-size: 13px; color: var(--studio-text-muted); }
 .monitor-task-row { width: 100%; display: grid !important; text-align: left; border: 0 !important; border-top: 1px solid var(--studio-border) !important; border-radius: 0 !important; padding: 10px 16px !important; gap: 6px !important; justify-content: stretch !important; }
 .monitor-task-row > span { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
@@ -1361,8 +1361,13 @@ summary { cursor: pointer; font-weight: 650; padding: 12px 4px; }
 .monitor-log-detail > div { max-height: 200px; overflow: auto; padding: 10px 12px; }
 .monitor-log-detail pre { margin: 0 0 8px; font: 12px/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .monitor-log-detail > span { display: block; padding: 0 12px; font-size: 12px; }
-.monitor-task-list { max-height: min(440px, calc(100dvh - 490px)); min-height: 150px; }
-@media (max-width: 1000px) { .monitor-task-list { max-height: 240px; } }
+/* Let the log panel set the row height; scroll tasks within the remaining sidebar. */
+.monitor-task-list { flex: 1 1 0; height: 0; min-height: 150px; max-height: none; overflow-y: auto; }
+.monitor-workspace--expanded:has(> .monitor-canvas--explorer) { display: flex; flex-direction: column; }
+.monitor-workspace--expanded > .monitor-canvas--explorer { flex: 1; }
+@media (max-width: 1000px) {
+  .monitor-task-list { flex: 0 1 auto; height: auto; min-height: 0; max-height: 240px; }
+}
 .monitor-log-detail--error { border-color: var(--studio-danger); background: var(--studio-danger-soft); }
 .monitor-log-detail--error header strong { color: var(--studio-danger); }
 @media (min-width: 1001px) {

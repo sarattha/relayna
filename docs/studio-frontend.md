@@ -236,6 +236,10 @@ resource measurements do not establish a task's individual
 resource use. Missing providers and empty windows have explicit messages.
 
 **Expand** opens a focused workspace; Escape exits and restores keyboard focus.
+The task list fills the remaining sidebar height in desktop Task explorer,
+including expanded mode, and scrolls independently so the last task stays
+reachable. On narrow screens it stays bounded above the log reader.
+
 The pane-width slider applies to desktop split layouts (20–40%). Narrow screens
 stack the list or timeline above logs, wrap controls, and show source names
 inside each log message. The global header scrolls away to leave room for logs.
