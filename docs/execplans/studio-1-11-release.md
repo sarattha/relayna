@@ -24,8 +24,10 @@ reviews, merging, a minor version bump, and release creation.
   release metadata validation and wheel/sdist checks.
 - [x] (2026-10-25) Strict docs build passed; the rendered guide loads all 12
   versioned images and the Linen canvas without horizontal overflow.
-- [ ] Complete the second Codex review of the final release diff.
-- [ ] Open and link the PR ready for review; watch checks and feedback.
+- [x] (2026-10-25) Second Codex review of immutable head `1a68a40` found no
+  actionable issues and confirmed the ANSI fix.
+- [x] (2026-10-25) Open and link [PR #135](https://github.com/sarattha/relayna/pull/135)
+  ready for review. CI/review monitoring is the next publication gate.
 - [ ] Merge once ready, tag the merged commit, and verify the published release
   and its artifacts/images. Stop watching the completed PR.
 
@@ -57,8 +59,8 @@ images, provenance and SBOMs after a `v*` tag is pushed.
 
 ## Outcomes & Retrospective
 
-Release metadata and screenshots are prepared; checks and PR review are in
-progress. Do not claim the release is published until
+Release metadata, screenshots and both independent code reviews are complete.
+PR #135 is ready for review; remote checks and publication are pending. Do not claim the release is published until
 the tag workflow and release artifacts have been verified.
 
 ## Context and Orientation
@@ -132,6 +134,12 @@ log contrast; fixed with theme-dependent foreground tokens, existing parser
 regression assertions, and a rendered audit of all 16 colors. Minimum measured
 contrast is 5.03:1 light / 6.34:1 dark. The latest released comparison is v1.10.1;
 the review prompt's initial v1.10.2 assumption was corrected in this plan.
+
+Review 2 (`studio-design-system-review-2-1a68a40`) reviewed the complete range
+`c7fc37a..1a68a40c15ad94bc88b296f38012b60947f824db`, including coordinated
+metadata/docs and unchanged freeze manifests. It returned no actionable findings
+and confirmed the first finding resolved. Both user-authorized review rounds
+are complete. The subsequent commit records this evidence only.
 
 Verification: SDK format/lint/types and tests passed (688 passed, 9 skipped);
 backend format/lint/types and tests passed (513 passed, 21 skipped). Frontend
