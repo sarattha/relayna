@@ -834,3 +834,60 @@ export type DlqQueryState = {
   limit: string;
   cursor?: string | null;
 };
+
+export type RecoverySelection = {
+  service_id: string;
+  environment: string;
+  items: Array<{ failure_id: string; target_queue?: string | null; override_payload?: unknown }>;
+  interval_seconds: number;
+  note: string;
+};
+
+export type RecoveryItem = {
+  failure_id: string;
+  original_task_id?: string | null;
+  target_queue?: string | null;
+  override_payload?: unknown;
+  payload_available: boolean;
+  eligible: boolean;
+  errors: string[];
+  dispatch_state?: "pending" | "dispatching" | "accepted" | "unknown" | "blocked";
+  outcome?: "not_requested" | "pending" | "unknown" | "succeeded" | "failed";
+  requested_at?: string | null;
+  accepted_at?: string | null;
+  replacement_task_id?: string | null;
+  observed_at?: string | null;
+  message?: string | null;
+};
+
+export type RecoveryPreview = Omit<RecoverySelection, "items"> & {
+  service_name: string;
+  base_url: string;
+  items: RecoveryItem[];
+  preview_digest: string;
+  eligible: boolean;
+  warning: string;
+};
+
+export type RecoveryPlan = RecoveryPreview & {
+  plan_id: string;
+  state: "ready" | "running" | "paused" | "stopped" | "completed";
+  version: number;
+  allowance: number;
+  created_at: string;
+  started_at: string | null;
+  dispatch_finished_at: string | null;
+  report: {
+    selected: number;
+    requested: number;
+    accepted: number;
+    observed_success: number;
+    observed_failure: number;
+    unknown_acceptance: number;
+    unknown_outcome: number;
+    awaiting_outcome: number;
+    not_dispatched: number;
+    repeated_failures: number;
+    cohort_recovery_seconds: number | null;
+  };
+};

@@ -1053,3 +1053,11 @@ The backend works best when downstream services:
 
 That service-side integration, including worker heartbeat wiring for Studio, is
 covered in [Getting Started](getting-started.md).
+
+## Recovery orchestration
+
+Studio owns the [Recovery Center](studio-recovery-center.md) ledger, worker, and
+`/studio/recovery` API. It reuses existing service retry endpoints and preserves
+unknown acceptance without automatic resends. Multiple instances coordinate
+through PostgreSQL row locks and persisted dispatch deadlines. Apply schema
+revision `0003_recovery` before starting this backend.

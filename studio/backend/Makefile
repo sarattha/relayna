@@ -44,7 +44,7 @@ test: ## Run the Studio backend test suite
 integration: ## Run real PostgreSQL and Redis integration tests
 	@test -n "$${RELAYNA_STUDIO_TEST_DATABASE_URL}" || (echo "Set RELAYNA_STUDIO_TEST_DATABASE_URL" >&2; exit 2)
 	@test -n "$${RELAYNA_STUDIO_TEST_REDIS_URL}" || (echo "Set RELAYNA_STUDIO_TEST_REDIS_URL" >&2; exit 2)
-	$(PYTEST) tests/test_postgres_persistence_integration.py
+	$(PYTEST) tests/test_postgres_persistence_integration.py tests/test_studio_recovery.py
 
 .PHONY: db-upgrade
 db-upgrade: ## Upgrade the configured Studio PostgreSQL database to head

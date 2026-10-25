@@ -76,7 +76,7 @@ from .registry import DuplicateServiceError, ServiceNotFoundError, ServiceRecord
 from .search import StudioServiceSearchDocument, StudioTaskSearchDocument, StudioTaskSearchQuery
 
 LOGGER = logging.getLogger(__name__)
-EXPECTED_SCHEMA_REVISION = "0003_incident_inbox"
+EXPECTED_SCHEMA_REVISION = "0003_recovery"
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
@@ -168,6 +168,26 @@ _incident_history = Table(
     Column("details", json_type, nullable=False),
 )
 Index("ix_studio_incident_history_incident", _incident_history.c.incident_id, _incident_history.c.id)
+
+_recovery_plans = Table(
+    "studio_recovery_plans",
+    metadata,
+    Column("plan_id", String(36), primary_key=True),
+    Column("document", json_type, nullable=False),
+    Column("next_poll_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+)
+Index("ix_studio_recovery_poll", _recovery_plans.c.next_poll_at)
+
+# Reservations intentionally outlive execution: the upstream retry API has no
+# idempotency key, so a second plan must not silently resend the same snapshot.
+_recovery_claims = Table(
+    "studio_recovery_claims",
+    metadata,
+    Column("service_id", Text, primary_key=True),
+    Column("environment", Text, primary_key=True),
+    Column("failure_id", Text, primary_key=True),
+    Column("plan_id", String(36), ForeignKey("studio_recovery_plans.plan_id"), nullable=False),
+)
 
 members = Table(
     "studio_members",

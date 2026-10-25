@@ -976,6 +976,7 @@ export function AppHeader() {
 
         </NavLink>
         {auth.isAdmin ? <NavLink to={scopedPath("/access")}>Access</NavLink> : null}
+        <NavLink to={scopedPath("/recovery")}>Recovery</NavLink>
       </nav>
       <div className="studio-header__tools">
         <label className="studio-environment-scope">

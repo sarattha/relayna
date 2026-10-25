@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 from relayna.metrics import RelaynaMetrics, create_metrics_router
 
 from ._incidents import _create_incident_router
+from ._recovery import _create_recovery_router, _RecoveryService
 from .auth import (
     StudioAuthMiddleware,
     StudioAuthService,
@@ -116,6 +117,8 @@ class StudioRuntime:
     outbox_relay: PostgresOutboxRelay | None = None
     outbox_relay_task: asyncio.Task[None] | None = None
     coordinator: PostgresAdvisoryCoordinator | None = None
+    recovery_service: _RecoveryService | None = None
+    recovery_task: asyncio.Task[None] | None = None
 
 
 class _StudioLifespan:
@@ -424,6 +427,7 @@ class _StudioLifespan:
                 database=database,
                 outbox_relay=outbox_relay,
                 coordinator=coordinator,
+                recovery_service=_RecoveryService(database, federation_service) if database is not None else None,
             )
         return self._runtime
 
@@ -531,8 +535,15 @@ class _StudioLifespan:
                         runtime.outbox_relay.run_forever(),
                         name="studio-postgres-outbox-relay",
                     )
+                if runtime.recovery_service is not None:
+                    runtime.recovery_task = asyncio.create_task(runtime.recovery_service.run(), name="studio-recovery")
                 yield
             finally:
+                if runtime.recovery_task is not None:
+                    runtime.recovery_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await runtime.recovery_task
+                    runtime.recovery_task = None
                 if runtime.pull_sync_worker is not None:
                     runtime.pull_sync_worker.stop()
                 if runtime.health_refresh_worker is not None:
@@ -689,6 +700,7 @@ def create_studio_app(
     app.include_router(create_studio_health_router(health_service=runtime.health_service))
     app.include_router(create_federation_router(federation_service=runtime.federation_service))
     app.include_router(_create_incident_router(runtime.federation_service, runtime.database))
+    app.include_router(_create_recovery_router(runtime.recovery_service))
     app.include_router(
         create_studio_events_router(
             ingest_service=runtime.event_ingest_service,

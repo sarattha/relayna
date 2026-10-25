@@ -1,4 +1,4 @@
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { scopedResults } from "../scoped-results";
 import { useStudioServices } from "../services-context";
 import type { FormEvent } from "react";
@@ -61,6 +61,8 @@ export function formatBatchWait(seconds: number) {
 }
 
 export function FailedTasksPage() {
+  const navigate = useNavigate();
+  const [recoveryItems, setRecoveryItems] = useState<FailedTaskSummary[]>([]);
   const { isAdmin, user } = useStudioAuth();
   const services = useStudioServices();
   const [params] = useSearchParams();
@@ -93,6 +95,7 @@ export function FailedTasksPage() {
     if (environment && services.loading) return;
     const scopedQuery = { ...initialQuery };
     setQuery(scopedQuery); setSelected(null);
+    setRecoveryItems([]);
     void load(scopedQuery);
     void loadEmailSettings();
     return () => { listVersion.current++; detailVersion.current++; };
@@ -378,9 +381,11 @@ export function FailedTasksPage() {
         {readErrors.length ? <NoticeBanner tone="error"><strong>{unavailable ? "Failed tasks unavailable" : "Partial results"}</strong><ul>{readErrors.map((message) => <li key={message}>{message}</li>)}</ul><button type="button" style={secondaryButtonStyle} disabled={loading} onClick={() => void load({ ...query, cursor: null })}>Retry service reads</button></NoticeBanner> : null}
         {!loading && !items.length && !unavailable ? <p style={mutedTextStyle}>{nextCursor ? "No matches on this page in the selected scope. Continue to the next page." : "No failed tasks matched the current filters."}</p> : null}
         {isAdmin ? <button type="button" style={secondaryButtonStyle} disabled={pending || !checkedFailures.length} onClick={() => void reviewSelected()}>Mark selected investigated ({checkedFailures.length}/20)</button> : null}
+        {isAdmin ? <div className="studio-action-row"><button type="button" style={primaryButtonStyle} disabled={!recoveryItems.length || pending} onClick={() => navigate(`/recovery${environment ? `?environment=${encodeURIComponent(environment)}` : ""}`, { state: { recovery: { service_id: recoveryItems[0]?.service_id, failure_ids: recoveryItems.map((item) => item.failure_id) } } })}>Prepare recovery ({recoveryItems.length}/200)</button>{recoveryItems.length ? <button type="button" style={secondaryButtonStyle} onClick={() => setRecoveryItems([])}>Clear recovery selection</button> : null}<span className="studio-inline-meta">Recovery selection pins one service and environment.</span></div> : null}
         <div className="studio-stack-sm">
           {items.map((item) => (
             <article key={`${item.service_id}:${item.failure_id}`} className="studio-subcard" style={{ borderRadius: 14, padding: 14, display: "grid", gap: 8 }}>
+              {isAdmin ? <label className="studio-inline-meta"><input type="checkbox" aria-label={`Recover ${item.failure_id}`} checked={recoveryItems.some((entry) => entry.failure_id === item.failure_id && entry.service_id === item.service_id)} disabled={pending || recoveryItems.length >= 200 && !recoveryItems.some((entry) => entry.failure_id === item.failure_id) || Boolean(recoveryItems.length && recoveryItems[0]?.service_id !== item.service_id)} onChange={(event) => setRecoveryItems((current) => event.target.checked ? [...current, item] : current.filter((entry) => entry.failure_id !== item.failure_id))} /> Include in recovery plan</label> : null}
               {isAdmin ? <label className="studio-inline-meta"><input type="checkbox" aria-label={`Select ${item.failure_id}`} checked={checkedFailures.includes(`${item.service_id}:${item.failure_id}`)} disabled={pending || !Array.isArray(services.servicesById.get(item.service_id)?.capabilities?.supported_routes) || !(services.servicesById.get(item.service_id)?.capabilities?.supported_routes as string[]).includes("failed_tasks.investigate") || (checkedFailures.length >= 20 && !checkedFailures.includes(`${item.service_id}:${item.failure_id}`))} onChange={(event) => setCheckedFailures((current) => event.target.checked ? [...current, `${item.service_id}:${item.failure_id}`] : current.filter((id) => id !== `${item.service_id}:${item.failure_id}`))} /> Select for review</label> : null}
               <div className="studio-list-card__top">
                 <div style={{ display: "grid", gap: 4 }}>

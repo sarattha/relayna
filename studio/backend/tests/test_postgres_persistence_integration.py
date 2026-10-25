@@ -946,6 +946,8 @@ def test_real_app_lifecycle_probes_audit_and_restart_persistence() -> None:
         assert runtime.event_ingest_service.search_indexer is None
         assert runtime.registry_service._search_indexer is None
         assert runtime.health_service.search_indexer is None
+        assert runtime.recovery_service is not None
+        assert runtime.recovery_task is not None and not runtime.recovery_task.done()
         assert client.get("/livez").json() == {"status": "ok"}
         assert client.get("/healthz").status_code == 200
         assert client.get("/readyz").json() == {"status": "ready"}
@@ -965,6 +967,8 @@ def test_real_app_lifecycle_probes_audit_and_restart_persistence() -> None:
         assert audit.status_code == 200 and audit.json()["count"] == 1
         actor_audit = client.get("/studio/admin/audit", params={"actor_user_id": "nobody"})
         assert actor_audit.json()["count"] == 0
+
+    assert runtime.recovery_task is None
 
     restarted = create_studio_app(
         redis_url=REDIS_URL,
@@ -1105,10 +1109,10 @@ async def test_database_configuration_and_schema_failures() -> None:
         await database.check_schema()
         async with database.engine.begin() as connection:
             await connection.execute(text("UPDATE alembic_version SET version_num = 'wrong'"))
-        with pytest.raises(RuntimeError, match="expected 0003_incident_inbox"):
+        with pytest.raises(RuntimeError, match="expected 0003_recovery"):
             await database.check_schema()
         async with database.engine.begin() as connection:
-            await connection.execute(text("UPDATE alembic_version SET version_num = '0003_incident_inbox'"))
+            await connection.execute(text("UPDATE alembic_version SET version_num = '0003_recovery'"))
             await connection.execute(text("ALTER TABLE alembic_version RENAME TO alembic_version_hidden"))
         try:
             with pytest.raises(RuntimeError, match="schema is missing"):

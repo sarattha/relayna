@@ -34,6 +34,11 @@
     {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "post", "path_expression": "'/preview'"},
     {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "post", "path_expression": "''"},
     {"file": "studio/backend/src/relayna_studio/_profile_import.py", "method": "delete", "path_expression": "'/{profile_id}'"},
+    {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "post", "path_expression": "'/studio/recovery/preview'"},
+    {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "post", "path_expression": "'/studio/recovery/plans'"},
+    {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "get", "path_expression": "'/studio/recovery/plans'"},
+    {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "get", "path_expression": "'/studio/recovery/plans/{plan_id}'"},
+    {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "post", "path_expression": "'/studio/recovery/plans/{plan_id}/control'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/config'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/login'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/callback'"},
@@ -91,5 +96,5 @@
     {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/traces'"},
     {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/trace-path'"}
   ],
-  "compatibility_note": "2026-10-03: User explicitly approved additive native Chamber workspace and administrator connection routes. Existing released SDK and Studio routes remain present; new service-scoped routes are intentional production perimeter additions."
+  "compatibility_note": "2026-10-03: User explicitly approved additive native Chamber workspace and administrator connection routes. Existing released SDK and Studio routes remain present; new service-scoped routes are intentional production perimeter additions. 2026-10-25: User explicitly approved Recovery Center production-perimeter additions in its implementation thread. Existing routes remain unchanged; five recovery routes and their durable Studio orchestration are additive."
 }
