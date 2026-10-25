@@ -21,6 +21,7 @@ from .auth import (
     StudioEntraConfig,
     create_studio_auth_router,
 )
+from .cockpit import _create_cockpit_router
 from .database import (
     HybridStudioAuthStore,
     PostgresAdvisoryCoordinator,
@@ -698,6 +699,13 @@ def create_studio_app(
         create_service_registry_router(service_registry=runtime.registry_service, health_service=runtime.health_service)
     )
     app.include_router(create_studio_health_router(health_service=runtime.health_service))
+    app.include_router(
+        _create_cockpit_router(
+            runtime.federation_service,
+            runtime.metrics_query_service,
+            worker_stale_after=worker_heartbeat_stale_after_seconds,
+        )
+    )
     app.include_router(create_federation_router(federation_service=runtime.federation_service))
     app.include_router(_create_incident_router(runtime.federation_service, runtime.database))
     app.include_router(_create_recovery_router(runtime.recovery_service))

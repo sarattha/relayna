@@ -353,3 +353,26 @@ async def test_client_remaining_prepare_batch_contract_and_lazy_init_paths(monke
     metrics_client._tasks_exchange = Exchange()  # type: ignore[assignment]
     await metrics_client.publish_tasks([{"task_id": "task"}], mode="batch_envelope", batch_id="batch")
     assert "relayna_queue_publish_total" in metrics_client.metrics.render().decode()  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        None,
+        SimpleNamespace(message_count=None, consumer_count=1),
+        SimpleNamespace(message_count=0, consumer_count=None),
+        SimpleNamespace(),
+    ],
+)
+async def test_queue_inspection_does_not_invent_zero_for_missing_declaration(monkeypatch, declaration):
+    from unittest.mock import AsyncMock
+
+    client = RelaynaRabbitClient(shared_topology())
+    channel = SimpleNamespace(
+        declare_queue=AsyncMock(return_value=SimpleNamespace(declaration_result=declaration)), close=AsyncMock()
+    )
+    monkeypatch.setattr(client, "_ensure_ready", AsyncMock())
+    monkeypatch.setattr(client, "acquire_channel", AsyncMock(return_value=channel))
+    assert await client.inspect_queue("tasks.queue") is None
+    channel.close.assert_awaited_once()

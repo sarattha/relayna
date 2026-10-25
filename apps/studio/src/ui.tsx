@@ -969,6 +969,7 @@ export function AppHeader() {
           {alertCount ? <span className="studio-alert-count" aria-label={`${alertCount} service alerts`}>{alertCount}</span> : null}
         </NavLink>
         <NavLink to={scopedPath("/services")}>Services</NavLink>
+        <NavLink to={scopedPath("/queues")}>Queues & Workers</NavLink>
         <NavLink to={scopedPath("/tasks/search")}>Task Search</NavLink>
         <NavLink to={scopedPath("/incidents")}>Incident Inbox</NavLink>
         <NavLink to={scopedPath("/failed-tasks")}>

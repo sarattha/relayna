@@ -6,6 +6,7 @@ import {
   deleteFailedTask,
   deleteService,
   fetchBrokerDlq,
+  fetchCockpit,
   fetchDlq,
   fetchFailedTaskDetail,
   fetchFailedTaskEmailSettings,
@@ -465,4 +466,13 @@ it("sends pinned recovery requests with CSRF and a version, and preserves ambigu
     await expect(recovery.controlRecoveryPlan("plan/id", "stop", 5)).rejects.toThrow("Connection lost");
     expect(fetcher).toHaveBeenCalledTimes(5);
   } finally { recovery.setStudioCsrfToken(null); }
+});
+
+
+it("reads cockpit evidence through the shared client with encoded service identity", async () => {
+  const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ service_id: "service/id", queues: [] }));
+  vi.stubGlobal("fetch", fetchMock);
+  const response = await fetchCockpit("service/id");
+  expect(response.service_id).toBe("service/id");
+  expect(fetchMock.mock.calls[0][0]).toBe("/studio/services/service%2Fid/runtime/cockpit");
 });

@@ -1061,3 +1061,34 @@ Studio owns the [Recovery Center](studio-recovery-center.md) ledger, worker, and
 unknown acceptance without automatic resends. Multiple instances coordinate
 through PostgreSQL row locks and persisted dispatch deadlines. Apply schema
 revision `0003_recovery` before starting this backend.
+
+## Queue & Worker Cockpit reads
+
+`GET /studio/services/{service_id}/runtime/cockpit` is a read-only federated
+snapshot. Existing Studio authentication/readonly access, registered-service
+identity, disabled-service checks, internal-network auth-mode checks, outbound
+URL policy and upstream timeouts apply. No broker credentials, new environment
+variables or database migrations are required.
+
+The response contains `service_id`, `reported_at`, freshness thresholds,
+`sources` (`pressure`, `workers`, `metrics`), `queues`, `workers`, `signals` and
+optional `metrics`. Each source retains its own state/detail/time; partial
+failure does not erase independent observations. Pressure and worker reads use
+advertised `runtime.backpressure` and `health.workers` capabilities. Legacy
+services without capability documents retain federation's existing probe
+behavior. Old signal-only pressure payloads can expose ready depth and explicitly
+observed zero consumers, but not inferred positive consumers or rates.
+
+Queue readings retain `(service_id, queue_name, source)` identity. Structured
+observations replace legacy signal inference for that queue. Freshness requires
+a timezone-aware timestamp no older than 90 seconds and at most 30 seconds in the
+future. Worker heartbeat freshness uses the existing
+`worker_heartbeat_stale_after_seconds` configuration (default 90), applied to each
+worker. Lease expiry is evaluated against current time as well as the provider's
+expired flag. Missing/future/naive timestamps do not establish freshness.
+
+Optional Prometheus reads reuse the configured service metrics provider for
+retry/DLQ rates, active tasks and handler p95. A group failure preserves other
+groups and emits a warning. These are service-scoped readings, not queue-scoped
+capacity rates. The cockpit does not treat event retention/search counts as
+backlog or use task-start/publish rates for drain calculations.

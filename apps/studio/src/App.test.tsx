@@ -3953,4 +3953,12 @@ describe("App", () => {
     view.unmount(); await act(async () => { pending.forEach(release => release()); }); expect(screen.queryByText("Late service read")).not.toBeInTheDocument();
   });
 
+  it("opens the cockpit from primary navigation", async () => {
+    render(<App />);
+    const link = await screen.findByRole("link", { name: "Queues & Workers" });
+    fireEvent.click(link);
+    expect(await screen.findByRole("heading", { name: "Queue & Worker Cockpit" })).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/queues");
+  });
+
 });

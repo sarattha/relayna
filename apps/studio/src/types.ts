@@ -891,3 +891,65 @@ export type RecoveryPlan = RecoveryPreview & {
     cohort_recovery_seconds: number | null;
   };
 };
+
+export type CockpitSource = {
+  state: "fresh" | "stale" | "missing" | "partial" | "unsupported" | "unavailable" | "not_configured";
+  detail: string;
+  reported_at?: string | null;
+};
+
+export type TaskLeaseHealth = {
+  lease_id: string;
+  task_id: string;
+  owner_id: string;
+  consumer_name: string;
+  heartbeat_at: string;
+  expires_at: string;
+  expired: boolean;
+  acquired_at?: string | null;
+  stage?: string | null;
+  attempt: number;
+  freshness: string;
+  age_seconds?: number | null;
+};
+
+export type CockpitQueue = {
+  queue_name: string;
+  source: string;
+  observed_at: string;
+  ready: number | null;
+  unacknowledged: number | null;
+  consumers: number | null;
+  oldest_message_age_seconds: number | null;
+  arrival_rate: number | null;
+  completion_rate: number | null;
+  rate_window_seconds: number | null;
+  freshness: string;
+  diagnosis: string;
+  drain: { state: "unknown" | "draining" | "not_draining"; seconds: number | null; reason: string };
+};
+
+export type CockpitWorker = WorkerHeartbeatSummary & {
+  state: string;
+  freshness: string;
+  active_leases: TaskLeaseHealth[];
+};
+
+export type CockpitResponse = {
+  service_id: string;
+  reported_at: string;
+  stale_after_seconds: number;
+  worker_stale_after_seconds: number;
+  sources: { pressure: CockpitSource; workers: CockpitSource; metrics: CockpitSource };
+  queues: CockpitQueue[];
+  workers: CockpitWorker[];
+  signals: Array<{
+    scope: string; scope_id?: string | null; kind: string; severity: string;
+    value?: number | null; reason?: string | null; recommended_action?: string | null;
+    observed_at: string; freshness: string;
+  }>;
+  metrics: {
+    from: string; to: string; series: StudioMetricSeries[]; warnings: string[];
+    rate_window_seconds: number; scope: string;
+  } | null;
+};

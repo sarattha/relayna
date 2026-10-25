@@ -760,3 +760,7 @@ export function controlRecoveryPlan(planId: string, action: "batch" | "pause" | 
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, version, count }),
   });
 }
+
+export async function fetchCockpit(serviceId: string) {
+  return requestJson<import("./types").CockpitResponse>(`/studio/services/${encodeURIComponent(serviceId)}/runtime/cockpit`);
+}
