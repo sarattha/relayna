@@ -1,6 +1,6 @@
 # Studio Incident Inbox
 
-This ExecPlan is a living document maintained according to [PLANS.md](../../PLANS.md).
+This ExecPlan is a living document maintained according to [PLANS.md](https://github.com/sarattha/relayna/blob/main/PLANS.md).
 
 ## Purpose / Big Picture
 
