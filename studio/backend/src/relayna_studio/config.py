@@ -41,6 +41,8 @@ class StudioAppKwargs(TypedDict):
     failed_task_email_dedupe_ttl_seconds: int
     failed_task_email_title_prefix: str
     failed_task_email_batch_wait_seconds: int
+    reliability_webhook_token: str | None
+    reliability_public_url: str | None
     entra_config: StudioEntraConfig | None
 
 
@@ -156,6 +158,8 @@ class StudioBackendSettings:
     failed_task_email_dedupe_ttl_seconds: int = 604800
     failed_task_email_title_prefix: str = "[Relayna] Failed task"
     failed_task_email_batch_wait_seconds: int = 0
+    reliability_webhook_token: str | None = None
+    reliability_public_url: str | None = None
     auth_mode: str = "entra"
     operator_token: str = ""
     entra_application_id: str = ""
@@ -264,6 +268,8 @@ class StudioBackendSettings:
                 "RELAYNA_STUDIO_FAILED_TASK_EMAIL_TITLE_PREFIX",
                 "[Relayna] Failed task",
             ),
+            reliability_public_url=_env_optional_str("RELAYNA_STUDIO_RELIABILITY_PUBLIC_URL"),
+            reliability_webhook_token=_env_optional_str("RELAYNA_STUDIO_RELIABILITY_WEBHOOK_TOKEN"),
             failed_task_email_batch_wait_seconds=_env_int("RELAYNA_STUDIO_FAILED_TASK_EMAIL_BATCH_WAIT_SECONDS", 0),
             entra_application_id=entra_value("RELAYNA_STUDIO_ENTRA_APPLICATION_ID"),
             entra_tenant_id=entra_value("RELAYNA_STUDIO_ENTRA_TENANT_ID"),
@@ -314,6 +320,8 @@ class StudioBackendSettings:
             "failed_task_email_dedupe_ttl_seconds": self.failed_task_email_dedupe_ttl_seconds,
             "failed_task_email_title_prefix": self.failed_task_email_title_prefix,
             "failed_task_email_batch_wait_seconds": self.failed_task_email_batch_wait_seconds,
+            "reliability_webhook_token": self.reliability_webhook_token,
+            "reliability_public_url": self.reliability_public_url,
             "entra_config": StudioEntraConfig(
                 application_id=self.entra_application_id,
                 tenant_id=self.entra_tenant_id,

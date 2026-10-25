@@ -970,6 +970,8 @@ export function AppHeader() {
         </NavLink>
         <NavLink to={scopedPath("/services")}>Services</NavLink>
         <NavLink to={scopedPath("/queues")}>Queues & Workers</NavLink>
+
+        <NavLink to={scopedPath("/reliability")}>Reliability</NavLink>
         <NavLink to={scopedPath("/tasks/search")}>Task Search</NavLink>
         <NavLink to={scopedPath("/incidents")}>Incident Inbox</NavLink>
         <NavLink to={scopedPath("/failed-tasks")}>

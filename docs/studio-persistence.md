@@ -216,3 +216,14 @@ Creation, controls, dispatch, and state transitions also write the operator audi
 log. See [Recovery Center](studio-recovery-center.md) for crash/timeout behavior,
 backup and downgrade guidance. Downgrading drops recovery history and reservations;
 stop all recovery workers and export reports first.
+
+## Reliability goals and delivery
+
+Reliability goals use versioned `reliability:v1:<goal-id>` rows in the existing
+`studio_operator_settings` table. Each JSON document contains immutable goal
+configuration and bounded delivery diagnostics (the last 100 alert episodes plus
+counters). PostgreSQL row locks serialize duplicate callbacks across replicas.
+No migration is required. Configuration and receipts persist until goal deletion;
+mutation and delivery audits use the existing audit log. These records are not a
+business-work ledger or a substitute for external alert history. See
+[Reliability goals](studio-reliability.md) for the at-least-once delivery boundary.

@@ -764,3 +764,28 @@ export function controlRecoveryPlan(planId: string, action: "batch" | "pause" | 
 export async function fetchCockpit(serviceId: string) {
   return requestJson<import("./types").CockpitResponse>(`/studio/services/${encodeURIComponent(serviceId)}/runtime/cockpit`);
 }
+
+export async function fetchReliabilityGoals(query: { service_id?: string; environment?: string } = {}) {
+  const params = new URLSearchParams();
+  if (query.service_id) params.set("service_id", query.service_id);
+  if (query.environment) params.set("environment", query.environment);
+  return requestJson<import("./types").ReliabilityGoalList>(`/studio/reliability/goals?${params}`);
+}
+
+export async function createReliabilityGoal(goal: import("./types").ReliabilityGoalInput) {
+  return requestJson<import("./types").ReliabilityGoal>("/studio/reliability/goals", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(goal),
+  });
+}
+
+export async function deleteReliabilityGoal(id: string) {
+  return requestJson<{ deleted: boolean }>(`/studio/reliability/goals/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function previewReliabilityGoal(id: string) {
+  return requestJson<import("./types").ReliabilityPreview>(`/studio/reliability/goals/${encodeURIComponent(id)}/preview`);
+}
+
+export async function exportReliabilityGoal(id: string) {
+  return requestJson<Record<string, unknown>>(`/studio/reliability/goals/${encodeURIComponent(id)}/export`);
+}

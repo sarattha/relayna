@@ -36,6 +36,7 @@ _PUBLIC = {
     "/studio/auth/login",
     "/studio/gateway/services",
     "/studio/ingest/events",
+    "/studio/ingest/reliability-alerts",
     "/metrics",
     "/healthz",
     "/readyz",

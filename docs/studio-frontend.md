@@ -987,3 +987,11 @@ Service-scoped handler p95 and active-task metrics help investigate slow handler
 lease age alone is not a latency verdict. Retry and DLQ trends cover the last
 15 minutes using 5-minute Prometheus rate windows, preserve missing samples, and
 link to Failed Tasks and DLQ investigation. No runtime operations are provided.
+
+## Reliability workspace
+
+Open **Reliability** to define service/environment goals and owner recipients,
+preview evidence, inspect delivery diagnostics, and export Prometheus/Alertmanager
+configuration. Saving does not deploy external rules. Missing/stale/unsupported
+measurements stay explicit; business success and end-to-end latency require durable
+accepted-work cohort aggregates. See [Reliability goals](studio-reliability.md).
