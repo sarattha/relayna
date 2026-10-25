@@ -970,9 +970,19 @@ card says **Not draining**. Otherwise the estimate is backlog divided by net
 completion rate; it assumes constant rates. Missing inputs produce **Unknown**.
 SDK publish/start metrics are not substituted for broker arrivals/completions.
 
-Worker cards assess each worker heartbeat independently and show lease owner,
-acquisition, heartbeat, expiry, stage and attempt. An expired lease remains
-visible even if the worker is live. Lease/task links open existing investigations.
+Worker source timestamps expire independently of the configured heartbeat
+tolerance; cached worker and lease labels stop claiming freshness when their
+source ages out, including during a pending refresh. Timezone-less timestamps
+cannot establish freshness, and lease labels preserve the backend verdict.
+
+Worker cards show the provider's running flag and the age of its reported
+heartbeat/activity timestamp independently. Periodic liveness remains **Unknown**:
+the current worker-health contract does not declare heartbeat cadence, and SDK
+task-activity timestamps advance at task boundaries. An idle or long-running
+healthy worker can have an older timestamp. Old/missing activity is never an
+absence verdict. A current source read is evidence availability, not proof that
+every worker is alive. Lease owner, acquisition, heartbeat, expiry, stage and
+attempt remain visible, including expired leases on a worker that reports running. Lease/task links open existing investigations.
 Service-scoped handler p95 and active-task metrics help investigate slow handlers;
 lease age alone is not a latency verdict. Retry and DLQ trends cover the last
 15 minutes using 5-minute Prometheus rate windows, preserve missing samples, and

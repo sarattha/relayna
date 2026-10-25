@@ -147,6 +147,10 @@ function ServiceEvidence({
   const path = `/services/${encodeURIComponent(service.service_id)}`;
   const fresh =
     !!data && isFresh(data.reported_at, now, data.stale_after_seconds);
+  const workerSourceFresh =
+    fresh &&
+    data.sources.workers.state === "fresh" &&
+    isFresh(data.sources.workers.reported_at, now, data.stale_after_seconds);
   return (
     <SectionCard
       title={service.name}
@@ -182,7 +186,15 @@ function ServiceEvidence({
                       : "Metrics source"}
                 </strong>
                 <span className="cockpit-state">
-                  {!fresh && source.state === "fresh"
+                  {source.state === "fresh" &&
+                  (!fresh ||
+                    (name === "workers" && !workerSourceFresh) ||
+                    (source.reported_at &&
+                      !isFresh(
+                        source.reported_at,
+                        now,
+                        data.stale_after_seconds,
+                      )))
                     ? "stale"
                     : source.state.replace(/_/g, " ")}
                 </span>
@@ -290,9 +302,12 @@ function ServiceEvidence({
             <Link to={`${path}?view=monitor&layout=logs`}>Worker logs</Link>
           </div>
           <p className="cockpit-muted">
-            Heartbeat freshness threshold: {data.worker_stale_after_seconds}s. A
-            running worker can still have expired leases. Lease age alone does
-            not prove a slow handler.
+            Reported timestamp freshness threshold:{" "}
+            {data.worker_stale_after_seconds}s. Worker timestamps may reflect
+            task boundaries or active leases; their age does not establish an
+            absent worker. This source contract does not declare periodic
+            liveness. Lease expiry and source freshness are evaluated
+            separately; lease age alone does not prove a slow handler.
           </p>
           {!data.workers.length ? (
             <p>
@@ -302,9 +317,7 @@ function ServiceEvidence({
           ) : (
             <div className="cockpit-grid">
               {data.workers.map((worker, index) => {
-                const current =
-                  fresh &&
-                  data.sources.workers.state === "fresh" &&
+                const recentHeartbeat =
                   worker.freshness === "fresh" &&
                   isFresh(
                     worker.last_heartbeat_at,
@@ -319,17 +332,26 @@ function ServiceEvidence({
                     <header>
                       <strong>{worker.worker_name}</strong>
                       <span className="cockpit-state">
-                        {!worker.running
-                          ? "stopped"
-                          : current
-                            ? "live"
-                            : "stale heartbeat"}
+                        {!workerSourceFresh
+                          ? "stale worker evidence"
+                          : worker.running
+                            ? "reports running"
+                            : "reports stopped"}
                       </span>
                     </header>
                     <p>
-                      Heartbeat {formatTimestamp(worker.last_heartbeat_at)} ·{" "}
+                      Last reported heartbeat/activity:{" "}
+                      {formatTimestamp(worker.last_heartbeat_at)}
+                      {" · "}
+                      {recentHeartbeat
+                        ? "recent timestamp"
+                        : worker.freshness === "missing"
+                          ? "timestamp missing"
+                          : "older timestamp"}
+                      {" · "}
                       {worker.active_leases.length} reported active leases
                     </p>
+                    <p>Periodic liveness: Unknown</p>
                     {worker.active_leases.length ? (
                       worker.active_leases.map((lease, index) => {
                         const expired =
@@ -348,15 +370,18 @@ function ServiceEvidence({
                             <strong>
                               {expired
                                 ? "Expired lease"
-                                : fresh &&
-                                    data.sources.workers.state === "fresh" &&
-                                    isFresh(
-                                      lease.heartbeat_at,
-                                      now,
-                                      data.worker_stale_after_seconds,
-                                    )
-                                  ? "Lease heartbeat fresh"
-                                  : "Lease heartbeat stale"}
+                                : !workerSourceFresh
+                                  ? "Lease evidence stale"
+                                  : lease.freshness === "missing"
+                                    ? "Lease heartbeat unknown"
+                                    : lease.freshness === "fresh" &&
+                                        isFresh(
+                                          lease.heartbeat_at,
+                                          now,
+                                          data.worker_stale_after_seconds,
+                                        )
+                                      ? "Lease heartbeat fresh"
+                                      : "Lease heartbeat stale"}
                             </strong>
                             <dl>
                               <div>

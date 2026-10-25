@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -138,7 +139,11 @@ class QueuePressureCollector:
         warning_depth: int = 100,
         critical_depth: int = 1000,
         max_concurrency: int = 16,
+        source_id: str | None = None,
     ) -> None:
+        self._source_id = source_id.strip() if source_id is not None else f"amqp_passive_declare:{uuid4().hex}"
+        if not self._source_id:
+            raise ValueError("source_id must not be empty")
         self._queue_names = tuple(dict.fromkeys(str(name).strip() for name in queue_names if str(name).strip()))
         self._inspect_queue = inspect_queue
         self._warning_depth = warning_depth
@@ -209,7 +214,7 @@ class QueuePressureCollector:
                 queues=[
                     RuntimeQueueObservation(
                         queue_name=queue_name,
-                        source="amqp_passive_declare",
+                        source=self._source_id,
                         observed_at=observed_at,
                         ready=inspection.message_count,
                         consumers=inspection.consumer_count,

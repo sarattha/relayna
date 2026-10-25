@@ -8,8 +8,8 @@ illustrative, not production measurements. The richer queue fixture represents
 an explicitly configured source; built-in AMQP readings expose fewer fields.
 
 Checked queue cards with excess arrivals, observed zero consumers, missing
-unacknowledged/rates/age, a live worker with an expired lease, a stale individual
-worker, service retry/DLQ samples and unsupported/unavailable/unconfigured sources.
+unacknowledged/rates/age, a worker reporting running with an expired lease, an older individual
+activity timestamp with periodic liveness explicitly unknown, service retry/DLQ samples and unsupported/unavailable/unconfigured sources.
 Task/service/topology/failed-task/DLQ links preserve environment and service scope.
 Both widths have document scrollWidth equal to viewport width. Header navigation
 uses its existing horizontal scroll on mobile; cards, identities and controls fit
@@ -22,3 +22,11 @@ and interaction checks. Automated fixtures/behavior tests live in
 `apps/studio/src/test/cockpit-fixtures.ts`,
 `apps/studio/src/pages/QueueWorkerPage.test.tsx` and
 `studio/backend/tests/test_studio_cockpit.py`.
+
+Updated after review fixes: separate AMQP collector identities preserve matching
+queue names across brokers/vhosts; timezone-less lease timestamps cannot display
+fresh; worker source timestamps expire independently while refresh is pending.
+The provider's running flag, activity timestamp age, source observation freshness,
+and unknown periodic liveness are presented separately. Fresh source reads and
+old task activity do not establish either presence or absence. Regression tests
+cover source expiry with 600-second worker tolerance and invalid lease clocks.

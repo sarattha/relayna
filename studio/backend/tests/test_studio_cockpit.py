@@ -432,3 +432,45 @@ def test_worker_snapshot_age_is_independent_of_configured_heartbeat_tolerance():
         }
     )
     assert _workers(payload, NOW, 600)[0]["freshness"] == "stale"
+
+
+@pytest.mark.parametrize("source_ids", [(None, None), ("primary/production", "secondary/production")])
+def test_distinct_amqp_sources_with_same_queue_name_cannot_hide_waiting_work(source_ids):
+    from relayna.observability import QueuePressureCollector, RuntimePressureService
+    from relayna.rabbitmq import QueueInspection
+
+    async def blocked(name):
+        return QueueInspection(queue_name=name, message_count=500, consumer_count=0)
+
+    async def idle(name):
+        return QueueInspection(queue_name=name, message_count=0, consumer_count=4)
+
+    async def scenario():
+        return await RuntimePressureService(
+            collectors=[
+                QueuePressureCollector(queue_names=["orders"], inspect_queue=blocked, source_id=source_ids[0]),
+                QueuePressureCollector(queue_names=["orders"], inspect_queue=idle, source_id=source_ids[1]),
+            ]
+        ).snapshot()
+
+    rows = _queues(asyncio.run(scenario()), datetime.now(UTC), 90)
+    assert len(rows) == 2
+    assert len({row["source"] for row in rows}) == 2
+    assert sorted((row["ready"], row["consumers"]) for row in rows) == [(0, 4), (500, 0)]
+    assert "No consumers observed" in next(row["diagnosis"] for row in rows if row["ready"] == 500)
+
+
+@pytest.mark.parametrize("heartbeat", [None, NOW - timedelta(hours=1)])
+def test_idle_or_long_running_activity_does_not_establish_worker_absence(heartbeat):
+    payload = WorkerHeartbeatListResponse.model_validate(
+        {
+            "reported_at": NOW,
+            "workers": [
+                {"worker_name": "worker", "running": True, "last_heartbeat_at": heartbeat},
+            ],
+        }
+    )
+    worker = _workers(payload, NOW, 90)[0]
+    assert worker["running"] is True
+    assert worker["liveness"] == "unknown"
+    assert worker["freshness"] in {"missing", "stale"}

@@ -24,6 +24,16 @@ This feature provides visibility only, with no runtime commands.
 - [x] (2026-10-25 15:49Z) Commit/push and open/link PR #138 against main.
 - [x] (2026-10-25 15:50Z) Request the single extra Codex review through T3;
   immutable implementation head 22e04d1d3f521bba544d8476adb9070e017c0296.
+- [x] (2026-10-25 15:55Z) All five GitHub checks passed on 57d66eb;
+  automatic Codex review completed without findings.
+- [x] (2026-10-25 16:16Z) Resolve all three P2 findings from the completed single
+  extra review: AMQP source identities are unique by default/configurable;
+  invalid lease timestamps preserve backend verdicts; cached worker source
+  freshness expires independently in the browser.
+- [x] (2026-10-25 16:16Z) Correct cross-feature liveness interpretation: report
+  running flags/activity ages and explicitly unknown periodic liveness; never
+  infer worker absence from idle/long-running task activity. Add regression tests,
+  update docs/screenshots, rerun mandatory checks and coverage.
 - [ ] Address review/CI findings and confirm review/check readiness; use T3 watch
   for event-driven monitoring. Coordination owns final restacking.
 
@@ -42,6 +52,12 @@ This feature provides visibility only, with no runtime commands.
   within the same scope; failures replace it with explicit errors.
 - NaN/Infinity metrics can occur for empty Prometheus histograms. Sanitize them
   to null, retain gaps and evaluate the newest sample per metric group.
+- Cross-feature review found SDK task-activity heartbeat metrics update at task
+  boundaries. Cockpit does not query that metric, but its former `live` label
+  still inferred liveness from a provider timestamp with unspecified cadence.
+  Show reported running state and timestamp age independently; periodic liveness
+  stays unknown, even for a current source read. Idle/long-running task activity
+  never establishes absence. Lease heartbeat/expiry remains separate.
 - Current manifests were advanced to v1.10.1; preserve their version metadata.
 
 ## Decision Log
@@ -70,12 +86,23 @@ This feature provides visibility only, with no runtime commands.
   coordination thread owns later stack assembly (main <- 01 <- 02 <- 03 <- 05). No sibling checkout edits.
   Date/Author: 2026-10-25 / Codex.
 
+- Decision: give QueuePressureCollector an optional stable source_id. When not
+  configured, assign an instance-stable unique ID so separate broker/vhost
+  collectors cannot silently overwrite one another. This adds an optional
+  keyword-only constructor parameter under the existing feature freeze exception;
+  existing callers and signal behavior remain compatible. No selected signature
+  freeze entry covers this constructor; the existing feature coverage entry does.
+  Frontend freshness must require timezone-aware timestamps, backend verdicts,
+  and independently current worker source timestamps.
+  Date/Author: 2026-10-25 / Codex.
+
 ## Outcomes & Retrospective
 
 Implementation complete; PR handoff in progress. The mandatory verification
 script passes; SDK coverage passes; backend coverage is 98.22% with dedicated
-PostgreSQL/Redis and 570 passing tests; frontend coverage passes with 287 tests,
-98.07% statements and 89.53% branches. Frontend production build passes. Desktop
+PostgreSQL/Redis and 574 passing tests; SDK tests pass (704, plus 9 environment
+skips); frontend coverage passes with 292 tests, 98.07% statements and 89.57%
+branches. Frontend production build passes. Desktop
 1440x1000 and mobile 390x844 layouts preserve missing-data states with no page
 overflow. Captures and notes are under docs/qa/studio-queue-worker-cockpit/.
 
@@ -97,7 +124,9 @@ Latest release v1.11.0; production freeze boundary v1.4.30. The user's explicit
 exception covers this feature. New queue observations, collector read support,
 Studio cockpit route, frontend API/types/page and related manifest entries are
 intentional additive perimeter changes. Existing providers, responses' existing
-fields, public exports and persisted schemas remain compatible. Feature tests
+fields, public exports and persisted schemas remain compatible. Review fixes
+also add optional source_id configuration and explicit liveness=unknown metadata;
+these are within the same authorized feature perimeter. Feature tests
 cover old signal-only providers as well as new observations.
 
 ## Plan of Work
@@ -146,7 +175,9 @@ Original main merge-base: 89954699d2e43aebfee54e4ec64c06edb0caf2ce.
 Reference patterns: https://www.rabbitmq.com/docs/management and
 https://docs.confluent.io/control-center/current/clients/consumers.html .
 PR: https://github.com/sarattha/relayna/pull/138 (linked to this thread).
-Extra Codex review: used once through T3, pending. Task ID:
+Extra Codex review: used once through T3, completed with three P2 findings.
+All three are addressed with regression tests. No additional review requested.
+The cross-feature task-activity/liveness interpretation was also corrected. Task ID:
 node:delegated-task:command%3Amcp%3Afc9a3a82-8ea4-444d-acb1-9475cdc73f27%3Adelegate-task%3Afeature03-cockpit-extra-codex-review-round1.
 The review is pinned to implementation commit 22e04d1; subsequent documentation
 updates do not change runtime code. Native T3 Codex catalog selection is

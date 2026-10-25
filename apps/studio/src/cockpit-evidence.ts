@@ -5,7 +5,9 @@ export function isFresh(
   now: number,
   seconds = 90,
 ) {
-  const age = now - Date.parse(timestamp || "");
+  const normalized = timestamp?.trim() || "";
+  if (!/(?:Z|[+-]\d{2}:?\d{2})$/i.test(normalized)) return false;
+  const age = now - Date.parse(normalized);
   return Number.isFinite(age) && age >= -30_000 && age <= seconds * 1000;
 }
 

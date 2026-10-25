@@ -267,7 +267,7 @@ def test_queue_observations_preserve_zero_missing_counts_and_partial_inspection(
         assert queue.ready == 0 and queue.consumers == 2
         assert queue.unacknowledged is None and queue.arrival_rate is None
         assert queue.completion_rate is None and queue.oldest_message_age_seconds is None
-        assert queue.source == "amqp_passive_declare"
+        assert queue.source.startswith("amqp_passive_declare:")
         assert {s.scope_id for s in snapshot.signals if s.kind == "queue_inspection_unavailable"} == {
             "broken",
             "missing",
@@ -338,3 +338,21 @@ def test_queue_observation_rejects_invalid_measurements(field, value) -> None:
         RuntimeQueueObservation.model_validate(
             {"queue_name": "orders", "source": "broker", "observed_at": datetime.now(UTC), field: value}
         )
+
+
+def test_queue_collector_source_ids_are_distinct_stable_and_configurable() -> None:
+    async def inspect(name):
+        return QueueInspection(queue_name=name, message_count=500, consumer_count=0)
+
+    async def scenario():
+        first = QueuePressureCollector(queue_names=["orders"], inspect_queue=inspect)
+        second = QueuePressureCollector(queue_names=["orders"], inspect_queue=inspect)
+        named = QueuePressureCollector(queue_names=["orders"], inspect_queue=inspect, source_id=" primary/orders ")
+        snapshot = await RuntimePressureService(collectors=[first, second, named]).snapshot()
+        assert len({q.source for q in snapshot.queues}) == 3
+        assert snapshot.queues[2].source == "primary/orders"
+        assert (await first.collect_snapshot()).queues[0].source == snapshot.queues[0].source
+
+    asyncio.run(scenario())
+    with pytest.raises(ValueError, match="source_id must not be empty"):
+        QueuePressureCollector(queue_names=[], inspect_queue=inspect, source_id="  ")

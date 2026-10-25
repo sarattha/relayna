@@ -137,9 +137,12 @@ def _workers(
                     else None,
                 }
             )
+        # The provider contract does not declare periodic heartbeat cadence.
+        # Fresh task/lease activity is not confirmation of worker liveness.
         state = "stopped" if not worker.running else freshness
         result.append(
-            worker.model_dump(mode="json") | {"freshness": freshness, "state": state, "active_leases": leases}
+            worker.model_dump(mode="json")
+            | {"freshness": freshness, "state": state, "liveness": "unknown", "active_leases": leases}
         )
     return result
 

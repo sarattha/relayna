@@ -72,6 +72,7 @@ export function cockpitFixture(now = Date.now()): CockpitResponse {
     workers: [
       {
         worker_name: "orders-worker-1",
+        liveness: "unknown",
         running: true,
         last_heartbeat_at: timestamp,
         freshness: "fresh",

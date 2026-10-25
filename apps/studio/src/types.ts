@@ -931,6 +931,7 @@ export type CockpitQueue = {
 
 export type CockpitWorker = WorkerHeartbeatSummary & {
   state: string;
+  liveness: "unknown";
   freshness: string;
   active_leases: TaskLeaseHealth[];
 };

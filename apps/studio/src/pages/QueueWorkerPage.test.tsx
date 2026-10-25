@@ -143,7 +143,7 @@ describe("queue and worker cockpit", () => {
       await screen.findByText(/Displayed snapshot is stale/),
     ).toBeInTheDocument();
     expect(screen.getByText("Drain estimate: Unknown")).toBeInTheDocument();
-    expect(screen.getByText("stopped")).toBeInTheDocument();
+    expect(screen.getByText("stale worker evidence")).toBeInTheDocument();
     expect(screen.getAllByText("Stale").length).toBe(2);
     expect(screen.getByText("No reason reported.")).toBeInTheDocument();
   });
@@ -155,9 +155,10 @@ describe("queue and worker cockpit", () => {
     ).toISOString();
     data.workers[0].active_leases[0].heartbeat_at = new Date().toISOString();
     data.workers[0].active_leases[0].stage = null;
+    data.workers[0].active_leases[0].freshness = "fresh";
     fetcher.mockResolvedValue(data);
     mount();
-    expect(await screen.findByText("stale heartbeat")).toBeInTheDocument();
+    expect(await screen.findByText("reports running")).toBeInTheDocument();
     expect(screen.getByText("Lease heartbeat fresh")).toBeInTheDocument();
     expect(screen.getByText("Not reported / 2")).toBeInTheDocument();
   });
@@ -359,4 +360,79 @@ describe("queue and worker cockpit", () => {
     expect((path.match(/M/g) || []).length).toBe(3);
     expect((path.match(/L/g) || []).length).toBe(1);
   });
+  it("preserves a missing lease verdict for a timezone-less heartbeat", async () => {
+    const data = cockpitFixture();
+    const lease = data.workers[0].active_leases[0];
+    lease.expires_at = new Date(Date.now() + 600_000).toISOString();
+    lease.heartbeat_at = new Date().toISOString().replace(/Z$/, "");
+    lease.freshness = "missing";
+    fetcher.mockResolvedValue(data);
+    mount();
+    expect(
+      await screen.findByText("Lease heartbeat unknown"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Lease heartbeat fresh")).not.toBeInTheDocument();
+  });
+  it("requires the backend lease freshness verdict even for a parseable timestamp", async () => {
+    const data = cockpitFixture();
+    const lease = data.workers[0].active_leases[0];
+    lease.expires_at = new Date(Date.now() + 600_000).toISOString();
+    lease.heartbeat_at = new Date().toISOString();
+    lease.freshness = "stale";
+    fetcher.mockResolvedValue(data);
+    mount();
+    expect(
+      await screen.findByText("Lease heartbeat stale"),
+    ).toBeInTheDocument();
+  });
+  it("expires worker source evidence independently while a refresh is pending", async () => {
+    vi.useFakeTimers();
+    const data = cockpitFixture();
+    data.worker_stale_after_seconds = 600;
+    data.sources.workers.reported_at = new Date(
+      Date.now() - 80_000,
+    ).toISOString();
+    const lease = data.workers[0].active_leases[0];
+    lease.expires_at = new Date(Date.now() + 600_000).toISOString();
+    lease.heartbeat_at = new Date().toISOString();
+    lease.freshness = "fresh";
+    fetcher
+      .mockResolvedValueOnce(data)
+      .mockImplementation(() => new Promise(() => {}));
+    mount();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("reports running")).toBeInTheDocument();
+    expect(screen.getByText("Lease heartbeat fresh")).toBeInTheDocument();
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(screen.getByText("stale worker evidence")).toBeInTheDocument();
+    expect(screen.getByText("Lease evidence stale")).toBeInTheDocument();
+    expect(screen.getByText(/recent timestamp/)).toBeInTheDocument();
+    expect(screen.queryByText("reports running")).not.toBeInTheDocument();
+    const source = screen.getByText("Worker source").closest("div")!;
+    expect(within(source).getByText("stale")).toBeInTheDocument();
+  });
+  it.each([null, new Date(Date.now() - 3_600_000).toISOString()])(
+    "does not infer absence from idle or long-running task activity (%s)",
+    async (heartbeat) => {
+      const data = cockpitFixture();
+      data.workers[0].last_heartbeat_at = heartbeat;
+      data.workers[0].freshness = heartbeat ? "stale" : "missing";
+      data.workers[0].active_leases = [];
+      fetcher.mockResolvedValue(data);
+      mount();
+      expect(await screen.findByText("reports running")).toBeInTheDocument();
+      expect(
+        screen.getByText("Periodic liveness: Unknown"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/their age does not establish an absent worker/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("live")).not.toBeInTheDocument();
+      expect(screen.queryByText("reports stopped")).not.toBeInTheDocument();
+    },
+  );
 });

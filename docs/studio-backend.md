@@ -1084,7 +1084,11 @@ observations replace legacy signal inference for that queue. Freshness requires
 a timezone-aware timestamp no older than 90 seconds and at most 30 seconds in the
 future. Worker heartbeat freshness uses the existing
 `worker_heartbeat_stale_after_seconds` configuration (default 90), applied to each
-worker. Lease expiry is evaluated against current time as well as the provider's
+worker. This is timestamp-age evidence, not periodic liveness: normalized worker
+records carry `liveness="unknown"` because the current provider contract does
+not declare cadence. The cockpit never infers a missing worker from an old or
+missing task-boundary heartbeat. Source observation freshness, task activity,
+and confirmed periodic liveness are separate concepts. Lease expiry is evaluated against current time as well as the provider's
 expired flag. Missing/future/naive timestamps do not establish freshness.
 
 Optional Prometheus reads reuse the configured service metrics provider for

@@ -116,6 +116,15 @@ supported_routes = merge_capability_route_ids(
 )
 ```
 
+The SDK task-activity Prometheus heartbeat advances at task starts/finishes;
+it is not a periodic liveness signal. A provider using the maximum active lease
+heartbeat also cannot establish idle-worker liveness. The Cockpit therefore
+shows the reported running flag and timestamp age separately, with periodic
+liveness unknown under the current worker-health contract. Never infer worker
+absence solely from an old or missing task-activity timestamp. A dedicated
+periodic heartbeat loop such as the Getting Started example can supply better
+observations, but its cadence is not declared by this response contract.
+
 Studio treats `running=False` as unhealthy even when active leases are also
 expired. Expired leases on otherwise running workers produce a stale worker
 state.
@@ -150,6 +159,7 @@ pressure_service = RuntimePressureService(
     collectors=[
         QueuePressureCollector(
             queue_names=["orders.tasks.queue"],
+            source_id="orders-broker/production-vhost",
             inspect_queue=runtime.rabbitmq.inspect_queue,
             warning_depth=100,
             critical_depth=1000,
@@ -332,6 +342,12 @@ passive-declare source reports **ready** and **consumers** only. It does not
 expose unacknowledged count, oldest age, arrival/completion rates, or a rate
 window. Studio renders those missing fields explicitly. A failed inspection
 retains an unknown signal for that queue while successful queue readings survive.
+
+Set `QueuePressureCollector(source_id="orders-broker/production-vhost", ...)`
+to identify the broker/vhost scope consistently across restarts. Without an
+explicit ID, each collector gets a unique ID that remains stable for that
+collector instance. Separate collectors never share the default identity, even
+when their queue names match. Do not put broker credentials in source IDs.
 
 A configured richer source can implement the optional `collect_snapshot()`
 read protocol in addition to the existing `collect()` protocol:

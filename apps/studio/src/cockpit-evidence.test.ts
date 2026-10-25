@@ -10,6 +10,15 @@ describe("cockpit evidence", () => {
     expect(isFresh(new Date(now + 31_000).toISOString(), now)).toBe(false);
     expect(isFresh(undefined, now)).toBe(false);
     expect(isFresh("invalid", now)).toBe(false);
+    expect(isFresh(new Date(now).toISOString().replace(/Z$/, ""), now)).toBe(
+      false,
+    );
+    expect(
+      isFresh(new Date(now).toISOString().replace(/Z$/, "+00:00"), now),
+    ).toBe(true);
+    expect(
+      isFresh(new Date(now).toISOString().replace(/Z$/, "+0000"), now),
+    ).toBe(true);
   });
   it("formats observed zero and durations without replacing missing values", () => {
     expect([
