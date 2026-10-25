@@ -2,7 +2,8 @@
 
 Validated the actual Studio route with representative local read fixtures at
 1440 × 1000 desktop and 390 × 844 mobile widths, using the shared Studio light
-palette. Full-page captures are `desktop.png` and `mobile.png`. Fixtures are
+palette. Full-page captures are `desktop.png`, `mobile.png`, and
+`mobile-missing-sources.png` (Billing selected). Fixtures are
 illustrative, not production measurements. The richer queue fixture represents
 an explicitly configured source; built-in AMQP readings expose fewer fields.
 

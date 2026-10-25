@@ -21,7 +21,11 @@ This feature provides visibility only, with no runtime commands.
 - [x] (2026-10-25) Build scoped responsive cockpit and investigation links.
 - [x] (2026-10-25) Cover freshness, aggregation, missing/capability states and drain math.
 - [x] (2026-10-25 15:49Z) Update documentation/manifests, run full verification and visual QA.
-- [ ] Commit/push, open/link PR, request at most one extra Codex review and watch.
+- [x] (2026-10-25 15:49Z) Commit/push and open/link PR #138 against main.
+- [x] (2026-10-25 15:50Z) Request the single extra Codex review through T3;
+  immutable implementation head 22e04d1d3f521bba544d8476adb9070e017c0296.
+- [ ] Address review/CI findings and confirm review/check readiness; use T3 watch
+  for event-driven monitoring. Coordination owns final restacking.
 
 ## Surprises & Discoveries
 
@@ -141,9 +145,13 @@ surfaces without changing broker data. Do not rebase onto sibling worktrees.
 Original main merge-base: 89954699d2e43aebfee54e4ec64c06edb0caf2ce.
 Reference patterns: https://www.rabbitmq.com/docs/management and
 https://docs.confluent.io/control-center/current/clients/consumers.html .
-Extra Codex review: not yet requested. Native T3 Codex catalog selection is
+PR: https://github.com/sarattha/relayna/pull/138 (linked to this thread).
+Extra Codex review: used once through T3, pending. Task ID:
+node:delegated-task:command%3Amcp%3Afc9a3a82-8ea4-444d-acb1-9475cdc73f27%3Adelegate-task%3Afeature03-cockpit-extra-codex-review-round1.
+The review is pinned to implementation commit 22e04d1; subsequent documentation
+updates do not change runtime code. Native T3 Codex catalog selection is
 codex / gpt-6.1-sol with inherited reasoningEffort=xhigh and serviceTier=priority.
-Use one bounded readonly review after opening the PR; do not also request @codex.
+One bounded readonly review was requested after opening the PR; do not also request @codex.
 
 Verification commands additionally used a disposable PostgreSQL on localhost:56889
 and Redis on localhost:56892, with schema upgraded via the backend Alembic target.
