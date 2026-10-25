@@ -30,8 +30,14 @@ observed failure, pending observation, and unknown acceptance/outcome.
 - [x] (2026-10-25) Final code-change-verification passes after the last regression
   tests: SDK 688 passed/9 skipped; backend 555 passed. Frontend coverage 284
   passed, final frontend build and strict documentation build pass.
-- [ ] Commit/push, open and register the PR, request at most one Codex review,
-  notify coordination, and enable T3 watching.
+- [x] (2026-10-25) Commit/push implementation 99671de98d0fef727e15c7b0fd670ac5f66dd168;
+  open and register https://github.com/sarattha/relayna/pull/136 against main,
+  mark ready for review, and notify the originating coordination thread.
+- [x] (2026-10-25) Use the single extra Codex review request via @codex review:
+  https://github.com/sarattha/relayna/pull/136#issuecomment-6399638552.
+  No more additional Codex reviews may be requested for this feature.
+- [ ] Follow T3 PR events, address actionable review/CI findings, and notify
+  coordination when checks/review are ready. Do not merge or independently restack.
 
 ## Surprises & Discoveries
 
@@ -107,7 +113,11 @@ one additional Codex review, and event-driven monitoring. No merge is authorized
 The originating coordination thread owns final restacking in this order:
 main <- 01 Incident Inbox <- 02 Recovery Center <- 03 Queue & Worker Cockpit <-
 05 Reliability Goals & Alert Routing. Keep 0003_recovery intact until that
-integration. PR URL/head and review/check progress remain to be recorded.
+integration. PR #136 is open and registered against main; the implementation commit is
+99671de98d0fef727e15c7b0fd670ac5f66dd168. One additional Codex review was
+requested and is running; hosted CI is pending. No findings have been reported
+at this checkpoint. Remaining work is event-driven review/check follow-up, with
+no merge or independent restack authorized.
 
 ## Context and Orientation
 
