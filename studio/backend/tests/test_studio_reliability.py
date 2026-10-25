@@ -152,7 +152,7 @@ async def test_early_signal_preview_and_no_data(monkeypatch, kind):
 async def test_preview_never_substitutes_failed_provider_or_unconfirmed_scope_for_health():
     rt = runtime()
     assert (await _preview(rt, goal()))["state"] == "unavailable"
-    assert (await _preview(rt, goal(kind="missing_worker", runtime_scope_confirmed=False)))["state"] == "unsupported"
+    assert (await _preview(rt, goal(kind="retry_activity", runtime_scope_confirmed=False)))["state"] == "unsupported"
     await rt.http_client.aclose()
 
 
@@ -454,3 +454,54 @@ async def test_callback_disabled_and_truncated_payloads_cannot_be_acknowledged()
             )
             assert response.status_code == expected
     await rt.http_client.aclose()
+
+
+@pytest.mark.parametrize(
+    ("pulse_age", "watermark_age", "state"),
+    [
+        (30, 0, "observed"),
+        (120, 0, "breaching"),
+        (120, 181, "stale"),
+        (None, 0, "no_data"),
+        (30, None, "no_data"),
+        (-5, 0, "insufficient"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_missing_worker_requires_periodic_liveness_independent_of_task_activity(
+    monkeypatch, pulse_age, watermark_age, state
+):
+    monkeypatch.setattr(reliability, "_now", lambda: NOW)
+    seen = []
+
+    def respond(request):
+        query = request.url.params["query"]
+        seen.append(query)
+        if "relayna_reliability_worker_heartbeat_timestamp_seconds" in query:
+            value = pulse_age
+        elif "relayna_reliability_evidence_timestamp_seconds" in query:
+            value = None if watermark_age is None else NOW.timestamp() - watermark_age
+        else:
+            # A fresh scrape of the old SDK gauge can still contain a task
+            # heartbeat from hours ago. It must not drive this goal.
+            raise AssertionError(f"Unexpected liveness source: {query}")
+        rows = [] if value is None else [{"metric": {}, "value": [NOW.timestamp(), str(value)]}]
+        return httpx.Response(200, json={"status": "success", "data": {"resultType": "vector", "result": rows}})
+
+    rt = runtime(respond)
+    item = goal(kind="missing_worker", threshold=90, runtime_scope_confirmed=False)
+    try:
+        preview = await _preview(rt, item)
+        assert preview["state"] == state
+        if state in {"observed", "breaching"}:
+            assert preview["value"] == pulse_age
+        assert all('environment="production"' in query for query in seen)
+        exported = _export(item, "orders-api")
+        rules = exported["prometheus"]["groups"][0]["rules"]
+        for rule in rules:
+            assert "relayna_reliability_worker_heartbeat_timestamp_seconds" in rule["expr"]
+            assert "relayna_reliability_evidence_timestamp_seconds" in rule["expr"]
+            assert "relayna_worker_heartbeat_timestamp" not in rule["expr"]
+        assert preview["queries"] == exported["queries"]
+    finally:
+        await rt.http_client.aclose()

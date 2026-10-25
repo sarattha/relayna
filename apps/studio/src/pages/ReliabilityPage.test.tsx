@@ -105,3 +105,10 @@ it("changes service scope without keeping another scope's goals", async () => {
   fireEvent.change(screen.getByLabelText("Service"), { target: { value: "" } });
   await waitFor(() => expect(api.fetchReliabilityGoals).toHaveBeenLastCalledWith({ environment: "production", service_id: "" }));
 });
+
+it("explains that missing-worker detection needs periodic liveness rather than task-boundary activity", async () => {
+  mount(); await screen.findByText("Define a goal");
+  fireEvent.change(screen.getByLabelText("Signal or objective"), { target: { value: "missing_worker" } });
+  expect(screen.getByText(/Age of the newest periodic worker liveness pulse/)).toBeInTheDocument();
+  expect(screen.getByText(/SDK task-boundary heartbeats cannot distinguish idle workers from missing workers/)).toBeInTheDocument();
+});

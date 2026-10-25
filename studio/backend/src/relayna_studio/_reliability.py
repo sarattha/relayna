@@ -183,8 +183,13 @@ def _queries(goal: _Goal, runtime_service: str) -> dict[str, str]:
         metric = f"relayna_tasks_retried_total{{{runtime}}}"
         return {"value": f"sum(increase({metric}[{goal.window_seconds}s]))", "freshness": f"min(timestamp({metric}))"}
     if goal.kind == "missing_worker":
-        metric = f"relayna_worker_heartbeat_timestamp{{{runtime}}}"
-        return {"value": f"time() - max({metric})", "freshness": f"min(timestamp({metric}))"}
+        # The SDK heartbeat gauge advances only at task boundaries. A separate
+        # periodic pulse and observation watermark distinguish idle from missing.
+        metric = f"relayna_reliability_worker_heartbeat_timestamp_seconds{{{custom}}}"
+        return {
+            "value": f"time() - {metric}",
+            "freshness": f"relayna_reliability_evidence_timestamp_seconds{{{custom}}}",
+        }
     if goal.kind in _BUSINESS:
         return {
             "good": f"relayna_reliability_good_work{{{custom}}}",
@@ -291,7 +296,7 @@ async def _preview(runtime: StudioRuntime, goal: _Goal) -> dict[str, Any]:
     }
     service = await _service(runtime, goal)
     config = service.metrics_config
-    if goal.kind in {"retry_activity", "missing_worker"} and not goal.runtime_scope_confirmed:
+    if goal.kind == "retry_activity" and not goal.runtime_scope_confirmed:
         return {
             **result,
             "state": "unsupported",
@@ -423,7 +428,7 @@ def _export(goal: _Goal, runtime_service: str, public_url: str = "") -> dict[str
             "Alertmanager owns grouping, silences, inhibition and routing. "
             "Bridge deduplicates each alert episode/status.",
             "SDK runtime series must be environment-isolated in this Prometheus datasource; "
-            "business/queue/lease series require the documented external aggregate contract.",
+            "business/queue/lease/liveness series require the documented external aggregate contract.",
         ],
     }
 
@@ -584,7 +589,7 @@ def _create_reliability_router(
         goal = _Goal.model_validate((await store.get(goal_id))["goal"])
         service = await _service(runtime, goal)
         config = service.metrics_config
-        if goal.kind in {"retry_activity", "missing_worker"} and not goal.runtime_scope_confirmed:
+        if goal.kind == "retry_activity" and not goal.runtime_scope_confirmed:
             raise HTTPException(409, "Confirm environment isolation for SDK runtime metrics before export.")
         if config is None:
             raise HTTPException(409, "Configure service Prometheus before exporting rules.")

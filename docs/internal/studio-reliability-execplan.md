@@ -17,6 +17,9 @@ silences, inhibition and routing. Studio reuses the failed-task email HTTP trans
 - [x] (2026-10-25) Implement responsive UI and behavioral tests; deliberately extend freeze manifests.
 - [x] (2026-10-25) Document instrumentation and operations; run verification and browser checks.
 - [x] (2026-10-25) Committed/pushed implementation and created/linked PR #139 against main; coordination notified of intended fourth layer.
+- [x] (2026-10-25) All five GitHub checks passed on de6491a; read all review comments. One actionable P2 finding: SDK task-boundary heartbeat is not periodic liveness.
+- [x] (2026-10-25) Implemented periodic-liveness correction; 36 reliability tests and seven Prometheus liveness scenarios passed. Mandatory verification, backend/frontend coverage, builds and strict docs passed.
+- [ ] Push correction, reply/resolve the review thread and monitor the new head.
 - [ ] Address review/CI events through T3 watch; coordination owns final restacking and migration ordering.
 
 ## Surprises & Discoveries
@@ -26,11 +29,13 @@ silences, inhibition and routing. Studio reuses the failed-task email HTTP trans
 - Latest release is v1.11.0; strict policy boundary remains v1.4.30. Current manifests are labeled v1.10.1 after prior authorized changes.
 - Events and task projections default to 86400 seconds retention; they cannot establish long-window business outcomes.
 - SDK task duration is handler duration, and task counters count attempts. Neither proves accepted-order success or end-to-end latency.
-- SDK supports retry counters, worker heartbeat and pressure signals, but no queue-age metric. Pressure gauges have no inherent observation freshness.
+- SDK supports retry counters, task-boundary worker heartbeat and pressure signals, but no queue-age metric. The task-boundary heartbeat is not periodic liveness and cannot support missing-worker detection. Pressure gauges have no inherent observation freshness.
 - Disposable integration setup initially lacked alembic_version after metadata-only creation; created a separate disposable database, migrated to 0002_load_profiles, and all 21 existing integration tests passed.
 - Existing PostgreSQL operator_settings JSON storage can hold bounded goal settings and last-delivery diagnostics without a migration.
 
 ## Decision Log
+
+- (2026-10-25, Codex) Address review finding r4371416901 by replacing the unreleased missing-worker query with an external periodic liveness aggregate plus source watermark. Preserve the goal kind/settings shape and SDK behavior; no migration or additional freeze surface. Old task-boundary SDK heartbeats alone yield no data, and both preview and exported rules use the periodic source.
 
 - (2026-10-25, Codex) Read shared email settings before the receipt transaction and lock registry scope in that same transaction. A one-connection PostgreSQL concurrency test guards against nested-session pool exhaustion and duplicate sends.
 
@@ -43,16 +48,18 @@ silences, inhibition and routing. Studio reuses the failed-task email HTTP trans
 
 Implemented immutable scoped goals, previews and guarded exports for six kinds,
 authenticated Alertmanager callbacks, shared email transport, receipts, UI and docs.
-SDK verification: 688 passed / 9 skipped. Final backend verification: 564 passed with PostgreSQL/Redis enabled, including
-30 reliability tests. Backend coverage: 98.19%.
-Existing PostgreSQL/Redis integration suite: 21 passed. Frontend: 277 passed, build passed; coverage 98.00% statements, 89.06% branches.
+SDK verification: 688 passed / 9 skipped. Final backend verification after review correction: 570 passed with PostgreSQL/Redis enabled, including
+36 reliability tests. Backend coverage: 98.21%.
+Existing PostgreSQL/Redis integration suite: 21 passed. Frontend: 278 passed, build passed; coverage 98.00% statements, 89.06% branches.
 Prometheus promtool accepted all 12 exported rules and passed five evaluation cases
 (breached/met objective, zero denominator, stale and duplicate aggregate evidence).
+Seven additional liveness rule cases passed: idle pool, long task, SDK-only activity,
+stopped pulse, stale observer, duplicate aggregate and future pulse.
 Desktop 1440px and mobile 390px fit without document overflow; both screenshots
 inspected. Local screenshots archived under /tmp/relayna-reliability-ui/. T3 browser snapshots timed out twice, so Playwright skill was used.
 PR: https://github.com/sarattha/relayna/pull/139. One additional Codex review requested
 via `@codex review` (allowance used, do not request another). Local checks are ready;
-GitHub CI/review pending. T3 event-driven watch handles follow-up; never merge or
+GitHub checks passed on de6491a. Review completed with one valid liveness finding; correction validated locally; new-head CI pending. T3 event-driven watch handles follow-up; never merge or
 enable auto-merge in this task. Coordination thread owns final stack assembly.
 
 ## Context and Orientation
@@ -122,7 +129,8 @@ No rebase or retarget of sibling PRs in this conversation.
 
 Use FastAPI/Pydantic/httpx/SQLAlchemy and current React components only. No new
 runtime dependency. Optional RELAYNA_STUDIO_RELIABILITY_WEBHOOK_TOKEN authorizes
-Alertmanager's callback; RELAYNA_STUDIO_RELIABILITY_PUBLIC_URL supplies optional clickable links; never return it in responses or exports. Prometheus egress
+Alertmanager's callback; never return that credential in responses or exports.
+RELAYNA_STUDIO_RELIABILITY_PUBLIC_URL supplies optional public links in email and rule annotations. Prometheus egress
 uses the same outbound policy as existing providers. Alertmanager export uses a
 credential-file placeholder, not a secret. Email bridge uses the existing email
 service and global enabled setting, with per-goal owner/environment recipients.

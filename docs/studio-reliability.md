@@ -23,7 +23,7 @@ Thresholds are inclusive for early signals (`>=`) and exclusive for objective
 breaches (`good / eligible * 100 < target`). The completion deadline only changes
 business cohort semantics; early signals use their threshold/window as below.
 
-For SDK runtime signals, explicitly confirm that the datasource and runtime
+For SDK retry activity, explicitly confirm that the datasource and runtime
 `service` selector isolate this environment. SDK metrics have no environment label.
 Use separate datasources or distinct runtime service labels for environments; do
 not acknowledge this confirmation for a shared selector that combines environments.
@@ -62,7 +62,7 @@ routing consistently with the saved goal. A deleted goal rejects future callback
 | Backlog age | Oldest ready work age, seconds | External queue-age aggregate plus actual observation timestamp. Queue depth is not age. |
 | Retry activity | Sum of SDK retry counter increases over the window | `relayna_tasks_retried_total`; observed aggregate activity, not retries per unique task. Counter extrapolation and missing samples can under/overestimate activity; an observed value below threshold does not prove full window coverage. |
 | Stale leases | Count of currently expired active leases | External fresh aggregate. Persistent SDK pressure gauges lack observation freshness and are not substituted. |
-| Missing worker | `time() - max(relayna_worker_heartbeat_timestamp)` | Detects loss of all service heartbeats, not a missing member of a pool. An absent series is missing evidence, not zero workers. |
+| Missing worker | Age of an external periodic worker liveness pulse | Requires an environment-scoped aggregate and source watermark. Detects service-wide liveness loss, not one missing member of a pool. SDK task-boundary heartbeats are not a liveness source. |
 | Completion success | Successful-by-deadline eligible work / all eligible accepted work | External durable mature-cohort aggregates. No task-attempt denominator. |
 | End-to-end latency | Successful work finished within deadline / all eligible accepted work | External durable mature-cohort aggregates. No handler-duration substitution. |
 
@@ -98,6 +98,26 @@ leases, expose `relayna_reliability_stale_leases`. Both require
 observation, **not** the scrape time. Zero is valid only after observing the full
 scope with no backlog/expired leases. The aggregate must cover all expected queues
 or workers in this service/environment; partial discovery is missing evidence.
+
+For missing-worker goals, expose
+`relayna_reliability_worker_heartbeat_timestamp_seconds` with `objective="missing_worker"`
+and the same custom selector labels. This is the Unix timestamp of the newest
+**periodic** worker pulse in the expected service/environment pool. Workers must
+continue emitting pulses while idle and while running long tasks. The aggregate is
+one series; do not add per-worker identity labels. The existing SDK
+`relayna_worker_heartbeat_timestamp` advances at task start/finish and must not be
+copied into this metric as a periodic liveness source.
+
+Also expose `relayna_reliability_evidence_timestamp_seconds` from a fresh, complete
+read of the authoritative liveness source. If workers stop pulsing while that source
+remains available, the pulse timestamp stays old and the fresh watermark allows a
+missing-worker breach. If the observer/source is stale or unavailable, stop advancing
+the watermark or omit evidence. A freshly scraped task-activity gauge alone proves
+neither current worker liveness nor worker loss. Missing periodic instrumentation
+produces `no_data` in preview and an evidence-missing rule, never a missing-worker
+breach. Only assert the aggregate after establishing the expected pool; unknown
+worker discovery is missing evidence. This goal does not detect one missing worker
+while another member continues pulsing.
 
 Business exporters expose five gauges with the same selector:
 
