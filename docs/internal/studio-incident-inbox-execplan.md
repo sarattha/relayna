@@ -21,7 +21,8 @@ Grouping is a triage aid and does not establish a shared root cause.
 - [x] (2026-10-25) Document operator semantics and migration; update only approved Studio freeze entries.
 - [x] (2026-10-25) Run code-change-verification (688 SDK passed/9 skipped, 546 backend passed), frontend test/build (289 passed), coverage gates, PostgreSQL migration cycle/integration, and desktop/mobile browser QA.
 - [x] (2026-10-25) Review final diff and prepare the PR summary after green verification.
-- [ ] Commit/push, open/link the feature PR, notify coordination, and enable event-driven monitoring. User authorized this follow-up on 2026-10-25; remote state is recorded in the thread.
+- [x] (2026-10-25) Commit/push implementation and open/link PR #137 against main; notify coordination.
+- [ ] Request the one authorized extra Codex review and enable event-driven monitoring; remote CI/review state is recorded in the thread.
 
 ## Surprises & Discoveries
 
@@ -88,7 +89,10 @@ horizontal page overflow, including dark mode. Browser QA saved an owner and
 acknowledgement, preserved them on reload, exposed three representative links,
 and switched environment without retaining the previous detail. Implementation is ready for review. The later user authorization adds PR
 creation, one extra Codex review request at most, coordination notifications,
-and event-driven monitoring. Remote CI/review state is tracked by this thread.
+and event-driven monitoring. PR [#137](https://github.com/sarattha/relayna/pull/137) is open against main,
+registered with the implementation thread, and reported to coordination. Remote
+CI/review state and the one extra Codex request are tracked by this thread; no
+merge is authorized.
 
 ## Context and Orientation
 
@@ -200,6 +204,12 @@ until verified; the user subsequently authorized a commit, push, and feature PR.
 Do not merge or restack sibling branches in this thread.
 
 ## Artifacts and Notes
+
+PR title: [codex] Add Studio Incident Inbox. Branch: feat/studio-incident-inbox.
+PR description begins: “This pull request adds an Incident Inbox that turns
+retained task failures into actionable cohorts.” The GitHub PR follows the
+repository template and records validation, approved perimeter changes,
+migration, count semantics, and the planned stack.
 
 Verification log: /tmp/relayna-incident-verification.log. Coverage summaries:
 /tmp/relayna-incident-frontend-coverage.log and
