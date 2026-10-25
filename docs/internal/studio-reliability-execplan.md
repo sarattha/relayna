@@ -16,7 +16,8 @@ silences, inhibition and routing. Studio reuses the failed-task email HTTP trans
 - [x] (2026-10-25) Implement persisted goal management, evidence preview, rule export and authenticated notification bridge.
 - [x] (2026-10-25) Implement responsive UI and behavioral tests; deliberately extend freeze manifests.
 - [x] (2026-10-25) Document instrumentation and operations; run verification and browser checks.
-- [ ] Commit, push, create/link PR against main, notify coordination and enable event-driven monitoring.
+- [x] (2026-10-25) Committed/pushed implementation and created/linked PR #139 against main; coordination notified of intended fourth layer.
+- [ ] Address review/CI events through T3 watch; coordination owns final restacking and migration ordering.
 
 ## Surprises & Discoveries
 
@@ -49,7 +50,10 @@ Prometheus promtool accepted all 12 exported rules and passed five evaluation ca
 (breached/met objective, zero denominator, stale and duplicate aggregate evidence).
 Desktop 1440px and mobile 390px fit without document overflow; both screenshots
 inspected. Local screenshots archived under /tmp/relayna-reliability-ui/. T3 browser snapshots timed out twice, so Playwright skill was used.
-Extra Codex review allowance unused; PR and event-driven monitoring pending.
+PR: https://github.com/sarattha/relayna/pull/139. One additional Codex review requested
+via `@codex review` (allowance used, do not request another). Local checks are ready;
+GitHub CI/review pending. T3 event-driven watch handles follow-up; never merge or
+enable auto-merge in this task. Coordination thread owns final stack assembly.
 
 ## Context and Orientation
 
