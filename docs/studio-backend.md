@@ -931,6 +931,56 @@ Broker DLQ inspection is intentionally separate from indexed DLQ reads:
   - returns service-normalized task references, investigation state, retry
     state, and cursor pagination for trimmed aggregate results
 
+## Incident Inbox
+
+Incident Inbox is Studio-owned and reads the existing service failed-task feed.
+It adds no SDK runtime command, capability, or worker dependency. PostgreSQL is
+required; compatibility-only app construction without a database returns `503`
+for these routes.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /studio/incidents` | Group live retained failures; accepts `environment`, `status` (`active`, `all`, `open`, `acknowledged`, `resolved`), `offset`, and `limit` (1–100). |
+| `GET /studio/incidents/{incident_id}` | Read current observed evidence, lifecycle, and latest 100 history entries. Merged source IDs remain readable. |
+| `POST /studio/incidents/{incident_id}` | Set optional `owner`/`status` or add a `note`; requires current `revision`. A null/empty owner unassigns it. |
+| `POST /studio/incidents/{incident_id}/split` | Move a proper subset of currently observed `failure_ids` to a new open/unassigned incident; requires source `revision`. |
+| `POST /studio/incidents/{incident_id}/merge` | Merge the source into `target_id`; requires source `revision` and `target_revision`. Scope must match environment and service. |
+
+Mutations use the existing administrator/CSRF policy and authenticated audit
+actor. Operator-token authentication retains its existing bearer/session policy.
+Bodies reject unknown fields. Mutation results return `incident_id` and
+`revision`; read that incident again for fresh evidence. Concurrent/stale edits
+return `409` and require operator review before retrying.
+
+Grouping version 1 hashes environment, service ID, queue, stage (or `unknown`),
+exception type, and normalized error text. It normalizes UUIDs, hexadecimal
+identifiers, standalone numbers, and whitespace. Missing messages fall back to
+failure-specific identities. The signature is a triage heuristic, not a root
+cause assertion. Changing this algorithm later requires an explicit identity
+migration decision because lifecycle and manual corrections reference these IDs.
+
+Scans dedupe `(service_id, failure_id)` and follow up to 20 pages of 50 records
+per enabled service, with at most eight concurrent readers, a four-second page
+timeout, and a twelve-second total budget including semaphore wait. Empty pages
+with continuation are followed. Loops, malformed fields, service errors, and
+timeouts preserve any prior evidence and mark the service `unavailable`; budget
+exhaustion marks it `truncated`. No such source can report `complete`.
+
+Responses disclose `count_scope: bounded_live_scan`, `complete`, `scanned_at`,
+and per-service `coverage` with page counts, unique observed failures, status,
+and error detail. List `observed_failures` counts all records in the scan before
+incident status filtering/paging; `total_incidents` counts groups matching the
+status filter, including durable groups with no current evidence. Counts are
+not lifetime totals. Upstream retention and concurrent writes can still limit
+a fully paginated scan. Reads project newly discovered identities to PostgreSQL
+without changing lifecycle. No task payload or traceback is persisted here.
+
+First/last seen and one-hour trend buckets derive from the current scan. Missing
+or timezone-naive timestamps are unknown; missing task IDs are excluded from
+distinct affected-task counts. Group counts are computed after manual split and
+merge mappings. Split affects exact failure IDs; merge redirects future source
+matches and preserves target lifecycle. No automatic reopen or unmerge occurs.
+
 ## Troubleshooting
 
 ### Redis misconfiguration

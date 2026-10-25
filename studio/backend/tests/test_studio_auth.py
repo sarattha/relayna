@@ -260,6 +260,8 @@ def test_full_login_rbac_and_local_logout(monkeypatch: pytest.MonkeyPatch, tmp_p
         )
         assert missing_user.status_code == 404
         assert admin_client.post("/studio/services", json={}).status_code == 403
+        for suffix in ("", "/split", "/merge"):
+            assert admin_client.post(f"/studio/incidents/example{suffix}", json={"revision": 0}).status_code == 403
         assert admin_client.post("/studio/services/svc/load-tests/profile-import", json={}).status_code == 403
 
         repeated_session = _login(admin_client, "admin", authorization_queries)
@@ -278,6 +280,15 @@ def test_full_login_rbac_and_local_logout(monkeypatch: pytest.MonkeyPatch, tmp_p
         )
         assert activated.status_code == 200
         assert reader_client.get("/studio/services").status_code == 200
+        # New incident writes use the same server-side admin and CSRF policy.
+        for suffix in ("", "/split", "/merge"):
+            assert (
+                reader_client.post(
+                    f"/studio/incidents/example{suffix}", headers={"X-CSRF-Token": reader_csrf}, json={"revision": 0}
+                ).status_code
+                == 403
+            )
+        assert reader_client.get("/studio/incidents").status_code == 503  # legacy fixture has no PostgreSQL
         assert reader_client.get("/studio/admin/users").status_code == 403
         assert reader_client.get("/studio/services/svc/load-tests/profile-import/sources").status_code == 403
         assert (

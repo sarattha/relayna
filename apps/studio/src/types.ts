@@ -369,6 +369,82 @@ export type FailedTaskSummary = {
   task_ref?: StudioTaskRef | null;
 };
 
+export type IncidentStatus = "open" | "acknowledged" | "resolved";
+
+export type IncidentEvidence = {
+  failure_id: string;
+  service_id: string;
+  environment: string;
+  task_id: string | null;
+  queue_name: string | null;
+  stage: string | null;
+  error_type: string | null;
+  error_message: string | null;
+  failed_at: string | null;
+};
+
+export type IncidentCoverage = {
+  service_id: string;
+  environment: string;
+  status: "complete" | "truncated" | "unavailable";
+  observed_failures: number;
+  pages: number;
+  detail: string | null;
+};
+
+export type IncidentSummary = {
+  grouping: "automatic" | "manual";
+  incident_id: string;
+  service_id: string;
+  environment: string;
+  dimensions: { signature_version: string; queue_name: string; stage: string; error_type: string; signature: string };
+  status: IncidentStatus;
+  owner: string | null;
+  revision: number;
+  merged_into: string | null;
+  created_at: string;
+  updated_at: string;
+  failure_count: number;
+  affected_tasks: number;
+  missing_task_ids: number;
+  first_seen: string | null;
+  last_seen: string | null;
+  trend: { recent_hour: number; preceding_hour: number; unknown_timestamps: number; outside_two_hours: number };
+  representative: IncidentEvidence[];
+};
+
+export type IncidentHistoryEntry = {
+  id: number;
+  incident_id: string;
+  occurred_at: string;
+  actor_user_id: string | null;
+  action: string;
+  details: Record<string, unknown>;
+};
+
+export type IncidentDetail = IncidentSummary & {
+  evidence: IncidentEvidence[];
+  history: IncidentHistoryEntry[];
+  history_limit: number;
+  coverage: IncidentCoverage[];
+  complete: boolean;
+  scanned_at: string;
+  count_scope: "bounded_live_scan";
+};
+
+export type IncidentInboxResponse = {
+  items: IncidentSummary[];
+  total_incidents: number;
+  next_offset: number | null;
+  coverage: IncidentCoverage[];
+  complete: boolean;
+  observed_failures: number;
+  scanned_at: string;
+  count_scope: "bounded_live_scan";
+};
+
+export type IncidentMutationResult = { incident_id: string; revision: number };
+
 export type FailedTaskDetail = FailedTaskSummary & {
   dlq_id?: string | null;
   reason?: string | null;

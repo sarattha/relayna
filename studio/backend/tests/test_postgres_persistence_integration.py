@@ -5,6 +5,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -17,7 +18,11 @@ from redis.asyncio import Redis
 from relayna_studio import app as studio_app_module
 from relayna_studio import backfill as backfill_module
 from relayna_studio._chamber_connection import _ConnectionStore, _ConnectionUpdate
+from relayna_studio._incident_groups import _dimensions, _group_id
+from relayna_studio._incident_store import _IncidentStore
+from relayna_studio._incidents import _create_incident_router
 from relayna_studio.app import create_studio_app, get_studio_runtime
+from relayna_studio.audit_context import reset_actor_user_id, set_actor_user_id
 from relayna_studio.auth import (
     StudioEntraConfig,
     StudioMemberStatus,
@@ -40,6 +45,7 @@ from relayna_studio.database import (
     StudioDatabase,
     StudioMutationAuditMiddleware,
     _dt,
+    _incident_history,
     _json_model,
     _optional_text,
     audit_log,
@@ -83,6 +89,7 @@ from relayna_studio.search import (
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from relayna.observability import (
     RelaynaServiceEvent,
@@ -1098,10 +1105,10 @@ async def test_database_configuration_and_schema_failures() -> None:
         await database.check_schema()
         async with database.engine.begin() as connection:
             await connection.execute(text("UPDATE alembic_version SET version_num = 'wrong'"))
-        with pytest.raises(RuntimeError, match="expected 0002_load_profiles"):
+        with pytest.raises(RuntimeError, match="expected 0003_incident_inbox"):
             await database.check_schema()
         async with database.engine.begin() as connection:
-            await connection.execute(text("UPDATE alembic_version SET version_num = '0002_load_profiles'"))
+            await connection.execute(text("UPDATE alembic_version SET version_num = '0003_incident_inbox'"))
             await connection.execute(text("ALTER TABLE alembic_version RENAME TO alembic_version_hidden"))
         try:
             with pytest.raises(RuntimeError, match="schema is missing"):
@@ -1319,3 +1326,189 @@ async def test_chamber_mutations_audit_actor_and_outcome_without_credentials(dat
     assert {row["actor_user_id"] for row in rows} == {"connection-admin"}
     assert {row["target_id"] for row in rows} == {"payments-api"}
     assert "never-log-this-credential" not in str(rows)
+
+
+@pytest.mark.asyncio
+async def test_incident_inbox_live_counts_durable_triage_split_merge_and_conflicts(database: StudioDatabase) -> None:
+    registry = PostgresServiceRegistryStore(database)
+    await registry.create(service_record())
+    failures = [
+        {
+            "failure_id": str(i),
+            "task_id": f"task-{i}",
+            "queue_name": "payment-capture",
+            "error_type": "TimeoutError",
+            "error_message": f"Capture request {i} timed out",
+            "failed_at": "2026-10-25T10:42:00Z",
+        }
+        for i in range(380)
+    ]
+    failures.append(
+        {
+            "failure_id": "other",
+            "task_id": "other",
+            "queue_name": "payment-capture",
+            "error_type": "ConnectionError",
+            "error_message": "Connection reset",
+            "failed_at": None,
+        }
+    )
+
+    async def read(**query: Any) -> dict[str, Any]:
+        offset = int(query["cursor"] or 0)
+        return {
+            "items": failures[offset : offset + 50],
+            "next_cursor": str(offset + 50) if offset + 50 < len(failures) else None,
+        }
+
+    federation = SimpleNamespace(
+        registry_service=SimpleNamespace(list_services=registry.list_records),
+        list_failed_tasks=AsyncMock(side_effect=read),
+        search_max_concurrency=2,
+    )
+    app = FastAPI()
+    app.include_router(_create_incident_router(federation, database))
+    actor = set_actor_user_id("tenant:operator")
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            result = (await client.get("/studio/incidents?limit=1")).json()
+            assert result["complete"] is True
+            assert result["total_incidents"] == 2
+            assert result["next_offset"] == 1
+            assert result["observed_failures"] == 381
+            incident = result["items"][0]
+            assert incident["failure_count"] == 380
+            iid = incident["incident_id"]
+            path = f"/studio/incidents/{iid}"
+            detail = (await client.get(path)).json()
+            assert len(detail["evidence"]) == 380
+            assert detail["affected_tasks"] == 380
+            assert (
+                await client.post(
+                    path, json={"revision": 0, "owner": "Payments", "status": "acknowledged", "note": "Investigating"}
+                )
+            ).status_code == 200
+            assert (await _IncidentStore(database).get(iid))["owner"] == "Payments"
+            assert (await client.post(path, json={"revision": 0, "status": "resolved"})).status_code == 409
+            assert (await client.post(path, json={"revision": 1, "status": "resolved"})).status_code == 200
+            failures.append({**failures[0], "failure_id": "new", "task_id": "new"})
+            active = (await client.get("/studio/incidents")).json()
+            assert all(item["incident_id"] != iid for item in active["items"])
+            retained = (await client.get(path)).json()
+            assert retained["status"] == "resolved" and retained["failure_count"] == 381
+            assert (await client.post(path, json={"revision": 2, "status": "open"})).status_code == 200
+            assert (
+                await client.post(f"{path}/split", json={"revision": 3, "failure_ids": ["missing"]})
+            ).status_code == 409
+            split = await client.post(
+                f"{path}/split", json={"revision": 3, "failure_ids": ["0", "1"], "note": "Separate deployment"}
+            )
+            assert split.status_code == 200
+            split_id = split.json()["incident_id"]
+            split_detail = (await client.get(f"/studio/incidents/{split_id}")).json()
+            assert split_detail["failure_count"] == 2
+            assert split_detail["owner"] is None and split_detail["status"] == "open"
+            assert (await client.get(path)).json()["failure_count"] == 379
+            assert (
+                await client.post(
+                    f"/studio/incidents/{split_id}/merge", json={"revision": 0, "target_id": iid, "target_revision": 4}
+                )
+            ).status_code == 200
+            merged = (await client.get(path)).json()
+            assert merged["failure_count"] == 381 and merged["owner"] == "Payments"
+            assert merged["revision"] == 5
+            source = (await client.get(f"/studio/incidents/{split_id}")).json()
+            assert source["merged_into"] == iid and source["history"][0]["action"] == "merged"
+            assert all(item["actor_user_id"] == "tenant:operator" for item in merged["history"])
+            edits = await asyncio.gather(
+                client.post(path, json={"revision": 5, "owner": "A"}),
+                client.post(path, json={"revision": 5, "owner": "B"}),
+            )
+            assert sorted(response.status_code for response in edits) == [200, 409]
+            await registry.delete("payments-api")
+            absent = (await client.get(path)).json()
+            assert absent["failure_count"] == 0 and absent["history"]
+            assert absent["owner"] in {"A", "B"}
+    finally:
+        reset_actor_user_id(actor)
+    async with database.sessions() as session:
+        audit = (await session.execute(select(audit_log).where(audit_log.c.target_type == "incident"))).mappings().all()
+    assert len(audit) == 8
+    with pytest.raises(DBAPIError, match="append-only"):
+        async with database.transaction() as session:
+            await session.execute(update(_incident_history).values(action="rewritten"))
+
+
+@pytest.mark.asyncio
+async def test_incident_transactions_rollback_and_merge_scope(database: StudioDatabase, monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    registry = PostgresServiceRegistryStore(database)
+    await registry.create(service_record())
+    await registry.create(service_record("other", base_url="https://other.example.test"))
+    store = _IncidentStore(database)
+    dimensions = [
+        _dimensions("production", sid, {"failure_id": "one", "error_message": "Timeout", "queue_name": queue})
+        for sid, queue in [("payments-api", "one"), ("payments-api", "two"), ("other", "one")]
+    ]
+    ids = [_group_id(dims) for dims in dimensions]
+    await store.snapshot(dict(zip(ids, dimensions, strict=True)), environment=None, service_id=None)
+    with pytest.raises(HTTPException) as wrong_scope:
+        await store.merge(ids[0], 0, ids[2], 0, "")
+    assert wrong_scope.value.status_code == 422
+    with pytest.raises(HTTPException) as self_merge:
+        await store.merge(ids[0], 0, ids[0], 0, "")
+    assert self_merge.value.status_code == 422
+    await store.merge(ids[0], 0, ids[1], 0, "same service")
+    with pytest.raises(HTTPException) as cycle:
+        await store.merge(ids[1], 1, ids[0], 1, "")
+    assert cycle.value.status_code == 409
+
+    async def fail_record(*args, **kwargs):
+        raise RuntimeError("Audit unavailable")
+
+    monkeypatch.setattr(store, "_record", fail_record)
+    with pytest.raises(RuntimeError, match="Audit unavailable"):
+        await store.change(ids[1], 1, {"owner": "Uncommitted"}, "test rollback")
+    target = await store.get(ids[1])
+    assert target["owner"] is None and target["revision"] == 1
+    assert len(await store.history(ids[1])) == 1
+
+
+@pytest.mark.asyncio
+async def test_incident_read_snapshot_remains_consistent_during_split(database: StudioDatabase) -> None:
+    await PostgresServiceRegistryStore(database).create(service_record())
+    dims = _dimensions("production", "payments-api", {"failure_id": "one", "error_message": "Timeout"})
+    iid = _group_id(dims)
+    store = _IncidentStore(database)
+    await store.snapshot({iid: dims}, environment=None, service_id=None)
+    states_read = asyncio.Event()
+    release_read = asyncio.Event()
+
+    class PausingSession(AsyncSession):
+        async def execute(self, statement, *args, **kwargs):
+            result = await super().execute(statement, *args, **kwargs)
+            if str(statement).startswith("SELECT studio_incidents.incident_id"):
+                states_read.set()
+                await release_read.wait()
+            return result
+
+    reader_database = StudioDatabase(DATABASE_URL)
+    reader_database.sessions = async_sessionmaker(reader_database.engine, class_=PausingSession, expire_on_commit=False)
+    reader = _IncidentStore(reader_database)
+    read_task = asyncio.create_task(reader.snapshot({}, environment=None, service_id=None))
+    try:
+        await asyncio.wait_for(states_read.wait(), 2)
+        split_task = asyncio.create_task(store.split(iid, 0, ["one"], {"one": iid, "two": iid}, "Separate"))
+        # Allow an unlocked writer to commit between the two snapshot SELECTs.
+        await asyncio.wait({split_task}, timeout=0.1)
+        release_read.set()
+        states, overrides = await asyncio.wait_for(read_task, 2)
+        await asyncio.wait_for(split_task, 2)
+        assert set(overrides.values()) <= set(states)
+        subsequent_states, subsequent_overrides = await store.snapshot({}, environment=None, service_id=None)
+        assert set(subsequent_overrides.values()) <= set(subsequent_states)
+        assert subsequent_overrides[("production", "payments-api", "one")] != iid
+    finally:
+        release_read.set()
+        await reader_database.dispose()
