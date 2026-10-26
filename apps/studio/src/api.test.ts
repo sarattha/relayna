@@ -496,3 +496,26 @@ it("scopes reliability reads and encodes goal mutations through the shared reque
   await api.exportReliabilityGoal("goal/id");
   expect(fetcher.mock.calls[5][0]).toBe("/studio/reliability/goals/goal%2Fid/export");
 });
+
+describe("Integration Doctor API contracts", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("encodes scope, bounds audit reads and uses existing CSRF for live checks", async () => {
+    const api = await import("./api");
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({ checks: [], items: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    api.setStudioCsrfToken("doctor-csrf");
+    await api.fetchStudioHealth();
+    await api.fetchIntegrationDoctor("payments/eu");
+    await api.checkIntegration("payments/eu", " known task ");
+    await api.checkIntegration("payments/eu");
+    await api.fetchStudioAudit({ actor_user_id: " operator ", action: "service.update", target_type: "service" });
+    await api.fetchStudioAudit();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "/studio/health", "/studio/services/payments%2Feu/doctor", "/studio/services/payments%2Feu/doctor/check?task_id=known+task",
+      "/studio/services/payments%2Feu/doctor/check", "/studio/admin/audit?limit=50&actor_user_id=operator&action=service.update&target_type=service", "/studio/admin/audit?limit=50",
+    ]);
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get("X-CSRF-Token")).toBe("doctor-csrf");
+    expect(fetchMock.mock.calls[0][1]?.cache).toBe("no-store");
+    api.setStudioCsrfToken(null);
+  });
+});

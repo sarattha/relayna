@@ -22,6 +22,7 @@ from relayna.observability import (
     StudioEventIngestMethod,
 )
 
+from ._diagnostic_observations import _record
 from .registry import (
     OutboundUrlPolicyError,
     ServiceNotFoundError,
@@ -499,6 +500,24 @@ class StudioEventIngestService:
                 continue
 
     async def sync_service(self, service: ServiceRecord) -> None:
+        try:
+            await self._sync_service(service)
+        except Exception:
+            await _record(
+                getattr(self.event_store, "redis", None),
+                getattr(self.event_store, "prefix", "studio:events"),
+                f"pull:{service.service_id}",
+                succeeded=False,
+            )
+            raise
+        await _record(
+            getattr(self.event_store, "redis", None),
+            getattr(self.event_store, "prefix", "studio:events"),
+            f"pull:{service.service_id}",
+            succeeded=True,
+        )
+
+    async def _sync_service(self, service: ServiceRecord) -> None:
         self._validate_service_base_url(service)
         stored_cursor = await self.event_store.get_pull_cursor(service.service_id)
         if stored_cursor is not None:

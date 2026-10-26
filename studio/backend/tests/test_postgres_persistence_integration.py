@@ -1516,3 +1516,59 @@ async def test_incident_read_snapshot_remains_consistent_during_split(database: 
     finally:
         release_read.set()
         await reader_database.dispose()
+
+
+@pytest.mark.asyncio
+async def test_doctor_reads_retained_events_and_bounded_outbox_age(database: StudioDatabase, redis: Redis) -> None:
+    from types import SimpleNamespace
+
+    from relayna_studio._doctor import _Doctor
+    from relayna_studio.database import PostgresStudioEventStore, outbox
+
+    store = PostgresStudioEventStore(database, redis, history_maxlen=3)
+    registry = PostgresServiceRegistryStore(database)
+    await registry.create(service_record())
+    await store.insert_event(event_envelope())
+    runtime = SimpleNamespace(
+        database=database,
+        redis=redis,
+        event_store=store,
+        failed_task_email_configured=False,
+        health_refresh_worker=None,
+        health_refresh_task=None,
+        pull_sync_worker=None,
+        pull_sync_task=None,
+        retention_worker=None,
+        retention_task=None,
+    )
+    doctor = _Doctor(runtime)
+    sample = await doctor._recent("payments-api")
+    assert len(sample) == 1 and sample[0].service_id == "payments-api"
+    assert sample[0].task_id == "task-1"
+    report = await doctor.studio()
+    checks = {item.source: item for item in report.checks}
+    assert checks["readiness"].state == "ok"
+    assert checks["outbox"].value is not None
+    async with database.transaction() as session:
+        await session.execute(delete(outbox))
+        await session.execute(
+            outbox.insert(),
+            [
+                {
+                    "channel": "test",
+                    "dedupe_key": str(i),
+                    "payload": {},
+                    "created_at": datetime.now(UTC) - timedelta(minutes=2),
+                    "available_at": datetime.now(UTC),
+                }
+                for i in range(105)
+            ],
+        )
+    report = await doctor.studio()
+    check = next(item for item in report.checks if item.source == "outbox")
+    assert check.state == "stale" and check.value >= 120
+    assert "100 pending rows sampled (more exist)" in check.detail
+    async with database.transaction() as session:
+        await session.execute(delete(outbox))
+    check = next(item for item in (await doctor.studio()).checks if item.source == "outbox")
+    assert check.state == "empty" and check.value is None

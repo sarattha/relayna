@@ -35,6 +35,8 @@ const ReliabilityPage = lazy(() => import("./pages/ReliabilityPage").then((modul
 const AccessPage = lazy(() => import("./pages/AccessPage").then((module) => ({ default: module.AccessPage })));
 const RecoveryCenterPage = lazy(() => import("./pages/RecoveryCenterPage").then((module) => ({ default: module.RecoveryCenterPage })));
 
+const HealthPage = lazy(() => import("./pages/HealthPage").then((module) => ({ default: module.HealthPage })));
+
 export function App() {
   return (
     <StudioThemeProvider>
@@ -59,6 +61,8 @@ export function App() {
                   <Route path="/tasks/search" element={<TaskSearchPage />} />
                   <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
                   <Route path="/reliability" element={<ReliabilityPage />} />
+
+                  <Route path="/health" element={<HealthPage />} />
                   <Route path="/access" element={<AccessPage />} />
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>

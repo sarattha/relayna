@@ -227,3 +227,22 @@ No migration is required. Configuration and receipts persist until goal deletion
 mutation and delivery audits use the existing audit log. These records are not a
 business-work ledger or a substitute for external alert history. See
 [Reliability goals](studio-reliability.md) for the at-least-once delivery boundary.
+
+## Doctor evidence retention
+
+Feature 07 reuses the existing event, health and outbox read models. It adds no
+SQL migration, changes no existing event envelope and does not extend history.
+Service event samples are limited to 20 records; outbox samples use the existing
+pending availability index with a 101-row limit. Outbox sample age is not an
+exact total or a global oldest-age guarantee.
+
+Optional refresh and email-provider-acceptance observations are stored in Redis
+under `<event_store_prefix>:doctor:pull:<service_id>:{attempt,outcome,success}`
+and `<failed_task_email_prefix>:doctor:delivery:{attempt,outcome,success}`.
+Each key expires after seven days. Writes have a 250 ms budget and are best
+effort: evidence failures do not fail ingestion or delivery. Failed attempts
+preserve the last success timestamp; absent/expired evidence remains unknown.
+These observations are auxiliary operational evidence, not durable audit or a
+complete notification-attempt history. No payloads, recipients, API keys or
+provider URLs are recorded there. Existing PostgreSQL notification delivery and
+audit persistence remain unchanged.

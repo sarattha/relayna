@@ -975,3 +975,36 @@ export type ReliabilityPreview = {
   evaluated_at: string; from: string; to: string; value: number | null; good: number | null; eligible: number | null;
   detail: string; investigation_url: string; queries?: Record<string, string>;
 };
+
+export type StudioDiagnosticCheck = {
+  source: string;
+  state: "ok" | "empty" | "stale" | "unknown" | "unsupported" | "unconfigured" | "unavailable" | "disabled";
+  scope: string;
+  observed_at: string;
+  checked_at: string | null;
+  last_successful_at: string | null;
+  evidence_at: string | null;
+  value: number | null;
+  unit: string | null;
+  detail: string;
+  next_check: string;
+};
+
+export type StudioDiagnosticReport = {
+  observed_at: string;
+  service_id: string | null;
+  environment: string | null;
+  checks: StudioDiagnosticCheck[];
+};
+
+export type StudioAuditEntry = {
+  id: number;
+  occurred_at: string;
+  actor_user_id: string | null;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  details: Record<string, unknown>;
+};
+
+export type StudioAuditResponse = { count: number; items: StudioAuditEntry[] };

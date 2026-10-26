@@ -1082,6 +1082,7 @@ export function ServiceDetailPage() {
         }
       >
         <WorkspaceNavigation service />
+        <p><Link to={`/health?service_id=${encodeURIComponent(service.service_id)}`}>Open Integration Doctor</Link></p>
         <div className="studio-stack-md" hidden={workspaceView === "monitor"}>
         <div className="studio-action-row">
           <Link to="/services" style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
