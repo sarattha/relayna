@@ -467,7 +467,7 @@ export function FailedTasksPage() {
               Retry
             </button>
           </div>
-          <label className="studio-filter-field"><span>Optional JSON payload override</span><textarea value={overridePayload} onChange={(event) => setOverridePayload(event.target.value)} placeholder="Optional JSON payload override" style={{ ...inputStyle, minHeight: 96, fontFamily: "'SFMono-Regular', Menlo, monospace" }} /></label></> : null}
+          <label className="studio-filter-field"><span>Optional JSON payload override</span><textarea value={overridePayload} onChange={(event) => setOverridePayload(event.target.value)} placeholder="Optional JSON payload override" style={{ ...inputStyle, minHeight: 96, fontFamily: "var(--rn-font-family-mono)" }} /></label></> : null}
 
           <div className="studio-detail-grid">
             <section><h3>Payload</h3><InlineCodeBox label="Payload" value={JSON.stringify(selected.input_preview ?? selected.body ?? null, null, 2)} minHeight={160} /></section>

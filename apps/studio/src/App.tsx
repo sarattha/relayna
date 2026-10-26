@@ -4,7 +4,6 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { StudioServicesProvider } from "./services-context";
 import { StudioAuthProvider } from "./auth-context";
 import { AppChrome, AppHeader } from "./ui";
-import { StudioThemeProvider } from "./studio-theme";
 
 const QueueWorkerPage = lazy(() => import("./pages/QueueWorkerPage").then((module) => ({ default: module.QueueWorkerPage })));
 const DlqPage = lazy(() => import("./pages/DlqPage").then((module) => ({ default: module.DlqPage })));
@@ -39,38 +38,36 @@ const HealthPage = lazy(() => import("./pages/HealthPage").then((module) => ({ d
 
 export function App() {
   return (
-    <StudioThemeProvider>
-      <StudioAuthProvider>
-        <BrowserRouter>
-          <StudioServicesProvider>
-            <AppChrome>
-              <AppHeader />
-              <Suspense fallback={<div className="studio-route-loading" role="status">Loading Studio workspace…</div>}>
-                <Routes>
-                  <Route path="/" element={<OverviewPage />} />
-                  <Route path="/queues" element={<QueueWorkerPage />} />
-                  <Route path="/services" element={<ServicesPage />} />
-                  <Route path="/services/:serviceId" element={<ServiceDetailPage />} />
-                  <Route path="/services/:serviceId/topology" element={<TopologyPage />} />
-                  <Route path="/services/:serviceId/load-tests" element={<LoadTestingPage />} />
-                  <Route path="/services/:serviceId/dlq" element={<DlqPage />} />
-                  <Route path="/failed-tasks" element={<FailedTasksPage />} />
-                  <Route path="/incidents" element={<IncidentInboxPage />} />
-                  <Route path="/recovery" element={<RecoveryCenterPage />} />
-                  <Route path="/recovery/:planId" element={<RecoveryCenterPage />} />
-                  <Route path="/tasks/search" element={<TaskSearchPage />} />
-                  <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
-                  <Route path="/reliability" element={<ReliabilityPage />} />
+    <StudioAuthProvider>
+      <BrowserRouter>
+        <StudioServicesProvider>
+          <AppChrome>
+            <AppHeader />
+            <Suspense fallback={<div className="studio-route-loading" role="status">Loading Studio workspace…</div>}>
+              <Routes>
+                <Route path="/" element={<OverviewPage />} />
+                <Route path="/queues" element={<QueueWorkerPage />} />
+                <Route path="/services" element={<ServicesPage />} />
+                <Route path="/services/:serviceId" element={<ServiceDetailPage />} />
+                <Route path="/services/:serviceId/topology" element={<TopologyPage />} />
+                <Route path="/services/:serviceId/load-tests" element={<LoadTestingPage />} />
+                <Route path="/services/:serviceId/dlq" element={<DlqPage />} />
+                <Route path="/failed-tasks" element={<FailedTasksPage />} />
+                <Route path="/incidents" element={<IncidentInboxPage />} />
+                <Route path="/recovery" element={<RecoveryCenterPage />} />
+                <Route path="/recovery/:planId" element={<RecoveryCenterPage />} />
+                <Route path="/tasks/search" element={<TaskSearchPage />} />
+                <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
+                <Route path="/reliability" element={<ReliabilityPage />} />
 
-                  <Route path="/health" element={<HealthPage />} />
-                  <Route path="/access" element={<AccessPage />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </Suspense>
-            </AppChrome>
-          </StudioServicesProvider>
-        </BrowserRouter>
-      </StudioAuthProvider>
-    </StudioThemeProvider>
+                <Route path="/health" element={<HealthPage />} />
+                <Route path="/access" element={<AccessPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
+          </AppChrome>
+        </StudioServicesProvider>
+      </BrowserRouter>
+    </StudioAuthProvider>
   );
 }

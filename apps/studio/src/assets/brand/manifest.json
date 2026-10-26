@@ -1,15 +1,19 @@
 {
   "package": "@relayna/design-system",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "identity": "Natural Connection / Mulberry & Linen",
-  "font": "Relayna Portico 0.101",
-  "source": "Owner-supplied relayna-design-system/dist snapshot (2026-10-25)",
+  "font": "Manrope 4.505",
+  "source": "Owner-supplied relayna-design-system/dist snapshot (2026-10-26)",
+  "font_license": "SIL Open Font License 1.1",
   "sha256": {
-    "USAGE-RIGHTS.md": "2cd73db19ca520eebc23b7fc7dd309adf7b196a205c9ad2d9b7f5ccaa5b00037",
-    "css/tokens.css": "5470cf5c4da1064201161a712ba46a4ff8ae2139934e03ce3da608e3fe8dd7c8",
-    "fonts/RelaynaPortico-Variable.woff2": "1321f7482d48f1e04ef8b896a44b81cc9af8937eff01c8349446d7aeecf8a20e",
-    "fonts/RelaynaPortico-VariableItalic.woff2": "4efe5e5cdf0037745bee04449332e0f69c5e95222ba13cfb0f41b1ce6dd5d5ea",
-    "logos/relayna-studio-dark.svg": "5932cb3fc7557a38d50197288934af22483fcaeb2f60295a484fd61ad9530089",
-    "logos/relayna-studio-light.svg": "82cfcc70d21ae02ae57bc77656cfc9e3976090b28c335d08018d88487352e1ca"
+    "USAGE-RIGHTS.md": "fe1c3131ef4380a50f0919c69c8e4523d2e12f5957c71c1a82a9db842636ebf1",
+    "css/fonts.css": "b44538931a04d6ed108eb87c2cec84dc1385c0e45a288ad1188cb2c163798190",
+    "css/tokens.css": "8c8c0eb1d2078fcf65ed11dfafa524fa60accf6adba23998c068c82716c148a5",
+    "fonts/Manrope-Variable.woff2": "30b83738add8c9edd9e3450b98036a9a8fb5668d0cbd4eb0ce5fe6761197f21f",
+    "fonts/OFL.txt": "58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b",
+    "logos/relayna-studio-dark.svg": "df33e732eaced11314070eeedf7abaaf924604d951eba0e120ec6932c87c13bb",
+    "logos/relayna-studio-light.svg": "c19b47e263de11b7b2769988aa44b5887648d57996d3e5a0a522b4f79eba13b6",
+    "provenance/manrope-upstream.json": "2c4b29c47c5baf79513a3e76ef58e1907603c6fa1d199576d378834fb6913b3b",
+    "provenance/manrope.json": "4df44456e731f50e3b65eaa6b2a0ced065b4741e1238859947473d774adc722d"
   }
 }

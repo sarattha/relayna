@@ -9,18 +9,23 @@ see [Studio Backend](studio-backend.md).
 ## Visual identity
 
 Studio uses the Natural Connection / Mulberry & Linen identity from
-`@relayna/design-system` 0.2.1: the supplied Slim Leaf lockup and self-hosted
-Relayna Portico 0.101 variable fonts (upright and italic, weights 300–700).
+`@relayna/design-system` 0.4.0: the supplied Slim Leaf lockup and self-hosted
+official Manrope 4.505 variable font (upright, weights 200–800), with the
+refreshed Manrope-outlined Studio lockup.
 Studio starts in the light Linen/Mulberry theme. Use the moon button to switch
 to dark Ink/Blossom, or the sun button to return to light. The toggle is available
-in the user menu and on sign-in screens, with a keyboard-accessible label and
+in the authenticated user menu, with a keyboard-accessible label and
 visible focus. Your choice is saved in browser storage as `relayna.studio.theme`
 and synchronized across tabs. If browser storage is blocked, switching still
 works for the current page. A browser without a saved choice starts in light
-mode regardless of system appearance. Logos, browser colors, and Chamber follow
-the selected palette. Success, warning, error, info, and unknown states retain
-their own
-functional tones and visible status labels; logs and identifiers use monospace.
+mode regardless of system appearance. Sign-in, session loading, authorization
+errors, pending and blocked access always use light mode. These screens leave
+the saved workspace preference intact; it returns when an active session opens.
+Logos, browser colors, and Chamber follow the selected palette. Success,
+warning, error, info, and unknown states retain their own functional tones and
+visible status labels. The current design system assigns
+Manrope to code and log roles too; whitespace is preserved, numeric figures are
+tabular, and tables supply structural column alignment.
 
 ### Shared interface patterns
 
@@ -28,13 +33,18 @@ Studio matches Gateway's visual emphasis with a flat canvas, surface-colored
 controls, muted secondary copy, medium control text, and semibold headings.
 Panel elevation uses the shared rest shadow; header and action controls avoid
 extra resting shadows or decorative gradients. The approved color anchors and
-functional status colors are unchanged. Studio uses the same Portico font files
-as Gateway, following the owner's typeface selection. ANSI log colors adapt to
+functional status colors are unchanged. Studio and documentation use the exact
+Manrope exports, following the owner's typeface selection. Body text uses 400,
+controls 500 and headings 600; normal tracking and unsynthesized styles retain
+the supplied font forms. No italic face is supplied. Other scripts fall back to
+system fonts, and loading text stays readable with `font-display: swap`. ANSI log colors adapt to
 the selected log surface; normal and bright color variants retain readable
 foregrounds in either theme.
 
 The portable assets are checked into `src/assets/brand/` and `public/favicon.ico`;
-no local package path or external font service is required. See
+no local package path or external font service is required. Manrope's SIL OFL 1.1
+license ships with the font snapshot and in the production frontend at
+`fonts/OFL.txt`. See
 [brand asset provenance](assets/brand/README.md) for source and usage notes.
 
 ## Role In The Architecture
@@ -60,8 +70,9 @@ backend instead of in the browser.
 
 The screenshots below were captured from the production build of Studio
 **1.11.0**, using synthetic services and operational evidence. They show the
-current Portico typography, Mulberry & Linen palette, and interface patterns.
-Example hostnames under `example.test` are placeholders; use addresses reachable
+earlier Portico typography, Mulberry & Linen palette, and interface patterns.
+Current interface text and artwork use Manrope; the screenshots remain a tour
+of the same operational controls. Example hostnames under `example.test` are placeholders; use addresses reachable
 from your Studio backend. The [capture record](assets/images/studio/v1.11.0/README.md)
 describes the fixture setup, viewports, and verification.
 

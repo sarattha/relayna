@@ -1,6 +1,9 @@
 # relayna docs
 
-![Relayna SDK — Your logic. Connected execution.](assets/brand/banners/relayna-sdk-wide-light.png)
+<div class="relayna-brand-banner">
+  <img class="relayna-brand-light" src="assets/brand/banners/relayna-sdk-wide-light.png" alt="Relayna SDK — Your logic. Connected execution.">
+  <img class="relayna-brand-dark" src="assets/brand/banners/relayna-sdk-wide-dark.png" alt="Relayna SDK — Your logic. Connected execution.">
+</div>
 
 `relayna` is shared infrastructure for services that need RabbitMQ task
 delivery, Redis-backed status storage, and FastAPI endpoints for live status

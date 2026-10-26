@@ -18,7 +18,7 @@ async function renderMermaidDiagrams() {
   }
 
   if (!mermaidInitialized) {
-    window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose" });
+    window.mermaid.initialize({ startOnLoad: false, securityLevel: "loose", fontFamily: "Manrope, system-ui, sans-serif" });
     mermaidInitialized = true;
   }
   await window.mermaid.run({ querySelector: ".mermaid" });

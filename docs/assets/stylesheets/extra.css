@@ -1,20 +1,10 @@
 @import "../brand/css/tokens.css";
-@import "../brand/css/fonts-round.css";
+@import "../brand/css/fonts.css";
 
-:root:not([data-rn-theme]),
-[data-md-color-scheme="default"] {
-  color-scheme: light;
-  --rn-color-canvas: var(--rn-primitive-linen);
-  --rn-color-surface: var(--rn-primitive-porcelain);
-  --rn-color-surface-selected: var(--rn-primitive-selected);
-  --rn-color-surface-subtle: var(--rn-primitive-petal);
-  --rn-color-text: var(--rn-primitive-ink);
-  --rn-color-text-secondary: var(--rn-primitive-quiet);
-  --rn-color-text-muted: var(--rn-primitive-muted);
-  --rn-color-border: var(--rn-primitive-line);
-  --rn-color-link: var(--rn-primitive-mulberry);
-  --md-text-font: "Relayna Round";
-  --md-code-font: ui-monospace, SFMono-Regular, Consolas, monospace;
+:root,
+[data-md-color-scheme] {
+  --md-text-font: var(--rn-font-family-sans);
+  --md-code-font: var(--rn-font-family-mono);
   --md-default-bg-color: var(--rn-color-canvas);
   --md-default-fg-color: var(--rn-color-text);
   --md-default-fg-color--light: var(--rn-color-text-secondary);
@@ -23,13 +13,45 @@
   --md-primary-bg-color: var(--rn-color-text);
   --md-accent-fg-color: var(--rn-color-link);
   --md-typeset-a-color: var(--rn-color-link);
+  --md-code-fg-color: var(--rn-color-text);
+  --md-code-bg-color: var(--rn-color-surface-subtle);
   --relayna-surface: var(--rn-color-surface);
   --relayna-border: var(--rn-color-border);
-  --relayna-shadow: 0 2px 8px rgb(44 31 46 / 0.05);
+  --relayna-shadow: var(--rn-shadow-rest);
 }
 
-[data-md-color-scheme="default"] {
+body {
   background: var(--rn-color-canvas);
+  font-synthesis: none;
+}
+
+.relayna-brand-dark,
+:root .md-logo img.relayna-brand-dark,
+[data-rn-theme="dark"] .relayna-brand-light,
+[data-rn-theme="dark"] .md-logo img.relayna-brand-light {
+  display: none;
+}
+
+[data-rn-theme="dark"] .relayna-brand-dark,
+[data-rn-theme="dark"] .md-logo img.relayna-brand-dark {
+  display: block;
+}
+
+.relayna-brand-banner img {
+  width: 100%;
+  height: auto;
+}
+
+.md-typeset table,
+.md-typeset code {
+  font-variant-numeric: tabular-nums;
+}
+
+.mermaid {
+  background: var(--rn-primitive-porcelain);
+  border-radius: 14px;
+  padding: 1rem;
+  overflow-x: auto;
 }
 
 .md-header {
@@ -45,9 +67,7 @@
 }
 
 .md-main {
-  background:
-    radial-gradient(circle at top right, var(--rn-color-surface-selected), transparent 24rem),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
+  background: var(--rn-color-canvas);
 }
 
 .md-main__inner {
@@ -78,16 +98,15 @@
 .md-typeset h1,
 .md-typeset h2,
 .md-typeset h3 {
-  letter-spacing: -0.02em;
+  letter-spacing: normal;
+  font-weight: 600;
 }
 
 .md-typeset h1 {
-  font-weight: 700;
   margin-bottom: 0.75rem;
 }
 
 .md-typeset h2 {
-  font-weight: 700;
   margin-top: 2.4rem;
 }
 

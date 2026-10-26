@@ -25,6 +25,22 @@ afterEach(() => {
 });
 
 describe("Studio appearance", () => {
+  it("keeps a forced light surface independent of saved and in-memory workspace preferences", () => {
+    localStorage.setItem(key, "dark");
+    const controls = (forceLight: boolean) => <StudioThemeProvider forceLight={forceLight}><StudioBrandLogo /><StudioThemeToggle /></StudioThemeProvider>;
+    const view = render(controls(true));
+    fireEvent.click(screen.getByRole("button", { name: "Switch to dark mode" }));
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    expect(localStorage.getItem(key)).toBe("dark");
+    view.rerender(controls(false));
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "dark");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Blocked"); });
+    fireEvent.click(screen.getByRole("button", { name: "Switch to light mode" }));
+    view.rerender(controls(true));
+    view.rerender(controls(false));
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+  });
+
   it.each([null, "invalid", "system", "light"])("defaults to light for preference %s", (saved) => {
     if (saved !== null) localStorage.setItem(key, saved);
     render(<Controls />);
