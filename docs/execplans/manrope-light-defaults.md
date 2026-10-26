@@ -28,6 +28,7 @@ owns native stack append, readiness audit, ordered merge and tag/release publica
 - [x] (2026-10-26) Prepare coordinated v1.12.0 metadata/locks, changelog, migration/rollback and release docs for all six layers.
 - [x] (2026-10-26) Fix verified public-checksum Gitleaks false positives; pinned history scan and five positive/negative canaries pass.
 - [x] (2026-10-27) Pass full code-change-verification, SDK/backend coverage, package/tag/lock metadata, frontend coverage/build, strict docs and rollback checks.
+- [x] (2026-10-27) Correct Getting Started's two current install links to v1.12.0 after coordinator audit; retain historical references.
 - [ ] Handle automatic CI/review on the final head and hand off release readiness.
 - [ ] Hand clean stable branch to coordinator for native stack append.
 
@@ -102,6 +103,13 @@ owns native stack append, readiness audit, ordered merge and tag/release publica
   Date/Author: 2026-10-26 / Codex.
 
 ## Outcomes & Retrospective
+
+Automatic review completed on `cefb50edd92cf2186f5c4831191ded411888b856` with no
+findings. The subsequent Getting Started correction and this living record are
+documentation only; runtime code and validated package metadata are unchanged.
+Strict docs and built-page anchor/install-link checks pass for the correction;
+wait for hosted CI on the new exact head. Do not represent the earlier automatic review as review
+of a later commit or request a replacement review.
 
 Coordinated v1.12.0 release preparation is complete. All package/runtime versions,
 backend SDK floor and locks align; seven freeze labels advance with identical
@@ -218,8 +226,9 @@ to light. Inspect login, operational pages, docs overview/code at 1440, 390 and
 ## Idempotence and Recovery
 
 Re-copying verified exports is safe. Preserve unrelated user work and source
-package files. Fix failed checks and rerun relevant gates. There is no server
-migration. Do not restack siblings or edit shared stack metadata. PR must target
+package files. Fix failed checks and rerun relevant gates. Typography alone needs
+no server migration; the coordinated release requires the schema chain documented
+above. Do not restack siblings or edit shared stack metadata. PR must target
 feat/studio-integration-doctor and remain unmerged, without auto-merge.
 
 ## Artifacts and Notes
