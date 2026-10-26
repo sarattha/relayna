@@ -978,6 +978,7 @@ export function AppHeader() {
           Failed Tasks
 
         </NavLink>
+        <NavLink to={scopedPath("/health")}>Health</NavLink>
         {auth.isAdmin ? <NavLink to={scopedPath("/access")}>Access</NavLink> : null}
         <NavLink to={scopedPath("/recovery")}>Recovery</NavLink>
       </nav>

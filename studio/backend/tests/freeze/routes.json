@@ -16,11 +16,15 @@
     {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/jobs/{job_id}/cleanup-verified'"},
     {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "post", "path_expression": "'/uploads'"},
     {"file": "studio/backend/src/relayna_studio/_chamber_api.py", "method": "get", "path_expression": "'/download/{run_id}/{kind}'"},
+    {"file": "studio/backend/src/relayna_studio/_doctor.py", "method": "get", "path_expression": "'/studio/health'"},
+    {"file": "studio/backend/src/relayna_studio/_doctor.py", "method": "get", "path_expression": "'/studio/services/{service_id}/doctor'"},
+    {"file": "studio/backend/src/relayna_studio/_doctor.py", "method": "post", "path_expression": "'/studio/services/{service_id}/doctor/check'"},
     {"file": "studio/backend/src/relayna_studio/_incidents.py", "method": "get", "path_expression": "'/studio/incidents'"},
     {"file": "studio/backend/src/relayna_studio/_incidents.py", "method": "get", "path_expression": "'/studio/incidents/{incident_id}'"},
     {"file": "studio/backend/src/relayna_studio/_incidents.py", "method": "post", "path_expression": "'/studio/incidents/{incident_id}'"},
     {"file": "studio/backend/src/relayna_studio/_incidents.py", "method": "post", "path_expression": "'/studio/incidents/{incident_id}/split'"},
     {"file": "studio/backend/src/relayna_studio/_incidents.py", "method": "post", "path_expression": "'/studio/incidents/{incident_id}/merge'"},
+
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "get", "path_expression": "'/studio/auth/config'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "get", "path_expression": "'/studio/auth/login'"},
     {"file": "studio/backend/src/relayna_studio/_operator_auth.py", "method": "post", "path_expression": "'/studio/auth/login'"},
@@ -104,5 +108,5 @@
     {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/traces'"},
     {"file": "studio/backend/src/relayna_studio/traces.py", "method": "get", "path_expression": "f'{prefix}/tasks/{{service_id}}/{{task_id}}/trace-path'"}
   ],
-  "compatibility_note": "2026-10-03: User explicitly approved additive native Chamber workspace and administrator connection routes. Existing released SDK and Studio routes remain present; new service-scoped routes are intentional production perimeter additions. 2026-10-25: User explicitly approved Recovery Center production-perimeter additions in its implementation thread. Existing routes remain unchanged; five recovery routes and their durable Studio orchestration are additive."
+  "compatibility_note": "2026-10-03: User explicitly approved additive native Chamber workspace and administrator connection routes. Existing released SDK and Studio routes remain present; new service-scoped routes are intentional production perimeter additions. 2026-10-25: User explicitly approved Recovery Center production-perimeter additions in its implementation thread. Existing routes remain unchanged; five recovery routes and their durable Studio orchestration are additive. 2026-10-26: User explicitly approved feature 07 additive Studio health and Integration Doctor routes; existing routes and authentication remain unchanged."
 }

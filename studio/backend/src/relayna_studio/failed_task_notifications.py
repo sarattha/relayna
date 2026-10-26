@@ -11,6 +11,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ._diagnostic_observations import _record
 from .federation import StudioFederationService
 from .registry import OutboundUrlPolicyError, StudioOutboundUrlPolicy
 
@@ -245,6 +246,14 @@ class FailedTaskEmailNotificationService:
             pending["started_at"] = _utc_now()
         return True
 
+    async def _send_email(self, *, title: str, body: str) -> None:
+        try:
+            await self.email_client.send(receivers=self.config.receivers, title=title, body=body)
+        except Exception:
+            await _record(self.redis, self.config.redis_prefix, "delivery", succeeded=False)
+            raise
+        await _record(self.redis, self.config.redis_prefix, "delivery", succeeded=True)
+
     async def _send_immediate_notifications(self, items: list[dict[str, Any]]) -> int:
         sent = 0
         remaining: list[dict[str, Any]] = []
@@ -256,7 +265,7 @@ class FailedTaskEmailNotificationService:
             title = build_failed_task_email_title(item, title_prefix=self.config.title_prefix)
             body = build_failed_task_email_body(item)
             try:
-                await self.email_client.send(receivers=self.config.receivers, title=title, body=body)
+                await self._send_email(title=title, body=body)
             except Exception:
                 LOGGER.exception("Failed-task email notification send failed.")
                 remaining.append(item)
@@ -281,7 +290,7 @@ class FailedTaskEmailNotificationService:
         title = build_failed_task_batch_email_title(valid_items, title_prefix=self.config.title_prefix)
         body = build_failed_task_batch_email_body(valid_items)
         try:
-            await self.email_client.send(receivers=self.config.receivers, title=title, body=body)
+            await self._send_email(title=title, body=body)
         except Exception:
             LOGGER.exception("Failed-task email notification send failed.")
             await self._save_pending_batch({"started_at": _utc_now(), "items": valid_items})

@@ -1107,3 +1107,48 @@ export/deployment, shared email routing, evidence states and instrumentation con
 
 `RELAYNA_STUDIO_RELIABILITY_PUBLIC_URL` optionally supplies the public HTTP(S)
 origin for clickable reliability email and alert links (no path or credentials).
+
+## Integration Doctor and Studio Health
+
+`GET /studio/health` reports Studio dependency readiness (the same checks as
+`/readyz`), process-local loop scheduling, a bounded PostgreSQL outbox sample,
+and failed-task email configuration/delivery evidence. Readiness establishes
+connectivity/schema readiness only; it says nothing about fresh data or every
+upstream provider. A running loop is not a successful refresh, and another
+replica may own the coordinator lock.
+
+`GET /studio/services/{service_id}/doctor` reads existing capability and retained
+event evidence, event-pull observations, configured providers and retention
+limits. `POST /studio/services/{service_id}/doctor/check` additionally invokes
+the existing health refresh and samples the advertised event feed and Loki.
+An optional `task_id` query (1–255 characters) scopes Loki to a known task;
+otherwise a sampled retained task is used, or only the service selector when no
+task is available. The Loki window is the last 15 minutes, with limit 1. The feed
+sample requests limit 1 and rejects responses above 64 KiB. Neither sample
+injects tasks or ingests events. Each check has a 3 second deadline; independent
+source failures remain individual `unavailable` checks. Existing registered-target
+URL policy, redirect restrictions, role/CSRF rules and provider query paths apply.
+New routes send `Cache-Control: no-store` and redact exception text.
+
+Every check contains source/scope, observation time, available check/success and
+evidence timestamps, nullable value/unit, detail and a next check. States are
+`ok`, `empty`, `stale`, `unknown`, `unsupported`, `unconfigured`, `unavailable`
+and `disabled`. A successful empty sample proves only that this query returned
+no matches. Provider configuration is `unknown` availability until probed;
+metrics and trace providers are not actively probed by this first version.
+Worker task-boundary timestamps never establish periodic worker liveness.
+Timezone-less, missing and future timestamps cannot establish freshness or a
+nonnegative ingestion delay. Source identity and environment are always retained.
+
+Retained evidence samples at most 20 event records. Ingestion delay is the
+maximum nonnegative source-to-index timestamp difference in that sample, not
+current queue lag. Event/task TTLs and the service history cap are configured
+limits, not proof of continuous coverage. Default event and task index TTLs
+remain 86400 seconds and the history cap remains 5000. Outbox evidence samples
+at most 100 pending rows (plus one to detect truncation), ordered by the existing
+availability index, including delayed retries. Its age is the oldest within
+that sample, not the global oldest or an exact backlog count.
+
+The existing `GET /studio/admin/audit` remains administrator-only with Entra;
+the UI requests the newest 50 exact-filtered records. It requires PostgreSQL.
+No roles, credentials or configuration mutation APIs are added.

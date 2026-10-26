@@ -789,3 +789,24 @@ export async function previewReliabilityGoal(id: string) {
 export async function exportReliabilityGoal(id: string) {
   return requestJson<Record<string, unknown>>(`/studio/reliability/goals/${encodeURIComponent(id)}/export`);
 }
+
+export async function fetchStudioHealth() {
+  return requestJson<import("./types").StudioDiagnosticReport>("/studio/health", { cache: "no-store" });
+}
+
+export async function fetchIntegrationDoctor(serviceId: string) {
+  return requestJson<import("./types").StudioDiagnosticReport>(`/studio/services/${encodeURIComponent(serviceId)}/doctor`, { cache: "no-store" });
+}
+
+export async function checkIntegration(serviceId: string, taskId = "") {
+  const params = new URLSearchParams();
+  if (taskId.trim()) params.set("task_id", taskId.trim());
+  const suffix = params.size ? `?${params}` : "";
+  return requestJson<import("./types").StudioDiagnosticReport>(`/studio/services/${encodeURIComponent(serviceId)}/doctor/check${suffix}`, { method: "POST" });
+}
+
+export async function fetchStudioAudit(query: { actor_user_id?: string; action?: string; target_type?: string } = {}) {
+  const params = new URLSearchParams({ limit: "50" });
+  for (const [key, value] of Object.entries(query)) if (value?.trim()) params.set(key, value.trim());
+  return requestJson<import("./types").StudioAuditResponse>(`/studio/admin/audit?${params}`, { cache: "no-store" });
+}

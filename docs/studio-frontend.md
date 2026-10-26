@@ -995,3 +995,27 @@ preview evidence, inspect delivery diagnostics, and export Prometheus/Alertmanag
 configuration. Saving does not deploy external rules. Missing/stale/unsupported
 measurements stay explicit; business success and end-to-end latency require durable
 accepted-work cohort aggregates. See [Reliability goals](studio-reliability.md).
+
+## Studio Health and Integration Doctor
+
+Open **Health** in primary navigation (`/health`). Studio evidence has global
+control-plane scope even when the environment selector is set. The Doctor
+service selector follows the selected environment and displays service identity
+and environment on every report. A service can link directly to
+`/health?service_id=<id>`; the selected environment remains part of the URL.
+
+Select a service to inspect stored evidence. Administrators can **Run integration
+check** with an optional known task ID for Loki matching. Read-only members can
+inspect existing diagnostics but cannot trigger live checks or browse audit.
+The audit browser is explicitly global across environments and returns only the
+newest 50 matching records from the existing endpoint. Exact actor/action/target
+filters, empty results, absent PostgreSQL storage and permission errors are
+shown separately.
+
+Missing values display “not established”; unsupported/unconfigured sources and
+successful empty queries remain distinct from unavailable sources. Each card
+shows scope, timestamps, evidence and a next check. “Last event refresh” is a
+completed pull attempt and may have returned no events. “Notification delivery”
+is provider acceptance, not inbox receipt. A stopped local loop or old task
+activity does not establish a missing worker. Use a known task across the feed,
+indexed events and matching logs to validate an integration end to end.

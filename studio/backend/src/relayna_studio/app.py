@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 
 from relayna.metrics import RelaynaMetrics, create_metrics_router
 
+from ._doctor import _create_doctor_router
 from ._incidents import _create_incident_router
 from ._recovery import _create_recovery_router, _RecoveryService
 from ._reliability import _create_reliability_router
@@ -744,6 +745,7 @@ def create_studio_app(
         )
     if runtime.database is not None:
         app.include_router(create_studio_audit_router(runtime.database))
+    app.include_router(_create_doctor_router(runtime))
     app.include_router(create_studio_probe_router(runtime.database, runtime.redis))
     app.include_router(create_metrics_router(runtime.metrics))
     if runtime.database is not None:
