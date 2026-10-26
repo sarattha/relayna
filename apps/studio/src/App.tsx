@@ -31,6 +31,7 @@ const TopologyPage = lazy(() =>
 );
 const LoadTestingPage = lazy(() => import("./pages/LoadTestingPage").then((module) => ({ default: module.LoadTestingPage })));
 const AccessPage = lazy(() => import("./pages/AccessPage").then((module) => ({ default: module.AccessPage })));
+const RecoveryCenterPage = lazy(() => import("./pages/RecoveryCenterPage").then((module) => ({ default: module.RecoveryCenterPage })));
 
 export function App() {
   return (
@@ -50,6 +51,8 @@ export function App() {
                   <Route path="/services/:serviceId/dlq" element={<DlqPage />} />
                   <Route path="/failed-tasks" element={<FailedTasksPage />} />
                   <Route path="/incidents" element={<IncidentInboxPage />} />
+                  <Route path="/recovery" element={<RecoveryCenterPage />} />
+                  <Route path="/recovery/:planId" element={<RecoveryCenterPage />} />
                   <Route path="/tasks/search" element={<TaskSearchPage />} />
                   <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
                   <Route path="/access" element={<AccessPage />} />

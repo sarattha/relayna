@@ -442,3 +442,27 @@ function configuredDraftToLogConfig(draft: ServiceDraft) {
     task_match_template: draft.log_task_match_template,
   };
 }
+
+it("sends pinned recovery requests with CSRF and a version, and preserves ambiguous transport errors", async () => {
+  const recovery = await import("./api");
+  recovery.setStudioCsrfToken("recovery-csrf");
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({ plan_id: "plan/id" }));
+  vi.stubGlobal("fetch", fetcher);
+  const cohort = { service_id: "svc", environment: "staging", items: [{ failure_id: "f0" }], interval_seconds: 2, note: "Provider recovered" };
+  try {
+    await recovery.previewRecovery(cohort);
+    await recovery.createRecoveryPlan(cohort, "digest", "request-id");
+    await recovery.fetchRecoveryPlan("plan/id");
+    await recovery.controlRecoveryPlan("plan/id", "batch", 4, 5);
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual([
+      "/studio/recovery/preview", "/studio/recovery/plans", "/studio/recovery/plans/plan%2Fid", "/studio/recovery/plans/plan%2Fid/control",
+    ]);
+    const create = fetcher.mock.calls[1]?.[1];
+    expect(new Headers(create?.headers).get("X-CSRF-Token")).toBe("recovery-csrf");
+    expect(JSON.parse(String(create?.body))).toEqual({ ...cohort, preview_digest: "digest", request_id: "request-id" });
+    expect(JSON.parse(String(fetcher.mock.calls[3]?.[1]?.body))).toEqual({ action: "batch", version: 4, count: 5 });
+    fetcher.mockRejectedValueOnce(new Error("Connection lost"));
+    await expect(recovery.controlRecoveryPlan("plan/id", "stop", 5)).rejects.toThrow("Connection lost");
+    expect(fetcher).toHaveBeenCalledTimes(5);
+  } finally { recovery.setStudioCsrfToken(null); }
+});

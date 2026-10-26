@@ -206,3 +206,13 @@ failed-task operations. Synchronous upstream failed-task actions write a
 `requested` record before the call and a `succeeded` or `failed` record after
 it. Audit records are append-only and are not automatically pruned; size and
 archive them according to the operator's compliance policy.
+
+## Recovery ledger
+
+Revision `0003_recovery` follows `0003_incident_inbox` and adds `studio_recovery_plans` and
+`studio_recovery_claims`. They retain exact cohorts, dispatch intent, acceptance,
+and observed outcomes, and reserve failure snapshots against overlapping plans.
+Creation, controls, dispatch, and state transitions also write the operator audit
+log. See [Recovery Center](studio-recovery-center.md) for crash/timeout behavior,
+backup and downgrade guidance. Downgrading drops recovery history and reservations;
+stop all recovery workers and export reports first.

@@ -2841,6 +2841,28 @@ describe("App", () => {
     expect(screen.getByText("Task: unattributed")).toBeInTheDocument();
   });
 
+  it("hands exact failure IDs from failure selection to a recovery plan without dispatch", async () => {
+    window.history.replaceState({}, "", "/failed-tasks");
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).startsWith("/studio/recovery/plans?")) return jsonResponse({ items: [], count: 0 });
+      return base(input, init);
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Recover failure-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear recovery selection" }));
+    expect(screen.getByRole("button", { name: "Prepare recovery (0/200)" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Recover failure-1" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Recover failure-1" }));
+    expect(screen.getByRole("button", { name: "Prepare recovery (0/200)" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Recover failure-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare recovery (1/200)" }));
+    await screen.findByRole("heading", { name: "Prepare a recovery plan" });
+    expect(screen.getByLabelText("Recovery service")).toHaveValue("payments-api");
+    expect(screen.getByLabelText("Failure IDs in batch order")).toHaveValue("failure-1");
+    expect(fetchMock.mock.calls.some(([url, options]) => String(url).includes("/control") && options?.method === "POST")).toBe(false);
+  });
+
   it("renders the global failed tasks page and opens a failure detail", async () => {
     window.history.replaceState({}, "", "/failed-tasks");
 

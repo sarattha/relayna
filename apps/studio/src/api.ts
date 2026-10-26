@@ -731,3 +731,32 @@ export async function deleteFailedTask(serviceId: string, failureId: string) {
     { method: "DELETE" },
   );
 }
+
+export function previewRecovery(selection: import("./types").RecoverySelection) {
+  return requestJson<import("./types").RecoveryPreview>("/studio/recovery/preview", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(selection),
+  });
+}
+
+export function createRecoveryPlan(selection: import("./types").RecoverySelection, previewDigest: string, requestId: string) {
+  return requestJson<import("./types").RecoveryPlan>("/studio/recovery/plans", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...selection, preview_digest: previewDigest, request_id: requestId }),
+  });
+}
+
+export function fetchRecoveryPlans(environment: string, offset = 0) {
+  return requestJson<{ items: import("./types").RecoveryPlan[]; count: number }>(
+    `/studio/recovery/plans?${new URLSearchParams({ ...(environment ? { environment } : {}), offset: String(offset) })}`,
+  );
+}
+
+export function fetchRecoveryPlan(planId: string) {
+  return requestJson<import("./types").RecoveryPlan>(`/studio/recovery/plans/${encodeURIComponent(planId)}`);
+}
+
+export function controlRecoveryPlan(planId: string, action: "batch" | "pause" | "resume" | "stop", version: number, count = 5) {
+  return requestJson<import("./types").RecoveryPlan>(`/studio/recovery/plans/${encodeURIComponent(planId)}/control`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, version, count }),
+  });
+}

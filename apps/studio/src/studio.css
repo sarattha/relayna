@@ -1579,3 +1579,18 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 4px; }
     scroll-behavior: auto !important;
   }
 }
+
+.recovery-fields { border: 0; padding: 0; margin: 0; display: grid; gap: 14px; min-width: 0; }
+.recovery-fields label { display: grid; gap: 6px; min-width: 0; }
+.recovery-fields textarea { width: 100%; resize: vertical; box-sizing: border-box; }
+.recovery-item { display: grid; gap: 10px; padding: 16px; overflow-wrap: anywhere; }
+.recovery-item p { margin: 0; }
+.recovery-item__evidence { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; }
+.recovery-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; margin: 18px 0; }
+.recovery-metrics > div { display: grid; gap: 6px; padding: 14px; }
+.recovery-metrics strong { font-size: 25px; }
+.recovery-metrics span { color: var(--studio-text-muted); font-size: 12px; }
+@media (max-width: 640px) {
+  .recovery-item__evidence { grid-template-columns: 1fr; }
+  .recovery-center .studio-action-row { align-items: stretch; }
+}

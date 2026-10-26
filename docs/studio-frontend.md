@@ -939,3 +939,11 @@ Checks:
   Studio-compatible
 - [Studio Backend](studio-backend.md) for backend runtime, PostgreSQL, Redis, and route
   behavior
+
+## Recovery Center
+
+The **Recovery** workspace accepts an exact failure selection from **Failed
+Tasks**, previews eligibility and overrides, and provides small-batch execution,
+pause/resume/stop, and linked outcome reports. See [Recovery Center](studio-recovery-center.md)
+for execution semantics and the distinction between accepted retries and observed
+completion. Recovery dispatch requires an administrator and PostgreSQL.
