@@ -1,0 +1,26 @@
+{
+  "repository": "https://github.com/google/fonts",
+  "revision": "b31870aff700ab7a1d74fa0c6887d95beb9e0037",
+  "path": "ofl/manrope",
+  "specimen": "https://fonts.google.com/specimen/Manrope",
+  "license": "SIL Open Font License 1.1",
+  "family": "Manrope",
+  "version": "4.505",
+  "weights": [
+    200,
+    800
+  ],
+  "styles": [
+    "normal"
+  ],
+  "glyphs": 742,
+  "codepoints": 678,
+  "conversion": "Lossless WOFF2 packaging with FontTools 4.67.0; no outline, spacing or name changes.",
+  "verification": "All glyph outlines and advances match the official TTF at six weights after WOFF2 decode.",
+  "sha256": {
+    "METADATA.pb": "fb204147a7c16d009d4fa53248b6075bc941d7adfa450a825bc5d4cef2f9ded9",
+    "Manrope-Variable.ttf": "3ae11c49db0455a3cc33e37d380f20fdb8c7f8b41dc07625c177e3d87a9d6ae6",
+    "Manrope-Variable.woff2": "30b83738add8c9edd9e3450b98036a9a8fb5668d0cbd4eb0ce5fe6761197f21f",
+    "OFL.txt": "58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b"
+  }
+}

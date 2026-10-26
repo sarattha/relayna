@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.12.0/relayna-1.12.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.12.0/relayna-1.12.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.11.0.tar.gz`
-- `dist/relayna-1.11.0-py3-none-any.whl`
+- `dist/relayna-1.12.0.tar.gz`
+- `dist/relayna-1.12.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,120 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.12.0
+
+Deploy matching SDK, Studio backend and frontend **1.12.0** packages/images.
+This minor release combines Incident Inbox, Recovery Center, Queue & Worker
+Cockpit, Reliability Goals & Alert Routing, Integration Doctor & Studio Health,
+and the Manrope design-system update. The approved additive contracts are
+recorded by the v1.12.0 freeze labels; all inherited approved entries remain
+intact. Existing SDK collectors/response fields and broker/Redis wire formats
+remain compatible. This combined release **requires a Studio database upgrade**.
+
+#### Database upgrade from 1.11.0
+
+Use a maintenance window. Pause/stop authorized recovery dispatch if upgrading
+an intermediate feature build, reconcile in-flight/unknown acceptance, and stop
+all old backend replicas. Back up PostgreSQL and Redis, record image digests,
+and retain settings encryption keys and provider credentials. With
+`RELAYNA_STUDIO_DATABASE_URL` set, run from the repository:
+
+```bash
+make -C studio/backend db-current
+make -C studio/backend db-upgrade
+make -C studio/backend db-current
+```
+
+The published 1.11.0 schema is `0002_load_profiles`. The upgrade chain is
+`0002_load_profiles -> 0003_incident_inbox -> 0003_recovery`; the final current
+revision must be `0003_recovery`. The application does not migrate automatically
+and checks its exact schema head at startup and readiness. Do not mix old and
+new backend replicas across these schema expectations. Incident identity,
+ownership/corrections/history and Recovery plans/claims are durable PostgreSQL
+data. Existing load profiles and earlier tables remain intact. See
+[persistence](studio-persistence.md#release-1120-schema-upgrade-and-rollback).
+
+Start only matching 1.12.0 backend/frontend images after migration, then verify
+`/readyz`, login and scoped feature access before restoring traffic. `/livez` and
+`/healthz` report process liveness; `/readyz` establishes PostgreSQL/Redis/schema
+readiness, not fresh upstream data or healthy providers. Health and Doctor show
+those independent evidence states. SDK service runtimes remain Redis-only.
+
+#### Feature setup and operational limits
+
+- [Incident Inbox](studio-backend.md#incident-inbox) retains owner/lifecycle and
+  manual grouping corrections separately from live failure evidence. Include
+  incident history in backups and retention planning.
+- [Recovery Center](studio-recovery-center.md) requires retained eligible
+  failures and existing retry capability/authorization. Batches have per-plan
+  pacing, not a global service rate limit. Accepted or ambiguous dispatch is not
+  proof of recovery; unknown acceptance is never automatically resent. Reports
+  require fresh terminal status, with the documented same-ID attribution limits.
+- [Queue & Worker Cockpit](studio-backend.md#queue-worker-cockpit-reads) is
+  read-only. Built-in AMQP observations provide ready depth and consumer count;
+  unacknowledged depth, oldest age and matching rates require an appropriate
+  source. Missing data disables drain estimates. Task-boundary activity cannot
+  establish periodic liveness or prove a worker is missing.
+- [Reliability goals](studio-reliability.md) require a registered, correctly
+  scoped Prometheus provider. Deploy exported Prometheus rules and Alertmanager
+  routing yourself. Configure the dedicated webhook credential and shared email
+  transport for receipts/delivery. Missing-worker goals need an external
+  service-wide periodic pulse aggregate while idle or busy plus a fresh source
+  watermark; they do not detect one absent member of a worker pool. Completion/latency
+  objectives need durable mature-cohort aggregates. SDK task activity and handler
+  duration are not substitutes. Absent evidence remains missing, never healthy.
+- [Health and Doctor](studio-backend.md#integration-doctor-and-studio-health)
+  distinguish configuration from successful probes and empty from unavailable
+  queries. Administrator live checks do not actively probe metrics or traces in
+  this version. A scheduled/running loop is not evidence of a successful pass.
+
+Studio and docs now self-host official Manrope 4.505 and refreshed 0.4.0 brand
+artwork, with SIL OFL 1.1 distributed alongside the font. Code roles also use
+Manrope under the current design system, preserving whitespace and structural
+table alignment. Studio auth gates always use light while the workspace keeps
+its saved choice. Docs start light independent of system appearance and retain
+an explicit saved toggle. Historical 1.11.0 screenshots remain labeled as such.
+
+#### Recovery-only and full rollback
+
+Stop every new backend/recovery worker before any downgrade. Export Recovery
+reports and Incident history, back up both stores, and reconcile accepted or
+unknown dispatches with the service: stopping Studio never undoes published
+work or authorizes blind retries. Recovery history/reservations are the record
+that prevents duplicate plan selection.
+
+For a **Recovery-only** rollback, run in `studio/backend`:
+
+```bash
+uv run alembic downgrade 0003_incident_inbox
+```
+
+This drops only `studio_recovery_plans` and `studio_recovery_claims`, retaining
+Incident Inbox and earlier tables. Deploy only a deliberately built intermediate
+backend expecting `0003_incident_inbox`. That intermediate build is not the
+published 1.11.0 release, and a 1.12.0 backend will reject that schema.
+
+For rollback to **published 1.11.0**, after the same shutdown/export safeguards:
+
+```bash
+uv run alembic downgrade 0002_load_profiles
+```
+
+This additionally drops Incident Inbox state, corrections/history and its history
+trigger/function, while preserving load profiles and earlier Studio data. Restore
+matching 1.11.0 SDK/backend/frontend packages/images only after verifying that
+revision. Restore a compatible backup if lost feature records are needed;
+re-upgrade alone cannot recover dropped data. Do not use `downgrade base` as a
+rollback shortcut. Reliability goals/receipts use older operator settings, but
+1.11.0 does not expose them: disable exported rules/Alertmanager callbacks before
+rollback and preserve their configuration for a later upgrade. Keep the settings
+encryption key, and do not treat a saved browser theme as a server migration.
+
+Publication follows the same v1.11.0 workflow: the coordinator audits the merged
+stack, tags the verified main commit `v1.12.0`, and the tag workflow builds the
+SDK wheel/sdist, signed Studio images, SBOMs/provenance and changelog-derived
+GitHub Release. Preparation does not mean those artifacts are already published.
 
 ### Upgrading to 1.11.0
 

@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+
+{% block styles %}
+  {# Resolve shared tokens before styles can follow a dark system preference. #}
+  <script src="{{ 'assets/theme-init.js' | url }}" data-md-scope="{{ config.extra.scope | d(base_url) }}"></script>
+  {{ super() }}
+{% endblock %}

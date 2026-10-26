@@ -152,3 +152,9 @@ and understand any in-flight/unknown requests before deciding on further retries
 while preserving Incident Inbox state;
 restore from backup if that loss was unintended. Never downgrade while a
 recovery worker is running.
+
+This is a Recovery-only rollback to an intermediate feature schema, requiring a
+backend built for exactly `0003_incident_inbox`. It is not sufficient for
+published 1.11.0, which expects `0002_load_profiles`; rolling back to that release
+also drops Incident Inbox state/history. See the
+[coordinated 1.12.0 upgrade and rollback](releases.md#upgrading-to-1120).

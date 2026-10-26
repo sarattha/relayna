@@ -389,10 +389,14 @@ restore old target approvals.
 Before deploying this feature, stop old backend replicas during a maintenance
 window, back up PostgreSQL and run `alembic upgrade head`
 from `studio/backend` with `RELAYNA_STUDIO_DATABASE_URL` set. Revision
-`0002_load_profiles` adds `studio_load_profiles`; it does not migrate or remove
-ConfigMap profiles. Deploy matching 1.11.0 backend/frontend images together; do not mix backends
-expecting different schema revisions. Downgrading
-the schema removes imported profiles, so export/back up the database first.
+`0002_load_profiles` originally added `studio_load_profiles`; it does not migrate
+or remove ConfigMap profiles. Current 1.12.0 also requires the subsequent
+`0003_incident_inbox -> 0003_recovery` revisions. Deploy matching 1.12.0
+backend/frontend images together and confirm final head `0003_recovery`; do not
+mix backends expecting different revisions. A downgrade below
+`0002_load_profiles` removes imported profiles. The supported 1.12.0 rollback
+targets preserve profiles but remove the relevant Incident/Recovery records;
+follow the [release procedure](releases.md#upgrading-to-1120) and back up first.
 Read-only members can use the normal profile/run views but cannot browse import
 sources, preview, save or remove profiles. Mutations retain Studio's CSRF and audit
 protection. The source catalog is paginated; a bounded upstream response that is

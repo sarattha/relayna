@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 
 import { fetchStudioSession, logoutStudio, setStudioCsrfToken, StudioApiError } from "./api";
 import type { StudioMember } from "./types";
-import { StudioBrandLogo, StudioThemeToggle } from "./studio-theme";
+import { StudioBrandLogo, StudioThemeProvider } from "./studio-theme";
 
 type AuthContextValue = {
   user: StudioMember;
@@ -17,7 +17,6 @@ function AuthSurface({ title, body, action }: { title: string; body: string; act
   return (
     <main className="studio-auth-shell">
       <section className="studio-auth-card">
-        <div className="studio-auth-tools"><StudioThemeToggle /></div>
         <picture>
           <StudioBrandLogo />
         </picture>
@@ -134,38 +133,37 @@ export function StudioAuthProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
+  let content: ReactNode;
   if (loading) {
-    return <AuthSurface title="Signing you in" body="Checking your secure Studio session…" />;
-  }
-  if ((error || callbackError) && !user) {
-    return <AuthSurface title="Authorization error" body={error || callbackError || "Unable to authorize Studio."} action={<button className="studio-auth-button" onClick={() => void loadSession()}>Try again</button>} />;
-  }
-  if (signedOut || !user) {
-    return (
+    content = <AuthSurface title="Signing you in" body="Checking your secure Studio session…" />;
+  } else if ((error || callbackError) && !user) {
+    content = <AuthSurface title="Authorization error" body={error || callbackError || "Unable to authorize Studio."} action={<button className="studio-auth-button" onClick={() => void loadSession()}>Try again</button>} />;
+  } else if (signedOut || !user) {
+    content = (
       <AuthSurface
         title="Sign in to Studio"
         body={authMode === "operator" ? "Enter the operator token to access this Studio." : "Use your organization’s Microsoft Entra account to continue."}
         action={authMode === "operator" ? <OperatorLogin onSignedIn={loadSession} /> : <a className="studio-auth-button" href={`/studio/auth/login?return_to=${encodeURIComponent(window.location.pathname + window.location.search)}`}>Sign in with Microsoft Entra</a>}
       />
     );
+  } else if (user.status === "pending") {
+    content = <AuthSurface title="Access pending" body="A Studio administrator must approve your account before you can continue." action={<button className="studio-auth-button" onClick={() => void value?.signOut()}>Sign out</button>} />;
+  } else if (user.status === "blocked") {
+    content = <AuthSurface title="Access blocked" body="Your Studio account has been blocked. Contact a Studio administrator." action={<button className="studio-auth-button" onClick={() => void value?.signOut()}>Sign out</button>} />;
+  } else {
+    content = (
+      <AuthContext.Provider value={value}>
+        {permissionMessage ? (
+          <div className="studio-permission-banner" role="alert">
+            <span>{permissionMessage}</span>
+            <button type="button" onClick={() => setPermissionMessage(null)}>Dismiss</button>
+          </div>
+        ) : null}
+        {children}
+      </AuthContext.Provider>
+    );
   }
-  if (user.status === "pending") {
-    return <AuthSurface title="Access pending" body="A Studio administrator must approve your account before you can continue." action={<button className="studio-auth-button" onClick={() => void value?.signOut()}>Sign out</button>} />;
-  }
-  if (user.status === "blocked") {
-    return <AuthSurface title="Access blocked" body="Your Studio account has been blocked. Contact a Studio administrator." action={<button className="studio-auth-button" onClick={() => void value?.signOut()}>Sign out</button>} />;
-  }
-  return (
-    <AuthContext.Provider value={value}>
-      {permissionMessage ? (
-        <div className="studio-permission-banner" role="alert">
-          <span>{permissionMessage}</span>
-          <button type="button" onClick={() => setPermissionMessage(null)}>Dismiss</button>
-        </div>
-      ) : null}
-      {children}
-    </AuthContext.Provider>
-  );
+  return <StudioThemeProvider forceLight={loading || signedOut || !user || user.status !== "active"}>{content}</StudioThemeProvider>;
 }
 
 export function useStudioAuth() {

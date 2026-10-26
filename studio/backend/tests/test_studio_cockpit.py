@@ -273,7 +273,14 @@ def test_metrics_partial_group_failure_preserves_other_series(monkeypatch):
 
 @pytest.mark.parametrize(
     "mode,expected",
-    [("fresh", "fresh"), ("empty", "missing"), ("stale", "stale"), ("nan", "missing"), ("failed", "unavailable")],
+    [
+        ("fresh", "fresh"),
+        ("empty", "missing"),
+        ("stale", "stale"),
+        ("invalid_timestamp", "stale"),
+        ("nan", "missing"),
+        ("failed", "unavailable"),
+    ],
 )
 def test_metric_source_freshness_and_missing_samples(monkeypatch, mode, expected):
     from relayna_studio.metrics import StudioMetricsResponse
@@ -306,7 +313,9 @@ def test_metric_source_freshness_and_missing_samples(monkeypatch, mode, expected
             if mode == "empty"
             else [
                 {
-                    "timestamp": (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
+                    "timestamp": "not-a-timestamp"
+                    if mode == "invalid_timestamp"
+                    else (datetime.now(UTC) - timedelta(minutes=10)).isoformat()
                     if mode == "stale"
                     else query.to_time,
                     "value": float("nan") if mode == "nan" else 0,
@@ -327,6 +336,9 @@ def test_metric_source_freshness_and_missing_samples(monkeypatch, mode, expected
         monkeypatch.setattr(get_studio_runtime(app).metrics_query_service, "query_service_metrics", metrics)
         data = client.get("/studio/services/orders/runtime/cockpit").json()
     assert data["sources"]["metrics"]["state"] == expected
+    if mode == "invalid_timestamp":
+        assert data["sources"]["pressure"]["state"] == "fresh"
+        assert data["sources"]["workers"]["state"] == "fresh"
     if mode == "nan":
         assert data["metrics"]["series"][0]["points"][0]["value"] is None
 

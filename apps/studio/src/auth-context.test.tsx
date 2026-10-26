@@ -4,10 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { setStudioCsrfToken, updateStudioUser } from "./api";
 import { StudioAuthProvider, useStudioAuth } from "./auth-context";
-import { StudioThemeProvider } from "./studio-theme";
+import { StudioThemeToggle } from "./studio-theme";
 
 function render(children: ReactNode) {
-  return renderWithoutTheme(<StudioThemeProvider>{children}</StudioThemeProvider>);
+  return renderWithoutTheme(children);
 }
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -42,9 +42,52 @@ afterEach(() => {
   vi.unstubAllGlobals();
   fetchMock.mockReset();
   setStudioCsrfToken(null);
+  localStorage.clear();
 });
 
 describe("StudioAuthProvider", () => {
+  it("keeps loading and operator login light, restores dark after sign-in and preserves it on logout", async () => {
+    localStorage.setItem("relayna.studio.theme", "dark");
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValueOnce(response({ detail: "Sign in", auth_mode: "operator" }, 401));
+    render(<StudioAuthProvider><SessionChild /><StudioThemeToggle /></StudioAuthProvider>);
+    expect(screen.getByRole("heading", { name: "Signing you in" })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    const input = await screen.findByLabelText("Operator token");
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    expect(screen.queryByRole("button", { name: /Switch to .* mode/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Relayna Studio" })).toHaveAttribute("src", expect.stringContaining("studio-light.svg"));
+    expect(localStorage.getItem("relayna.studio.theme")).toBe("dark");
+
+    // A different tab can change the workspace preference while login stays light.
+    for (const preference of ["light", "dark"]) {
+      localStorage.setItem("relayna.studio.theme", preference);
+      act(() => window.dispatchEvent(new StorageEvent("storage", { key: "relayna.studio.theme", storageArea: localStorage })));
+      expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    }
+    fireEvent.change(input, { target: { value: "example-token" } });
+    fetchMock.mockResolvedValueOnce(response(session())).mockResolvedValueOnce(response(session()));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByRole("button", { name: "Admin session" })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "dark");
+    expect(screen.getByRole("button", { name: "Switch to light mode" })).toBeInTheDocument();
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
+    fireEvent.click(screen.getByRole("button", { name: "Admin session" }));
+    expect(await screen.findByRole("heading", { name: "Sign in to Studio" })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    expect(localStorage.getItem("relayna.studio.theme")).toBe("dark");
+  });
+
+  it.each(["pending", "blocked"] as const)("keeps %s access light with a saved dark workspace", async (status) => {
+    localStorage.setItem("relayna.studio.theme", "dark");
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValueOnce(response(session(status)));
+    render(<StudioAuthProvider><SessionChild /></StudioAuthProvider>);
+    expect(await screen.findByRole("heading", { name: `Access ${status}` })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
+    expect(localStorage.getItem("relayna.studio.theme")).toBe("dark");
+  });
+
   it("renders signed-out, pending, blocked, and active session states", async () => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockResolvedValueOnce(response({ detail: "Studio authentication is required." }, 401));
@@ -106,13 +149,16 @@ describe("StudioAuthProvider", () => {
   });
 
   it("renders a recoverable authorization error", async () => {
+    localStorage.setItem("relayna.studio.theme", "dark");
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockRejectedValueOnce(new Error("Identity provider unavailable")).mockResolvedValueOnce(response(session()));
     render(<StudioAuthProvider><SessionChild /></StudioAuthProvider>);
     expect(await screen.findByRole("heading", { name: "Authorization error" })).toBeInTheDocument();
     expect(screen.getByText("Identity provider unavailable")).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "light");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("button", { name: "Admin session" })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-rn-theme", "dark");
   });
 
   it("renders an authorization callback error from the Studio URL", async () => {

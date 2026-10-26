@@ -691,7 +691,7 @@ const logMessageSurfaceStyle: CSSProperties = {
   borderRadius: 12,
   background: "var(--studio-surface-muted)",
   border: "1px solid var(--studio-border)",
-  fontFamily: "'SFMono-Regular', Menlo, monospace",
+  fontFamily: "var(--rn-font-family-mono)",
   fontSize: 12,
   lineHeight: 1.6,
   minWidth: 0,
@@ -918,7 +918,7 @@ export function InlineCodeBox({ value, minHeight = 180, label }: { value: string
         minHeight,
         maxWidth: "100%",
         resize: "vertical",
-        fontFamily: "'SFMono-Regular', Menlo, monospace",
+        fontFamily: "var(--rn-font-family-mono)",
         fontSize: 12,
         background: "var(--studio-surface-strong)",
       }}

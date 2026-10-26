@@ -104,7 +104,7 @@
 .studio-auth-card img { display: block; width: 220px; max-width: 100%; height: auto; margin: 0 auto; }
 .studio-auth-card h1, .studio-auth-card p { margin: 0; }
 .studio-auth-card p { color: var(--studio-text-muted); line-height: 1.6; }
-.studio-auth-eyebrow { color: var(--studio-primary-strong); font-size: 12px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; }
+.studio-auth-eyebrow { color: var(--studio-primary-strong); font-size: 12px; font-weight: 500; letter-spacing: normal; text-transform: uppercase; }
 .studio-auth-button { display: inline-flex; justify-content: center; border: 0; border-radius: 14px; padding: 12px 16px; background: var(--studio-primary); color: var(--studio-primary-contrast); font: inherit; font-weight: 500; text-decoration: none; cursor: pointer; }
 .studio-permission-banner { align-items: center; background: var(--studio-warning-soft); border-bottom: 1px solid var(--studio-warning); color: var(--studio-warning); display: flex; gap: 16px; justify-content: space-between; padding: 10px 24px; }
 .studio-permission-banner button { background: transparent; border: 1px solid currentColor; border-radius: 999px; color: inherit; cursor: pointer; padding: 4px 10px; }
@@ -114,7 +114,6 @@
 .studio-user-menu small { color: var(--studio-text-muted); }
 .studio-user-menu button { border: 1px solid var(--studio-border); border-radius: 10px; padding: 7px 10px; background: var(--studio-surface); color: var(--studio-text); cursor: pointer; }
 
-.studio-auth-tools { display: flex; justify-content: flex-end; }
 .studio-theme-toggle,
 .studio-user-menu .studio-theme-toggle {
   display: inline-grid;
@@ -161,9 +160,15 @@ body {
   font-family: var(--rn-font-family-sans);
   font-size: 14px;
   font-synthesis: none;
+  font-variant-numeric: tabular-nums;
   line-height: var(--rn-line-height-body);
   color: var(--studio-text);
   background: var(--studio-background);
+}
+
+code,
+pre {
+  font-family: var(--rn-font-family-mono);
 }
 
 button,
@@ -368,7 +373,7 @@ button:hover {
   color: var(--studio-text-muted);
   font-size: 0.72rem;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: normal;
   text-transform: uppercase;
 }
 
@@ -466,7 +471,7 @@ button:hover {
   color: var(--studio-text-soft);
   font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: normal;
   text-transform: uppercase;
 }
 
@@ -767,7 +772,7 @@ button:hover {
   color: var(--studio-text-soft);
   font-size: 0.62rem;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: normal;
   text-transform: uppercase;
 }
 
@@ -1321,7 +1326,7 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 4px; }
 .monitor-log-toolbar input { width: 100px; }
 .monitor-log-toolbar button[aria-pressed="true"] { border-color: var(--studio-secondary-strong); color: var(--studio-secondary-strong); background: var(--studio-surface-muted); }
 .monitor-log-scroll { min-width: 0; max-height: 680px; min-height: 340px; overflow: auto; flex: 1; scrollbar-gutter: stable; }
-.monitor-log-table { width: 100%; border-collapse: collapse; font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.monitor-log-table { width: 100%; border-collapse: collapse; font: 12px/1.65 var(--rn-font-family-mono); }
 .monitor-log-table th { text-align: left; font: 500 12px/1.5 var(--rn-font-family-sans); position: sticky; top: 0; z-index: 2; background: var(--studio-surface); }
 .monitor-log-table td, .monitor-log-table th { padding: 3px 12px; border-bottom: 1px solid var(--studio-border); vertical-align: top; }
 .monitor-log-table td:first-child { white-space: nowrap; width: 82px; }
@@ -1414,7 +1419,7 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 4px; }
 .monitor-log-detail > header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--studio-border); font-size: 12px; }
 .monitor-log-detail > header button:first-of-type { margin-left: auto; }
 .monitor-log-detail > div { max-height: 200px; overflow: auto; padding: 10px 12px; }
-.monitor-log-detail pre { margin: 0 0 8px; font: 12px/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.monitor-log-detail pre { margin: 0 0 8px; font: 12px/1.6 var(--rn-font-family-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .monitor-log-detail > span { display: block; padding: 0 12px; font-size: 12px; }
 /* Let the log panel set the row height; scroll tasks within the remaining sidebar. */
 .monitor-task-list { flex: 1 1 0; height: 0; min-height: 150px; max-height: none; overflow-y: auto; }
@@ -1476,7 +1481,7 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 4px; }
 .load-review-inputs { display: grid; gap: 12px; }
 .load-review-inputs dt { font-weight: 600; }
 .load-review-inputs dd { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
-.load-output { background: var(--rn-primitive-ink); color: var(--rn-primitive-linen); padding: 20px; border-radius: 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 ui-monospace, monospace; }
+.load-output { background: var(--rn-primitive-ink); color: var(--rn-primitive-linen); padding: 20px; border-radius: 10px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 var(--rn-font-family-mono); }
 .load-task-list { display: grid; gap: 12px; max-height: 360px; overflow: auto; }
 .load-task-list a { display: flex; justify-content: space-between; gap: 12px; overflow-wrap: anywhere; }
 .load-result { border-top: 1px solid var(--studio-border); margin-top: 20px; }

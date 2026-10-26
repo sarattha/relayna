@@ -52,8 +52,8 @@
   --rn-primitive-chart-night-copper: #E6AC7A;
   --rn-primitive-chart-night-blue: #9EBFED;
   --rn-primitive-chart-night-rose: #F09AB8;
-  --rn-font-family-sans: "Relayna Portico", system-ui, sans-serif;
-  --rn-font-family-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --rn-font-family-sans: Manrope, system-ui, sans-serif;
+  --rn-font-family-mono: Manrope, system-ui, sans-serif;
   --rn-font-weight-light: 300;
   --rn-font-weight-regular: 400;
   --rn-font-weight-medium: 500;
@@ -98,7 +98,6 @@
   --rn-motion-lift: -2px;
   --rn-z-index-menu: 20;
   --rn-z-index-sticky: 10;
-  --rn-font-family-round: "Relayna Round", ui-rounded, system-ui, sans-serif;
 }
 :root, [data-rn-theme="light"] {
   --rn-color-canvas: #F7F0E8;

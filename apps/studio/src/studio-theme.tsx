@@ -22,8 +22,9 @@ function savedTheme(): Theme {
   }
 }
 
-export function StudioThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(savedTheme);
+export function StudioThemeProvider({ children, forceLight = false }: { children: ReactNode; forceLight?: boolean }) {
+  const [preference, setTheme] = useState<Theme>(savedTheme);
+  const theme = forceLight ? "light" : preference;
 
   useLayoutEffect(() => {
     document.documentElement.dataset.rnTheme = theme;
@@ -47,6 +48,7 @@ export function StudioThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   function toggle() {
+    if (forceLight) return;
     const next = theme === "light" ? "dark" : "light";
     setTheme(next);
     try {

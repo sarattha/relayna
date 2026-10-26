@@ -1,19 +1,23 @@
 {
   "package": "@relayna/design-system",
-  "version": "0.2.1",
+  "version": "0.4.0",
   "identity": "Natural Connection / Mulberry & Linen",
-  "font": "Relayna Round 0.100",
-  "source": "Owner-supplied relayna-design-system/dist snapshot (2026-10-25)",
+  "font": "Manrope 4.505",
+  "source": "Owner-supplied relayna-design-system/dist snapshot (2026-10-26)",
+  "font_license": "SIL Open Font License 1.1",
   "sha256": {
-    "USAGE-RIGHTS.md": "2cd73db19ca520eebc23b7fc7dd309adf7b196a205c9ad2d9b7f5ccaa5b00037",
-    "banners/relayna-sdk-wide-dark.png": "320fe39e2e2cdbd1d1525b729c877d1da1dc368599d256de43e112da884a914a",
-    "banners/relayna-sdk-wide-light.png": "f0ea54c3ea97049b4168e83f60df6ac1ec589999557c912371f40b6630c0347e",
-    "css/fonts-round.css": "4d254e8535032989c0cf1e0852685b232bc0ebbf47b3c6b1523a1b3ddb561163",
-    "css/tokens.css": "5470cf5c4da1064201161a712ba46a4ff8ae2139934e03ce3da608e3fe8dd7c8",
-    "fonts/RelaynaRound-Variable.woff2": "d848189921682ece1065404e1241e81e090e7658aca8ff6a453a03f1668b8e28",
+    "USAGE-RIGHTS.md": "fe1c3131ef4380a50f0919c69c8e4523d2e12f5957c71c1a82a9db842636ebf1",
+    "banners/relayna-sdk-wide-dark.png": "3655c53d3f822a0ca2742faea192f879daff102d54ce21ba0bfff497d288e37d",
+    "banners/relayna-sdk-wide-light.png": "d7e4837f66ab1c32a387af3f21e33f5f3b4c61cd42cb841c0990c264ccd60a74",
+    "css/fonts.css": "b44538931a04d6ed108eb87c2cec84dc1385c0e45a288ad1188cb2c163798190",
+    "css/tokens.css": "8c8c0eb1d2078fcf65ed11dfafa524fa60accf6adba23998c068c82716c148a5",
+    "fonts/Manrope-Variable.woff2": "30b83738add8c9edd9e3450b98036a9a8fb5668d0cbd4eb0ce5fe6761197f21f",
+    "fonts/OFL.txt": "58172e0c0fac2cda8a37b348164bb55e44b0e69051e557e92b1d3f6910141f7b",
     "logos/mark-dark.svg": "6812dd3cdcfa00d8e504915b4803c32650a1db28cccd12a7a4167ba58b33b525",
     "logos/mark-light.svg": "1c2a3641fd312301c26cb7c7ed500f9d665b573cbc2f3eb1ef2f9cb475d9964e",
-    "logos/relayna-sdk-dark.svg": "8383a3802f3a86e4da887d973f89b1457f8781f240153101ab536c450c9119f9",
-    "logos/relayna-sdk-light.svg": "aecb463ff0ff8ee072d6f24526e8513bb05545b7266afc39888c9b9e6304d8ec"
+    "logos/relayna-sdk-dark.svg": "b47217a4ea9b80aaa004bdb8ff2b8971c302c11725761a9029bd87e5a5f549a1",
+    "logos/relayna-sdk-light.svg": "68404047acf1eb65d838d8df665aa603a33f6559f0b49d94cd6ba83f66c51724",
+    "provenance/manrope-upstream.json": "2c4b29c47c5baf79513a3e76ef58e1907603c6fa1d199576d378834fb6913b3b",
+    "provenance/manrope.json": "4df44456e731f50e3b65eaa6b2a0ced065b4741e1238859947473d774adc722d"
   }
 }

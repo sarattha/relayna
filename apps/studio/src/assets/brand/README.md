@@ -1,23 +1,26 @@
 # Relayna brand assets
 
 Selected, unmodified exports from the owner-supplied `@relayna/design-system`
-0.2.1 package, supplied on 2026-10-25. Identity: Natural Connection / Mulberry &
-Linen; Slim Leaf symbol; Open Signal campaign; Relayna Portico 0.101 variable
-webfonts, upright and italic. Studio's interface uses Portico at the owner's
-request, matching Gateway. The supplied Studio logo is retained as outlined
-artwork. SDK documentation uses its separate Round snapshot.
+0.4.0 package, supplied on 2026-10-26. Identity: Natural Connection / Mulberry &
+Linen; Slim Leaf symbol; Open Signal campaign. The interface, documentation and
+refreshed outlined product lockups use official **Manrope 4.505**, variable
+weights 200–800. The approved Studio tagline remains “Make distributed work
+visible.”
 
-`apps/studio/src/typography.css` declares the consumer's Portico font faces;
-`studio.css` uses the shared `--rn-font-family-sans` token.
+`apps/studio/src/typography.css` imports the unmodified `css/fonts.css`;
+`studio.css` uses the shared sans and code-role tokens. Both roles use Manrope
+as specified by this design-system version. Code preserves whitespace; tables
+use semantic columns and tabular numerals. Use normal tracking and
+`font-synthesis: none`: upstream supplies no italic face. `font-display: swap`
+and system fallbacks keep loading text and unsupported scripts readable.
 
-`manifest.json` records SHA-256 hashes for this snapshot. Generated CSS and
-artwork must remain unchanged. Refresh from the authoritative package exports,
-then update hashes and verify the consuming app. Consumer variable mappings
-belong in authored app styles, outside this directory. The Studio favicon is
-also copied unchanged to `apps/studio/public/favicon.ico`.
+`manifest.json` records SHA-256 hashes. `provenance/manrope.json` records the
+pinned font revision, hashes and lossless WOFF2 conversion evidence. Refresh
+from authoritative exports rather than editing generated CSS or artwork.
+Consumer mappings belong outside this directory. The Studio favicon is copied
+to `apps/studio/public/favicon.ico`.
 
-These assets are intended for Relayna repositories. They have no selected public
-distribution license and are not covered by the repository's software license.
-See [usage and provenance](USAGE-RIGHTS.md). Do not publish them to a font or npm
-registry. This repository contains only the exports needed by the application
-and documentation; it does not vendor the private source design-system package.
+Manrope is licensed under SIL Open Font License 1.1. Keep `fonts/OFL.txt` with
+its font files; the same license is copied to `apps/studio/public/fonts/OFL.txt`
+so production bundles include it. This license is independent of the private
+Relayna artwork/package policy. See [usage and provenance](USAGE-RIGHTS.md).

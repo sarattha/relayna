@@ -5,6 +5,7 @@ repo_url: https://github.com/sarattha/relayna
 repo_name: sarattha/relayna
 theme:
   name: material
+  custom_dir: docs/overrides
   language: en
   logo: assets/brand/logos/mark-light.svg
   favicon: assets/brand/logos/mark-light.svg
@@ -17,9 +18,18 @@ theme:
     - content.code.copy
     - content.code.annotate
   palette:
-    scheme: default
-    primary: white
-    accent: custom
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
   font: false
 nav:
   - Overview: index.md
@@ -27,6 +37,8 @@ nav:
   - Studio Backend: studio-backend.md
   - Studio Persistence: studio-persistence.md
   - Studio Frontend: studio-frontend.md
+  - Studio Recovery Center: studio-recovery-center.md
+  - Studio Reliability Goals: studio-reliability.md
   - Studio Load Testing: studio-load-testing.md
   - Studio Entra Authentication: studio-entra-auth.md
   - Studio Entra Deployment Checklist: studio-entra-deployment-checklist.md
