@@ -20,7 +20,8 @@ Administrators can browse the existing audit endpoint without changing roles.
 - [x] (2026-10-26) Update operational docs and intentional freeze manifests.
 - [x] (2026-10-26) First mandatory verification, frontend tests/build, strict docs and desktop/mobile inspection pass; backend first pass 98.10%, frontend statements 98.00%/branches 89.20%.
 - [x] (2026-10-26) Final verification after review fixes passes: SDK 688 passed/9 skipped; backend 531 passed/22 persistence skips without service variables; full real-service backend coverage 553 passed, 98.29%; frontend 282 tests, build and coverage pass; strict docs pass.
-- [ ] Commit, push, open/link PR against main, perform one extra review, address CI and hand off to coordinator.
+- [x] (2026-10-26) Commit/push and open/link [PR #141](https://github.com/sarattha/relayna/pull/141) against main; one extra review completed and both findings fixed.
+- [ ] GitHub CI/automatic review monitoring and clean idle handoff to coordinator. Stack extension remains coordinator-owned.
 
 ## Surprises & Discoveries
 
@@ -60,7 +61,9 @@ used. Desktop 1440px and mobile 390px evidence cards have no horizontal overflow
 
 ## Outcomes & Retrospective
 
-Implementation, documentation and review fixes are complete; final validation is complete and PR delivery is in progress. Extra review allowance: used by one bounded delegated Codex review, task
+Implementation, documentation and review fixes are complete; final validation is complete and [PR #141](https://github.com/sarattha/relayna/pull/141)
+is open against main. GitHub CI and automatic review are pending. The coordinator
+was notified; the checkout is committed and clean for later restacking. Extra review allowance: used by one bounded delegated Codex review, task
 `feature07-review-01-20261026`, gpt-6.1-sol, xhigh/priority. Review complete: two P2 findings (zero-cap sample admission and future timestamp
 lag) fixed with regressions. No additional review rounds or @codex request will
 be made.
