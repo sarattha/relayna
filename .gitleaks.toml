@@ -50,4 +50,5 @@ paths = [
 regexTarget = "line"
 regexes = [
     '''^\s*"css/tokens\.css": "5470cf5c4da1064201161a712ba46a4ff8ae2139934e03ce3da608e3fe8dd7c8",?\s*$''',
+    '''^\s*"css/tokens\.css": "8c8c0eb1d2078fcf65ed11dfafa524fa60accf6adba23998c068c82716c148a5",?\s*$''',
 ]

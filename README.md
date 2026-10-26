@@ -39,13 +39,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.12.0/relayna-1.12.0-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.11.0/relayna-1.11.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.12.0/relayna-1.12.0.tar.gz
 ```
 
 For local development in this repository:
@@ -252,7 +252,17 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.11.0`, and the backend requires `relayna>=1.11.0`.
+release version is `1.12.0`, and the backend requires `relayna>=1.12.0`.
+
+Version 1.12.0 adds Incident Inbox, Recovery Center, Queue & Worker Cockpit,
+Reliability Goals & Alert Routing, Integration Doctor & Studio Health, and the
+Manrope brand/theme update. The combined Studio upgrade requires PostgreSQL
+revisions `0002_load_profiles -> 0003_incident_inbox -> 0003_recovery`; use a
+maintenance window and matching SDK/backend/frontend versions. Follow the
+[release upgrade and rollback guide](docs/releases.md#upgrading-to-1120),
+including the distinction between a Recovery-only downgrade and full rollback
+to published 1.11.0. Upstream providers and periodic liveness instrumentation
+remain required where documented; missing data is not a healthy result.
 
 If you are migrating an existing v1 codebase, use the dedicated guide:
 [docs/migration-v1-to-v2.md](docs/migration-v1-to-v2.md).

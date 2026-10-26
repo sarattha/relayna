@@ -11,6 +11,10 @@ light for first-time visitors, including dark-system visitors, and retains an
 explicit light/dark toggle and saved preference. Logos, banners and typography
 come from exact current exports rather than redesigned consumer assets.
 
+The resumed release instruction also prepares coordinated v1.12.0 metadata,
+changelog and operational docs for the entire six-layer delivery. The coordinator
+owns native stack append, readiness audit, ordered merge and tag/release publication.
+
 ## Progress
 
 - [x] (2026-10-26) Confirm prepared branch and stable original parent c4a4d084adfeccbdbc3b44c718d0624324701afd.
@@ -20,7 +24,11 @@ come from exact current exports rather than redesigned consumer assets.
 - [x] (2026-10-26) Replace obsolete work with exact Manrope font, CSS, tokens, logos, SDK banners, favicon, provenance and OFL.
 - [x] (2026-10-26) Implement auth light isolation and docs light default/manual toggle with focused regression coverage.
 - [x] (2026-10-26) Pass current frontend tests/coverage/build, strict docs build, asset checks and responsive visual QA for Manrope.
-- [ ] Commit/push, open/register PR against feat/studio-integration-doctor and handle automatic CI/review.
+- [x] (2026-10-26) Commit/push and open/register PR #142 against feat/studio-integration-doctor.
+- [x] (2026-10-26) Prepare coordinated v1.12.0 metadata/locks, changelog, migration/rollback and release docs for all six layers.
+- [x] (2026-10-26) Fix verified public-checksum Gitleaks false positives; pinned history scan and five positive/negative canaries pass.
+- [x] (2026-10-27) Pass full code-change-verification, SDK/backend coverage, package/tag/lock metadata, frontend coverage/build, strict docs and rollback checks.
+- [ ] Handle automatic CI/review on the final head and hand off release readiness.
 - [ ] Hand clean stable branch to coordinator for native stack append.
 
 ## Surprises & Discoveries
@@ -39,8 +47,35 @@ come from exact current exports rather than redesigned consumer assets.
 - Previous T3 screenshots timed out twice with `Preview automation snapshot
   timed out after 15000ms.` Current visual QA must try T3 first and may use the
   documented Playwright fallback if the same failure persists.
+- Release verification uses isolated task-owned PostgreSQL/Redis. The empty
+  database correctly failed the exact-schema readiness fixture until migrated;
+  install backend dev tools in the selected Python 3.13 environment and apply
+  `upgrade head` before the final full-stack rerun. No schema checks were weakened.
+- Backend coverage exposed two untested failure paths near the existing 98%
+  gate. Add regressions proving a deleted service is rejected before its former
+  provider is queried and invalid metric timestamps do not erase valid independent
+  queue/worker evidence. Runtime behavior and coverage thresholds stay unchanged.
 
 ## Decision Log
+
+- Decision: Prepare coordinated minor v1.12.0 using the published v1.11.0 notes
+  and release workflow as structure. Update package/dependency/lock versions and
+  freeze labels only, retaining every previously approved contract entry. Runtime
+  SDK version is derived from package metadata; no runtime version constant needs
+  a new API. Preserve historical notes, screenshot versions and external Chamber
+  version requirements. Full verification is now mandatory because packaging and
+  freeze tests are touched. Date/Author: 2026-10-26 / Codex.
+- Decision: The combined release requires PostgreSQL migrations
+  `0002_load_profiles -> 0003_incident_inbox -> 0003_recovery`. A Recovery-only
+  downgrade to `0003_incident_inbox` removes only Recovery data and requires a
+  backend built for that head; it is not a rollback to published v1.11.0, which
+  expects `0002_load_profiles`. Document full rollback data loss explicitly.
+  Date/Author: 2026-10-26 / Codex.
+- Decision: CI's two Gitleaks findings are exact public token-CSS digests, verified
+  against source bytes. Extend the existing inherited generic-rule AND allowlist
+  for only the new digest on the two manifest paths; retain real-token detection.
+  Validate pinned 8.24.3 history scanning and positive/negative canaries.
+  Date/Author: 2026-10-26 / Codex.
 
 - Decision: Use exact current 0.4.0 exports and pinned font provenance. Copy only
   consumed artwork and the WOFF2 face, preserve generated CSS/artwork, and ship
@@ -67,6 +102,24 @@ come from exact current exports rather than redesigned consumer assets.
   Date/Author: 2026-10-26 / Codex.
 
 ## Outcomes & Retrospective
+
+Coordinated v1.12.0 release preparation is complete. All package/runtime versions,
+backend SDK floor and locks align; seven freeze labels advance with identical
+approved contents. Full verification passes with 704 SDK tests (nine existing
+environment skips) and 664 backend tests on task-owned PostgreSQL/Redis. SDK
+coverage passes at the reported 98%, backend reaches 98.04%, and current frontend
+checks retain 370 passing tests and the metrics below. Two focused failure-path
+regressions improved the combined backend gate without changing runtime behavior.
+
+SDK wheel/sdist and backend wheel metadata/builds and Twine pass (backend retains
+its existing optional long-description warnings). The positional v1.12.0 tag
+validator, both lock checks, runtime package versions, dependency audits, pinned
+Gitleaks 8.24.3 history scan and five canaries pass. Strict docs and rendered
+anchor checks pass. Disposable migration upgrade/downgrade/base/upgrade and both
+documented rollback targets passed: Recovery-only preserves Incident/load
+profiles; published 1.11.0 rollback also removes Incident; re-upgrade returns
+`0003_recovery`. The final PR head remains subject to hosted CI/automatic review
+before the coordinator appends the native stack, merges and publishes.
 
 The Manrope revision passes all 370 frontend tests, all seven Node tooling
 tests, the production build and strict MkDocs build. Coverage is 98.06%
@@ -106,9 +159,13 @@ Latest release comparison: v1.11.0; strict freeze baseline: v1.4.30. The user
 explicitly authorizes typography, branding and theme changes to presentation.
 SDK exports, frontend API/types, routes, backend behavior, server persistence
 and wire formats remain intact. Preserve `relayna.studio.theme` and Material's
-supported palette preference. No freeze manifest updates, shims or migrations.
-Python code-change-verification is not triggered unless SDK/backend runtime,
-tests or their build/test tooling are touched; this change is frontend/docs.
+supported palette preference. The typography layer needs no shims or migrations; combined release requirements
+are recorded below.
+Release preparation intentionally advances freeze labels to v1.12.0 without
+changing approved entries. The five inherited features already contain their
+authorized additive SDK/Studio contracts and Incident/Recovery migrations.
+The combined release therefore requires the documented database upgrade. Run
+the complete code-change-verification skill and rebuild both Python packages.
 
 ## Plan of Work
 
@@ -128,6 +185,19 @@ Run from the prepared worktree with Node ^24.22.1 and Python 3.13:
     make -C apps/studio coverage
     make -C apps/studio build
     uv run --extra dev mkdocs build --strict
+
+For release preparation also run:
+
+    bash .codex/skills/code-change-verification/scripts/run.sh
+    uv run python scripts/validate-release-metadata.py v1.12.0
+    uv build
+    make -C studio/backend build
+    uv run twine check dist/* studio/backend/dist/*
+
+The metadata script accepts a positional tag, not `--tag`. Use isolated task-owned
+PostgreSQL/Redis for backend integration and migration-cycle checks; never use a
+sibling's database. Compare freeze JSON after removing only `freeze_version` to
+the parent/first-head manifests to prove approved entries remain identical.
 
 Use T3 preview first, then the documented fallback when necessary. QA fixtures
 may intercept session/service responses, but never ship bypasses or demo data.

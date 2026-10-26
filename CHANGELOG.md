@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.12.0 - 2026-10-27
+
+### Added
+
+- Incident Inbox groups retained terminal failures by stable service/environment
+  identity, with ownership, lifecycle, revision-checked merge/split corrections,
+  and transactional history/audit records. Live evidence counts retain unknowns.
+- Recovery Center previews exact failure selections and saves durable, explicitly
+  authorized retry batches with per-plan pacing, pause/resume/stop controls and
+  outcome reports. Ambiguous acceptance is never automatically resent; an
+  accepted request is not counted as recovered without fresh terminal evidence.
+- Queue & Worker Cockpit combines scoped queue pressure, worker/task activity,
+  lease freshness and optional Prometheus evidence. Source failures stay visible;
+  task-boundary timestamps never prove periodic worker liveness. Drain estimates
+  require fresh queue-scoped backlog and matching rates from the same window.
+- Reliability Goals & Alert Routing adds scoped goals, evidence previews,
+  Prometheus/Alertmanager configuration exports and authenticated delivery
+  receipts. Operators deploy rules through their existing workflow; saving a
+  goal does not install rules. Periodic liveness and mature business-cohort goals
+  require the documented external aggregates and freshness watermarks.
+- Integration Doctor & Studio Health separates dependency readiness, loop
+  scheduling, outbox/ingestion evidence, provider configuration and notification
+  delivery. Bounded administrator live checks and audit browsing preserve
+  disabled, empty, stale, unknown, unconfigured and unavailable states.
+
+### Changed
+
+- Adopt exact design-system 0.4.0 Manrope 4.505 font, tokens, outlined logos and
+  SDK banners across Studio, documentation and repository branding. Distribute
+  the official font's SIL OFL 1.1 license and pinned provenance. Both sans and
+  code roles follow Manrope; whitespace, structural columns and tabular numerals
+  preserve code/table usability. Approved tagline wording is unchanged.
+- Keep Studio login/loading/access gates light without overwriting the saved
+  authenticated workspace choice. Documentation defaults to light even under a
+  dark system setting, retains an explicit saved light/dark toggle, and selects
+  matching logo/banner colorways before rendering.
+- Coordinate SDK, backend, frontend, dependency floors, locks and freeze-version
+  labels at 1.12.0. Preserve all previously approved contract entries. Existing
+  collectors and response fields remain compatible; optional queue observations
+  and the approved Studio APIs extend the released perimeter. SDK broker/Redis
+  wire formats are unchanged.
+
+### Upgrade and rollback
+
+- The combined release requires PostgreSQL migration from
+  `0002_load_profiles` through `0003_incident_inbox` to `0003_recovery`. Stop old
+  backend replicas, back up PostgreSQL/Redis and settings encryption keys, migrate,
+  then deploy matching 1.12.0 packages/images. Backends require their exact schema
+  head; mixed-version rolling deployment is unsupported across this boundary.
+- Recovery-only rollback to `0003_incident_inbox` drops recovery plans/claims,
+  preserves Incident Inbox, and requires a backend built for that intermediate
+  head. Returning to published 1.11.0 additionally removes Incident Inbox tables
+  by downgrading to `0002_load_profiles`. Export/backup both features first,
+  resolve in-flight/unknown dispatches without blind retries, and stop every
+  recovery worker before downgrade. See the release guide for exact procedures.
+
 ## 1.11.0 - 2026-10-25
 
 ### Added

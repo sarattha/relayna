@@ -25,7 +25,12 @@ from relayna_studio._reliability import (
 )
 from relayna_studio.auth import StudioMemberStatus, StudioRole
 from relayna_studio.database import PostgresFailedTaskEmailSettingsStore, StudioDatabase, metadata, services
-from relayna_studio.registry import PrometheusMetricsConfig, ServiceRecord, StudioOutboundUrlPolicy
+from relayna_studio.registry import (
+    PrometheusMetricsConfig,
+    ServiceNotFoundError,
+    ServiceRecord,
+    StudioOutboundUrlPolicy,
+)
 
 NOW = datetime(2026, 10, 25, 12, tzinfo=UTC)
 
@@ -154,6 +159,22 @@ async def test_preview_never_substitutes_failed_provider_or_unconfirmed_scope_fo
     assert (await _preview(rt, goal()))["state"] == "unavailable"
     assert (await _preview(rt, goal(kind="retry_activity", runtime_scope_confirmed=False)))["state"] == "unsupported"
     await rt.http_client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_preview_rejects_a_removed_service_before_querying_its_provider():
+    def unexpected_query(request):
+        raise AssertionError("A removed service must not query its former provider")
+
+    rt = runtime(unexpected_query)
+    rt.registry_service.get_service.side_effect = ServiceNotFoundError("Service no longer exists")
+    try:
+        with pytest.raises(HTTPException) as failure:
+            await _preview(rt, goal())
+        assert failure.value.status_code == 404
+        assert failure.value.detail == "Service no longer exists"
+    finally:
+        await rt.http_client.aclose()
 
 
 @pytest.mark.asyncio

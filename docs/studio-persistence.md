@@ -1,6 +1,6 @@
 # Studio PostgreSQL and Redis persistence
 
-Relayna Studio 1.6.0 uses PostgreSQL and Redis together. PostgreSQL is the
+Since 1.6.0, Relayna Studio uses PostgreSQL and Redis together. PostgreSQL is the
 authoritative system of record for the Studio control plane. Redis remains a
 required low-latency transport and ephemeral-state service. This change is
 limited to Studio: Relayna SDK service runtimes continue to use their existing
@@ -62,7 +62,7 @@ the same operation can be a one-shot deployment job:
 ```bash
 docker run --rm \
   -e RELAYNA_STUDIO_DATABASE_URL="$RELAYNA_STUDIO_DATABASE_URL" \
-  ghcr.io/sarattha/relayna-studio-backend:1.6.0 \
+  ghcr.io/sarattha/relayna-studio-backend:1.12.0 \
   alembic upgrade head
 ```
 
@@ -73,6 +73,37 @@ real PostgreSQL. Never edit a revision after it has shipped.
 
 The initial downgrade removes every Studio PostgreSQL table and is therefore
 destructive. `make db-migration-cycle` is reserved for disposable databases.
+
+## Release 1.12.0 schema upgrade and rollback
+
+The coordinated 1.12.0 release requires the full chain
+`0002_load_profiles -> 0003_incident_inbox -> 0003_recovery`.
+The current backend expects exactly `0003_recovery`; 1.11.0 expects exactly
+`0002_load_profiles`. Stop old backends in a maintenance window, back up both
+stores and the settings encryption key, run `make -C studio/backend db-upgrade`,
+confirm the head, then start only matching 1.12.0 backends/frontends. No mixed
+schema-version rollout or automatic startup migration is supported.
+
+Before downgrading, stop every backend/recovery worker, export Recovery reports
+and Incident state/history, and reconcile accepted or ambiguous dispatch with
+upstream services. Downgrade does not undo published retries. From
+`studio/backend`, with `RELAYNA_STUDIO_DATABASE_URL` set:
+
+```bash
+# Recovery-only: drops recovery plans/claims, keeps Incident Inbox.
+uv run alembic downgrade 0003_incident_inbox
+# Full rollback to published 1.11.0: also drops Incident Inbox tables/history.
+uv run alembic downgrade 0002_load_profiles
+```
+
+Choose the target appropriate to the rollback, rather than running both by
+default. Recovery-only rollback requires a deliberately built intermediate
+backend expecting `0003_incident_inbox`; neither released 1.11.0 nor 1.12.0 accepts
+that head. For published 1.11.0 restore matching packages/images only after the
+database reaches `0002_load_profiles`. Load profiles and earlier tables remain;
+dropped Incident/Recovery data needs a backup to recover. Stop exported reliability
+callbacks/rules when rolling back to a version without that endpoint. See the
+[release procedure](releases.md#upgrading-to-1120) for the complete checklist.
 
 ## Incident Inbox state
 
@@ -103,8 +134,10 @@ budget their growth alongside the unpruned operator audit log. Do not reuse
 service/failure identities for different external records; split overrides refer
 to their exact environment/service/failure identity.
 
-The supported one-revision downgrade removes only the three incident tables and
-the history trigger/function, preserving older Studio data. It permanently loses
+An explicit downgrade from `0003_incident_inbox` to `0002_load_profiles` removes
+only the three incident tables and history trigger/function, preserving older
+Studio data. From the combined `0003_recovery` head, a one-revision downgrade
+removes Recovery only and leaves Incident Inbox. Removing Incident permanently loses
 incident ownership, lifecycle/history, and manual corrections. Export/backup
 those tables before downgrading, and restore the matching backend/schema as a
 coordinated operation. Upgrade/downgrade/upgrade was exercised on disposable
