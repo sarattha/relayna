@@ -1096,3 +1096,14 @@ retry/DLQ rates, active tasks and handler p95. A group failure preserves other
 groups and emits a warning. These are service-scoped readings, not queue-scoped
 capacity rates. The cockpit does not treat event retention/search counts as
 backlog or use task-start/publish rates for drain calculations.
+
+## Reliability goals and alert routing
+
+The optional `RELAYNA_STUDIO_RELIABILITY_WEBHOOK_TOKEN` enables a dedicated bearer-
+authenticated Alertmanager callback at `/studio/ingest/reliability-alerts`. Goal
+configuration and delivery receipts use existing PostgreSQL operator settings;
+no migration is needed. See [Reliability goals](studio-reliability.md) for rule
+export/deployment, shared email routing, evidence states and instrumentation contracts.
+
+`RELAYNA_STUDIO_RELIABILITY_PUBLIC_URL` optionally supplies the public HTTP(S)
+origin for clickable reliability email and alert links (no path or credentials).

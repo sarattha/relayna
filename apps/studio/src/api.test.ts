@@ -476,3 +476,23 @@ it("reads cockpit evidence through the shared client with encoded service identi
   expect(response.service_id).toBe("service/id");
   expect(fetchMock.mock.calls[0][0]).toBe("/studio/services/service%2Fid/runtime/cockpit");
 });
+
+it("scopes reliability reads and encodes goal mutations through the shared request client", async () => {
+  const api = await import("./api");
+  const fetcher = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ items: [], deleted: true })));
+  vi.stubGlobal("fetch", fetcher);
+  await api.fetchReliabilityGoals();
+  expect(fetcher.mock.calls[0][0]).toBe("/studio/reliability/goals?");
+  await api.fetchReliabilityGoals({ service_id: "orders/api", environment: "prod eu" });
+  expect(fetcher.mock.calls[1][0]).toBe("/studio/reliability/goals?service_id=orders%2Fapi&environment=prod+eu");
+  const payload = { service_id: "orders", environment: "prod", name: "Retries", owner: "owner", kind: "retry_activity" as const, threshold: 10, window_seconds: 300, deadline_seconds: 120, freshness_seconds: 180, hold_seconds: 0, runtime_scope_confirmed: true, receivers: ["owner@example.com"] };
+  await api.createReliabilityGoal(payload);
+  expect(fetcher.mock.calls[2][1]).toMatchObject({ method: "POST", body: JSON.stringify(payload) });
+  await api.deleteReliabilityGoal("goal/id");
+  expect(fetcher.mock.calls[3][0]).toBe("/studio/reliability/goals/goal%2Fid");
+  expect(fetcher.mock.calls[3][1]).toMatchObject({ method: "DELETE" });
+  await api.previewReliabilityGoal("goal/id");
+  expect(fetcher.mock.calls[4][0]).toBe("/studio/reliability/goals/goal%2Fid/preview");
+  await api.exportReliabilityGoal("goal/id");
+  expect(fetcher.mock.calls[5][0]).toBe("/studio/reliability/goals/goal%2Fid/export");
+});

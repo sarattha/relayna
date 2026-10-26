@@ -954,3 +954,24 @@ export type CockpitResponse = {
     rate_window_seconds: number; scope: string;
   } | null;
 };
+
+export type ReliabilityGoalKind = "backlog_age" | "retry_activity" | "stale_leases" | "missing_worker" | "completion_success" | "end_to_end_latency";
+export type ReliabilityGoalInput = {
+  service_id: string; environment: string; name: string; owner: string; kind: ReliabilityGoalKind;
+  threshold: number; window_seconds: number; deadline_seconds: number; freshness_seconds: number;
+  hold_seconds: number; runtime_scope_confirmed: boolean; receivers: string[];
+};
+export type ReliabilityGoal = ReliabilityGoalInput & { id: string; revision: string; created_at: string };
+export type ReliabilityDelivery = {
+  state?: string; detail?: string | null; received?: number; duplicates?: number; sent?: number;
+  last_received_at?: string; alert_started_at?: string; investigation_url?: string;
+};
+export type ReliabilityGoalList = {
+  configured: boolean; webhook_configured: boolean; email_configured: boolean;
+  items: { goal: ReliabilityGoal; delivery: ReliabilityDelivery }[];
+};
+export type ReliabilityPreview = {
+  state: "unavailable" | "unsupported" | "no_data" | "stale" | "insufficient" | "observed" | "breaching";
+  evaluated_at: string; from: string; to: string; value: number | null; good: number | null; eligible: number | null;
+  detail: string; investigation_url: string; queries?: Record<string, string>;
+};

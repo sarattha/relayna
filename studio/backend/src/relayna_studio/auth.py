@@ -538,6 +538,7 @@ class StudioAuthMiddleware:
             "/studio/auth/callback",
             "/studio/gateway/services",
             "/studio/ingest/events",
+            "/studio/ingest/reliability-alerts",
             "/metrics",
             "/healthz",
             "/readyz",

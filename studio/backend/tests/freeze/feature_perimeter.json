@@ -4,6 +4,8 @@
     "Recovery Center (explicitly approved production perimeter)": ["studio/backend/tests/test_studio_recovery.py"],
 
     "queue and worker cockpit (approved feature 03 perimeter)": ["studio/backend/tests/test_studio_cockpit.py"],
+
+    "reliability goals and alert routing (explicit user freeze exception)": ["studio/backend/tests/test_studio_reliability.py"],
     "operator login (approved sandbox perimeter)": ["studio/backend/tests/test_operator_auth.py"],
     "asgi app": ["studio/backend/tests/test_asgi.py"],
     "authentication and access control": ["studio/backend/tests/test_studio_auth.py"],

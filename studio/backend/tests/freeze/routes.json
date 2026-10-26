@@ -39,6 +39,13 @@
     {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "get", "path_expression": "'/studio/recovery/plans'"},
     {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "get", "path_expression": "'/studio/recovery/plans/{plan_id}'"},
     {"file": "studio/backend/src/relayna_studio/_recovery.py", "method": "post", "path_expression": "'/studio/recovery/plans/{plan_id}/control'"},
+
+    {"file": "studio/backend/src/relayna_studio/_reliability.py", "method": "get", "path_expression": "'/studio/reliability/goals'"},
+    {"file": "studio/backend/src/relayna_studio/_reliability.py", "method": "post", "path_expression": "'/studio/reliability/goals'"},
+    {"file": "studio/backend/src/relayna_studio/_reliability.py", "method": "delete", "path_expression": "'/studio/reliability/goals/{goal_id}'"},
+    {"file": "studio/backend/src/relayna_studio/_reliability.py", "method": "get", "path_expression": "'/studio/reliability/goals/{goal_id}/preview'"},
+    {"file": "studio/backend/src/relayna_studio/_reliability.py", "method": "get", "path_expression": "'/studio/reliability/goals/{goal_id}/export'"},
+    {"file": "studio/backend/src/relayna_studio/_reliability.py", "method": "post", "path_expression": "'/studio/ingest/reliability-alerts'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/config'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/login'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/auth/callback'"},

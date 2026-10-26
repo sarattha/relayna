@@ -14,6 +14,7 @@ from relayna.metrics import RelaynaMetrics, create_metrics_router
 
 from ._incidents import _create_incident_router
 from ._recovery import _create_recovery_router, _RecoveryService
+from ._reliability import _create_reliability_router
 from .auth import (
     StudioAuthMiddleware,
     StudioAuthService,
@@ -648,6 +649,8 @@ def create_studio_app(
     failed_task_email_title_prefix: str = "[Relayna] Failed task",
     failed_task_email_batch_wait_seconds: int = 0,
     entra_config: StudioEntraConfig | None = None,
+    reliability_webhook_token: str | None = None,
+    reliability_public_url: str | None = None,
 ) -> FastAPI:
     resolved_capability_fetcher = capability_fetcher or HttpCapabilityFetcher(
         allowed_hosts=capability_refresh_allowed_hosts,
@@ -727,6 +730,7 @@ def create_studio_app(
             database=runtime.database,
         )
     )
+    app.include_router(_create_reliability_router(runtime, reliability_webhook_token, reliability_public_url))
     app.include_router(create_studio_logs_router(log_query_service=runtime.log_query_service))
     app.include_router(create_studio_metrics_router(metrics_query_service=runtime.metrics_query_service))
     app.include_router(create_studio_traces_router(trace_query_service=runtime.trace_query_service))
