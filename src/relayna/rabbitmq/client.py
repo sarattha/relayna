@@ -401,10 +401,12 @@ class RelaynaRabbitClient:
             channel = await self.acquire_channel(prefetch=1)
             queue = await channel.declare_queue(queue_name, durable=True, passive=True)
             result = getattr(queue, "declaration_result", None)
+            if result is None or result.message_count is None or result.consumer_count is None:
+                return None
             return QueueInspection(
                 queue_name=queue_name,
-                message_count=int(getattr(result, "message_count", 0)),
-                consumer_count=int(getattr(result, "consumer_count", 0)),
+                message_count=int(result.message_count),
+                consumer_count=int(result.consumer_count),
             )
         except Exception:
             return None

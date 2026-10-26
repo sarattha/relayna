@@ -46,6 +46,7 @@
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "post", "path_expression": "f'{prefix}/auth/logout'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "get", "path_expression": "f'{prefix}/admin/users'"},
     {"file": "studio/backend/src/relayna_studio/auth.py", "method": "patch", "path_expression": "f'{prefix}/admin/users/{{user_id}}'"},
+    {"file": "studio/backend/src/relayna_studio/cockpit.py", "method": "get", "path_expression": "'/studio/services/{service_id}/runtime/cockpit'"},
     {"file": "studio/backend/src/relayna_studio/database.py", "method": "get", "path_expression": "f'{prefix}/audit'"},
     {"file": "studio/backend/src/relayna_studio/database.py", "method": "get", "path_expression": "'/livez'"},
     {"file": "studio/backend/src/relayna_studio/database.py", "method": "get", "path_expression": "'/healthz'"},

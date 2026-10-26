@@ -947,3 +947,43 @@ Tasks**, previews eligibility and overrides, and provides small-batch execution,
 pause/resume/stop, and linked outcome reports. See [Recovery Center](studio-recovery-center.md)
 for execution semantics and the distinction between accepted retries and observed
 completion. Recovery dispatch requires an administrator and PostgreSQL.
+
+## Queue & Worker Cockpit
+
+Open **Queues & Workers** (`/queues`) or use the shortcut on a service page.
+The global environment selector and the cockpit service selector constrain all
+reads and investigation links. The page refreshes every 30 seconds while visible;
+**Refresh evidence** rereads the current scope. Up to four services are read at
+once. Read-only members can use this diagnostic workspace.
+
+Each service shows independent pressure, worker and metrics source states. A
+successful service snapshot can contain unsupported, unavailable or partial
+sources. Empty worker records do not establish absent consumers; only an observed
+queue consumer count of zero does. Historical or unavailable values never become
+zero. Queue/source observations are not summed across providers or services.
+
+Queue cards show ready and unacknowledged counts, consumers, oldest-message age,
+and queue arrival/completion rates only when supplied. Drain estimates require
+fresh ready + unacknowledged backlog and compatible rates for the same queue and
+source, with an explicit rate window. If arrival meets/exceeds completion, the
+card says **Not draining**. Otherwise the estimate is backlog divided by net
+completion rate; it assumes constant rates. Missing inputs produce **Unknown**.
+SDK publish/start metrics are not substituted for broker arrivals/completions.
+
+Worker source timestamps expire independently of the configured heartbeat
+tolerance; cached worker and lease labels stop claiming freshness when their
+source ages out, including during a pending refresh. Timezone-less timestamps
+cannot establish freshness, and lease labels preserve the backend verdict.
+
+Worker cards show the provider's running flag and the age of its reported
+heartbeat/activity timestamp independently. Periodic liveness remains **Unknown**:
+the current worker-health contract does not declare heartbeat cadence, and SDK
+task-activity timestamps advance at task boundaries. An idle or long-running
+healthy worker can have an older timestamp. Old/missing activity is never an
+absence verdict. A current source read is evidence availability, not proof that
+every worker is alive. Lease owner, acquisition, heartbeat, expiry, stage and
+attempt remain visible, including expired leases on a worker that reports running. Lease/task links open existing investigations.
+Service-scoped handler p95 and active-task metrics help investigate slow handlers;
+lease age alone is not a latency verdict. Retry and DLQ trends cover the last
+15 minutes using 5-minute Prometheus rate windows, preserve missing samples, and
+link to Failed Tasks and DLQ investigation. No runtime operations are provided.

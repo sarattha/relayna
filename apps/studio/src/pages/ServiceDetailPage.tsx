@@ -1092,6 +1092,7 @@ export function ServiceDetailPage() {
             <StudioIcon name="topology" />
             Topology
           </Link>
+          <Link to={`/queues?service_id=${encodeURIComponent(service.service_id)}`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>Queues & Workers</Link>
           <Link to={`/services/${encodeURIComponent(service.service_id)}/load-tests`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>Load testing</Link>
           <Link to={`/services/${encodeURIComponent(service.service_id)}/dlq`} style={{ ...secondaryButtonStyle, textDecoration: "none" }}>
             <StudioIcon name="dlq" />

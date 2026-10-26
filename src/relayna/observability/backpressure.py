@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -33,9 +34,29 @@ class RuntimePressureSignal(BaseModel):
     recommended_action: str | None = None
 
 
+class RuntimeQueueObservation(BaseModel):
+    """One queue and source; rates must describe the same backlog and window.
+
+    Null means the source does not expose the measurement. Completion means
+    work leaving this queue's ready + unacknowledged backlog, not delivery.
+    """
+
+    queue_name: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    observed_at: datetime
+    ready: int | None = Field(default=None, ge=0)
+    unacknowledged: int | None = Field(default=None, ge=0)
+    consumers: int | None = Field(default=None, ge=0)
+    oldest_message_age_seconds: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    arrival_rate: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    completion_rate: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    rate_window_seconds: int | None = Field(default=None, gt=0)
+
+
 class RuntimePressureSnapshot(BaseModel):
     reported_at: datetime = Field(default_factory=_utcnow)
     signals: list[RuntimePressureSignal] = Field(default_factory=list)
+    queues: list[RuntimeQueueObservation] = Field(default_factory=list)
 
 
 class PressureSignalCollector(Protocol):
@@ -73,28 +94,36 @@ class RuntimePressureService:
         self._max_concurrency = max_concurrency
 
     async def snapshot(self) -> RuntimePressureSnapshot:
-        async def collect(collector: PressureSignalCollector) -> list[RuntimePressureSignal]:
+        async def collect(collector: PressureSignalCollector) -> RuntimePressureSnapshot:
             try:
-                return list(await collector.collect())
+                # Optional richer read protocol; collect-only providers remain supported.
+                snapshot_provider = getattr(collector, "collect_snapshot", None)
+                if callable(snapshot_provider):
+                    return RuntimePressureSnapshot.model_validate(await snapshot_provider())
+                return RuntimePressureSnapshot(signals=list(await collector.collect()))
             except Exception as exc:
-                return [
-                    RuntimePressureSignal(
-                        scope="collector",
-                        scope_id=type(collector).__name__,
-                        kind="pressure_collector_unavailable",
-                        severity=PressureSeverity.UNKNOWN,
-                        reason=str(exc),
-                        recommended_action="Inspect the pressure signal collector configuration.",
-                    )
-                ]
+                return RuntimePressureSnapshot(
+                    signals=[
+                        RuntimePressureSignal(
+                            scope="collector",
+                            scope_id=type(collector).__name__,
+                            kind="pressure_collector_unavailable",
+                            severity=PressureSeverity.UNKNOWN,
+                            reason=str(exc),
+                            recommended_action="Inspect the pressure signal collector configuration.",
+                        )
+                    ]
+                )
 
         batches = await map_bounded(
             self._collectors,
             collect,
             concurrency=self._max_concurrency,
         )
-        signals = [signal for batch in batches for signal in batch]
-        snapshot = RuntimePressureSnapshot(signals=signals)
+        signals = [signal for batch in batches for signal in batch.signals]
+        snapshot = RuntimePressureSnapshot(
+            signals=signals, queues=[queue for batch in batches for queue in batch.queues]
+        )
         if self._metrics_recorder is not None:
             for signal in signals:
                 self._metrics_recorder(signal)
@@ -110,7 +139,11 @@ class QueuePressureCollector:
         warning_depth: int = 100,
         critical_depth: int = 1000,
         max_concurrency: int = 16,
+        source_id: str | None = None,
     ) -> None:
+        self._source_id = source_id.strip() if source_id is not None else f"amqp_passive_declare:{uuid4().hex}"
+        if not self._source_id:
+            raise ValueError("source_id must not be empty")
         self._queue_names = tuple(dict.fromkeys(str(name).strip() for name in queue_names if str(name).strip()))
         self._inspect_queue = inspect_queue
         self._warning_depth = warning_depth
@@ -120,19 +153,28 @@ class QueuePressureCollector:
         self._max_concurrency = max_concurrency
 
     async def collect(self) -> Iterable[RuntimePressureSignal]:
-        async def inspect(queue_name: str) -> list[RuntimePressureSignal]:
-            inspection = await self._inspect_queue(queue_name)
+        return (await self.collect_snapshot()).signals
+
+    async def collect_snapshot(self) -> RuntimePressureSnapshot:
+        async def inspect(queue_name: str) -> RuntimePressureSnapshot:
+            try:
+                inspection = await self._inspect_queue(queue_name)
+            except Exception:
+                inspection = None
+            observed_at = _utcnow()
             if inspection is None:
-                return [
-                    RuntimePressureSignal(
-                        scope="queue",
-                        scope_id=queue_name,
-                        kind="queue_inspection_unavailable",
-                        severity=PressureSeverity.UNKNOWN,
-                        reason="Queue inspection returned no data.",
-                        recommended_action="Verify RabbitMQ management inspection is configured.",
-                    )
-                ]
+                return RuntimePressureSnapshot(
+                    signals=[
+                        RuntimePressureSignal(
+                            scope="queue",
+                            scope_id=queue_name,
+                            kind="queue_inspection_unavailable",
+                            severity=PressureSeverity.UNKNOWN,
+                            reason="Queue inspection returned no data.",
+                            recommended_action="Verify RabbitMQ management inspection is configured.",
+                        )
+                    ]
+                )
             severity = severity_for_thresholds(
                 inspection.message_count,
                 warning_threshold=self._warning_depth,
@@ -167,14 +209,28 @@ class QueuePressureCollector:
                         recommended_action="Start at least one worker for this queue.",
                     )
                 )
-            return signals
+            return RuntimePressureSnapshot(
+                signals=signals,
+                queues=[
+                    RuntimeQueueObservation(
+                        queue_name=queue_name,
+                        source=self._source_id,
+                        observed_at=observed_at,
+                        ready=inspection.message_count,
+                        consumers=inspection.consumer_count,
+                    )
+                ],
+            )
 
         batches = await map_bounded(
             self._queue_names,
             inspect,
             concurrency=self._max_concurrency,
         )
-        return [signal for batch in batches for signal in batch]
+        return RuntimePressureSnapshot(
+            signals=[signal for batch in batches for signal in batch.signals],
+            queues=[queue for batch in batches for queue in batch.queues],
+        )
 
 
 class WorkerHealthPressureCollector:
@@ -286,6 +342,7 @@ __all__ = [
     "RuntimePressureService",
     "RuntimePressureSignal",
     "RuntimePressureSnapshot",
+    "RuntimeQueueObservation",
     "WorkerHealthPressureCollector",
     "severity_for_thresholds",
 ]

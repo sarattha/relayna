@@ -6,6 +6,7 @@ import { StudioAuthProvider } from "./auth-context";
 import { AppChrome, AppHeader } from "./ui";
 import { StudioThemeProvider } from "./studio-theme";
 
+const QueueWorkerPage = lazy(() => import("./pages/QueueWorkerPage").then((module) => ({ default: module.QueueWorkerPage })));
 const DlqPage = lazy(() => import("./pages/DlqPage").then((module) => ({ default: module.DlqPage })));
 const FailedTasksPage = lazy(() =>
   import("./pages/FailedTasksPage").then((module) => ({ default: module.FailedTasksPage })),
@@ -44,6 +45,7 @@ export function App() {
               <Suspense fallback={<div className="studio-route-loading" role="status">Loading Studio workspace…</div>}>
                 <Routes>
                   <Route path="/" element={<OverviewPage />} />
+                  <Route path="/queues" element={<QueueWorkerPage />} />
                   <Route path="/services" element={<ServicesPage />} />
                   <Route path="/services/:serviceId" element={<ServiceDetailPage />} />
                   <Route path="/services/:serviceId/topology" element={<TopologyPage />} />

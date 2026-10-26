@@ -116,6 +116,15 @@ supported_routes = merge_capability_route_ids(
 )
 ```
 
+The SDK task-activity Prometheus heartbeat advances at task starts/finishes;
+it is not a periodic liveness signal. A provider using the maximum active lease
+heartbeat also cannot establish idle-worker liveness. The Cockpit therefore
+shows the reported running flag and timestamp age separately, with periodic
+liveness unknown under the current worker-health contract. Never infer worker
+absence solely from an old or missing task-activity timestamp. A dedicated
+periodic heartbeat loop such as the Getting Started example can supply better
+observations, but its cadence is not declared by this response contract.
+
 Studio treats `running=False` as unhealthy even when active leases are also
 expired. Expired leases on otherwise running workers produce a stale worker
 state.
@@ -150,6 +159,7 @@ pressure_service = RuntimePressureService(
     collectors=[
         QueuePressureCollector(
             queue_names=["orders.tasks.queue"],
+            source_id="orders-broker/production-vhost",
             inspect_queue=runtime.rabbitmq.inspect_queue,
             warning_depth=100,
             critical_depth=1000,
@@ -323,3 +333,73 @@ can see whether a path is still retrying or has reached a terminal DLQ state.
 
 See [Execution Graphs](execution-graphs.md) for the graph API, data model, and
 Mermaid export.
+
+### Queue observations for Studio capacity diagnosis
+
+The built-in `QueuePressureCollector` now includes structured queue observations
+in `RuntimePressureSnapshot.queues`, alongside its existing signals. Its AMQP
+passive-declare source reports **ready** and **consumers** only. It does not
+expose unacknowledged count, oldest age, arrival/completion rates, or a rate
+window. Studio renders those missing fields explicitly. A failed inspection
+retains an unknown signal for that queue while successful queue readings survive.
+
+Set `QueuePressureCollector(source_id="orders-broker/production-vhost", ...)`
+to identify the broker/vhost scope consistently across restarts. Without an
+explicit ID, each collector gets a unique ID that remains stable for that
+collector instance. Separate collectors never share the default identity, even
+when their queue names match. Do not put broker credentials in source IDs.
+
+A configured richer source can implement the optional `collect_snapshot()`
+read protocol in addition to the existing `collect()` protocol:
+
+```python
+from relayna.observability import (
+    RuntimePressureSnapshot,
+    RuntimeQueueObservation,
+)
+
+
+class ConfiguredQueueCollector:
+    async def collect_snapshot(self) -> RuntimePressureSnapshot:
+        reading = await configured_source.read_queue("orders.tasks.queue")
+        return RuntimePressureSnapshot(
+            queues=[RuntimeQueueObservation(
+                queue_name=reading.queue_name,
+                source=reading.source_id,
+                observed_at=reading.observed_at,
+                ready=reading.ready,
+                unacknowledged=reading.unacknowledged,
+                consumers=reading.consumers,
+                oldest_message_age_seconds=reading.oldest_message_age_seconds,
+                arrival_rate=reading.arrival_rate,
+                completion_rate=reading.completion_rate,
+                rate_window_seconds=reading.rate_window_seconds,
+            )]
+        )
+
+    async def collect(self):
+        return (await self.collect_snapshot()).signals
+```
+
+`configured_source` is the deployment's existing monitoring integration, not a
+new built-in Relayna provider. It must provide measurements for the same queue,
+broker/vhost and observation time. Use a stable source identifier that includes
+broker/vhost scope when necessary. Omit unsupported fields or return `None`.
+Rates must describe arrivals into, and completed removals from, the same
+ready-plus-unacknowledged backlog over the same `rate_window_seconds`; delivery
+rate is not completion rate. Do not combine service publish counters with queue
+handler counters. Do not claim oldest age when the broker does not expose it.
+
+`RuntimePressureService` prefers `collect_snapshot()` when supplied, and still
+supports existing collect-only providers. Errors become unknown collector
+signals. The new model/export and `queues` field are additive feature 03
+production-perimeter changes approved for Queue & Worker Cockpit; existing
+signals, stored task data and broker protocols are unchanged.
+
+For deployments choosing richer observations, review the configured source's
+sampling and scope. [RabbitMQ management](https://www.rabbitmq.com/docs/management)
+collects queue statistics subject to its statistics configuration; the SDK's
+passive AMQP inspection is a narrower source. The cockpit follows the contextual
+lag/consumer visibility pattern described by
+[Confluent consumer monitoring](https://docs.confluent.io/control-center/current/clients/consumers.html),
+without assuming that those provider capabilities exist in Relayna.

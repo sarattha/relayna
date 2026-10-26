@@ -249,3 +249,110 @@ def test_pressure_concurrency_must_be_positive() -> None:
         RuntimePressureService(max_concurrency=0)
     with pytest.raises(ValueError, match="max_concurrency"):
         QueuePressureCollector(queue_names=[], inspect_queue=inspect_queue, max_concurrency=0)
+
+
+def test_queue_observations_preserve_zero_missing_counts_and_partial_inspection() -> None:
+    async def inspect(name):
+        if name == "broken":
+            raise RuntimeError("broker unavailable")
+        if name == "missing":
+            return None
+        return QueueInspection(queue_name=name, message_count=0, consumer_count=2)
+
+    async def scenario():
+        collector = QueuePressureCollector(queue_names=["empty", "broken", "missing"], inspect_queue=inspect)
+        snapshot = await RuntimePressureService(collectors=[collector]).snapshot()
+        assert len(snapshot.queues) == 1
+        queue = snapshot.queues[0]
+        assert queue.ready == 0 and queue.consumers == 2
+        assert queue.unacknowledged is None and queue.arrival_rate is None
+        assert queue.completion_rate is None and queue.oldest_message_age_seconds is None
+        assert queue.source.startswith("amqp_passive_declare:")
+        assert {s.scope_id for s in snapshot.signals if s.kind == "queue_inspection_unavailable"} == {
+            "broken",
+            "missing",
+        }
+        # Existing callers still receive signals from collect().
+        assert len(list(await collector.collect())) == 3
+
+    asyncio.run(scenario())
+
+
+def test_richer_collectors_and_signal_only_collectors_remain_compatible() -> None:
+    from relayna.observability import RuntimePressureSnapshot, RuntimeQueueObservation
+
+    class RichCollector:
+        async def collect(self):
+            raise AssertionError("snapshot protocol must take precedence")
+
+        async def collect_snapshot(self):
+            return RuntimePressureSnapshot(
+                queues=[
+                    RuntimeQueueObservation(
+                        queue_name="orders",
+                        source="configured_broker",
+                        observed_at=datetime.now(UTC),
+                        ready=20,
+                        unacknowledged=2,
+                        consumers=1,
+                        arrival_rate=2,
+                        completion_rate=4,
+                        rate_window_seconds=300,
+                    )
+                ]
+            )
+
+    class LegacyCollector:
+        async def collect(self):
+            return [RuntimePressureSignal(scope="custom", kind="legacy", severity="normal")]
+
+    async def scenario():
+        snapshot = await RuntimePressureService(collectors=[RichCollector(), LegacyCollector()]).snapshot()
+        assert snapshot.queues[0].rate_window_seconds == 300
+        assert snapshot.signals[0].kind == "legacy"
+        assert RuntimePressureSnapshot.model_validate({"signals": []}).queues == []
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("ready", -1),
+        ("consumers", -1),
+        ("unacknowledged", -1),
+        ("arrival_rate", float("nan")),
+        ("completion_rate", float("inf")),
+        ("rate_window_seconds", 0),
+        ("oldest_message_age_seconds", -1),
+        ("queue_name", ""),
+        ("source", ""),
+    ],
+)
+def test_queue_observation_rejects_invalid_measurements(field, value) -> None:
+    from pydantic import ValidationError
+
+    from relayna.observability import RuntimeQueueObservation
+
+    with pytest.raises(ValidationError):
+        RuntimeQueueObservation.model_validate(
+            {"queue_name": "orders", "source": "broker", "observed_at": datetime.now(UTC), field: value}
+        )
+
+
+def test_queue_collector_source_ids_are_distinct_stable_and_configurable() -> None:
+    async def inspect(name):
+        return QueueInspection(queue_name=name, message_count=500, consumer_count=0)
+
+    async def scenario():
+        first = QueuePressureCollector(queue_names=["orders"], inspect_queue=inspect)
+        second = QueuePressureCollector(queue_names=["orders"], inspect_queue=inspect)
+        named = QueuePressureCollector(queue_names=["orders"], inspect_queue=inspect, source_id=" primary/orders ")
+        snapshot = await RuntimePressureService(collectors=[first, second, named]).snapshot()
+        assert len({q.source for q in snapshot.queues}) == 3
+        assert snapshot.queues[2].source == "primary/orders"
+        assert (await first.collect_snapshot()).queues[0].source == snapshot.queues[0].source
+
+    asyncio.run(scenario())
+    with pytest.raises(ValueError, match="source_id must not be empty"):
+        QueuePressureCollector(queue_names=[], inspect_queue=inspect, source_id="  ")

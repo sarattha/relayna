@@ -8,6 +8,7 @@ from .backpressure import (
     RuntimePressureService,
     RuntimePressureSignal,
     RuntimePressureSnapshot,
+    RuntimeQueueObservation,
     WorkerHealthPressureCollector,
     severity_for_thresholds,
 )
@@ -78,6 +79,7 @@ __all__ = [
     "RuntimePressureService",
     "RuntimePressureSignal",
     "RuntimePressureSnapshot",
+    "RuntimeQueueObservation",
     "RELAYNA_STUDIO_HIGH_CARDINALITY_BODY_FIELDS",
     "RELAYNA_STUDIO_LOKI_LABEL_ALLOWLIST",
     "RELAYNA_STUDIO_OPTIONAL_LOG_FIELDS",
