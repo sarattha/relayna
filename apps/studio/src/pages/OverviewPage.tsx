@@ -44,10 +44,13 @@ export function OverviewPage() {
             Services with degraded, stale, or unreachable health appear first.
           </p>
         </div>
-        <Link to="/failed-tasks" className="studio-button-link studio-button-link--primary">
-          <StudioIcon name="dlq" />
-          Investigate failed tasks
-        </Link>
+        <div className="inbox-actions">
+          <Link to="/incidents" className="studio-button-link studio-button-link--primary">Open Incident Inbox</Link>
+          <Link to="/failed-tasks" className="studio-button-link">
+            <StudioIcon name="dlq" />
+            Investigate failed tasks
+          </Link>
+        </div>
       </section>
 
       <div className="studio-metrics-grid studio-metrics-grid--4 studio-metrics-grid--compact">

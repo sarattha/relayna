@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 
 from relayna.metrics import RelaynaMetrics, create_metrics_router
 
+from ._incidents import _create_incident_router
 from .auth import (
     StudioAuthMiddleware,
     StudioAuthService,
@@ -687,6 +688,7 @@ def create_studio_app(
     )
     app.include_router(create_studio_health_router(health_service=runtime.health_service))
     app.include_router(create_federation_router(federation_service=runtime.federation_service))
+    app.include_router(_create_incident_router(runtime.federation_service, runtime.database))
     app.include_router(
         create_studio_events_router(
             ingest_service=runtime.event_ingest_service,

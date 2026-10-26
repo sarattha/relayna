@@ -7,6 +7,10 @@ import type {
   FailedTaskListResponse,
   FailedTaskQueryState,
   FailedTaskRetryResponse,
+  IncidentDetail,
+  IncidentInboxResponse,
+  IncidentMutationResult,
+  IncidentStatus,
   GatewayServiceExportResponse,
   ServiceDraft,
   ServiceListResponse,
@@ -633,6 +637,34 @@ export async function fetchFailedTasks(state: FailedTaskQueryState) {
     }
   }
   return requestJson<FailedTaskListResponse>(`/studio/failed-tasks?${params.toString()}`);
+}
+
+export async function fetchIncidentInbox(environment = "", status = "active", offset = 0) {
+  const params = new URLSearchParams({ status, offset: String(offset) });
+  if (environment) params.set("environment", environment);
+  return requestJson<IncidentInboxResponse>(`/studio/incidents?${params}`);
+}
+
+export async function fetchIncident(incidentId: string) {
+  return requestJson<IncidentDetail>(`/studio/incidents/${encodeURIComponent(incidentId)}`);
+}
+
+export async function updateIncident(incidentId: string, payload: { revision: number; owner?: string | null; status?: IncidentStatus; note?: string }) {
+  return requestJson<IncidentMutationResult>(`/studio/incidents/${encodeURIComponent(incidentId)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+}
+
+export async function splitIncident(incidentId: string, payload: { revision: number; failure_ids: string[]; note?: string }) {
+  return requestJson<IncidentMutationResult>(`/studio/incidents/${encodeURIComponent(incidentId)}/split`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+}
+
+export async function mergeIncident(incidentId: string, payload: { revision: number; target_id: string; target_revision: number; note?: string }) {
+  return requestJson<IncidentMutationResult>(`/studio/incidents/${encodeURIComponent(incidentId)}/merge`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchFailedTaskEmailSettings() {

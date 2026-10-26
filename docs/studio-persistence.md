@@ -17,6 +17,7 @@ Redis stores and do not require PostgreSQL.
 | Current and historical service health | PostgreSQL | Current state and retained history are both indexed. |
 | Notification pending state, delivery and dedupe history | PostgreSQL | Multi-replica execution uses a PostgreSQL advisory lock. |
 | Operator audit log | PostgreSQL | A database trigger rejects updates and deletes. |
+| Incident identity, owner/lifecycle, grouping corrections and history | PostgreSQL | Counts/evidence are live reads; history and audit writes commit with state changes. |
 | Browser sessions and OIDC login transactions | Redis | Opaque-token hashes retain the existing fixed TTL behavior. |
 | SSE/pub-sub delivery | Redis | PostgreSQL outbox rows publish the existing event payloads and channel names after commit. |
 | Caches and short-lived coordination | Redis | No durable Studio state should rely solely on these keys. |
@@ -72,6 +73,43 @@ real PostgreSQL. Never edit a revision after it has shipped.
 
 The initial downgrade removes every Studio PostgreSQL table and is therefore
 destructive. `make db-migration-cycle` is reserved for disposable databases.
+
+## Incident Inbox state
+
+Incident Inbox adds revision `0003_incident_inbox` after `0002_load_profiles`.
+Run `alembic upgrade head` before deploying this backend. Startup/readiness
+requires the exact new head; coordinate migration and backend deployment rather
+than running mixed schema expectations indefinitely. Existing SDK stores and
+Studio tables retain their formats and behavior.
+
+`studio_incidents` stores stable grouping identities, normalized dimensions,
+owner, status, revision, and merge redirects. `studio_incident_overrides` maps
+explicitly split failure IDs within their original environment/service.
+`studio_incident_history` records lifecycle and grouping changes, actor, note,
+and before/after or source/target details. A database trigger rejects history
+updates/deletes. Every operator change, its history, and its existing operator
+audit entry share one transaction; a failure rolls them all back.
+
+Discovery upserts never reset owner/status. A short PostgreSQL transaction
+advisory lock serializes lifecycle/correction writes across replicas, and source
+and target revision checks reject stale edits. Upstream network I/O occurs
+before taking this lock. Counts, failure bodies, payloads, and traceback evidence
+are not retained in these tables. Normalized error text is part of durable group
+identity; include it in the same data-access and backup policy as operator notes.
+
+Incident state/corrections/history currently have no automatic retention policy.
+They survive service tombstoning and upstream evidence expiry. Back them up and
+budget their growth alongside the unpruned operator audit log. Do not reuse
+service/failure identities for different external records; split overrides refer
+to their exact environment/service/failure identity.
+
+The supported one-revision downgrade removes only the three incident tables and
+the history trigger/function, preserving older Studio data. It permanently loses
+incident ownership, lifecycle/history, and manual corrections. Export/backup
+those tables before downgrading, and restore the matching backend/schema as a
+coordinated operation. Upgrade/downgrade/upgrade was exercised on disposable
+PostgreSQL with existing earlier tables; never use the destructive initial
+downgrade as an operational shortcut.
 
 ## Transactional outbox and multi-replica workers
 

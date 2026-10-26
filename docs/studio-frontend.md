@@ -76,6 +76,7 @@ The header is available on every page:
 | **Services** | Opens registry status, service search, registration, and editing. |
 | **Task Search** | Opens indexed cross-service task search. |
 | **Failed Tasks** | Opens terminal failures; the badge is the current alert count. |
+| **Incident Inbox** | Groups terminal failures into triage cohorts with durable ownership and lifecycle history. |
 | **Environment** | Scopes service and task views. `All environments` removes the scope. |
 | **Find task** | Accepts a task ID and sends it to Task Search in the selected environment. |
 | Magnifying-glass button | Runs the global task-ID search. |
@@ -353,6 +354,62 @@ when search was opened from a service.
 | **Reload Logs** | Reruns the task-window Loki query. |
 | Metrics reload action | Reruns the task Kubernetes metrics query. |
 | **Close** | Closes the selected span detail. |
+
+### Incident Inbox
+
+Choose **Incident Inbox** in the header or **Open Incident Inbox** on Overview.
+The largest observed failure cohort appears first. Environment scopes the
+backend query; status defaults to open and acknowledged incidents. Cohort pages
+contain at most 100 incidents. The observed-failure total covers the entire
+bounded scan, including resolved groups; it is not the sum of the visible page
+or the current status filter.
+
+Grouping uses environment, service, queue, stage when available, exception
+type, and a versioned normalized error signature. Numeric values, UUIDs,
+hexadecimal identifiers, and repeated whitespace normalize deterministically.
+Missing messages stay separate by failure ID. These cohorts are triage aids,
+not proof of a shared root cause. Inspect raw representative messages before
+deciding whether failures belong together.
+
+Each scan reads up to 20 pages of 50 failures per enabled service. **Service
+coverage** reports complete, truncated, and unavailable sources. Counts in an
+incomplete scan are lower bounds on available retained evidence; a source
+failure never becomes a clean empty state. A complete scan covers enabled
+services that responded, subject to their retention and concurrent changes;
+it does not establish a lifetime failure count. First/last seen and the recent
+versus preceding one-hour buckets refer to this scan. Missing timestamps and
+task IDs are disclosed. The list and selected detail are independent live
+reads, so their counts can differ when evidence changes.
+
+Open a cohort to inspect its representative failures, distinct affected tasks,
+service health, and history. **Investigate task** opens the existing task Monitor
+in Investigation layout. Records with no canonical task ID have no investigation
+link. **Refresh evidence** repeats the scan. A failed list refresh retains the
+previous result with a stale-data notice. If evidence expires, is removed, or
+becomes unreachable, the incident retains its owner/status/history and shows
+zero *observed* matching failures with an explicit notice.
+
+Administrators can set a person or team as **Owner**, select **Acknowledged**,
+**Resolved**, or **Open**, add a note, and choose **Save incident**. Clearing owner
+unassigns it. Resolution never retries/clears upstream tasks, and new matching
+failures do not automatically reopen it. Readonly members can inspect evidence
+and history but cannot mutate incident state. Stale revisions return a conflict;
+refresh and review the current state before retrying.
+
+Select a proper subset of the observed **Affected failures** and choose **Split
+selected failures** to move those exact records into a new, unassigned open
+incident. Future failures continue their automatic grouping. **Merge into**
+offers other cohorts on the current inbox page in the same environment/service.
+The target keeps its owner/status; future source matches also join it. Source
+history remains accessible through history links. Manual groups show their
+grouping anchor and can contain different queues/signatures. Splitting individual
+records is the available correction after an overly broad merge; there is no
+automatic unmerge. Confirmation precedes both corrections.
+
+The selected incident is deep-linked as `/incidents?incident=<id>` with optional
+`environment` and `status`. History shows the latest 100 changes; full history
+remains durable in PostgreSQL and the operator audit log. Incident persistence
+requires the [Incident Inbox schema migration](studio-persistence.md#incident-inbox-state).
 
 ### Failed Tasks
 

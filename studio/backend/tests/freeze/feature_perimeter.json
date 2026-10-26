@@ -9,6 +9,7 @@
     "federation": ["studio/backend/tests/test_studio_federation.py"],
     "health": ["studio/backend/tests/test_studio_health.py"],
     "service load testing (approved Studio integration)": ["studio/backend/tests/test_studio_load_testing.py"],
+    "incident inbox (approved Studio-only perimeter addition)": ["studio/backend/tests/test_studio_incidents.py", "studio/backend/tests/test_postgres_persistence_integration.py"],
     "logs": ["studio/backend/tests/test_studio_logs.py"],
     "metrics": ["studio/backend/tests/test_studio_metrics.py"],
     "failed task notifications": ["studio/backend/tests/test_failed_task_notifications.py"],

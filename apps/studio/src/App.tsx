@@ -10,6 +10,7 @@ const DlqPage = lazy(() => import("./pages/DlqPage").then((module) => ({ default
 const FailedTasksPage = lazy(() =>
   import("./pages/FailedTasksPage").then((module) => ({ default: module.FailedTasksPage })),
 );
+const IncidentInboxPage = lazy(() => import("./pages/IncidentInboxPage").then((module) => ({ default: module.IncidentInboxPage })));
 const OverviewPage = lazy(() =>
   import("./pages/OverviewPage").then((module) => ({ default: module.OverviewPage })),
 );
@@ -48,6 +49,7 @@ export function App() {
                   <Route path="/services/:serviceId/load-tests" element={<LoadTestingPage />} />
                   <Route path="/services/:serviceId/dlq" element={<DlqPage />} />
                   <Route path="/failed-tasks" element={<FailedTasksPage />} />
+                  <Route path="/incidents" element={<IncidentInboxPage />} />
                   <Route path="/tasks/search" element={<TaskSearchPage />} />
                   <Route path="/tasks/:serviceId/:taskId" element={<TaskDetailPage />} />
                   <Route path="/access" element={<AccessPage />} />

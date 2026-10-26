@@ -10,6 +10,12 @@ import {
   fetchFailedTaskDetail,
   fetchFailedTaskEmailSettings,
   fetchFailedTasks,
+  fetchIncidentInbox,
+  fetchIncident,
+  updateIncident,
+  splitIncident,
+  mergeIncident,
+  setStudioCsrfToken,
   fetchServiceEvents,
   fetchServiceLogs,
   fetchServiceMetrics,
@@ -329,6 +335,26 @@ describe("Studio API helpers", () => {
     expect(calls).toContainEqual(["/studio/tasks/service%2Fid/task%2Fid?join=none", "GET"]);
     expect(calls).toContainEqual(["/studio/failed-tasks/service%2Fid/failure%2Fid", "DELETE"]);
     expect(calls).toHaveLength(20);
+  });
+
+  it("scopes incident reads and sends revision-checked writes with CSRF", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+    setStudioCsrfToken("incident-csrf");
+    try {
+      await fetchIncidentInbox("prod/eu", "all", 100);
+      await fetchIncident("incident/id");
+      await updateIncident("incident/id", { revision: 2, status: "resolved", owner: null });
+      await splitIncident("incident/id", { revision: 3, failure_ids: ["failure"] });
+      await mergeIncident("incident/id", { revision: 4, target_id: "target", target_revision: 1 });
+      expect(String(fetchMock.mock.calls[0][0])).toBe("/studio/incidents?status=all&offset=100&environment=prod%2Feu");
+      expect(String(fetchMock.mock.calls[1][0])).toBe("/studio/incidents/incident%2Fid");
+      for (const [, init] of fetchMock.mock.calls.slice(2)) {
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("X-CSRF-Token")).toBe("incident-csrf");
+        expect(JSON.parse(String(init?.body))).toHaveProperty("revision");
+      }
+    } finally { setStudioCsrfToken(null); }
   });
 
   it("builds full and minimal query strings for logs, metrics, search, and DLQ requests", async () => {

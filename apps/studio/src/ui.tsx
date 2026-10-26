@@ -970,6 +970,7 @@ export function AppHeader() {
         </NavLink>
         <NavLink to={scopedPath("/services")}>Services</NavLink>
         <NavLink to={scopedPath("/tasks/search")}>Task Search</NavLink>
+        <NavLink to={scopedPath("/incidents")}>Incident Inbox</NavLink>
         <NavLink to={scopedPath("/failed-tasks")}>
           Failed Tasks
 
@@ -986,6 +987,7 @@ export function AppHeader() {
               const params = new URLSearchParams(location.search);
               if (value) params.set("environment", value); else params.delete("environment");
               params.delete("service_id");
+              params.delete("incident");
               navigate({ pathname: location.pathname.startsWith("/services/") || location.pathname.startsWith("/tasks/") && location.pathname !== "/tasks/search" ? "/services" : location.pathname, search: params.toString() });
             }}
           >

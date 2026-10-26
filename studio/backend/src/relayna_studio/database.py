@@ -76,7 +76,7 @@ from .registry import DuplicateServiceError, ServiceNotFoundError, ServiceRecord
 from .search import StudioServiceSearchDocument, StudioTaskSearchDocument, StudioTaskSearchQuery
 
 LOGGER = logging.getLogger(__name__)
-EXPECTED_SCHEMA_REVISION = "0002_load_profiles"
+EXPECTED_SCHEMA_REVISION = "0003_incident_inbox"
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
@@ -129,6 +129,45 @@ _load_profiles = Table(
     Column("profile_id", String(100), primary_key=True),
     Column("profile", json_type, nullable=False),
 )
+
+_incidents = Table(
+    "studio_incidents",
+    metadata,
+    Column("incident_id", String(64), primary_key=True),
+    Column("service_id", Text, ForeignKey("studio_services.service_id"), nullable=False),
+    Column("environment", String(128), nullable=False),
+    Column("dimensions", json_type, nullable=False),
+    Column("status", String(32), nullable=False, server_default="open"),
+    Column("owner", String(320)),
+    Column("revision", Integer, nullable=False, server_default="0"),
+    Column("merged_into", String(64), ForeignKey("studio_incidents.incident_id")),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("status IN ('open', 'acknowledged', 'resolved')", name="incident_status"),
+    CheckConstraint("merged_into IS NULL OR merged_into <> incident_id", name="incident_not_self_merged"),
+)
+Index("ix_studio_incidents_scope", _incidents.c.environment, _incidents.c.service_id, _incidents.c.status)
+
+_incident_overrides = Table(
+    "studio_incident_overrides",
+    metadata,
+    Column("service_id", Text, primary_key=True),
+    Column("environment", String(128), primary_key=True),
+    Column("failure_id", Text, primary_key=True),
+    Column("incident_id", String(64), ForeignKey("studio_incidents.incident_id"), nullable=False),
+)
+
+_incident_history = Table(
+    "studio_incident_history",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("incident_id", String(64), ForeignKey("studio_incidents.incident_id"), nullable=False),
+    Column("occurred_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("actor_user_id", String(600)),
+    Column("action", String(32), nullable=False),
+    Column("details", json_type, nullable=False),
+)
+Index("ix_studio_incident_history_incident", _incident_history.c.incident_id, _incident_history.c.id)
 
 members = Table(
     "studio_members",
