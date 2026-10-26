@@ -21,7 +21,10 @@ Administrators can browse the existing audit endpoint without changing roles.
 - [x] (2026-10-26) First mandatory verification, frontend tests/build, strict docs and desktop/mobile inspection pass; backend first pass 98.10%, frontend statements 98.00%/branches 89.20%.
 - [x] (2026-10-26) Final verification after review fixes passes: SDK 688 passed/9 skipped; backend 531 passed/22 persistence skips without service variables; full real-service backend coverage 553 passed, 98.29%; frontend 282 tests, build and coverage pass; strict docs pass.
 - [x] (2026-10-26) Commit/push and open/link [PR #141](https://github.com/sarattha/relayna/pull/141) against main; one extra review completed and both findings fixed.
-- [ ] GitHub CI/automatic review monitoring and clean idle handoff to coordinator. Stack extension remains coordinator-owned.
+- [x] (2026-10-26) Current-head CI and automatic review passed; clean idle ownership handoff completed and individual watcher stopped.
+- [x] (2026-10-26) Coordinator rebased this fifth layer onto Reliability #139, combining routes, UI/contracts, tests and approved manifests while preserving the first four heads.
+- [x] (2026-10-26) Combined verification passed: 704 SDK tests/9 environment skips, 662 real-service backend tests, 357 frontend tests, all coverage gates, production build, strict docs and Alembic drift check.
+- [ ] Publish the five-layer native stack and monitor CI on the rewritten head.
 
 ## Surprises & Discoveries
 
@@ -58,18 +61,30 @@ used. Desktop 1440px and mobile 390px evidence cards have no horizontal overflow
   remain distinct. Metrics/trace configuration is not a successful provider probe.
 - 2026-10-26, Codex: Coordinator owns stack #140 extension and final restacking.
   Open against main independently; never edit sibling worktrees/migrations.
+- 2026-10-26, Coordinator: Inherit `0003_recovery` through the existing
+  Incident Inbox → Recovery migration chain. Integration Doctor adds no
+  migration and preserves all earlier feature contracts and diagnostic safeguards.
+- 2026-10-26, Coordinator: Keep the full approved route set and metadata;
+  order Doctor declarations before Incident declarations to match source-file
+  ordering in the freeze guard. No route was added or removed by this correction.
 
 ## Outcomes & Retrospective
 
-Implementation, documentation and review fixes are complete; final validation is complete and [PR #141](https://github.com/sarattha/relayna/pull/141)
-is open against main. GitHub CI and automatic review are pending. The coordinator
-was notified; the checkout is committed and clean for later restacking. Extra review allowance: used by one bounded delegated Codex review, task
+Implementation, documentation and review fixes are complete, and standalone
+validation and hosted CI passed for [PR #141](https://github.com/sarattha/relayna/pull/141).
+The coordinator has taken ownership and rebased this fifth layer after
+Reliability #139. Combined verification passes, including all 662 backend tests
+against isolated PostgreSQL/Redis and 357 frontend tests. Native stack #140
+publication and rewritten-head CI monitoring are the remaining delivery steps.
+Extra review allowance: used by one bounded delegated Codex review, task
 `feature07-review-01-20261026`, gpt-6.1-sol, xhigh/priority. Review complete: two P2 findings (zero-cap sample admission and future timestamp
 lag) fixed with regressions. No additional review rounds or @codex request will
 be made.
 Browser evidence: 1440×1000 and 390×844 layouts, empty/unknown/unconfigured
 service states, failed live check and absent PostgreSQL audit storage verified.
-No new migration; existing schema head remains 0002_load_profiles.
+No new migration. The standalone main baseline was `0002_load_profiles`;
+the combined stack inherits schema head `0003_recovery` after
+`0003_incident_inbox`.
 
 Original main merge-base: 89954699d2e43aebfee54e4ec64c06edb0caf2ce.
 
