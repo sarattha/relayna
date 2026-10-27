@@ -164,6 +164,12 @@ are read only by the one-time backfill command. See
 [Studio PostgreSQL and Redis persistence](studio-persistence.md) for storage
 ownership, migrations, backup, cutover, and rollback.
 
+The backend applies bundled Alembic migrations automatically on startup before
+serving requests or starting workers. Replicas serialize upgrades with a
+PostgreSQL advisory lock; an upgrade failure stops startup. The database role
+needs migration DDL privileges. Separate pre-deployment migration jobs remain
+optional; Redis backfill still requires the explicit command above.
+
 Remaining production prefixes:
 
 - live event channels: `studio:events:channel:*`
@@ -206,8 +212,9 @@ PYTHONPATH=src:studio/backend/src \
 uv run python -m relayna_studio
 ```
 
-Run `make db-upgrade` before the application. The CLI entrypoint serves
-`uvicorn relayna_studio.asgi:app` and rejects a missing or stale schema.
+The CLI entrypoint serves `uvicorn relayna_studio.asgi:app` and automatically
+applies bundled migrations before schema validation and serving. Run
+`make db-upgrade` explicitly only when you want to migrate before startup.
 
 For a complete local container topology, copy `.env.studio.example` to a
 private `.env.studio`, set the secrets, and run:
@@ -1059,8 +1066,9 @@ covered in [Getting Started](getting-started.md).
 Studio owns the [Recovery Center](studio-recovery-center.md) ledger, worker, and
 `/studio/recovery` API. It reuses existing service retry endpoints and preserves
 unknown acceptance without automatic resends. Multiple instances coordinate
-through PostgreSQL row locks and persisted dispatch deadlines. Apply schema
-revision `0003_recovery` before starting this backend.
+through PostgreSQL row locks and persisted dispatch deadlines. Startup applies
+schema revision `0003_recovery` through the bundled migration chain before the
+Recovery worker starts.
 
 ## Queue & Worker Cockpit reads
 

@@ -14,6 +14,7 @@ from relayna.metrics import RelaynaMetrics, create_metrics_router
 
 from ._doctor import _create_doctor_router
 from ._incidents import _create_incident_router
+from ._migrations import _upgrade_database
 from ._recovery import _create_recovery_router, _RecoveryService
 from ._reliability import _create_reliability_router
 from .auth import (
@@ -503,6 +504,7 @@ class _StudioLifespan:
             try:
                 if runtime.database is not None:
                     await runtime.database.check_ready()
+                    await _upgrade_database(runtime.database.engine)
                     await runtime.database.check_schema()
                     await cast(Awaitable[bool], runtime.redis.ping())
                 # PostgreSQL projections are created transactionally and by

@@ -39,8 +39,23 @@ normalized internally to `postgresql+asyncpg://`.
 Budget PostgreSQL connections across all replicas. For example, four replicas
 with the defaults can open up to 120 connections under peak overflow.
 
-The application does not run migrations. Startup fails if PostgreSQL is
-unreachable or its Alembic revision is not exactly the application head.
+Since 1.13.0, the backend automatically runs its bundled Alembic migrations to `head` during
+application startup, before schema validation, authentication initialization, or
+background workers. This applies to Docker, Compose, Kubernetes, and Python
+launches. Fresh databases are initialized and already-current databases are a
+no-op. PostgreSQL transaction advisory locking serializes concurrent replicas
+and explicit Alembic commands. Failed upgrades roll back and abort startup;
+unknown/newer revisions fail rather than downgrade. Fix the reported cause and
+restart to retry.
+
+The configured database role must own the Studio schema objects or have the
+DDL privileges required by the bundled migrations. Back up before upgrades and
+allow startup probes enough time for migration work and waiting replicas. Normal
+deployment no longer needs a separate migration job; Compose waits for healthy
+PostgreSQL and Redis, then the backend migrates itself. Explicit pre-deployment
+upgrades remain supported, and legacy Redis backfill remains a separate
+operator-controlled process.
+
 `/readyz` checks PostgreSQL connectivity, the exact schema revision, and Redis;
 `/livez` and `/healthz` only report process liveness. Deployment systems should
 send traffic only after `/readyz` succeeds.
@@ -57,12 +72,12 @@ make db-downgrade
 ```
 
 The backend image contains `alembic`, `alembic.ini`, and all revision files, so
-the same operation can be a one-shot deployment job:
+the same operation can optionally be a one-shot deployment job:
 
 ```bash
 docker run --rm \
   -e RELAYNA_STUDIO_DATABASE_URL="$RELAYNA_STUDIO_DATABASE_URL" \
-  ghcr.io/sarattha/relayna-studio-backend:1.12.0 \
+  ghcr.io/sarattha/relayna-studio-backend:1.13.0 \
   alembic upgrade head
 ```
 
@@ -82,7 +97,10 @@ The current backend expects exactly `0003_recovery`; 1.11.0 expects exactly
 `0002_load_profiles`. Stop old backends in a maintenance window, back up both
 stores and the settings encryption key, run `make -C studio/backend db-upgrade`,
 confirm the head, then start only matching 1.12.0 backends/frontends. No mixed
-schema-version rollout or automatic startup migration is supported.
+schema-version rollout is supported. The released 1.12.0 image requires this
+explicit migration; newer backends with startup migration support apply the
+bundled chain automatically. Keep the maintenance window and backup procedure
+when crossing schema versions.
 
 Before downgrading, stop every backend/recovery worker, export Recovery reports
 and Incident state/history, and reconcile accepted or ambiguous dispatch with
@@ -108,8 +126,9 @@ callbacks/rules when rolling back to a version without that endpoint. See the
 ## Incident Inbox state
 
 Incident Inbox adds revision `0003_incident_inbox` after `0002_load_profiles`.
-Run `alembic upgrade head` before deploying this backend. Startup/readiness
-requires the exact new head; coordinate migration and backend deployment rather
+Backends with automatic startup migrations apply this revision as part of the
+bundled chain; older releases require `alembic upgrade head` before deployment.
+Startup/readiness requires the exact new head; coordinate backend deployment rather
 than running mixed schema expectations indefinitely. Existing SDK stores and
 Studio tables retain their formats and behavior.
 

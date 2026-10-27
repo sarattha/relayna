@@ -5,8 +5,9 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
+from relayna_studio._migrations import _MIGRATION_LOCK_ID
 from relayna_studio.database import metadata
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -15,7 +16,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 database_url = os.getenv("RELAYNA_STUDIO_DATABASE_URL", config.get_main_option("sqlalchemy.url")) or ""
-if not database_url:
+if not database_url and config.attributes.get("connection") is None:
     raise RuntimeError("RELAYNA_STUDIO_DATABASE_URL must be set for Alembic operations.")
 if database_url.startswith("postgresql://"):
     database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -36,6 +37,9 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
+    # CLI and application startup share one transaction-level lock. The caller
+    # owns the transaction, including its commit after Alembic updates revision.
+    connection.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _MIGRATION_LOCK_ID})
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()
@@ -47,12 +51,16 @@ async def run_async_migrations() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-    await connectable.dispose()
+    try:
+        async with connectable.begin() as connection:
+            await connection.run_sync(do_run_migrations)
+    finally:
+        await connectable.dispose()
 
 
 if context.is_offline_mode():
     run_migrations_offline()
+elif config.attributes.get("connection") is not None:
+    do_run_migrations(config.attributes["connection"])
 else:
     asyncio.run(run_async_migrations())

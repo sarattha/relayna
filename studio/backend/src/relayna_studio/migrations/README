@@ -4,6 +4,9 @@ Create future revisions from studio/backend with:
 
     RELAYNA_STUDIO_DATABASE_URL=postgresql+asyncpg://... uv run alembic revision --autogenerate -m "description"
 
-Review every generated operation before committing it. Deployments run
-`alembic upgrade head` as a separate maintenance step before starting the new
-Studio backend image; the application never mutates its schema at startup.
+Review every generated operation before committing it. The application applies
+the bundled chain to head during startup, before readiness and background
+workers. Startup and explicit Alembic commands serialize under the same
+PostgreSQL transaction advisory lock. The database role needs migration DDL
+privileges. Explicit pre-deployment upgrades remain optional; back up before
+schema upgrades and coordinate versions that expect different schema heads.

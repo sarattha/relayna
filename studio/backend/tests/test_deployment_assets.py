@@ -39,8 +39,8 @@ def test_backend_image_and_compose_ship_migrations_and_hybrid_dependencies() -> 
     assert "COPY --from=build /app/studio/backend/src /app/studio-backend/src" in dockerfile
     assert "postgres:16-alpine" in compose
     assert "redis:7-alpine" in compose
-    assert 'command: ["alembic", "upgrade", "head"]' in compose
-    assert "condition: service_completed_successfully" in compose
+    assert "  migrate:" not in compose
+    assert "      postgres:\n        condition: service_healthy" in compose
     assert "http://127.0.0.1:8000/readyz" in compose
 
 

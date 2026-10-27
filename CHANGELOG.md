@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.13.0 - 2026-10-27
+
+### Added
+
+- Studio automatically applies bundled PostgreSQL migrations at startup before
+  serving requests or starting workers. Concurrent replicas and manual Alembic
+  commands serialize upgrades with a transaction advisory lock; failures roll
+  back and stop startup. The database role now needs migration DDL privileges.
+  Compose no longer requires a separate migration service.
+
+### Changed
+
+- Align SDK, Studio backend/frontend, backend SDK dependency floor, and lock
+  metadata at 1.13.0. Preserve the existing v1.12.0 public contract freeze
+  manifests, PostgreSQL revision chain, and SDK broker/Redis wire formats.
+- Update deployment, persistence, Entra, and Recovery documentation for startup
+  migrations, optional explicit migration jobs, and startup probe budgets.
+
+### Upgrade and rollback
+
+- Deploy matching 1.13.0 packages/images. No new schema revision is introduced
+  relative to 1.12.0 (`0003_recovery`). The configured PostgreSQL role must have
+  schema ownership/DDL privileges for pending migrations; allow startup time for
+  migration work and advisory-lock waits. Back up before schema upgrades.
+- Returning to 1.12.0 requires only matching older packages/images when the
+  database remains at `0003_recovery`; no downgrade is needed. For databases
+  upgraded from older schema heads, stop new replicas and follow the documented
+  coordinated rollback. Startup never downgrades or imports legacy Redis data.
+
 ## 1.12.0 - 2026-10-27
 
 ### Added

@@ -131,7 +131,9 @@ The additive Studio routes are:
 | GET | `/studio/recovery/plans/{plan_id}` | Read progress and report |
 | POST | `/studio/recovery/plans/{plan_id}/control` | `batch`, `pause`, `resume`, or `stop`, with `version` and optional `count` |
 
-Deploy the migration before starting the new backend:
+Backends with automatic startup migrations apply the bundled chain before
+starting Recovery workers. For older releases, or to migrate explicitly before
+deployment, run:
 
 ```bash
 make -C studio/backend db-upgrade
