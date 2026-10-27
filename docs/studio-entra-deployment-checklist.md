@@ -190,7 +190,8 @@ normal deployment process.
       backend Deployment.
 - [ ] Mount the certificate Secret directly as a read-only volume in the
       backend Deployment.
-- [ ] Give the migration Job access to
+- [ ] Ensure the backend database role has schema ownership/DDL privileges for
+      automatic startup migrations. If using an optional migration Job, give it
       `RELAYNA_STUDIO_DATABASE_URL` from `relayna-studio-runtime-secrets`.
 - [ ] Do not template these resources through Helm and do not duplicate their
       values in Deployment environment entries.
@@ -325,8 +326,10 @@ prevents startup.
 
 ### Platform And Network Readiness
 
-- [ ] Run the required Alembic migration job before starting the new backend;
-      the application does not migrate its own database.
+- [ ] Back up PostgreSQL before upgrading. The backend automatically applies
+      bundled Alembic migrations before serving; allow startup probes time for
+      migration work and replica lock waits. Older images without this support
+      still require a pre-deployment Alembic migration job.
 - [ ] Confirm `/readyz` passes PostgreSQL connectivity, exact schema revision,
       and Redis connectivity before routing traffic.
 - [ ] Confirm `/livez` and `/healthz` are used only as liveness signals, not as

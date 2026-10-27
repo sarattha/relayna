@@ -58,6 +58,16 @@ Optional:
 The container entrypoint serves `uvicorn relayna_studio.asgi:app` and keeps all
 Studio backend routes under `/studio/*`.
 
+The application lifespan automatically upgrades PostgreSQL to the bundled
+Alembic head before workers or HTTP traffic start. Compose uses the same startup
+path; a separate migration container or Kubernetes init job is optional. All
+replicas and explicit Alembic commands share a PostgreSQL transaction advisory
+lock. An upgrade failure rolls back and aborts startup. Grant the configured
+database role the required schema ownership/DDL privileges and budget startup
+probes for migration duration and lock waits. Back up before schema upgrades;
+keep old and new schema-expecting backends out of the same rollout. See
+`docs/studio-persistence.md` for manual commands, Redis backfill, and rollback.
+
 The capability refresh allowlist variables are the shared Studio backend egress
 policy for registered service URLs, Loki URLs, and Prometheus URLs. For AKS DNS
 names, allow suffixes such as `.svc.cluster.local`; for literal private IP URLs,

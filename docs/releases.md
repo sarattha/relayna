@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.12.0/relayna-1.12.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.13.0/relayna-1.13.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.12.0/relayna-1.12.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.13.0/relayna-1.13.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.12.0.tar.gz`
-- `dist/relayna-1.12.0-py3-none-any.whl`
+- `dist/relayna-1.13.0.tar.gz`
+- `dist/relayna-1.13.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,39 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.13.0
+
+Deploy matching SDK, Studio backend and frontend **1.13.0** packages/images.
+The backend now automatically applies its bundled Alembic migrations during
+application startup, like Relayna Gateway. This works with Docker, Compose,
+Kubernetes, and the Python entry point. A separate migration job is optional.
+PostgreSQL advisory locking serializes replicas and explicit Alembic commands;
+failed migrations roll back and abort startup before requests or workers run.
+Already-current databases are a no-op; unknown/newer revisions fail rather than
+downgrade. No new schema revision is introduced relative to 1.12.0: both expect
+`0003_recovery`. Public contract freeze manifests remain at v1.12.0.
+
+Before deploying, back up PostgreSQL and Redis, retain settings encryption keys,
+and ensure the database role owns Studio schema objects or has the required DDL
+privileges. Budget startup probes for migration work and advisory-lock waits.
+Send traffic only after `/readyz` passes PostgreSQL, exact-schema, and Redis
+checks. When upgrading from an older schema head, stop old replicas first and
+use the maintenance-window guidance below; automatic migration does not make
+mixed schema-version backends compatible. Legacy Redis backfill remains
+explicit; startup never imports those records.
+
+To return to 1.12.0 while the database remains at `0003_recovery`, stop 1.13.0
+backends and restore matching older packages/images without downgrading the
+database. If startup upgraded an older schema, stop every new backend before
+following the coordinated schema rollback below or restoring a compatible
+backup. A still-running 1.13.0 backend would reapply pending upgrades on restart.
+
+Publication follows the existing v1.12.0 template: merge the verified PR, tag
+that main commit `v1.13.0`, and let the tag workflow publish the SDK wheel/sdist,
+signed backend/frontend images, SBOMs/provenance, and changelog-derived GitHub
+Release notes. See [Studio persistence](studio-persistence.md) for migration
+commands, privileges, backups, and recovery.
 
 ### Upgrading to 1.12.0
 
@@ -68,8 +101,10 @@ make -C studio/backend db-current
 
 The published 1.11.0 schema is `0002_load_profiles`. The upgrade chain is
 `0002_load_profiles -> 0003_incident_inbox -> 0003_recovery`; the final current
-revision must be `0003_recovery`. The application does not migrate automatically
-and checks its exact schema head at startup and readiness. Do not mix old and
+revision must be `0003_recovery`. The released 1.12.0 image requires an explicit
+migration; newer backends with startup migration support automatically apply
+their bundled chain. All versions check the exact schema head at startup and
+readiness. Do not mix old and
 new backend replicas across these schema expectations. Incident identity,
 ownership/corrections/history and Recovery plans/claims are durable PostgreSQL
 data. Existing load profiles and earlier tables remain intact. See

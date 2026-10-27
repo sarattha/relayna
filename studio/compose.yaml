@@ -28,25 +28,13 @@ services:
       - studio-redis:/data
     restart: unless-stopped
 
-  migrate:
-    build:
-      context: ..
-      dockerfile: studio/backend/Dockerfile
-    command: ["alembic", "upgrade", "head"]
-    environment: &backend-environment
-      RELAYNA_STUDIO_DATABASE_URL: postgresql+asyncpg://relayna:${RELAYNA_STUDIO_POSTGRES_PASSWORD}@postgres:5432/relayna_studio
-      RELAYNA_STUDIO_REDIS_URL: redis://redis:6379/0
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-
   backend:
     build:
       context: ..
       dockerfile: studio/backend/Dockerfile
     environment:
-      <<: *backend-environment
+      RELAYNA_STUDIO_DATABASE_URL: postgresql+asyncpg://relayna:${RELAYNA_STUDIO_POSTGRES_PASSWORD}@postgres:5432/relayna_studio
+      RELAYNA_STUDIO_REDIS_URL: redis://redis:6379/0
       RELAYNA_STUDIO_ENTRA_APPLICATION_ID: ${RELAYNA_STUDIO_ENTRA_APPLICATION_ID:?Set RELAYNA_STUDIO_ENTRA_APPLICATION_ID}
       RELAYNA_STUDIO_ENTRA_TENANT_ID: ${RELAYNA_STUDIO_ENTRA_TENANT_ID:?Set RELAYNA_STUDIO_ENTRA_TENANT_ID}
       RELAYNA_STUDIO_ENTRA_ISSUER: ${RELAYNA_STUDIO_ENTRA_ISSUER:?Set RELAYNA_STUDIO_ENTRA_ISSUER}
@@ -61,8 +49,8 @@ services:
       - ${RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH:?Set RELAYNA_STUDIO_ENTRA_OIDC_PRIVATE_KEY_PATH}:/run/secrets/relayna-studio-private-key.pem:ro
       - ${RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH:?Set RELAYNA_STUDIO_ENTRA_OIDC_CERTIFICATE_PATH}:/run/secrets/relayna-studio-certificate.pem:ro
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
