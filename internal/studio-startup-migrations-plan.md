@@ -16,7 +16,7 @@ Operators should not need a separate migration job for normal upgrades.
 - [x] (2026-10-27) Run code-change-verification: SDK 704 passed/9 optional skips; backend 671 passed with PostgreSQL and Redis enabled. Prepare PR draft for `t3/studio-auto-db-migrations`.
 - [x] (2026-10-27) Coordinate 1.13.0 versions, changelog, release notes, and locks. Repeat verification: SDK 704 passed/9 optional skips, backend 671 passed with PostgreSQL/Redis, frontend 370 passed and build passed on Node 24.22.1, docs build passed, wheel/sdist builds and Twine checks passed, installed 1.13.0 wheel migrations passed outside checkout.
 - [x] (2026-10-27) Obtain one independent read-only Codex review: no actionable findings. Reviewer independently ran focused tests (9 passed, 4 PostgreSQL skips); parent ran real-service integration tests.
-- [ ] Commit, push, and open PR.
+- [x] (2026-10-27) Commit and push implementation/release preparation; open PR https://github.com/sarattha/relayna/pull/143 and mark ready for review. CI and reviews are pending.
 - [ ] Monitor PR checks/reviews, merge when ready, and publish v1.13.0 with the existing release workflow.
 
 ## Surprises & Discoveries
@@ -70,9 +70,10 @@ successfully migrated a fresh database, checked the exact schema head, and
 repeated startup. Compose configuration and `git diff --check` passed.
 
 Release preparation and local verification are complete for 1.13.0. The one
-additional Codex review reported no actionable findings. No application
-environment is being deployed; PR checks and merge/tag publication will use
-the existing GitHub workflows.
+additional Codex review reported no actionable findings. PR #143 is open and
+ready for review; its CI checks are running. No application environment is being
+deployed; merge/tag publication will use the existing GitHub workflows after
+the PR is verified.
 
 ## Context and Orientation
 
