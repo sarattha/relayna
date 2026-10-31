@@ -32,7 +32,7 @@ providers is outside this change. Existing manual configurations remain usable.
 - [x] (2026-11-01) Add regression, persistence, authorization, redaction, and race tests; update documentation and narrowly scoped freeze entries. Add a per-file frontend coverage gate above 95%.
 - [x] (2026-11-01) Run mandatory SDK/backend verification and frontend build and coverage. Complete shared-browser desktop/mobile UI checks.
 - [x] (2026-11-01) Final coverage measurements pass: backend 98.24% overall and new profile module 99.60%; frontend 98.86% lines overall and new profile UI 100% lines / 98% branches.
-- [ ] Create the PR and activate monitoring without merging.
+- [x] (2026-11-01) Open PR #145: https://github.com/sarattha/relayna/pull/145. Activate T3 check/review monitoring at handoff; merging remains prohibited until the user signals.
 - [ ] Native Computer Use remains blocked: browser host unavailable, Chrome timeoutReached, Safari noWindowsAvailable. Shared preview browser used as an explicitly reported fallback.
 
 ## Surprises & Discoveries
@@ -105,7 +105,7 @@ failed reload and recovery, and a 390px mobile layout. Native Computer Use itsel
 could not run because its host could not connect to browser windows; this is a
 remaining verification limitation, not a passed check.
 
-Final PR creation and monitoring remain; merging requires a separate user signal.
+PR #145 is open at https://github.com/sarattha/relayna/pull/145. Local checks and coverage gates passed. T3 monitoring is activated at handoff to handle checks and reviews; merging requires a separate user signal.
 
 ## Context and Orientation
 
