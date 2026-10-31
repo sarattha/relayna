@@ -421,6 +421,9 @@ class StudioSearchService(StudioSearchIndexer):
             await self.upsert_service_document(service)
 
     async def prune_expired_task_documents(self) -> int:
+        database_prune = getattr(self.store, "_prune_expired_task_documents", None)
+        if callable(database_prune):
+            return await database_prune()
         removed = 0
         for document_id in await self.store.list_task_document_ids():
             document = await self.store.get_task_document(document_id)

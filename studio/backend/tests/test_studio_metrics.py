@@ -453,7 +453,7 @@ def test_prometheus_provider_preserves_sanitized_422_diagnostics(
         provider = PrometheusMetricsProvider(
             http_client=TrackingAsyncClient(transport=httpx.MockTransport(handler), timeout=5.0)
         )
-        with pytest.raises(StudioMetricsProviderError) as exc_info:
+        with pytest.raises(StudioMetricsConfigError) as exc_info:
             if operation == "metrics":
                 await provider.query_metrics(
                     service=make_record(metrics_config=config),

@@ -1,7 +1,7 @@
 {
   "name": "@relayna/studio",
   "private": true,
-  "version": "1.13.0",
+  "version": "1.13.1",
   "type": "module",
   "engines": {
     "node": "^24.22.1"

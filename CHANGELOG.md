@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.13.1 - 2026-11-01
+
+### Fixed
+
+- Avoid rewriting task projections during service capability/health refreshes
+  when service name and environment are unchanged. Preserve atomic propagation
+  of real metadata edits and reduce PostgreSQL row-lock contention.
+- Prune expired PostgreSQL task projections in bounded transactions, skipping
+  locked rows and rechecking expiry on subsequent passes. Preserve live and
+  non-expiring tasks without per-task retention reads.
+- Keep worker session advisory locks outside transactions and discard uncertain
+  lock connections after acquisition/release errors. Cover cancellation and
+  restoration of pooled connection isolation.
+- Isolate optional Loki, Prometheus, and Tempo queries from core HTTP resources.
+  Bound provider work, cache failures, and back off with jitter before one
+  recovery query so shared services are not continuously retried during outages.
+- Pause affected monitor reads across time-window changes, retain useful stale
+  evidence, and recover automatically while core features stay available.
+  Existing integration-doctor fields report cached provider query availability.
+- Classify upstream query rejections (400, 413, 414, and 422) as validation
+  errors, preserving immediate query correction without opening provider-wide
+  outage backoff. Authentication, throttling, and availability failures still
+  pause dependent work.
+
+### Changed
+
+- Align SDK, Studio backend/frontend, dependency floor, and lock metadata at
+  1.13.1. Add regression coverage and document shared-infrastructure budgets.
+- Preserve existing public APIs, response shapes, freeze manifests, and schema
+  head `0003_recovery`. No migration or new configuration is required.
+
 ## 1.13.0 - 2026-10-27
 
 ### Added

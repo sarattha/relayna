@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from relayna.api import CapabilityDocument
 from relayna.observability import RelaynaServiceEventFeedResponse
 
+from ._provider_availability import _provider_key
 from .database import events, outbox
 from .events import StudioControlPlaneEvent, _supports_events_feed
 from .logs import StudioLogQuery
@@ -450,25 +451,6 @@ class _Doctor:
         pull_check = await _bounded("event_pull", scope, pull)
         pull_check.source = "event_pull"
         checks.append(pull_check)
-        for source, config in (
-            ("logs", service.log_config),
-            ("metrics", service.metrics_config),
-            ("traces", service.trace_config),
-        ):
-            checks.append(
-                _Check(
-                    source=source,
-                    scope=scope,
-                    state="unknown" if config else "unconfigured",
-                    detail=f"{config.provider} configured; provider availability has not been probed."
-                    if config
-                    else "No provider configured for this service.",
-                    next_check=(
-                        "Run a bounded log check or use the service metrics/trace investigation view; "
-                        "configuration alone does not prove availability."
-                    ),
-                )
-            )
         if live and service.status != ServiceStatus.DISABLED:
 
             async def feed() -> _Check:
@@ -543,6 +525,26 @@ class _Doctor:
 
             checks.extend(
                 await asyncio.gather(_bounded("feed_sample", scope, feed), _bounded("log_sample", log_scope, logs))
+            )
+        for source, config, query_service in (
+            ("logs", service.log_config, rt.log_query_service),
+            ("metrics", service.metrics_config, rt.metrics_query_service),
+            ("traces", service.trace_config, rt.trace_query_service),
+        ):
+            availability = query_service._availability.describe(_provider_key(service_id, config)) if config else {}
+            checks.append(
+                _Check(
+                    source=source,
+                    scope=scope,
+                    state="unconfigured" if config is None else availability.get("state", "unknown"),
+                    checked_at=availability.get("checked_at"),
+                    last_successful_at=availability.get("last_successful_at"),
+                    detail=availability.get("detail", "No provider configured for this service."),
+                    next_check=(
+                        "The next query checks availability. Failed requests back off with jitter up to five minutes, "
+                        "then one query checks recovery. Other features remain available."
+                    ),
+                )
             )
         return _Report(service_id=service_id, environment=service.environment, checks=checks)
 

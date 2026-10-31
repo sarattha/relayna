@@ -39,6 +39,20 @@ normalized internally to `postgresql+asyncpg://`.
 Budget PostgreSQL connections across all replicas. For example, four replicas
 with the defaults can open up to 120 connections under peak overflow.
 
+Capability and health refreshes update task search metadata only when the
+service name or environment changes. Those edits remain atomic with the service
+record; an unchanged refresh does not rewrite or lock retained task rows.
+PostgreSQL task-index retention uses the existing expiry index and commits
+deletes in batches of at most 1,000 rows. It skips rows locked by concurrent
+writers and retries them on a later retention pass, checking their current
+expiry before deletion. Tasks without an expiry are retained.
+
+Background worker coordination keeps a session advisory lock on a dedicated
+pooled connection while work is running, without holding a database transaction
+open during upstream requests. An error during lock acquisition or release
+invalidates that connection so an uncertain session lock cannot return to the
+pool. These changes require no schema migration or configuration changes.
+
 Since 1.13.0, the backend automatically runs its bundled Alembic migrations to `head` during
 application startup, before schema validation, authentication initialization, or
 background workers. This applies to Docker, Compose, Kubernetes, and Python
@@ -77,7 +91,7 @@ the same operation can optionally be a one-shot deployment job:
 ```bash
 docker run --rm \
   -e RELAYNA_STUDIO_DATABASE_URL="$RELAYNA_STUDIO_DATABASE_URL" \
-  ghcr.io/sarattha/relayna-studio-backend:1.13.0 \
+  ghcr.io/sarattha/relayna-studio-backend:1.13.1 \
   alembic upgrade head
 ```
 

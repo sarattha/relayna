@@ -344,7 +344,7 @@ export function MonitorWorkspace({
     return taskScope
       ? fetchTaskLogs(service.service_id, selectedTaskId, query)
       : fetchServiceLogs(service.service_id, query);
-  });
+  }, JSON.stringify([service.service_id, "logs", service.log_config]));
   const metrics = useMonitorRead(
     JSON.stringify([taskKey, windowBounds]),
     active &&
@@ -360,6 +360,7 @@ export function MonitorWorkspace({
         ...windowBounds,
         groups: ["cpu_usage", "memory_usage"],
       }),
+    JSON.stringify([service.service_id, "metrics", service.metrics_config]),
   );
   // Slow providers must finish before the next automatic refresh starts.
   readsPending.current =
@@ -839,7 +840,7 @@ export function MonitorWorkspace({
                 updateParams({ monitor_source: event.target.value })
               }
             />
-            <button type="button" onClick={refresh} disabled={logs.loading}>
+            <button type="button" onClick={refresh} disabled={logs.loading || logs.paused}>
               <StudioIcon name="refresh" />
               Refresh
             </button>
@@ -883,7 +884,7 @@ export function MonitorWorkspace({
           )}
           {logs.error && (
             <NoticeBanner tone="error">
-              Refresh failed; displayed logs may be stale. {logs.error}
+              {logs.paused ? "Log queries paused; displayed logs may be stale. Recovery will be checked automatically; other features remain available. " : "Refresh failed; displayed logs may be stale. "}{logs.error}
             </NoticeBanner>
           )}
           {unread > 0 && (
@@ -979,7 +980,7 @@ export function MonitorWorkspace({
                   <p>No metrics provider configured.</p>
                 ) : metrics.error ? (
                   <NoticeBanner tone="error">
-                    Metrics unavailable: {metrics.error}
+                    {metrics.paused ? "Metric queries paused. Recovery will be checked automatically. " : "Metrics unavailable: "}{metrics.error}
                   </NoticeBanner>
                 ) : metrics.loading ? (
                   <p role="status">Loading metrics…</p>

@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -13,7 +14,7 @@ import pytest
 import pytest_asyncio
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, ConnectError, ConnectTimeout, MockTransport
 from redis.asyncio import Redis
 from relayna_studio import app as studio_app_module
 from relayna_studio import backfill as backfill_module
@@ -73,11 +74,13 @@ from relayna_studio.health import (
     WorkerHealthState,
     WorkerHealthSummary,
 )
+from relayna_studio.logs import LokiLogProvider, StudioLogQueryService, create_studio_logs_router
 from relayna_studio.registry import (
     DuplicateServiceError,
     LokiLogConfig,
     ServiceNotFoundError,
     ServiceRecord,
+    ServiceRegistryService,
     StudioOutboundUrlPolicy,
 )
 from relayna_studio.search import (
@@ -91,6 +94,7 @@ from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from relayna.api import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
 from relayna.observability import (
     RelaynaServiceEvent,
     ServiceEventSourceKind,
@@ -1572,3 +1576,323 @@ async def test_doctor_reads_retained_events_and_bounded_outbox_age(database: Stu
         await session.execute(delete(outbox))
     check = next(item for item in (await doctor.studio()).checks if item.source == "outbox")
     assert check.state == "empty" and check.value is None
+
+
+@contextmanager
+def _contention_queries(database: StudioDatabase):
+    queries: list[tuple[str, int]] = []
+
+    def executed(_connection, cursor, statement, _parameters, _context, _executemany):
+        queries.append((statement, cursor.rowcount))
+
+    def committed(_connection):
+        queries.append(("COMMIT", 0))
+
+    sqlalchemy_event.listen(database.engine.sync_engine, "after_cursor_execute", executed)
+    sqlalchemy_event.listen(database.engine.sync_engine, "commit", committed)
+    try:
+        yield queries
+    finally:
+        sqlalchemy_event.remove(database.engine.sync_engine, "after_cursor_execute", executed)
+        sqlalchemy_event.remove(database.engine.sync_engine, "commit", committed)
+
+
+async def _contention_search(database: StudioDatabase, redis: Redis):
+    registry_store = PostgresServiceRegistryStore(database)
+    await registry_store.create(service_record())
+    registry = ServiceRegistryService(store=registry_store)
+    store = PostgresStudioSearchStore(database)
+    search = StudioSearchService(
+        registry_service=registry, store=store, event_store=PostgresStudioEventStore(database, redis)
+    )
+    return registry, store, search
+
+
+def _contention_task(task_id: str, *, expires_at: datetime | None = None) -> StudioTaskSearchDocument:
+    return StudioTaskSearchDocument(
+        service_id="payments-api",
+        service_name="Payments",
+        environment="production",
+        task_id=task_id,
+        detail_path=f"/studio/tasks/payments-api/{task_id}",
+        expires_at=expires_at.isoformat() if expires_at else None,
+    )
+
+
+async def _contention_versions(database: StudioDatabase) -> dict[str, str]:
+    async with database.sessions() as session:
+        rows = (await session.execute(text("SELECT task_id, xmin::text FROM studio_task_search_projections"))).all()
+    return dict(rows)
+
+
+@pytest.mark.asyncio
+async def test_contention_capability_refresh_skips_task_writes_and_locked_rows(database: StudioDatabase, redis: Redis):
+    registry, store, _ = await _contention_search(database, redis)
+    task = _contention_task("locked-task")
+    await store.set_task_document(task)
+    before = await _contention_versions(database)
+    capabilities = CapabilityDocument(
+        relayna_version="1.13.0",
+        topology_kind="shared_tasks_shared_status",
+        alias_config_summary=AliasConfigSummary(),
+        supported_routes=["status.latest"],
+        service_metadata=CapabilityServiceMetadata(
+            capability_path="/relayna/capabilities",
+            discovery_source="live",
+            compatibility="capabilities_v1",
+        ),
+    )
+    async with database.transaction() as session:
+        await session.execute(
+            select(task_projections).where(task_projections.c.task_id == task.task_id).with_for_update()
+        )
+        with _contention_queries(database) as queries:
+            refreshed = await asyncio.wait_for(
+                registry.store_capability_document("payments-api", capabilities, mark_healthy=True),
+                timeout=2,
+            )
+    assert refreshed.capabilities == capabilities.model_dump(mode="json")
+    assert refreshed.last_seen_at is not None
+    assert not any(sql.startswith("UPDATE studio_task_search_projections") for sql, _ in queries)
+    assert await _contention_versions(database) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes", [{"name": "Renamed"}, {"environment": "staging"}, {"name": "Renamed", "environment": "staging"}]
+)
+async def test_contention_real_metadata_edits_still_propagate(database: StudioDatabase, redis: Redis, changes):
+    _, store, _ = await _contention_search(database, redis)
+    registry = PostgresServiceRegistryStore(database)
+    record = await registry.get("payments-api")
+    assert record is not None
+    task = _contention_task("metadata", expires_at=datetime.now(UTC) + timedelta(days=1))
+    await store.set_task_document(task)
+    stored_before = await store.get_task_document(task.document_id)
+    assert stored_before is not None
+    before = await _contention_versions(database)
+    updated = record.model_copy(update=changes)
+    await registry.update(record.service_id, updated)
+    after = await _contention_versions(database)
+    assert after != before
+    document = await store.get_task_document(task.document_id)
+    assert document == stored_before.model_copy(
+        update={"service_name": updated.name, "environment": updated.environment}
+    )
+    with _contention_queries(database) as queries:
+        await registry.update(record.service_id, updated)
+    assert not any(sql.startswith("UPDATE studio_task_search_projections") for sql, _ in queries)
+    assert await _contention_versions(database) == after
+
+
+@pytest.mark.asyncio
+async def test_contention_retention_does_not_read_every_live_task(database: StudioDatabase, redis: Redis):
+    _, _, search = await _contention_search(database, redis)
+    async with database.transaction() as session:
+        await session.execute(
+            text("""
+            INSERT INTO studio_task_search_projections
+                (service_id, task_id, service_name, environment, detail_path, expires_at)
+            SELECT 'payments-api', 'live-' || n, 'Payments', 'production', '/task/' || n, now() + interval '1 day'
+            FROM generate_series(1, 100) n
+        """)
+        )
+    with _contention_queries(database) as queries:
+        assert await search.prune_expired_task_documents() == 0
+    assert len([sql for sql, _ in queries if sql != "COMMIT"]) <= 2
+    async with database.sessions() as session:
+        assert await session.scalar(select(func.count()).select_from(task_projections)) == 100
+
+
+@pytest.mark.asyncio
+async def test_contention_retention_batches_preserve_live_and_non_expiring_tasks(
+    database: StudioDatabase, redis: Redis, monkeypatch
+):
+    _, store, search = await _contention_search(database, redis)
+    monkeypatch.setattr(store, "_retention_batch_size", 3, raising=False)
+    cutoff = datetime.now(UTC)
+    for index in range(7):
+        await store.set_task_document(
+            _contention_task(f"expired-{index}", expires_at=cutoff if index == 0 else cutoff - timedelta(days=1))
+        )
+    for task in [
+        _contention_task("no-expiry"),
+        _contention_task("live", expires_at=datetime.now(UTC) + timedelta(days=1)),
+    ]:
+        await store.set_task_document(task)
+    monkeypatch.setattr("relayna_studio.database._utcnow", lambda: cutoff)
+    with _contention_queries(database) as queries:
+        assert await search.prune_expired_task_documents() == 7
+    deletes = [count for sql, count in queries if sql.startswith("DELETE FROM studio_task_search_projections")]
+    assert sum(deletes) == 7 and max(deletes) <= 3
+    assert len(deletes) == 3
+    assert sum(sql == "COMMIT" for sql, _ in queries) == 3
+    async with database.sessions() as session:
+        assert set((await session.scalars(select(task_projections.c.task_id))).all()) == {"no-expiry", "live"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extend_expiration", [False, True])
+async def test_contention_retention_skips_locked_rows_and_rechecks_expiry(
+    database: StudioDatabase, redis: Redis, extend_expiration
+):
+    _, store, search = await _contention_search(database, redis)
+    expired = datetime.now(UTC) - timedelta(days=1)
+    locked = _contention_task("locked", expires_at=expired)
+    await store.set_task_document(locked)
+    await store.set_task_document(_contention_task("available", expires_at=expired))
+    async with database.transaction() as session:
+        await session.execute(
+            select(task_projections).where(task_projections.c.task_id == locked.task_id).with_for_update()
+        )
+        if extend_expiration:
+            await session.execute(
+                update(task_projections)
+                .where(task_projections.c.task_id == locked.task_id)
+                .values(expires_at=datetime.now(UTC) + timedelta(days=1))
+            )
+        assert await asyncio.wait_for(search.prune_expired_task_documents(), timeout=2) == 1
+    assert await search.prune_expired_task_documents() == (0 if extend_expiration else 1)
+    assert (await store.get_task_document(locked.document_id) is not None) == extend_expiration
+
+
+@pytest.mark.asyncio
+async def test_contention_coordinator_holds_lock_without_open_transaction(database: StudioDatabase):
+    coordinator = PostgresAdvisoryCoordinator(database)
+    async with coordinator.try_lock("contention-job") as acquired:
+        assert acquired
+        async with coordinator.try_lock("contention-job") as competing:
+            assert not competing
+            async with database.sessions() as session:
+                rows = (
+                    await session.execute(
+                        text("""
+                    SELECT state, xact_start FROM pg_stat_activity
+                    WHERE datname = current_database() AND pid <> pg_backend_pid()
+                      AND query LIKE 'SELECT pg_try_advisory_lock%'
+                """)
+                    )
+                ).all()
+            assert len(rows) == 2
+            assert all(row.state == "idle" and row.xact_start is None for row in rows)
+    async with coordinator.try_lock("contention-job") as acquired_again:
+        assert acquired_again
+    # Returning an AUTOCOMMIT connection must restore transactional behavior
+    # for ordinary writes that later borrow it from the same pool.
+    with pytest.raises(RuntimeError, match="rollback"):
+        async with database.transaction() as session:
+            await session.execute(audit_log.insert().values(action="rollback-probe", target_type="test"))
+            raise RuntimeError("rollback")
+    async with database.sessions() as session:
+        assert (
+            await session.scalar(
+                select(func.count()).select_from(audit_log).where(audit_log.c.action == "rollback-probe")
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exit_mode", ["exception", "cancel", "unlock_failure"])
+async def test_contention_coordinator_releases_session_lock_on_every_exit(database: StudioDatabase, exit_mode):
+    coordinator = PostgresAdvisoryCoordinator(database)
+    entered = asyncio.Event()
+
+    async def work():
+        async with coordinator.try_lock("contention-exit") as acquired:
+            assert acquired
+            entered.set()
+            if exit_mode == "cancel":
+                await asyncio.Event().wait()
+            if exit_mode == "exception":
+                raise RuntimeError("worker failed")
+
+    def fail_unlock(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if "pg_advisory_unlock(" in statement:
+            raise RuntimeError("unlock failed")
+
+    if exit_mode == "unlock_failure":
+        sqlalchemy_event.listen(database.engine.sync_engine, "before_cursor_execute", fail_unlock)
+    task = asyncio.create_task(work())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        if exit_mode == "cancel":
+            task.cancel()
+        with pytest.raises(asyncio.CancelledError if exit_mode == "cancel" else RuntimeError):
+            await task
+    finally:
+        if exit_mode == "unlock_failure":
+            sqlalchemy_event.remove(database.engine.sync_engine, "before_cursor_execute", fail_unlock)
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    async with database.sessions() as session:
+        count = await session.scalar(
+            text("""
+            SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+            WHERE a.datname = current_database() AND l.locktype = 'advisory'
+        """)
+        )
+    assert count == 0
+    assert database.engine.pool.checkedout() == 0
+
+
+@pytest.mark.asyncio
+async def test_contention_coordinator_discards_uncertain_lock_acquisition(database: StudioDatabase):
+    def fail_after_acquire(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if "pg_try_advisory_lock(" in statement:
+            raise RuntimeError("acquire response lost")
+
+    sqlalchemy_event.listen(database.engine.sync_engine, "after_cursor_execute", fail_after_acquire)
+    try:
+        with pytest.raises(RuntimeError, match="acquire response lost"):
+            async with PostgresAdvisoryCoordinator(database).try_lock("contention-acquire"):
+                pytest.fail("Worker must not run when lock acquisition fails")
+    finally:
+        sqlalchemy_event.remove(database.engine.sync_engine, "after_cursor_execute", fail_after_acquire)
+    async with database.sessions() as session:
+        assert (
+            await session.scalar(
+                text("""
+                SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+                WHERE a.datname = current_database() AND l.locktype = 'advisory'
+            """)
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [ConnectError, ConnectTimeout])
+async def test_contention_loki_failures_release_registry_connection(database: StudioDatabase, redis: Redis, failure):
+    registry, _, _ = await _contention_search(database, redis)
+    record = await registry.get_service("payments-api")
+    await PostgresServiceRegistryStore(database).update(
+        record.service_id,
+        record.model_copy(
+            update={
+                "log_config": LokiLogConfig(
+                    base_url="https://loki.example.test", service_selector_labels={"app": "payments"}
+                )
+            }
+        ),
+    )
+
+    async def unavailable(request):
+        assert database.engine.pool.checkedout() == 0
+        raise failure("Loki unavailable", request=request)
+
+    async with AsyncClient(transport=MockTransport(unavailable)) as outbound:
+        provider = LokiLogProvider(
+            http_client=outbound, outbound_policy=StudioOutboundUrlPolicy(allowed_hosts=["loki.example.test"])
+        )
+        app = FastAPI()
+        app.include_router(
+            create_studio_logs_router(
+                log_query_service=StudioLogQueryService(registry_service=registry, providers={"loki": provider})
+            )
+        )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://studio.test") as client:
+            for _ in range(3):
+                assert (await client.get("/studio/tasks/payments-api/task-1/logs")).status_code == 502
+                assert database.engine.pool.checkedout() == 0

@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from ._provider_availability import _is_query_rejection, _provider_key, _ProviderAvailability
 from .registry import (
     LokiLogConfig,
     OutboundUrlPolicyError,
@@ -220,7 +221,8 @@ class LokiLogProvider:
             raise StudioLogProviderError(f"Loki query failed for service '{service.service_id}'.") from exc
 
         if response.status_code != 200:
-            raise StudioLogProviderError(
+            error_type = StudioLogConfigError if _is_query_rejection(response.status_code) else StudioLogProviderError
+            raise error_type(
                 f"Loki query for service '{service.service_id}' returned unexpected status {response.status_code}."
             )
 
@@ -418,6 +420,7 @@ class StudioLogQueryService:
     ) -> None:
         self._registry_service = registry_service
         self._providers = dict(providers)
+        self._availability = _ProviderAvailability("Loki")
 
     async def query_service_logs(self, service_id: str, query: StudioLogQuery) -> StudioLogListResponse:
         service = await self._registry_service.get_service(service_id)
@@ -437,7 +440,11 @@ class StudioLogQueryService:
             raise StudioLogConfigError(
                 f"Unsupported log provider '{config.provider}' for service '{service.service_id}'."
             )
-        return await provider.query_logs(service=service, config=config, query=query)
+        return await self._availability.run(
+            _provider_key(service.service_id, config),
+            lambda: provider.query_logs(service=service, config=config, query=query),
+            StudioLogProviderError,
+        )
 
 
 def create_studio_logs_router(

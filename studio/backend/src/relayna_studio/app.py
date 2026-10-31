@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import httpx
@@ -92,6 +92,7 @@ class StudioRuntime:
     registry_store: Any
     registry_service: ServiceRegistryService
     http_client: httpx.AsyncClient
+    _provider_http_clients: tuple[httpx.AsyncClient, ...] = field(default=(), init=False, repr=False)
     federation_service: StudioFederationService
     event_store: Any
     event_ingest_service: StudioEventIngestService
@@ -305,15 +306,28 @@ class _StudioLifespan:
                 observation_stale_after_seconds=self._observation_stale_after_seconds,
                 worker_heartbeat_stale_after_seconds=self._worker_heartbeat_stale_after_seconds,
             )
+
+            # Optional telemetry never borrows core federation/ingestion slots.
+            def provider_client() -> httpx.AsyncClient:
+                if self._federation_client_factory is _default_async_client_factory:
+                    return httpx.AsyncClient(
+                        timeout=self._federation_timeout_seconds,
+                        limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+                    )
+                return self._federation_client_factory(self._federation_timeout_seconds)
+
+            loki_client, prometheus_client, tempo_client = (provider_client() for _ in range(3))
             log_query_service = StudioLogQueryService(
                 registry_service=registry_service,
-                providers={"loki": LokiLogProvider(http_client=http_client, outbound_policy=outbound_policy)},
+                providers={"loki": LokiLogProvider(http_client=loki_client, outbound_policy=outbound_policy)},
             )
             search_service.log_query_service = log_query_service
             metrics_query_service = StudioMetricsQueryService(
                 registry_service=registry_service,
                 providers={
-                    "prometheus": PrometheusMetricsProvider(http_client=http_client, outbound_policy=outbound_policy)
+                    "prometheus": PrometheusMetricsProvider(
+                        http_client=prometheus_client, outbound_policy=outbound_policy
+                    )
                 },
                 federation_service=federation_service,
             )
@@ -329,7 +343,7 @@ class _StudioLifespan:
             )
             trace_query_service = StudioTraceQueryService(
                 registry_service=registry_service,
-                providers={"tempo": TempoTraceProvider(http_client=http_client, outbound_policy=outbound_policy)},
+                providers={"tempo": TempoTraceProvider(http_client=tempo_client, outbound_policy=outbound_policy)},
                 federation_service=federation_service,
                 log_query_service=log_query_service,
                 event_ingest_service=event_ingest_service,
@@ -433,6 +447,7 @@ class _StudioLifespan:
                 coordinator=coordinator,
                 recovery_service=_RecoveryService(database, federation_service) if database is not None else None,
             )
+            self._runtime._provider_http_clients = (loki_client, prometheus_client, tempo_client)
         return self._runtime
 
     def _failed_task_email_configured(self) -> bool:
@@ -604,7 +619,10 @@ class _StudioLifespan:
                             await runtime.outbox_relay_task
                     finally:
                         runtime.outbox_relay_task = None
-                await runtime.http_client.aclose()
+                # A custom factory may return the same client more than once.
+                clients = {id(client): client for client in (runtime.http_client, *runtime._provider_http_clients)}
+                for client in clients.values():
+                    await client.aclose()
                 await runtime.redis.aclose()
                 if runtime.database is not None:
                     await runtime.database.dispose()

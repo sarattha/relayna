@@ -451,3 +451,23 @@ def test_future_source_or_index_timestamps_cannot_establish_ingestion_delay(
     assert evidence["ingestion_lag"]["state"] == "unknown"
     assert evidence["ingestion_lag"]["value"] is None
     assert evidence["indexed_events"]["observed_at"] == evidence["ingestion_lag"]["observed_at"]
+
+
+def test_cached_provider_outage_is_visible_without_additional_queries(client):
+    from relayna_studio.logs import StudioLogProviderError
+    from relayna_studio.registry import LokiLogConfig
+
+    client, rt = client
+    configured = record(
+        log_config=LokiLogConfig(base_url="https://loki.example.test", service_selector_labels={"app": "payments"})
+    )
+    client.portal.call(rt.registry_store.update, "payments", configured)
+    provider = rt.log_query_service._providers["loki"]
+    provider.query_logs = AsyncMock(side_effect=StudioLogProviderError("Loki offline"))
+    assert client.get("/studio/services/payments/logs").status_code == 502
+    evidence = checks(client.get("/studio/services/payments/doctor"))
+    assert evidence["logs"]["state"] == "unavailable"
+    assert evidence["logs"]["checked_at"] is not None
+    assert "paused" in evidence["logs"]["detail"]
+    assert client.get("/studio/services/payments/logs").status_code == 502
+    provider.query_logs.assert_awaited_once()
