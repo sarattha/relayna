@@ -13,11 +13,12 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError, field_validator, model_validator
 
 from relayna.api import CapabilityDocument, build_legacy_fallback_capability_document
 
 if TYPE_CHECKING:
+    from ._observability_profiles import _ProfileStore
     from .health import StudioHealthRefreshService
     from .search import StudioSearchIndexer
 
@@ -39,6 +40,8 @@ def _normalize_optional_string(value: Any) -> str | None:
 
 
 class LokiLogConfig(BaseModel):
+    _profile_revision: int | None = PrivateAttr(default=None)
+    profile_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     provider: Literal["loki"] = "loki"
     base_url: str
     tenant_id: str | None = None
@@ -104,6 +107,8 @@ _UNSUPPORTED_METRIC_SELECTOR_LABELS = {"task_id", "correlation_id", "request_id"
 
 
 class PrometheusMetricsConfig(BaseModel):
+    _profile_revision: int | None = PrivateAttr(default=None)
+    profile_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     provider: Literal["prometheus"] = "prometheus"
     base_url: str
     namespace: str
@@ -159,6 +164,8 @@ class PrometheusMetricsConfig(BaseModel):
 
 
 class TempoTraceConfig(BaseModel):
+    _profile_revision: int | None = PrivateAttr(default=None)
+    profile_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     provider: Literal["tempo"] = "tempo"
     base_url: str
     public_base_url: str | None = None
@@ -711,7 +718,9 @@ class ServiceRegistryService:
         capability_fetcher: CapabilityFetcher | None = None,
         search_indexer: StudioSearchIndexer | None = None,
         outbound_policy: StudioOutboundUrlPolicy | None = None,
+        profile_store: _ProfileStore | None = None,
     ) -> None:
+        self._profile_store = profile_store
         self._store = store
         self._capability_fetcher = capability_fetcher or HttpCapabilityFetcher()
         self._search_indexer = search_indexer
@@ -722,6 +731,8 @@ class ServiceRegistryService:
 
     async def create_service(self, request: CreateServiceRequest) -> ServiceRecord:
         record = request.to_record()
+        if self._profile_store is not None:
+            record = await self._profile_store.record(record, strict=True)
         self._validate_record_outbound_urls(record)
         created = await self._store.create(record)
         if self._search_indexer is not None:
@@ -729,14 +740,15 @@ class ServiceRegistryService:
         return created
 
     async def list_services(self) -> list[ServiceRecord]:
-        return await self._store.list_records()
+        records = await self._store.list_records()
+        return [await self._profile_store.record(record) for record in records] if self._profile_store else records
 
     async def get_service(self, service_id: str) -> ServiceRecord:
         normalized_service_id = service_id.strip()
         record = await self._store.get(normalized_service_id)
         if record is None:
             raise ServiceNotFoundError(f"Service '{service_id}' was not found.")
-        return record
+        return await self._profile_store.record(record) if self._profile_store else record
 
     async def update_service(self, service_id: str, request: UpdateServiceRequest) -> ServiceRecord:
         normalized_service_id = service_id.strip()
@@ -751,6 +763,8 @@ class ServiceRegistryService:
         if next_status is not None:
             data["status"] = next_status
         updated = ServiceRecord.model_validate(data)
+        if self._profile_store is not None:
+            updated = await self._profile_store.record(updated, strict=True)
         self._validate_record_outbound_urls(updated)
         saved = await self._store.update(normalized_service_id, updated)
         if self._search_indexer is not None:

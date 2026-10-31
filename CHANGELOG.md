@@ -4,6 +4,50 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 1.14.0 - 2026-11-01
+
+### Added
+
+- Reusable, environment-scoped Loki, Prometheus, and Tempo profiles with encrypted
+  bearer/basic credentials, bounded connection tests, and service-registration
+  selectors. Endpoint and credential changes apply to linked services while
+  selectors and query settings remain service-owned.
+- Administrator profile management with revision checks, audited mutations,
+  secret-free responses, and transactional protection against deleting a profile
+  while services are binding to it. Existing inline configuration remains usable.
+
+### Fixed
+
+- Preserve Loki source-label defaults in the service editor and saved payload.
+  Keep graph, task-event, and DLQ diagnostics available when Tempo profile
+  resolution or decryption prevents span enrichment.
+- Integrate profiles with isolated provider HTTP pools and outage backoff.
+  Credential rotation permits an immediate retry; rejected Prometheus queries
+  remain validation errors and do not pause the provider. Cache keys contain
+  profile revisions, never credentials.
+- Include the PostgreSQL refresh/retention contention and bounded provider-outage
+  recovery fixes prepared for 1.13.1, retaining atomic metadata updates and core
+  task/event availability during optional telemetry failures.
+
+### Changed
+
+- Align SDK, Studio backend/frontend, SDK dependency floor, and lock metadata at
+  1.14.0. Record the user-approved additive Studio API/type perimeter entries;
+  preserve SDK exports, broker/Redis formats, and existing inline configurations.
+- Document profile setup, key backup, credential rotation, provider isolation,
+  deletion, and coordinated rollback. Add regression and coverage gates above
+  95% for the new UI, with whole backend/frontend coverage gates retained.
+
+### Upgrade and rollback
+
+- Deploy matching 1.14.0 packages/images. PostgreSQL revision `0003_recovery`
+  remains unchanged; no SQL migration or service backfill is needed. Authenticated
+  profiles require the existing settings encryption key on every backend replica.
+- Before restoring an older backend, detach profile-bound services and arrange
+  compatible upstream authentication. Retain the encryption key and PostgreSQL
+  backups; older backends cannot honor saved profile credentials. Avoid mixed
+  backend versions for profile-bound services. No SQL downgrade is required.
+
 ## 1.13.1 - 2026-11-01
 
 ### Fixed

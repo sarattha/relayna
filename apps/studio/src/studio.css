@@ -1658,3 +1658,5 @@ summary { cursor: pointer; font-weight: 600; padding: 12px 4px; }
 .studio-doctor-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0; }
 .studio-doctor-controls label { flex: 1 1 220px; min-width: 0; display: grid; gap: 6px; font-size: 13px; }
 .studio-doctor-json { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+
+.observability-profile-fields > label { display: grid; gap: 6px; min-width: 0; }

@@ -91,7 +91,7 @@ the same operation can optionally be a one-shot deployment job:
 ```bash
 docker run --rm \
   -e RELAYNA_STUDIO_DATABASE_URL="$RELAYNA_STUDIO_DATABASE_URL" \
-  ghcr.io/sarattha/relayna-studio-backend:1.13.1 \
+  ghcr.io/sarattha/relayna-studio-backend:1.14.0 \
   alembic upgrade head
 ```
 
@@ -312,3 +312,12 @@ These observations are auxiliary operational evidence, not durable audit or a
 complete notification-attempt history. No payloads, recipients, API keys or
 provider URLs are recorded there. Existing PostgreSQL notification delivery and
 audit persistence remain unchanged.
+
+## Shared observability connections
+
+[Observability profiles](studio-observability-profiles.md) retain versioned
+connection settings in `studio_operator_settings`, with credentials encrypted
+using `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY`. Services retain optional
+`profile_id` references in their existing provider JSON fields. No SQL revision
+is required. Back up the key and database together through the existing secret
+backup process; detach bound services before rolling back to an older backend.

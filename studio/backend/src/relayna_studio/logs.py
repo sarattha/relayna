@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from string import Formatter
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -81,6 +81,10 @@ def _encode_page_cursor(*, cursor: str, skip_count: int) -> str:
     if skip_count <= 0:
         return cursor
     return f"{_LOKI_CURSOR_PREFIX}{cursor}:{skip_count}"
+
+
+if TYPE_CHECKING:
+    from ._observability_profiles import _ProfileStore
 
 
 class StudioLogEntry(BaseModel):
@@ -177,10 +181,12 @@ class LokiLogProvider:
         http_client: httpx.AsyncClient,
         query_path: str = "/loki/api/v1/query_range",
         outbound_policy: StudioOutboundUrlPolicy | None = None,
+        profile_store: _ProfileStore | None = None,
     ) -> None:
         normalized_path = query_path.strip() or "/loki/api/v1/query_range"
         if not normalized_path.startswith("/"):
             normalized_path = f"/{normalized_path}"
+        self._profile_store = profile_store
         self._http_client = http_client
         self._query_path = normalized_path
         self._outbound_policy = outbound_policy or StudioOutboundUrlPolicy()
@@ -192,6 +198,15 @@ class LokiLogProvider:
         config: LokiLogConfig,
         query: StudioLogQuery,
     ) -> StudioLogListResponse:
+        if config.profile_id and self._profile_store is None:
+            raise StudioLogProviderError("Observability profile resolution is unavailable.")
+        if self._profile_store:
+            try:
+                config, headers = await self._profile_store.resolve(config, service.environment)
+            except (HTTPException, OutboundUrlPolicyError) as exc:
+                raise StudioLogProviderError("Loki connection profile is unavailable.") from exc
+        else:
+            headers = {"Accept": "application/json"}
         before_cursor: str | None = None
         skip_boundary_count = 0
         if query.before is not None:
@@ -208,13 +223,12 @@ class LokiLogProvider:
             params["end"] = _iso_to_loki_ns(query.to_time)
         if before_cursor is not None:
             params["end"] = _iso_to_loki_ns(before_cursor)
-        headers = {"Accept": "application/json"}
         if config.tenant_id:
             headers["X-Scope-OrgID"] = config.tenant_id
         url = f"{config.base_url.rstrip('/')}{self._query_path}"
         try:
             self._outbound_policy.validate_url(config.base_url, label="Loki log_config.base_url")
-            response = await self._http_client.get(url, params=params, headers=headers)
+            response = await self._http_client.get(url, params=params, headers=headers, follow_redirects=False)
         except OutboundUrlPolicyError as exc:
             raise StudioLogProviderError(str(exc)) from exc
         except httpx.HTTPError as exc:
