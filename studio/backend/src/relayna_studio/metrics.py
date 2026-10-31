@@ -298,7 +298,10 @@ class PrometheusMetricsProvider:
         if config.profile_id and self._profile_store is None:
             raise StudioMetricsProviderError("Observability profile resolution is unavailable.")
         if self._profile_store:
-            config, headers = await self._profile_store.resolve(config, service.environment)
+            try:
+                config, headers = await self._profile_store.resolve(config, service.environment)
+            except (HTTPException, OutboundUrlPolicyError) as exc:
+                raise StudioMetricsProviderError("Prometheus connection profile is unavailable.") from exc
         else:
             headers = {"Accept": "application/json"}
         promql = self._build_pod_list_query(config)
@@ -316,7 +319,12 @@ class PrometheusMetricsProvider:
 
         if response.status_code != 200:
             if config.profile_id:
-                raise StudioMetricsProviderError(f"Prometheus request returned HTTP {response.status_code}.")
+                error_type = (
+                    StudioMetricsConfigError
+                    if _is_query_rejection(response.status_code)
+                    else StudioMetricsProviderError
+                )
+                raise error_type(f"Prometheus request returned HTTP {response.status_code}.")
             raise self._unexpected_status_error(
                 response=response,
                 service=service,
@@ -346,7 +354,10 @@ class PrometheusMetricsProvider:
         if config.profile_id and self._profile_store is None:
             raise StudioMetricsProviderError("Observability profile resolution is unavailable.")
         if self._profile_store:
-            config, headers = await self._profile_store.resolve(config, service.environment)
+            try:
+                config, headers = await self._profile_store.resolve(config, service.environment)
+            except (HTTPException, OutboundUrlPolicyError) as exc:
+                raise StudioMetricsProviderError("Prometheus connection profile is unavailable.") from exc
         else:
             headers = {"Accept": "application/json"}
         promql = self._build_query(service=service, config=config, query=query, group=group)
@@ -367,7 +378,12 @@ class PrometheusMetricsProvider:
 
         if response.status_code != 200:
             if config.profile_id:
-                raise StudioMetricsProviderError(f"Prometheus request returned HTTP {response.status_code}.")
+                error_type = (
+                    StudioMetricsConfigError
+                    if _is_query_rejection(response.status_code)
+                    else StudioMetricsProviderError
+                )
+                raise error_type(f"Prometheus request returned HTTP {response.status_code}.")
             raise self._unexpected_status_error(
                 response=response,
                 service=service,

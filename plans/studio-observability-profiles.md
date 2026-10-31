@@ -20,6 +20,23 @@ providers is outside this change. Existing manual configurations remain usable.
 
 ## Progress
 
+- [x] (2026-11-01) User authorized rebasing, coordinated version/changelog/docs
+  updates, merging when ready, and creating the release after merge. This replaces
+  the earlier requirement to wait for a separate merge signal.
+- [x] (2026-11-01) Validate v1.14.0 preparation: 704 SDK tests/9 optional skips,
+  771 backend tests, 387 frontend tests, strict docs and distribution checks.
+  Coverage: SDK 97.95%, backend 98.28%, frontend lines 98.87%; new UI lines
+  100% and branches 98.07%. Release metadata and lock files agree.
+- [ ] Push the rebased release preparation, merge when required checks/reviews
+  permit, and tag the merged main commit for the existing release workflow.
+- [ ] Verify the published v1.14.0 release, artifacts, images, and release notes.
+
+- [x] (2026-11-01) Rebase onto current origin/main (b637c2b) and reconcile
+  profile binding validation with the new row-lock/projection update ordering.
+- [x] (2026-11-01) Verify the rebased provider-isolation/profile implementation;
+  preserve separate HTTP pools, query-error classification, and rotation recovery.
+  Twenty-two new regression cases cover the integration; focused tests passed 124 cases.
+
 - [x] (2026-11-01) Reproduce and fix both PR review findings with regression tests.
 - [x] (2026-11-01) Mandatory verification, frontend build, and coverage pass after the review fixes: 704 SDK tests, 695 backend tests, 380 frontend tests; backend coverage 98.25%, frontend lines 98.86%, new UI lines 100% and branches 98.07%.
 - [x] (2026-11-01) Publish both verified review fixes in PR #145 and continue monitoring without merging; mark their review threads resolved after the push.
@@ -36,7 +53,7 @@ providers is outside this change. Existing manual configurations remain usable.
 - [x] (2026-11-01) Add regression, persistence, authorization, redaction, and race tests; update documentation and narrowly scoped freeze entries. Add a per-file frontend coverage gate above 95%.
 - [x] (2026-11-01) Run mandatory SDK/backend verification and frontend build and coverage. Complete shared-browser desktop/mobile UI checks.
 - [x] (2026-11-01) Final coverage measurements pass: backend 98.24% overall and new profile module 99.60%; frontend 98.86% lines overall and new profile UI 100% lines / 98% branches.
-- [x] (2026-11-01) Open PR #145: https://github.com/sarattha/relayna/pull/145. Activate T3 check/review monitoring at handoff; merging remains prohibited until the user signals.
+- [x] (2026-11-01) Open PR #145: https://github.com/sarattha/relayna/pull/145. Activate T3 check/review monitoring at handoff; merge is authorized after required checks and reviews permit.
 - [ ] Native Computer Use remains blocked: browser host unavailable, Chrome timeoutReached, Safari noWindowsAvailable. Shared preview browser used as an explicitly reported fallback.
 
 ## Surprises & Discoveries
@@ -70,6 +87,23 @@ providers is outside this change. Existing manual configurations remain usable.
   these concerns could query another service's telemetry.
 
 ## Decision Log
+
+- Decision: Prepare v1.14.0 as a coordinated minor release for the new feature;
+  preserve the prepared 1.13.1 fixes from main and describe them in the release notes.
+  The latest published release is v1.13.0. Follow its tag-triggered release workflow
+  so wheel/sdist, signed Studio images, SBOMs/provenance, title, and changelog-derived
+  notes match the previous format. Tag only the verified merged main commit.
+  Date/Author: 2026-11-01, Codex; release and merge explicitly authorized by the user.
+
+- Decision: Preserve main's dedicated provider pools and registry row-lock order.
+  Route saved-profile connection tests through the appropriate provider pool;
+  classify bound Prometheus query rejections without exposing upstream secrets.
+  Keep profile revision as a Pydantic PrivateAttr so credential rotation changes
+  only the internal availability key, without changing public response shapes or
+  persisted service documents. Policy boundary v1.4.30, latest local tag v1.13.0;
+  this combines approved profile behavior with main's internal outage isolation.
+  No new freeze entries or schema migrations are required.
+  Date/Author: 2026-11-01, Codex.
 
 - Decision: Correct both review findings within the existing approved perimeter;
   keep the Loki editor/serializer fields synchronized and translate Tempo profile
@@ -124,7 +158,7 @@ failed reload and recovery, and a 390px mobile layout. Native Computer Use itsel
 could not run because its host could not connect to browser windows; this is a
 remaining verification limitation, not a passed check.
 
-PR #145 is open at https://github.com/sarattha/relayna/pull/145. Local checks and coverage gates passed. T3 monitoring is activated at handoff to handle checks and reviews; merging requires a separate user signal.
+PR #145 is open at https://github.com/sarattha/relayna/pull/145. Local checks and coverage gates passed. T3 monitoring is activated at handoff to handle checks and reviews; merging and release are now explicitly authorized once required checks/reviews pass.
 
 ## Context and Orientation
 
@@ -305,3 +339,18 @@ profile, and a disallowed endpoint. They now return HTTP 200 trace-path diagnost
 with graph nodes, events, DLQ records, trace identifiers, and an enrichment warning;
 direct trace requests return a provider error without attempting an HTTP request
 or exposing credentials. No route/schema/manifest changes were needed.
+
+## Release preparation
+
+The branch is rebased onto origin/main b637c2b, including the prepared 1.13.1
+provider-isolation and PostgreSQL contention fixes. All three packages, the backend
+SDK dependency floor, uv locks, and npm root lock metadata use 1.14.0. CHANGELOG.md
+contains the release's Added, Fixed, Changed, and Upgrade/rollback sections; README.md
+and docs/releases.md point to the new artifacts and describe coordinated deployment.
+The previous GitHub release is v1.13.0, with an annotated `Release v1.13.0` tag.
+Use the same annotated-tag and existing `.github/workflows/release.yml` mechanism
+after merge; it creates the release with SDK wheel/sdist, three SPDX JSON assets,
+signed backend/frontend OCI images, and provenance. Do not publish from the PR head.
+Local distribution builds and `twine check` pass; strict MkDocs passes. Backend
+distribution checks retain the existing missing-long-description warnings.
+GitHub required checks and review policy still govern the merge.

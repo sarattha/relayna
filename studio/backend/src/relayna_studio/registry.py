@@ -13,7 +13,7 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError, field_validator, model_validator
 
 from relayna.api import CapabilityDocument, build_legacy_fallback_capability_document
 
@@ -40,6 +40,7 @@ def _normalize_optional_string(value: Any) -> str | None:
 
 
 class LokiLogConfig(BaseModel):
+    _profile_revision: int | None = PrivateAttr(default=None)
     profile_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     provider: Literal["loki"] = "loki"
     base_url: str
@@ -106,6 +107,7 @@ _UNSUPPORTED_METRIC_SELECTOR_LABELS = {"task_id", "correlation_id", "request_id"
 
 
 class PrometheusMetricsConfig(BaseModel):
+    _profile_revision: int | None = PrivateAttr(default=None)
     profile_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     provider: Literal["prometheus"] = "prometheus"
     base_url: str
@@ -162,6 +164,7 @@ class PrometheusMetricsConfig(BaseModel):
 
 
 class TempoTraceConfig(BaseModel):
+    _profile_revision: int | None = PrivateAttr(default=None)
     profile_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
     provider: Literal["tempo"] = "tempo"
     base_url: str

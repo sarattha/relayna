@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -135,7 +136,9 @@ def _effective(config: Any, profile: dict[str, Any]) -> Any:
     changes: dict[str, Any] = {"base_url": profile["base_url"]}
     if hasattr(config, "tenant_id"):
         changes["tenant_id"] = profile.get("tenant_id")
-    return config.model_copy(update=changes)
+    effective = config.model_copy(update=changes)
+    effective._profile_revision = profile["revision"]
+    return effective
 
 
 class _ProfileStore:
@@ -371,7 +374,7 @@ class _ProfileStore:
                         raise
         return record.model_copy(update=changes) if changes else record
 
-    async def test(self, profile_id: str, client: httpx.AsyncClient) -> dict[str, Any]:
+    async def test(self, profile_id: str, clients: Mapping[str, httpx.AsyncClient]) -> dict[str, Any]:
         profile = await self.current(profile_id)
         model = _MODELS[profile["provider"]]
         config = model.model_validate(
@@ -389,6 +392,7 @@ class _ProfileStore:
             "tempo": ("/api/search/tags", {}),
         }
         path, params = paths[profile["provider"]]
+        client = clients[profile["provider"]]
         try:
             response = await client.get(
                 config.base_url + path, params=params, headers=headers, follow_redirects=False, timeout=10
@@ -419,7 +423,7 @@ class _ProfileStore:
         }
 
 
-def _create_profile_router(store: _ProfileStore, client: httpx.AsyncClient) -> APIRouter:
+def _create_profile_router(store: _ProfileStore, clients: Mapping[str, httpx.AsyncClient]) -> APIRouter:
     router = APIRouter(prefix="/studio/admin/observability-profiles")
 
     async def parse(request: Request) -> _ProfileInput:
@@ -455,6 +459,6 @@ def _create_profile_router(store: _ProfileStore, client: httpx.AsyncClient) -> A
 
     @router.post("/{profile_id}/test")
     async def test_profile(profile_id: str):
-        return await store.test(profile_id, client)
+        return await store.test(profile_id, clients)
 
     return router

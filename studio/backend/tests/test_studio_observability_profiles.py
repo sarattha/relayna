@@ -22,13 +22,16 @@ from relayna_studio._observability_profiles import (
     _ProfileStore,
     _url,
 )
+from relayna_studio._provider_availability import _provider_key
 from relayna_studio.database import PostgresServiceRegistryStore, StudioDatabase, audit_log, metadata, operator_settings
-from relayna_studio.logs import LokiLogProvider, StudioLogProviderError, StudioLogQuery
+from relayna_studio.logs import LokiLogProvider, StudioLogProviderError, StudioLogQuery, StudioLogQueryService
 from relayna_studio.metrics import (
     PrometheusMetricsProvider,
     StudioMetricGroup,
+    StudioMetricsConfigError,
     StudioMetricsProviderError,
     StudioMetricsQuery,
+    StudioMetricsQueryService,
 )
 from relayna_studio.registry import (
     LokiLogConfig,
@@ -211,13 +214,13 @@ async def test_saved_connection_tests_are_bounded_and_sanitized(provider):
             "provider_error",
             "provider_error",
         ]:
-            result = await store.test("profile", client)
+            result = await store.test("profile", dict.fromkeys(MODELS, client))
             assert result["state"] == expected and "private" not in json.dumps(result)
         assert len(requests) == 7
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda r: (_ for _ in ()).throw(httpx.ConnectError("private")))
     ) as client:
-        assert (await store.test("profile", client))["state"] == "unreachable"
+        assert (await store.test("profile", dict.fromkeys(MODELS, client)))["state"] == "unreachable"
 
 
 @pytest.mark.asyncio
@@ -271,7 +274,7 @@ async def test_provider_requests_resolve_credentials_and_reject_redirects(provid
 def test_routes_sanitize_validation_and_missing_storage():
     store = _ProfileStore(None, POLICY)
     app = FastAPI()
-    app.include_router(_create_profile_router(store, httpx.AsyncClient()))
+    app.include_router(_create_profile_router(store, dict.fromkeys(MODELS, httpx.AsyncClient())))
     with TestClient(app) as client:
         base = "/studio/admin/observability-profiles"
         for body in [
@@ -416,7 +419,7 @@ async def test_admin_api_roundtrip_and_linked_registry_behavior(profile_database
         transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"status": "success"}))
     ) as upstream:
         app = FastAPI()
-        app.include_router(_create_profile_router(store, upstream))
+        app.include_router(_create_profile_router(store, dict.fromkeys(MODELS, upstream)))
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://studio") as client:
             base = "/studio/admin/observability-profiles"
             created = await client.post(base, json=payload().model_dump(mode="json"))
@@ -534,3 +537,191 @@ async def test_tempo_profile_failure_preserves_trace_path_diagnostics(monkeypatc
             assert direct.status_code == 502
             assert secret not in direct.text and profile["credential_cipher"] not in direct.text
     assert requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", MODELS)
+async def test_profile_revision_changes_only_private_availability_key(provider):
+    profiles = _ProfileStore(None, POLICY)
+    profile = document(provider=provider)
+    profiles.current = AsyncMock(return_value=profile)
+    first, _ = await profiles.resolve(config(provider), "prod", credentials=False)
+    profile["revision"] = 2
+    second, _ = await profiles.resolve(config(provider), "prod", credentials=False)
+    assert first.model_dump_json() == second.model_dump_json()
+    assert _provider_key("orders", first) != _provider_key("orders", second)
+    assert "_profile_revision" not in second.model_dump_json()
+    assert MODELS[provider].model_validate_json(second.model_dump_json())._profile_revision is None
+
+
+@pytest.mark.asyncio
+async def test_rotating_profile_credentials_recovers_from_auth_backoff_immediately(monkeypatch):
+    monkeypatch.setenv("RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    profile = document(auth_mode="bearer", credential_cipher=_cipher().encrypt(b'{"token":"synthetic-old"}').decode())
+    profiles = _ProfileStore(None, POLICY)
+    profiles.current = AsyncMock(return_value=profile)
+    service = record(log_config=config())
+
+    async def current(_):
+        return await profiles.record(service)
+
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        if request.headers["Authorization"] == "Bearer synthetic-old":
+            return httpx.Response(401)
+        return httpx.Response(200, json={"status": "success", "data": {"resultType": "streams", "result": []}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as upstream:
+        query_service = StudioLogQueryService(
+            registry_service=SimpleNamespace(get_service=current),
+            providers={"loki": LokiLogProvider(http_client=upstream, outbound_policy=POLICY, profile_store=profiles)},
+        )
+        for _ in range(2):
+            with pytest.raises(StudioLogProviderError):
+                await query_service.query_service_logs("orders", StudioLogQuery())
+        assert len(requests) == 1
+        profile.update(revision=2, credential_cipher=_cipher().encrypt(b'{"token":"synthetic-new"}').decode())
+        response = await query_service.query_service_logs("orders", StudioLogQuery())
+        assert response.count == 0 and len(requests) == 2
+        assert requests[-1].headers["Authorization"] == "Bearer synthetic-new"
+        assert "synthetic-" not in json.dumps(list(query_service._availability._states))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 413, 414, 422, 401, 429, 503])
+@pytest.mark.parametrize("operation", ["pods", "range"])
+async def test_bound_prometheus_keeps_query_rejections_out_of_outage_backoff(status, operation):
+    profiles = _ProfileStore(None, POLICY)
+    profiles.current = AsyncMock(return_value=document(provider="prometheus"))
+    service = record(metrics_config=config("prometheus"))
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(status, json={"error": "synthetic-private"})
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": {"resultType": "vector" if operation == "pods" else "matrix", "result": []},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as upstream:
+        query_service = StudioMetricsQueryService(
+            registry_service=SimpleNamespace(get_service=AsyncMock(return_value=service)),
+            providers={
+                "prometheus": PrometheusMetricsProvider(
+                    http_client=upstream, outbound_policy=POLICY, profile_store=profiles
+                )
+            },
+        )
+
+        async def query():
+            if operation == "pods":
+                return await query_service.query_service_pods("orders")
+            return await query_service.query_service_metrics(
+                "orders", StudioMetricsQuery(groups=[StudioMetricGroup.CPU_USAGE])
+            )
+
+        rejected = status in {400, 413, 414, 422}
+        with pytest.raises(StudioMetricsConfigError if rejected else StudioMetricsProviderError) as exc:
+            await query()
+        assert "synthetic-private" not in str(exc.value)
+        if rejected:
+            await query()
+            assert len(requests) == 2
+        else:
+            with pytest.raises(StudioMetricsProviderError, match="paused"):
+                await query()
+            assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["loki", "prometheus-pods", "prometheus-range"])
+async def test_profile_lookup_failure_uses_provider_outage_gate(provider):
+    profiles = _ProfileStore(None, POLICY)
+    profiles.current = AsyncMock(side_effect=HTTPException(503, "synthetic-private"))
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: pytest.fail("Must not contact upstream"))
+    ) as upstream:
+        if provider == "loki":
+            service = record(log_config=config())
+            query_service = StudioLogQueryService(
+                registry_service=SimpleNamespace(get_service=AsyncMock(return_value=service)),
+                providers={
+                    "loki": LokiLogProvider(http_client=upstream, outbound_policy=POLICY, profile_store=profiles)
+                },
+            )
+
+            async def query():
+                return await query_service.query_service_logs("orders", StudioLogQuery())
+
+            error_type = StudioLogProviderError
+        else:
+            service = record(metrics_config=config("prometheus"))
+            query_service = StudioMetricsQueryService(
+                registry_service=SimpleNamespace(get_service=AsyncMock(return_value=service)),
+                providers={
+                    "prometheus": PrometheusMetricsProvider(
+                        http_client=upstream, outbound_policy=POLICY, profile_store=profiles
+                    )
+                },
+            )
+
+            async def query():
+                if provider == "prometheus-pods":
+                    return await query_service.query_service_pods("orders")
+                return await query_service.query_service_metrics(
+                    "orders", StudioMetricsQuery(groups=[StudioMetricGroup.CPU_USAGE])
+                )
+
+            error_type = StudioMetricsProviderError
+        for _ in range(2):
+            with pytest.raises(error_type) as exc:
+                await query()
+            assert "synthetic-private" not in str(exc.value)
+        assert profiles.current.await_count == 1
+
+
+def test_saved_profile_checks_use_provider_owned_http_pools(monkeypatch):
+    from relayna_studio import app as studio_app
+    from relayna_studio.app import create_studio_app
+    from test_studio_logs import FakeRedis
+
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+
+    async def current(self, profile_id):
+        return document(provider=profile_id)
+
+    monkeypatch.setattr(_ProfileStore, "current", current)
+    clients, requests = [], []
+
+    def factory(timeout):
+        index = len(clients)
+
+        def transport(request):
+            requests.append((index, request.url.path))
+            return httpx.Response(200, json={"status": "success", "tagNames": []})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(transport), timeout=timeout)
+        clients.append(client)
+        return client
+
+    app = create_studio_app(
+        redis_url="redis://test",
+        federation_client_factory=factory,
+        capability_refresh_allowed_hosts=(".internal",),
+        pull_sync_interval_seconds=None,
+        health_refresh_interval_seconds=None,
+        retention_prune_interval_seconds=None,
+    )
+    with TestClient(app) as client:
+        for provider in MODELS:
+            response = client.post(f"/studio/admin/observability-profiles/{provider}/test")
+            assert response.status_code == 200 and response.json()["ok"]
+    assert [index for index, _ in requests] == [1, 2, 3]
+    assert len(clients) == 4 and all(client.is_closed for client in clients)

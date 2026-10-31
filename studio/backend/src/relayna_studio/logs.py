@@ -201,7 +201,10 @@ class LokiLogProvider:
         if config.profile_id and self._profile_store is None:
             raise StudioLogProviderError("Observability profile resolution is unavailable.")
         if self._profile_store:
-            config, headers = await self._profile_store.resolve(config, service.environment)
+            try:
+                config, headers = await self._profile_store.resolve(config, service.environment)
+            except (HTTPException, OutboundUrlPolicyError) as exc:
+                raise StudioLogProviderError("Loki connection profile is unavailable.") from exc
         else:
             headers = {"Accept": "application/json"}
         before_cursor: str | None = None
