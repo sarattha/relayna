@@ -36,7 +36,11 @@ export function ProfileSelector({ provider, draft, onChange, state }: { provider
         if (profile) {
           Object.assign(next, { [`${prefix}_provider`]: provider, [`${prefix}_base_url`]: profile.base_url });
           if (provider !== "prometheus") Object.assign(next, { [`${prefix}_tenant_id`]: profile.tenant_id || "" });
-          for (const [key, value] of Object.entries(profile.defaults)) Object.assign(next, { [`${prefix}_${key}`]: value == null ? "" : String(value) });
+          for (const [key, value] of Object.entries(profile.defaults)) {
+            const fieldValue = value == null ? "" : String(value);
+            Object.assign(next, { [`${prefix}_${key}`]: fieldValue });
+            if (provider === "loki" && key === "source_label") next.log_app_label_key = fieldValue;
+          }
         }
         return next;
       });

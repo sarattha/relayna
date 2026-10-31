@@ -16,9 +16,9 @@ const initial = api.serviceToDraft({ service_id: "orders", name: "Orders", base_
 const profile = (provider: ObservabilityProfile["provider"] = "loki", overrides = {}): ObservabilityProfile => ({ id: provider, name: `Shared ${provider}`, environment: "prod", provider, base_url: "http://telemetry.internal", tenant_id: "tenant", auth_mode: "none", defaults: {}, revision: 1, updated_at: "now", used_by: [], credential_configured: false, ...overrides });
 let saved: ObservabilityProfile[];
 let calls: Array<{ path: string; init?: RequestInit }>;
-function Harness({ enabled = true }: { enabled?: boolean }) {
+function Harness({ enabled = true, initialDraft = initial }: { enabled?: boolean; initialDraft?: ServiceDraft }) {
   const state = useObservabilityProfiles(enabled);
-  const [draft, setDraft] = useState<ServiceDraft>(initial);
+  const [draft, setDraft] = useState<ServiceDraft>(initialDraft);
   return <><ObservabilityProfileManager state={state} />{(["loki", "prometheus", "tempo"] as const).map(provider => <ProfileSelector key={provider} provider={provider} draft={draft} onChange={setDraft} state={state} />)}<output>{JSON.stringify(draft)}</output></>;
 }
 function change(label: string, value: string) { fireEvent.change(screen.getByLabelText(label), { target: { value } }); }
@@ -36,6 +36,21 @@ beforeEach(() => {
 });
 
 describe("observability profiles", () => {
+  it.each([
+    { previous: "", source: "component", expected: "component" },
+    { previous: "old_source", source: "component", expected: "component" },
+    { previous: "old_source", source: null, expected: null },
+  ])("serializes the selected Loki source default over '$previous' as '$expected'", async ({ previous, source, expected }) => {
+    saved = [profile("loki", { defaults: { source_label: source } })];
+    render(<Harness initialDraft={{ ...initial, log_app_label_key: previous, log_source_label: previous }} />);
+    await screen.findByRole("option", { name: "Shared loki" });
+    change("Loki saved profile", "loki");
+    const draft = JSON.parse(screen.getByRole("status").textContent || "{}");
+    expect(draft.log_app_label_key).toBe(expected || "");
+    expect(draft.log_source_label).toBe(expected || "");
+    expect(api.buildServicePayload(draft).log_config?.source_label).toBe(expected);
+  });
+
   it("creates bearer/basic profiles, tests, rotates without leaking read metadata, and deletes with confirmation", async () => {
     render(<Harness />); open();
     await screen.findByText("No saved profiles yet. Create your first connection below.");

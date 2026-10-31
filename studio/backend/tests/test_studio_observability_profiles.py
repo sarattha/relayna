@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -36,7 +37,12 @@ from relayna_studio.registry import (
     StudioOutboundUrlPolicy,
     TempoTraceConfig,
 )
-from relayna_studio.traces import StudioTraceProviderError, TempoTraceProvider
+from relayna_studio.traces import (
+    StudioTraceProviderError,
+    StudioTraceQueryService,
+    TempoTraceProvider,
+    create_studio_traces_router,
+)
 from sqlalchemy import select, text
 
 POLICY = StudioOutboundUrlPolicy(allowed_hosts=[".internal"])
@@ -455,3 +461,76 @@ async def test_damaged_bindings_stay_editable_but_never_query_without_resolution
         await store.record(bound, strict=True)
     with pytest.raises(HTTPException):
         await store.resolve(bound.log_config, bound.environment)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["missing_key", "wrong_key", "missing_profile", "disallowed_endpoint"])
+async def test_tempo_profile_failure_preserves_trace_path_diagnostics(monkeypatch, failure):
+    key = Fernet.generate_key()
+    secret = "synthetic-trace-credential"
+    profile = document(
+        provider="tempo",
+        auth_mode="bearer",
+        credential_cipher=Fernet(key).encrypt(json.dumps({"token": secret}).encode()).decode(),
+    )
+    monkeypatch.setenv("RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY", key.decode())
+    profiles = _ProfileStore(None, POLICY)
+    profiles.current = AsyncMock(return_value=profile)
+    if failure == "missing_key":
+        monkeypatch.delenv("RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY")
+    elif failure == "wrong_key":
+        monkeypatch.setenv("RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    elif failure == "missing_profile":
+        profiles.current.side_effect = HTTPException(404, "Profile missing")
+    else:
+        profile["base_url"] = "http://untrusted.invalid"
+    service = record(trace_config=config("tempo"))
+    trace_id = "a" * 32
+    dlq = {"dlq_id": "dlq-1", "task_id": "task-1", "queue_name": "orders.queue", "reason": "failed"}
+    event = {"event_type": "TaskFailed", "task_id": "task-1", "payload": {"trace_id": trace_id}}
+    detail = {
+        "trace_id": trace_id,
+        "execution_graph": {
+            "summary": {"status": "failed", "graph_completeness": "partial"},
+            "nodes": [{"id": "task:task-1", "kind": "task", "label": "Order task", "task_id": "task-1"}],
+            "edges": [],
+        },
+        "dlq_messages": {"items": [dlq]},
+    }
+    requests = []
+
+    def transport(request):
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as upstream:
+        provider = TempoTraceProvider(http_client=upstream, outbound_policy=POLICY, profile_store=profiles)
+        query_service = StudioTraceQueryService(
+            registry_service=SimpleNamespace(get_service=AsyncMock(return_value=service)),
+            providers={"tempo": provider},
+            federation_service=SimpleNamespace(
+                get_task_detail=AsyncMock(return_value=SimpleNamespace(model_dump=lambda **_: detail))
+            ),
+            event_ingest_service=SimpleNamespace(
+                list_task_events=AsyncMock(
+                    return_value=SimpleNamespace(items=[SimpleNamespace(model_dump=lambda **_: event)])
+                )
+            ),
+        )
+        app = FastAPI()
+        app.include_router(create_studio_traces_router(trace_query_service=query_service))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://studio") as client:
+            response = await client.get("/studio/tasks/orders/task-1/trace-path")
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert any(node["id"] == "task:task-1" for node in result["nodes"])
+            assert result["events"] == [event]
+            assert result["dlq_messages"] == [dlq]
+            assert result["summary"]["trace_ids"] == [trace_id]
+            assert result["spans"] == []
+            assert any("could not enrich" in warning for warning in result["warnings"])
+            assert secret not in response.text and profile["credential_cipher"] not in response.text
+            direct = await client.get("/studio/tasks/orders/task-1/traces")
+            assert direct.status_code == 502
+            assert secret not in direct.text and profile["credential_cipher"] not in direct.text
+    assert requests == []

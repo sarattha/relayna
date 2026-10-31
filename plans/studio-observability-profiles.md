@@ -20,6 +20,10 @@ providers is outside this change. Existing manual configurations remain usable.
 
 ## Progress
 
+- [x] (2026-11-01) Reproduce and fix both PR review findings with regression tests.
+- [x] (2026-11-01) Mandatory verification, frontend build, and coverage pass after the review fixes: 704 SDK tests, 695 backend tests, 380 frontend tests; backend coverage 98.25%, frontend lines 98.86%, new UI lines 100% and branches 98.07%.
+- [x] (2026-11-01) Publish both verified review fixes in PR #145 and continue monitoring without merging; mark their review threads resolved after the push.
+
 - [x] (2026-11-01) Inspect service registration, provider clients, PostgreSQL
   persistence, authentication, existing encrypted settings, and freeze tests.
 - [x] (2026-11-01) Apply `implementation-strategy` and
@@ -36,6 +40,13 @@ providers is outside this change. Existing manual configurations remain usable.
 - [ ] Native Computer Use remains blocked: browser host unavailable, Chrome timeoutReached, Safari noWindowsAvailable. Shared preview browser used as an explicitly reported fallback.
 
 ## Surprises & Discoveries
+
+- PR review found that Loki `source_label` defaults updated a redundant draft
+  field while the editor and serializer read `log_app_label_key`. Regression tests
+  reproduced blank, stale, and explicit-null source defaults before the fix.
+- PR review found that Tempo profile HTTP/policy failures bypassed the trace-path
+  enrichment fallback. Real resolver regressions reproduced missing/wrong keys,
+  missing profiles, and blocked endpoints suppressing graph/event/DLQ diagnostics.
 
 - The latest local release tag is `v1.13.0`; `HEAD` is `7dfd2b1`.
   `registry.py` and `ServicesPage.tsx` have no differences against that tag.
@@ -59,6 +70,14 @@ providers is outside this change. Existing manual configurations remain usable.
   these concerns could query another service's telemetry.
 
 ## Decision Log
+
+- Decision: Correct both review findings within the existing approved perimeter;
+  keep the Loki editor/serializer fields synchronized and translate Tempo profile
+  failures into sanitized provider-domain errors. Preserve the released trace-path
+  diagnostic fallback and its response schema. No new manifest or migration changes.
+  Compatibility boundary remains v1.4.30 policy / v1.13.0 released behavior;
+  profile binding fixes affect only this PR's unreleased additions.
+  Date/Author: 2026-11-01, Codex.
 
 - Decision: Propose one independently selectable profile per provider, with an
   explicit environment scope. Keep service selectors and namespaces editable
@@ -275,3 +294,14 @@ and 98% branches; `apps/studio/vite.config.ts` now enforces per-file minimums of
 98% statements/functions/lines and 96% branches. Whole-source frontend line
 coverage is 98.86%; its existing whole-source branch threshold remains unchanged.
 Final backend coverage passed at 98.24% overall and 99.60% for the profile module, measured after all runtime edits. All 691 backend tests ran with disposable PostgreSQL and Redis. The frontend suite passed all 377 tests.
+
+## PR review regressions
+
+The Loki source-default regression failed for all three cases before the fix:
+blank source label, stale source label, and explicit null. All now serialize the
+selected value through the editor's actual `log_app_label_key` field. Tempo
+regressions failed before the fix for missing/wrong encryption keys, a missing
+profile, and a disallowed endpoint. They now return HTTP 200 trace-path diagnostics
+with graph nodes, events, DLQ records, trace identifiers, and an enrichment warning;
+direct trace requests return a provider error without attempting an HTTP request
+or exposing credentials. No route/schema/manifest changes were needed.
