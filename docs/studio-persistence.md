@@ -91,7 +91,7 @@ the same operation can optionally be a one-shot deployment job:
 ```bash
 docker run --rm \
   -e RELAYNA_STUDIO_DATABASE_URL="$RELAYNA_STUDIO_DATABASE_URL" \
-  ghcr.io/sarattha/relayna-studio-backend:1.13.0 \
+  ghcr.io/sarattha/relayna-studio-backend:1.13.1 \
   alembic upgrade head
 ```
 

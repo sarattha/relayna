@@ -147,7 +147,7 @@ export function HealthPage() {
       {busy ? <p role="status">Reading scoped integration evidence…</p> : null}
       {doctorError ? <NoticeBanner tone="error">{doctorError}</NoticeBanner> : null}
       {doctor && doctor.service_id === service?.service_id ? <Evidence report={doctor} /> : null}
-      <p style={mutedTextStyle}>Live samples use configured targets, a 3 second deadline per source, one feed result and one Loki result over 15 minutes. Empty samples do not prove ingestion works. Metrics and trace configuration are not availability checks.</p>
+      <p style={mutedTextStyle}>Live samples use configured targets, a 3 second deadline per source, one feed result and one Loki result over 15 minutes. Empty samples do not prove ingestion works. Provider availability reflects recent queries; configuration alone does not establish connectivity. Failed providers back off before a recovery query, while other features remain available.</p>
     </SectionCard>
     {auth.isAdmin ? <AuditBrowser /> : null}
   </div>;

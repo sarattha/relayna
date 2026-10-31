@@ -13,6 +13,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from ._provider_availability import _provider_key, _ProviderAvailability
 from .federation import StudioFederationError, StudioFederationService, StudioTaskDetailResponse
 from .registry import (
     OutboundUrlPolicyError,
@@ -259,7 +260,16 @@ class PrometheusMetricsProvider:
                     step_seconds=step_seconds,
                 )
 
-        results = await asyncio.gather(*(query_group(group) for group in groups))
+        tasks = [asyncio.create_task(query_group(group)) for group in groups]
+        try:
+            results = await asyncio.gather(*tasks)
+        finally:
+            # gather does not cancel sibling queries on failure. Stop queued
+            # and active work before returning a failed optional operation.
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         series = [item for result in results for item in result]
         return StudioMetricsResponse.model_validate(
             {
@@ -698,6 +708,7 @@ class StudioMetricsQueryService:
         self._registry_service = registry_service
         self._providers = dict(providers)
         self._federation_service = federation_service
+        self._availability = _ProviderAvailability("Prometheus")
 
     async def query_service_metrics(self, service_id: str, query: StudioMetricsQuery) -> StudioMetricsResponse:
         service = await self._registry_service.get_service(service_id)
@@ -715,7 +726,11 @@ class StudioMetricsQueryService:
             raise StudioMetricsConfigError(
                 f"Unsupported metrics provider '{config.provider}' for service '{service.service_id}'."
             )
-        return await provider.query_service_pods(service=service, config=config)
+        return await self._availability.run(
+            _provider_key(service.service_id, config),
+            lambda: provider.query_service_pods(service=service, config=config),
+            StudioMetricsProviderError,
+        )
 
     async def query_task_metrics(
         self,
@@ -724,6 +739,10 @@ class StudioMetricsQueryService:
         query: StudioMetricsQuery,
     ) -> StudioMetricsResponse:
         service = await self._registry_service.get_service(service_id)
+        if service.metrics_config is not None:
+            self._availability.check(
+                _provider_key(service.service_id, service.metrics_config), StudioMetricsProviderError
+            )
         scoped_query, warnings = await self._with_task_window(service_id, task_id.strip(), query)
         if _TASK_APPROXIMATION_WARNING not in warnings:
             warnings.insert(0, _TASK_APPROXIMATION_WARNING)
@@ -754,13 +773,17 @@ class StudioMetricsQueryService:
             raise StudioMetricsConfigError(
                 f"Unsupported metrics provider '{config.provider}' for service '{service.service_id}'."
             )
-        return await provider.query_metrics(
-            service=service,
-            config=config,
-            query=query,
-            task_id=task_id,
-            approximate=approximate,
-            warnings=warnings,
+        return await self._availability.run(
+            _provider_key(service.service_id, config),
+            lambda: provider.query_metrics(
+                service=service,
+                config=config,
+                query=query,
+                task_id=task_id,
+                approximate=approximate,
+                warnings=warnings,
+            ),
+            StudioMetricsProviderError,
         )
 
     async def _with_task_window(

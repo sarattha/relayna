@@ -39,13 +39,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.0/relayna-1.13.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.0/relayna-1.13.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1.tar.gz
 ```
 
 For local development in this repository:
@@ -252,7 +252,12 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.13.0`, and the backend requires `relayna>=1.13.0`.
+release version is `1.13.1`, and the backend requires `relayna>=1.13.1`.
+
+Version 1.13.1 protects shared infrastructure during optional telemetry outages,
+pauses affected monitor queries with automatic recovery, and fixes PostgreSQL
+refresh/retention contention. It preserves existing APIs and the schema revision.
+See the [1.13.1 upgrade guide](docs/releases.md#upgrading-to-1131).
 
 Version 1.13.0 automatically applies bundled Studio PostgreSQL migrations before
 serving requests or starting workers, with advisory locking across replicas.

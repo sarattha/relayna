@@ -268,7 +268,7 @@ it("pauses polling, refreshes manually, and retains evidence on refresh failure"
     new Error("Loki unavailable"),
   );
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-  expect(await screen.findByText(/Refresh failed/)).toHaveTextContent(
+  expect(await screen.findByText(/Log queries paused/)).toHaveTextContent(
     "Loki unavailable",
   );
   expect(screen.getByText("Payment timed out")).toBeInTheDocument();
@@ -558,4 +558,15 @@ it.each(["complete", "completed", "succeeded", "success", "failed", "failure", "
   const later = monitorTimeWindow("task", Date.parse("2026-10-03T08:00:00Z"), { ...task, status }, [event]);
   expect(first.to).toBe("2026-10-02T07:34:09.000Z");
   expect(later).toEqual(first);
+});
+
+it("pauses failed log queries while keeping task controls usable", async () => {
+  vi.mocked(api.fetchTaskLogs).mockRejectedValue(new Error("Loki offline"));
+  mount();
+  expect(await screen.findByText(/Log queries paused/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^Refresh$/ })).toBeDisabled();
+  const previous = vi.mocked(api.fetchTaskDetail).mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Refresh tasks" }));
+  await waitFor(() => expect(api.fetchTaskDetail).toHaveBeenCalledTimes(previous + 1));
+  expect(api.fetchTaskLogs).toHaveBeenCalledTimes(1);
 });

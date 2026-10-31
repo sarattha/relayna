@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.0/relayna-1.13.0-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.0/relayna-1.13.0.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.13.0.tar.gz`
-- `dist/relayna-1.13.0-py3-none-any.whl`
+- `dist/relayna-1.13.1.tar.gz`
+- `dist/relayna-1.13.1-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,26 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.13.1
+
+Deploy matching SDK, Studio backend and frontend **1.13.1** packages/images.
+There is no new schema revision or configuration requirement. Service refreshes
+skip unchanged task metadata, expiry cleanup uses short batches, and background
+coordination does not hold database transactions across upstream waits.
+
+Optional Loki, Prometheus, and Tempo queries use separate HTTP pools. The first
+bounded real query checks availability; failures pause only dependent work and
+back off with jitter before one recovery query. No background readiness polling
+is added. The monitor shows paused providers, keeps core task/event features
+available, and retries while the view is active. See
+[provider isolation](studio-backend.md#optional-provider-failure-isolation) for
+budgets, per-replica limits, and shared Azure service considerations.
+
+Back up and deploy through the normal release procedure. Returning to 1.13.0
+requires matching older packages/images and no schema downgrade, but restores
+its previous contention and provider-failure behavior. Publication still uses
+the existing tag workflow after merge; this PR prepares version 1.13.1.
 
 ### Upgrading to 1.13.0
 

@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from ._provider_availability import _provider_key, _ProviderAvailability
 from .events import StudioEventIngestService
 from .federation import StudioFederationError, StudioFederationService
 from .logs import StudioLogQuery, StudioLogQueryService
@@ -241,6 +242,7 @@ class StudioTraceQueryService:
         self._federation_service = federation_service
         self._log_query_service = log_query_service
         self._event_ingest_service = event_ingest_service
+        self._availability = _ProviderAvailability("Tempo")
 
     async def query_task_traces(self, service_id: str, task_id: str) -> StudioTraceResponse:
         service = await self._registry_service.get_service(service_id)
@@ -253,6 +255,8 @@ class StudioTraceQueryService:
         task_id: str,
         detail_payload: Mapping[str, Any] | None = None,
     ) -> StudioTraceResponse:
+        if service.trace_config is not None:
+            self._availability.check(_provider_key(service.service_id, service.trace_config), StudioTraceProviderError)
         trace_ids, warnings = await self._discover_task_trace_ids(
             service,
             task_id,
@@ -277,7 +281,13 @@ class StudioTraceQueryService:
             )
         spans: list[StudioTraceSpan] = []
         for trace_id in trace_ids:
-            spans.extend(await provider.query_trace(service=service, config=config, trace_id=trace_id))
+            spans.extend(
+                await self._availability.run(
+                    _provider_key(service.service_id, config),
+                    lambda trace_id=trace_id: provider.query_trace(service=service, config=config, trace_id=trace_id),
+                    StudioTraceProviderError,
+                )
+            )
         return StudioTraceResponse(
             service_id=service.service_id,
             task_id=task_id,

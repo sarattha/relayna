@@ -150,6 +150,44 @@ session settings, route policy, and deployment guidance.
   - keep retention and health intervals intentional rather than relying on
     defaults
 
+## Optional provider failure isolation
+
+Loki, Prometheus, and Tempo are optional investigation dependencies. Their
+availability does not decide Studio readiness or disable task details, events,
+registry operations, or healthy providers. The first bounded real query checks
+whether the configured operation works; an empty successful result is healthy.
+There is no mandatory `/ready` URL or additional background health polling.
+
+Each provider has its own HTTP client, separate from core federation, ingestion,
+and authentication. Defaults allow two concurrent query operations and four HTTP
+connections per provider per Studio process. At most sixteen callers can wait
+for an initial/recovery probe; excess work fails fast. Availability state is
+bounded to 128 configurations and does not evict active probes. Individual
+operations have a ten second total budget. A failed provider pauses dependent operations; retries back
+off from approximately thirty seconds to five minutes with jitter, and only one
+initial/recovery probe runs for a service/provider configuration at a time.
+Changing the provider configuration allows a new check immediately. Cancellation
+does not mark the provider unavailable. Failed or expired availability evidence
+uses the existing integration-doctor check fields; configuration alone is not
+proof of connectivity.
+
+If one Prometheus metric query fails, its remaining queued and active sibling
+queries are cancelled before the operation returns, so an abandoned dashboard
+batch does not keep querying the shared service.
+
+The monitor pauses failed log/metric reads across automatic time-window changes,
+labels retained evidence as potentially stale, and checks recovery while the
+view is active. Recovery stops when the view is disabled or unmounted. Query
+validation failures do not trigger an outage pause. Optional trace evidence can
+remain unavailable while the task timeline and other evidence stay usable.
+
+For shared Azure deployments, budget these limits across all Studio processes
+and replicas: they are process-local safeguards, not a global quota across other
+applications. Use deployment-specific credentials and provider tenancy, and
+retain upstream rate limits/resource budgets. Guards do not issue synthetic
+traffic to every registered provider on startup. A custom HTTP client factory
+should return a fresh client per call to preserve independent pools.
+
 ## PostgreSQL And Redis Requirements
 
 Both services are mandatory. PostgreSQL stores durable Studio control-plane

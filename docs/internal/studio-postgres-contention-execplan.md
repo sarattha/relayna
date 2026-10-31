@@ -1,6 +1,6 @@
 # Fix Studio PostgreSQL refresh and retention contention
 
-This living ExecPlan follows [PLANS.md](../../PLANS.md).
+This living ExecPlan follows [repository PLANS.md](https://github.com/sarattha/relayna/blob/main/PLANS.md).
 
 ## Purpose / Big Picture
 
