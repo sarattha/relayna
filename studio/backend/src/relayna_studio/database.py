@@ -565,7 +565,9 @@ def _service_from_row(row: RowMapping) -> ServiceRecord:
     )
 
 
-async def _upsert_service_projection(session: AsyncSession, record: ServiceRecord) -> None:
+async def _upsert_service_projection(
+    session: AsyncSession, record: ServiceRecord, *, update_task_metadata: bool = True
+) -> None:
     values = {
         "service_id": record.service_id,
         "name": record.name,
@@ -588,11 +590,18 @@ async def _upsert_service_projection(session: AsyncSession, record: ServiceRecor
             set_={key: value for key, value in values.items() if key != "health_status"},
         )
     )
-    await session.execute(
-        update(task_projections)
-        .where(task_projections.c.service_id == record.service_id)
-        .values(service_name=record.name, environment=record.environment)
-    )
+    if update_task_metadata:
+        await session.execute(
+            update(task_projections)
+            .where(
+                task_projections.c.service_id == record.service_id,
+                or_(
+                    task_projections.c.service_name.is_distinct_from(record.name),
+                    task_projections.c.environment.is_distinct_from(record.environment),
+                ),
+            )
+            .values(service_name=record.name, environment=record.environment)
+        )
 
 
 class PostgresServiceRegistryStore:
@@ -661,14 +670,28 @@ class PostgresServiceRegistryStore:
     async def update(self, service_id: str, record: ServiceRecord) -> ServiceRecord:
         try:
             async with self.database.transaction() as session:
-                result = await session.execute(
+                # Compare while owning the same service row lock as the write:
+                # concurrent capability refreshes must not use stale metadata
+                # to decide whether task projections need to be rewritten.
+                existing = (
+                    await session.execute(
+                        select(services.c.name, services.c.environment)
+                        .where(services.c.service_id == service_id, services.c.deleted_at.is_(None))
+                        .with_for_update()
+                    )
+                ).one_or_none()
+                if existing is None:
+                    raise ServiceNotFoundError(f"Service '{service_id}' was not found.")
+                await session.execute(
                     update(services)
                     .where(services.c.service_id == service_id, services.c.deleted_at.is_(None))
                     .values(**_service_values(record))
                 )
-                if getattr(result, "rowcount", 0) == 0:
-                    raise ServiceNotFoundError(f"Service '{service_id}' was not found.")
-                await _upsert_service_projection(session, record)
+                await _upsert_service_projection(
+                    session,
+                    record,
+                    update_task_metadata=existing.name != record.name or existing.environment != record.environment,
+                )
                 await _append_audit(
                     session,
                     action="service.update",
@@ -1065,6 +1088,7 @@ class PostgresStudioEventStore:
 
 class PostgresStudioSearchStore:
     _bulk_fetch_size = 1000
+    _retention_batch_size = 1000
 
     def __init__(self, database: StudioDatabase) -> None:
         self.database = database
@@ -1228,6 +1252,31 @@ class PostgresStudioSearchStore:
                         tuple_(task_projections.c.service_id, task_projections.c.task_id).in_(chunk)
                     )
                 )
+
+    async def _prune_expired_task_documents(self) -> int:
+        cutoff = _utcnow()
+        removed = 0
+        while True:
+            # Lock only a bounded set of expired rows. Concurrent ingestion or
+            # metadata edits can finish; their locked rows are retried next pass.
+            expired = (
+                select(task_projections.c.service_id, task_projections.c.task_id)
+                .where(task_projections.c.expires_at <= cutoff)
+                .order_by(task_projections.c.expires_at)
+                .limit(self._retention_batch_size)
+                .with_for_update(skip_locked=True)
+            )
+            async with self.database.transaction() as session:
+                result = await session.execute(
+                    delete(task_projections).where(
+                        task_projections.c.expires_at <= cutoff,
+                        tuple_(task_projections.c.service_id, task_projections.c.task_id).in_(expired),
+                    )
+                )
+                deleted = int(getattr(result, "rowcount", 0) or 0)
+            removed += deleted
+            if deleted < self._retention_batch_size:
+                return removed
 
     async def list_task_document_ids(self) -> set[str]:
         return await self._task_ids()
@@ -1862,12 +1911,26 @@ class PostgresAdvisoryCoordinator:
     async def try_lock(self, name: str) -> AsyncIterator[bool]:
         lock_id = int.from_bytes(hashlib.sha256(name.encode()).digest()[:8], "big", signed=True)
         async with self.database.engine.connect() as connection:
-            acquired = bool(await connection.scalar(select(func.pg_try_advisory_lock(lock_id))))
+            # Session locks survive statement completion; worker network waits
+            # must not keep an implicit PostgreSQL transaction open.
+            await connection.execution_options(isolation_level="AUTOCOMMIT")
+            try:
+                acquired = bool(await connection.scalar(select(func.pg_try_advisory_lock(lock_id))))
+            except BaseException:
+                # Acquisition may have reached PostgreSQL before cancellation
+                # or a transport failure. Never pool a connection of uncertain
+                # session-lock ownership.
+                await connection.invalidate()
+                raise
             try:
                 yield acquired
             finally:
                 if acquired:
-                    await connection.execute(select(func.pg_advisory_unlock(lock_id)))
+                    try:
+                        await connection.execute(select(func.pg_advisory_unlock(lock_id)))
+                    except BaseException:
+                        await connection.invalidate()
+                        raise
 
 
 class AuditEntry(BaseModel):
