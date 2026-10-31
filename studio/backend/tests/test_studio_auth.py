@@ -259,6 +259,7 @@ def test_full_login_rbac_and_local_logout(monkeypatch: pytest.MonkeyPatch, tmp_p
             json={"status": "blocked"},
         )
         assert missing_user.status_code == 404
+        assert admin_client.post("/studio/admin/observability-profiles", json={}).status_code == 403
         assert admin_client.post("/studio/services", json={}).status_code == 403
         for suffix in ("", "/split", "/merge"):
             assert admin_client.post(f"/studio/incidents/example{suffix}", json={"revision": 0}).status_code == 403
@@ -289,6 +290,22 @@ def test_full_login_rbac_and_local_logout(monkeypatch: pytest.MonkeyPatch, tmp_p
                 == 403
             )
         assert reader_client.get("/studio/incidents").status_code == 503  # legacy fixture has no PostgreSQL
+        assert reader_client.get("/studio/admin/observability-profiles").status_code == 403
+        for method, path in [
+            ("POST", ""),
+            ("PUT", "/profile"),
+            ("DELETE", "/profile?revision=1"),
+            ("POST", "/profile/test"),
+        ]:
+            assert (
+                reader_client.request(
+                    method,
+                    "/studio/admin/observability-profiles" + path,
+                    headers={"X-CSRF-Token": reader_csrf},
+                    json={},
+                ).status_code
+                == 403
+            )
         assert reader_client.get("/studio/admin/users").status_code == 403
         assert reader_client.get("/studio/services/svc/load-tests/profile-import/sources").status_code == 403
         assert (

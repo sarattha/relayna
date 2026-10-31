@@ -78,6 +78,7 @@ export type ServiceHealthSummary = {
 };
 
 export type ServiceLogConfig = {
+  profile_id?: string | null;
   provider: "loki";
   base_url: string;
   tenant_id?: string | null;
@@ -94,6 +95,7 @@ export type ServiceLogConfig = {
 };
 
 export type ServiceMetricsConfig = {
+  profile_id?: string | null;
   provider: "prometheus";
   base_url: string;
   namespace: string;
@@ -107,6 +109,7 @@ export type ServiceMetricsConfig = {
 };
 
 export type ServiceTraceConfig = {
+  profile_id?: string | null;
   provider: "tempo";
   base_url: string;
   public_base_url?: string | null;
@@ -160,6 +163,7 @@ export type ServiceDraft = {
   environment: string;
   tags: string;
   auth_mode: string;
+  log_profile_id?: string;
   log_provider: "" | "loki";
   log_base_url: string;
   log_tenant_id: string;
@@ -176,6 +180,7 @@ export type ServiceDraft = {
   log_level_label: string;
   log_task_match_mode: "label" | "contains" | "regex" | "structured_metadata";
   log_task_match_template: string;
+  metrics_profile_id?: string;
   metrics_provider: "" | "prometheus";
   metrics_base_url: string;
   metrics_namespace: string;
@@ -188,6 +193,7 @@ export type ServiceDraft = {
   metrics_container_label: string;
   metrics_step_seconds: string;
   metrics_task_window_padding_seconds: string;
+  trace_profile_id?: string;
   trace_provider: "" | "tempo";
   trace_base_url: string;
   trace_public_base_url: string;
@@ -1008,3 +1014,10 @@ export type StudioAuditEntry = {
 };
 
 export type StudioAuditResponse = { count: number; items: StudioAuditEntry[] };
+
+export type ObservabilityProfile = {
+  id: string; name: string; environment: string; provider: "loki" | "prometheus" | "tempo";
+  base_url: string; tenant_id: string | null; defaults: Record<string, unknown>;
+  auth_mode: "none" | "bearer" | "basic"; credential_configured: boolean;
+  revision: number; updated_at: string; used_by: string[];
+};
