@@ -17,6 +17,12 @@ _T = TypeVar("_T")
 _Key = tuple[str, str]
 
 
+def _is_query_rejection(status_code: int) -> bool:
+    # Bad input, request size, URI size, and semantic query validation are
+    # request-specific. Authentication, throttling, and server failures are not.
+    return status_code in {400, 413, 414, 422}
+
+
 def _provider_key(service_id: str, config: BaseModel) -> _Key:
     return service_id, config.model_dump_json()
 
@@ -129,6 +135,8 @@ class _ProviderAvailability:
                 async with asyncio.timeout(self._timeout):
                     result = await operation()
             except (failure_type, TimeoutError) as exc:
+                # Providers map query rejections to their existing validation
+                # exception type, which escapes without changing outage state.
                 state.generation += 1
                 state.failures += 1
                 state.healthy_until = 0

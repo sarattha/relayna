@@ -12,7 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ._provider_availability import _provider_key, _ProviderAvailability
+from ._provider_availability import _is_query_rejection, _provider_key, _ProviderAvailability
 from .events import StudioEventIngestService
 from .federation import StudioFederationError, StudioFederationService
 from .logs import StudioLogQuery, StudioLogQueryService
@@ -183,7 +183,10 @@ class TempoTraceProvider:
         if response.status_code == 404:
             return []
         if response.status_code != 200:
-            raise StudioTraceProviderError(
+            error_type = (
+                StudioTraceConfigError if _is_query_rejection(response.status_code) else StudioTraceProviderError
+            )
+            raise error_type(
                 f"Tempo query for service '{service.service_id}' returned unexpected status {response.status_code}."
             )
         try:

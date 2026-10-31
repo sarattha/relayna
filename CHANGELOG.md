@@ -23,6 +23,10 @@ All notable changes to this project will be documented in this file.
 - Pause affected monitor reads across time-window changes, retain useful stale
   evidence, and recover automatically while core features stay available.
   Existing integration-doctor fields report cached provider query availability.
+- Classify upstream query rejections (400, 413, 414, and 422) as validation
+  errors, preserving immediate query correction without opening provider-wide
+  outage backoff. Authentication, throttling, and availability failures still
+  pause dependent work.
 
 ### Changed
 

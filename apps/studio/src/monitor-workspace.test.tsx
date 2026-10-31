@@ -570,3 +570,17 @@ it("pauses failed log queries while keeping task controls usable", async () => {
   await waitFor(() => expect(api.fetchTaskDetail).toHaveBeenCalledTimes(previous + 1));
   expect(api.fetchTaskLogs).toHaveBeenCalledTimes(1);
 });
+
+it("allows correcting a rejected query without pausing the log provider", async () => {
+  vi.mocked(api.fetchTaskLogs)
+    .mockRejectedValueOnce(Object.assign(new Error("Query range exceeds limit"), { status: 422 }))
+    .mockResolvedValue(logs("Corrected query result"));
+  mount();
+  expect(await screen.findByText(/Query range exceeds limit/)).toBeInTheDocument();
+  expect(screen.queryByText(/Log queries paused/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^Refresh$/ })).toBeEnabled();
+  fireEvent.change(screen.getByLabelText("Search monitor logs"), { target: { value: "corrected" } });
+  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  expect(await screen.findByText("Corrected query result")).toBeInTheDocument();
+  expect(api.fetchTaskLogs).toHaveBeenCalledTimes(2);
+});

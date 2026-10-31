@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from ._provider_availability import _provider_key, _ProviderAvailability
+from ._provider_availability import _is_query_rejection, _provider_key, _ProviderAvailability
 from .registry import (
     LokiLogConfig,
     OutboundUrlPolicyError,
@@ -221,7 +221,8 @@ class LokiLogProvider:
             raise StudioLogProviderError(f"Loki query failed for service '{service.service_id}'.") from exc
 
         if response.status_code != 200:
-            raise StudioLogProviderError(
+            error_type = StudioLogConfigError if _is_query_rejection(response.status_code) else StudioLogProviderError
+            raise error_type(
                 f"Loki query for service '{service.service_id}' returned unexpected status {response.status_code}."
             )
 

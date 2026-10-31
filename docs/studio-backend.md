@@ -171,6 +171,11 @@ does not mark the provider unavailable. Failed or expired availability evidence
 uses the existing integration-doctor check fields; configuration alone is not
 proof of connectivity.
 
+Upstream query rejections (HTTP 400, 413, 414, or 422) use Studio's existing
+HTTP 422 validation response and do not open provider backoff. Correcting the
+query or opening another task can proceed immediately. Authentication errors,
+rate limits, transport failures, and server errors still pause provider work.
+
 If one Prometheus metric query fails, its remaining queued and active sibling
 queries are cancelled before the operation returns, so an abandoned dashboard
 batch does not keep querying the shared service.

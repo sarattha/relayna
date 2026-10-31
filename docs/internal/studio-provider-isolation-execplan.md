@@ -33,6 +33,12 @@ could reject healthy deployments whose proxy exposes query endpoints only.
   builds, and release metadata. Probe admission and cancellation cases passed.
 - [ ] Push updated PR #144, request fresh review, and monitor checks/reviews.
 - [ ] Land the PR when required checks/reviews are ready under user approval.
+- [x] (2026-11-01) Addressed r4432639244: upstream 400/413/414/422 uses existing
+  validation exceptions/HTTP 422 without modifying provider outage state.
+  Added 22 backend cases across all providers/pod discovery, including positive
+  auth/throttle/server-backoff controls, and a UI query-correction regression.
+  Final validation: 725 backend tests, 377 frontend tests, mandatory SDK/backend
+  stack, both coverage gates, backend/frontend builds, strict docs, and metadata.
 
 ## Surprises & Discoveries
 
@@ -69,6 +75,13 @@ could reject healthy deployments whose proxy exposes query endpoints only.
   monitoring, and approved landing PR #144 when checks/reviews are ready. Prepare
   patch version 1.13.1 across all three packages and locks; do not publish a tag
   or deploy as part of the merge. Date/author: 2026-11-01/Codex.
+- Review r4432639244 identified HTTP 400 query rejection incorrectly opening
+  provider-wide backoff. Map query-specific 400/413/414/422 responses to the
+  existing provider configuration/validation exceptions and existing HTTP 422
+  route path. Preserve diagnostic detail and leave outage state unchanged;
+  authentication, throttling, transport, and server failures retain backoff.
+  This corrects error classification without adding an API field, status-code
+  family, exception export, or migration. Date/author: 2026-11-01/Codex.
 
 ## Outcomes & Retrospective
 
@@ -92,6 +105,13 @@ These defenses complement PR #144's database fixes; they do not establish
 production CPU attribution or impose a global quota on other Azure applications.
 The user approved landing the PR when checks/reviews are ready; tag publication
 and deployment are outside the requested merge.
+
+Review follow-up: query-specific HTTP errors had incorrectly entered shared
+outage backoff. They now use the existing validation path, allowing a corrected
+query or another task immediately; genuine availability failures still pause.
+Latest counts are 725 backend tests and 377 frontend tests; backend coverage is
+98.24% and all frontend gates pass. The PR contains 54 added backend cases and
+seven added frontend cases. Version remains the prepared, unreleased 1.13.1.
 
 ## Context and Orientation
 

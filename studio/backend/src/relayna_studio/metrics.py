@@ -13,7 +13,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from ._provider_availability import _provider_key, _ProviderAvailability
+from ._provider_availability import _is_query_rejection, _provider_key, _ProviderAvailability
 from .federation import StudioFederationError, StudioFederationService, StudioTaskDetailResponse
 from .registry import (
     OutboundUrlPolicyError,
@@ -563,7 +563,7 @@ class PrometheusMetricsProvider:
         operation: str,
         endpoint: str,
         params: Mapping[str, str],
-    ) -> StudioMetricsProviderError:
+    ) -> StudioMetricsProviderError | StudioMetricsConfigError:
         error_type: str | None = None
         upstream_error: str | None = None
         try:
@@ -597,7 +597,10 @@ class PrometheusMetricsProvider:
             detail_parts.append(f"errorType={error_type}")
         if upstream_error is not None:
             detail_parts.append(f"error={upstream_error}")
-        return StudioMetricsProviderError("; ".join(detail_parts) + ".")
+        failure_type = (
+            StudioMetricsConfigError if _is_query_rejection(response.status_code) else StudioMetricsProviderError
+        )
+        return failure_type("; ".join(detail_parts) + ".")
 
     def _format_selector(self, labels: Mapping[str, tuple[str, str]]) -> str:
         return ",".join(

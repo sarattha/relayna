@@ -412,3 +412,109 @@ async def test_failed_metrics_batch_cancels_siblings_and_queued_queries():
             )
         assert active == 0
         assert started < 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 413, 414, 422])
+@pytest.mark.parametrize("family", ["loki", "prometheus", "pods", "tempo"])
+async def test_query_rejection_returns_validation_error_and_allows_next_query(status, family):
+    from fastapi import FastAPI
+    from relayna_studio.logs import LokiLogProvider, create_studio_logs_router
+    from relayna_studio.metrics import (
+        PrometheusMetricsProvider,
+        StudioMetricsQueryService,
+        create_studio_metrics_router,
+    )
+    from relayna_studio.registry import PrometheusMetricsConfig, StudioOutboundUrlPolicy, TempoTraceConfig
+    from relayna_studio.traces import StudioTraceQueryService, TempoTraceProvider, create_studio_traces_router
+
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(
+                status, json={"status": "error", "errorType": "bad_data", "error": "query range exceeds limit"}
+            )
+        if family == "loki":
+            payload = {"status": "success", "data": {"resultType": "streams", "result": []}}
+        elif family == "tempo":
+            payload = {"batches": []}
+        else:
+            payload = {
+                "status": "success",
+                "data": {"resultType": "vector" if family == "pods" else "matrix", "result": []},
+            }
+        return httpx.Response(200, json=payload)
+
+    policy = StudioOutboundUrlPolicy(allowed_hosts=["loki.example.test"])
+    record = make_record(log_config=make_log_config()).model_copy(
+        update={
+            "metrics_config": PrometheusMetricsConfig(base_url="https://loki.example.test", namespace="production"),
+            "trace_config": TempoTraceConfig(base_url="https://loki.example.test"),
+        }
+    )
+    registry = SimpleNamespace(get_service=AsyncMock(return_value=record))
+    app = FastAPI()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as outbound:
+        if family == "loki":
+            service = StudioLogQueryService(
+                registry_service=registry,
+                providers={"loki": LokiLogProvider(http_client=outbound, outbound_policy=policy)},
+            )
+            app.include_router(create_studio_logs_router(log_query_service=service))
+            endpoint = f"/studio/tasks/{record.service_id}/task-a/logs"
+            config = record.log_config
+        elif family in {"prometheus", "pods"}:
+            service = StudioMetricsQueryService(
+                registry_service=registry,
+                providers={"prometheus": PrometheusMetricsProvider(http_client=outbound, outbound_policy=policy)},
+            )
+            app.include_router(create_studio_metrics_router(metrics_query_service=service))
+            endpoint = f"/studio/services/{record.service_id}/" + (
+                "pods" if family == "pods" else "metrics?group=cpu_usage"
+            )
+            config = record.metrics_config
+        else:
+            service = StudioTraceQueryService(
+                registry_service=registry,
+                providers={"tempo": TempoTraceProvider(http_client=outbound, outbound_policy=policy)},
+            )
+            service._discover_task_trace_ids = AsyncMock(return_value=(["a" * 32], []))
+            app.include_router(create_studio_traces_router(trace_query_service=service))
+            endpoint = f"/studio/tasks/{record.service_id}/task-a/traces"
+            config = record.trace_config
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://studio.test") as client:
+            params = {"from": "2020-01-01T00:00:00Z", "to": "2026-11-01T00:00:00Z"}
+            if family == "prometheus":
+                params["group"] = "cpu_usage"
+            invalid = await client.get(endpoint, params=params)
+            assert invalid.status_code == 422, invalid.text
+            assert service._availability.describe(_provider_key(record.service_id, config))["state"] != "unavailable"
+            valid = await client.get(endpoint.replace("/task-a/", "/task-b/"))
+            assert valid.status_code == 200, valid.text
+            assert len(calls) == 2
+            assert service._availability.describe(_provider_key(record.service_id, config))["state"] == "ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403, 408, 429, 500, 503])
+async def test_provider_auth_throttle_and_availability_errors_still_back_off(status):
+    from relayna_studio.logs import LokiLogProvider
+
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(status)
+
+    record = make_record(log_config=make_log_config())
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        service = StudioLogQueryService(
+            registry_service=SimpleNamespace(get_service=AsyncMock(return_value=record)),
+            providers={"loki": LokiLogProvider(http_client=client)},
+        )
+        for _ in range(2):
+            with pytest.raises(StudioLogProviderError, match="paused"):
+                await service.query_service_logs(record.service_id, StudioLogQuery())
+        assert len(calls) == 1
