@@ -36,6 +36,7 @@ nav:
   - Getting Started: getting-started.md
   - Studio Backend: studio-backend.md
   - Studio Persistence: studio-persistence.md
+  - Studio Observability Profiles: studio-observability-profiles.md
   - Studio Frontend: studio-frontend.md
   - Studio Recovery Center: studio-recovery-center.md
   - Studio Reliability Goals: studio-reliability.md

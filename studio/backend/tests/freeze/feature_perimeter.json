@@ -24,6 +24,7 @@
     "postgresql persistence, migrations, backfill, and recovery (approved v1.6.0 perimeter change)": ["studio/backend/tests/test_postgres_persistence_integration.py", "studio/backend/tests/test_deployment_assets.py"],
     "registry": ["studio/backend/tests/test_studio_registry.py"],
     "search": ["studio/backend/tests/test_studio_search.py"],
-    "traces": ["studio/backend/tests/test_studio_traces.py"]
+    "traces": ["studio/backend/tests/test_studio_traces.py"],
+    "observability_profiles": ["studio/backend/tests/test_studio_observability_profiles.py"]
   }
 }

@@ -611,6 +611,9 @@ class PostgresServiceRegistryStore:
     async def create(self, record: ServiceRecord) -> ServiceRecord:
         try:
             async with self.database.transaction() as session:
+                from ._observability_profiles import _validate_profile_bindings
+
+                record = await _validate_profile_bindings(session, record)
                 existing = (
                     await session.execute(
                         select(services.c.deleted_at)
@@ -670,6 +673,9 @@ class PostgresServiceRegistryStore:
     async def update(self, service_id: str, record: ServiceRecord) -> ServiceRecord:
         try:
             async with self.database.transaction() as session:
+                from ._observability_profiles import _validate_profile_bindings
+
+                record = await _validate_profile_bindings(session, record)
                 # Compare while owning the same service row lock as the write:
                 # concurrent capability refreshes must not use stale metadata
                 # to decide whether task projections need to be rewritten.

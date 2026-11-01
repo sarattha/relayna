@@ -179,6 +179,7 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     environment: service.environment,
     tags: service.tags.join(", "),
     auth_mode: service.auth_mode,
+    log_profile_id: service.log_config?.profile_id || "",
     log_provider: service.log_config?.provider || "",
     log_base_url: service.log_config?.base_url || "",
     log_tenant_id: service.log_config?.tenant_id || "",
@@ -195,6 +196,7 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     log_level_label: service.log_config?.level_label || "",
     log_task_match_mode: service.log_config?.task_match_mode || "label",
     log_task_match_template: service.log_config?.task_match_template || "",
+    metrics_profile_id: service.metrics_config?.profile_id || "",
     metrics_provider: service.metrics_config?.provider || "",
     metrics_base_url: service.metrics_config?.base_url || "",
     metrics_namespace: service.metrics_config?.namespace || "",
@@ -207,6 +209,7 @@ export function serviceToDraft(service: ServiceRecord): ServiceDraft {
     metrics_container_label: service.metrics_config?.container_label || "container",
     metrics_step_seconds: String(service.metrics_config?.step_seconds || 30),
     metrics_task_window_padding_seconds: String(service.metrics_config?.task_window_padding_seconds || 120),
+    trace_profile_id: service.trace_config?.profile_id || "",
     trace_provider: service.trace_config?.provider || "",
     trace_base_url: service.trace_config?.base_url || "",
     trace_public_base_url: service.trace_config?.public_base_url || "",
@@ -270,6 +273,7 @@ export function buildServicePayload(draft: ServiceDraft) {
     auth_mode: draft.auth_mode.trim(),
     log_config: hasLogConfig
         ? {
+          profile_id: draft.log_profile_id || undefined,
           provider: (draft.log_provider || "loki") as "loki",
           base_url: draft.log_base_url.trim(),
           tenant_id: draft.log_tenant_id.trim() || null,
@@ -287,6 +291,7 @@ export function buildServicePayload(draft: ServiceDraft) {
       : null,
     metrics_config: hasMetricsConfig
       ? {
+          profile_id: draft.metrics_profile_id || undefined,
           provider: (draft.metrics_provider || "prometheus") as "prometheus",
           base_url: draft.metrics_base_url.trim(),
           namespace: draft.metrics_namespace.trim(),
@@ -301,6 +306,7 @@ export function buildServicePayload(draft: ServiceDraft) {
       : null,
     trace_config: hasTraceConfig
       ? {
+          profile_id: draft.trace_profile_id || undefined,
           provider: (draft.trace_provider || "tempo") as "tempo",
           base_url: draft.trace_base_url.trim(),
           public_base_url: draft.trace_public_base_url.trim() || null,

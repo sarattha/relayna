@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Link } from "../scoped-link";
 
+import { ObservabilityProfileManager, ProfileSelector, useObservabilityProfiles } from "../observability-profiles";
 import { searchServices } from "../api";
 import { useStudioAuth } from "../auth-context";
 import { useStudioServices } from "../services-context";
@@ -41,6 +42,7 @@ export function ServicesPage() {
   const scopedServices = servicesState.services.filter((service) => !environment || service.environment === environment);
   const searchVersion = useRef(0);
   const { isAdmin } = useStudioAuth();
+  const profilesState = useObservabilityProfiles(isAdmin);
   const [showEditor, setShowEditor] = useState(false);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServiceDraft>(servicesState.emptyDraft);
@@ -180,6 +182,7 @@ export function ServicesPage() {
       {servicesState.error ? <NoticeBanner tone="error">{servicesState.error}</NoticeBanner> : null}
       {servicesState.notice ? <NoticeBanner>{servicesState.notice}</NoticeBanner> : null}
 
+      {isAdmin && <ObservabilityProfileManager state={profilesState} />}
       <SectionCard
         title="Registry Overview"
         subtitle="Registered services and their current health."
@@ -380,7 +383,11 @@ export function ServicesPage() {
               Environment
               <input
                 value={draft.environment}
-                onChange={(event) => setDraft((current) => ({ ...current, environment: event.target.value }))}
+                onChange={(event) => setDraft((current) => ({ ...current, environment: event.target.value,
+                  ...(current.log_profile_id ? { log_profile_id: "", log_provider: "" as const, log_base_url: "", log_tenant_id: "" } : {}),
+                  ...(current.metrics_profile_id ? { metrics_profile_id: "", metrics_provider: "" as const, metrics_base_url: "" } : {}),
+                  ...(current.trace_profile_id ? { trace_profile_id: "", trace_provider: "" as const, trace_base_url: "", trace_tenant_id: "" } : {}),
+                }))}
                 placeholder="prod"
                 style={inputStyle}
               />
@@ -407,13 +414,14 @@ export function ServicesPage() {
             <details style={insetSurfaceStyle}>
               <summary style={{ cursor: "pointer", fontSize: 16, fontWeight: 700, listStyle: "none" }}>Log Configuration</summary>
               <div className="studio-stack-sm" style={{ marginTop: 12 }}>
+                <ProfileSelector provider="loki" draft={draft} onChange={setDraft} state={profilesState} />
                 <p style={mutedTextStyle}>Choose Loki, enter its base URL and a label that identifies this service. Save the service, then use Test telemetry connections on its detail page.</p>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Log provider
                   <select
                     value={draft.log_provider}
                     onChange={(event) =>
-                      setDraft((current) => ({ ...current, log_provider: event.target.value as "" | "loki" }))
+                      setDraft((current) => ({ ...current, log_profile_id: "", log_provider: event.target.value as "" | "loki" }))
                     }
                     style={inputStyle}
                   >
@@ -424,6 +432,7 @@ export function ServicesPage() {
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Log base URL
                   <input
+                    readOnly={Boolean(draft.log_profile_id)}
                     value={draft.log_base_url}
                     onChange={(event) => setDraft((current) => ({ ...current, log_base_url: event.target.value }))}
                     placeholder="https://loki.example.test"
@@ -433,6 +442,7 @@ export function ServicesPage() {
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Loki tenant id
                   <input
+                    readOnly={Boolean(draft.log_profile_id)}
                     value={draft.log_tenant_id}
                     onChange={(event) => setDraft((current) => ({ ...current, log_tenant_id: event.target.value }))}
                     placeholder="optional"
@@ -587,13 +597,14 @@ export function ServicesPage() {
             <details style={insetSurfaceStyle}>
               <summary style={{ cursor: "pointer", fontSize: 16, fontWeight: 700, listStyle: "none" }}>Metrics Configuration</summary>
               <div className="studio-stack-sm" style={{ marginTop: 12 }}>
+                <ProfileSelector provider="prometheus" draft={draft} onChange={setDraft} state={profilesState} />
                 <p style={mutedTextStyle}>Choose Prometheus, enter its base URL and namespace, then identify the service with selector labels. Test the saved connection from the service detail page.</p>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Metrics provider
                   <select
                     value={draft.metrics_provider}
                     onChange={(event) =>
-                      setDraft((current) => ({ ...current, metrics_provider: event.target.value as "" | "prometheus" }))
+                      setDraft((current) => ({ ...current, metrics_profile_id: "", metrics_provider: event.target.value as "" | "prometheus" }))
                     }
                     style={inputStyle}
                   >
@@ -604,6 +615,7 @@ export function ServicesPage() {
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Prometheus base URL
                   <input
+                    readOnly={Boolean(draft.metrics_profile_id)}
                     value={draft.metrics_base_url}
                     onChange={(event) => setDraft((current) => ({ ...current, metrics_base_url: event.target.value }))}
                     placeholder="https://prometheus.example.test"
@@ -731,12 +743,13 @@ export function ServicesPage() {
             <details style={insetSurfaceStyle}>
               <summary style={{ cursor: "pointer", fontSize: 16, fontWeight: 700, listStyle: "none" }}>Trace Configuration</summary>
               <div className="studio-stack-sm" style={{ marginTop: 12 }}>
+                <ProfileSelector provider="tempo" draft={draft} onChange={setDraft} state={profilesState} />
                 <p style={mutedTextStyle}>Optional per-service Tempo trace lookup settings.</p>
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Trace provider
                   <select
                     value={draft.trace_provider}
-                    onChange={(event) => setDraft((current) => ({ ...current, trace_provider: event.target.value as "" | "tempo" }))}
+                    onChange={(event) => setDraft((current) => ({ ...current, trace_profile_id: "", trace_provider: event.target.value as "" | "tempo" }))}
                     style={inputStyle}
                   >
                     <option value="">Disabled</option>
@@ -746,6 +759,7 @@ export function ServicesPage() {
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Tempo base URL
                   <input
+                    readOnly={Boolean(draft.trace_profile_id)}
                     value={draft.trace_base_url}
                     onChange={(event) => setDraft((current) => ({ ...current, trace_base_url: event.target.value }))}
                     placeholder="https://tempo.example.test"
@@ -766,6 +780,7 @@ export function ServicesPage() {
                 <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
                   Tenant ID
                   <input
+                    readOnly={Boolean(draft.trace_profile_id)}
                     value={draft.trace_tenant_id}
                     onChange={(event) => setDraft((current) => ({ ...current, trace_tenant_id: event.target.value }))}
                     placeholder="tenant-a"

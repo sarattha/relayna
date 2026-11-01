@@ -23,6 +23,12 @@ export default defineConfig({
         functions: 98,
         lines: 98,
         branches: 89,
+        "src/observability-profiles.tsx": {
+          statements: 98,
+          functions: 98,
+          lines: 98,
+          branches: 96,
+        },
       },
     },
   },

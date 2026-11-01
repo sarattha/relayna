@@ -15,13 +15,13 @@ Each release publishes:
 ## Install the wheel
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.14.0/relayna-1.14.0-py3-none-any.whl
 ```
 
 ## Install the source distribution
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.14.0/relayna-1.14.0.tar.gz
 ```
 
 ## Build artifacts locally
@@ -32,8 +32,8 @@ uv build
 
 Expected artifacts:
 
-- `dist/relayna-1.13.1.tar.gz`
-- `dist/relayna-1.13.1-py3-none-any.whl`
+- `dist/relayna-1.14.0.tar.gz`
+- `dist/relayna-1.14.0-py3-none-any.whl`
 
 ## Versioning policy
 
@@ -41,6 +41,39 @@ The SDK, Studio backend, and Studio frontend share one stable SemVer release
 line. The documented SDK API, documented Studio backend API, and
 frontend/backend Studio contract follow semantic versioning. Undocumented
 internals may change outside of SemVer guarantees.
+
+### Upgrading to 1.14.0
+
+Deploy matching SDK, Studio backend and frontend **1.14.0** packages/images.
+This release includes reusable observability profiles and the PostgreSQL contention
+and provider-isolation fixes prepared for 1.13.1. No SQL migration or service
+backfill is required; the schema head remains `0003_recovery`.
+
+Administrators can save environment-scoped Loki, Prometheus and Tempo connections
+and select them during service registration. Bearer/basic credentials use the
+existing `RELAYNA_STUDIO_SETTINGS_ENCRYPTION_KEY` Fernet key. Back up that key
+separately from PostgreSQL and use the same key on all replicas. Profiles without
+authentication and existing inline configurations do not require this key.
+See [observability profiles](studio-observability-profiles.md) for setup, rotation,
+connection tests, and deletion rules.
+
+The Studio API adds administrator profile routes and optional service provider
+`profile_id` references under an explicitly approved freeze exception. Existing
+SDK exports, broker/Redis contracts, inline payloads, and inherited freeze entries
+remain compatible. Profile revisions affect internal availability state only;
+they do not add a serialized service field. Rotation allows an immediate retry
+after a failed credential without restarting Studio.
+
+Before rollback to a backend without profile support, detach all linked services
+into appropriate inline configurations and arrange upstream authentication that
+the older backend supports. Stop new replicas before restoring matching older
+packages/images; there is no SQL downgrade for this release. Do not mix older
+backends with services that depend on saved profile credentials.
+
+After merging the verified PR, tag its main commit `v1.14.0`. The existing tag
+workflow publishes SDK wheel/sdist, signed backend/frontend images, SBOMs and
+provenance, and a GitHub Release named `v1.14.0` using the changelog section below.
+This matches the previous release's artifact and release-note format.
 
 ### Upgrading to 1.13.1
 
@@ -60,7 +93,7 @@ budgets, per-replica limits, and shared Azure service considerations.
 Back up and deploy through the normal release procedure. Returning to 1.13.0
 requires matching older packages/images and no schema downgrade, but restores
 its previous contention and provider-failure behavior. Publication still uses
-the existing tag workflow after merge; this PR prepares version 1.13.1.
+the existing tag workflow after merge. These prepared fixes are also included in 1.14.0.
 
 ### Upgrading to 1.13.0
 

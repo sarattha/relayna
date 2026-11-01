@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -23,6 +23,9 @@ from .registry import (
     ServiceRegistryService,
     StudioOutboundUrlPolicy,
 )
+
+if TYPE_CHECKING:
+    from ._observability_profiles import _ProfileStore
 
 
 class StudioMetricGroup(StrEnum):
@@ -216,6 +219,7 @@ class PrometheusMetricsProvider:
         query_path: str = "/api/v1/query_range",
         instant_query_path: str = "/api/v1/query",
         outbound_policy: StudioOutboundUrlPolicy | None = None,
+        profile_store: _ProfileStore | None = None,
     ) -> None:
         normalized_path = query_path.strip() or "/api/v1/query_range"
         if not normalized_path.startswith("/"):
@@ -223,6 +227,7 @@ class PrometheusMetricsProvider:
         normalized_instant_path = instant_query_path.strip() or "/api/v1/query"
         if not normalized_instant_path.startswith("/"):
             normalized_instant_path = f"/{normalized_instant_path}"
+        self._profile_store = profile_store
         self._http_client = http_client
         self._query_path = normalized_path
         self._instant_query_path = normalized_instant_path
@@ -290,12 +295,21 @@ class PrometheusMetricsProvider:
         service: ServiceRecord,
         config: PrometheusMetricsConfig,
     ) -> StudioServicePodListResponse:
+        if config.profile_id and self._profile_store is None:
+            raise StudioMetricsProviderError("Observability profile resolution is unavailable.")
+        if self._profile_store:
+            try:
+                config, headers = await self._profile_store.resolve(config, service.environment)
+            except (HTTPException, OutboundUrlPolicyError) as exc:
+                raise StudioMetricsProviderError("Prometheus connection profile is unavailable.") from exc
+        else:
+            headers = {"Accept": "application/json"}
         promql = self._build_pod_list_query(config)
         params = {"query": promql}
         url = f"{config.base_url.rstrip('/')}{self._instant_query_path}"
         try:
             self._outbound_policy.validate_url(config.base_url, label="Prometheus metrics_config.base_url")
-            response = await self._http_client.get(url, params=params, headers={"Accept": "application/json"})
+            response = await self._http_client.get(url, params=params, headers=headers, follow_redirects=False)
         except OutboundUrlPolicyError as exc:
             raise StudioMetricsProviderError(str(exc)) from exc
         except httpx.HTTPError as exc:
@@ -304,6 +318,13 @@ class PrometheusMetricsProvider:
             ) from exc
 
         if response.status_code != 200:
+            if config.profile_id:
+                error_type = (
+                    StudioMetricsConfigError
+                    if _is_query_rejection(response.status_code)
+                    else StudioMetricsProviderError
+                )
+                raise error_type(f"Prometheus request returned HTTP {response.status_code}.")
             raise self._unexpected_status_error(
                 response=response,
                 service=service,
@@ -330,6 +351,15 @@ class PrometheusMetricsProvider:
         end: datetime,
         step_seconds: int,
     ) -> list[StudioMetricSeries]:
+        if config.profile_id and self._profile_store is None:
+            raise StudioMetricsProviderError("Observability profile resolution is unavailable.")
+        if self._profile_store:
+            try:
+                config, headers = await self._profile_store.resolve(config, service.environment)
+            except (HTTPException, OutboundUrlPolicyError) as exc:
+                raise StudioMetricsProviderError("Prometheus connection profile is unavailable.") from exc
+        else:
+            headers = {"Accept": "application/json"}
         promql = self._build_query(service=service, config=config, query=query, group=group)
         params = {
             "query": promql,
@@ -340,13 +370,20 @@ class PrometheusMetricsProvider:
         url = f"{config.base_url.rstrip('/')}{self._query_path}"
         try:
             self._outbound_policy.validate_url(config.base_url, label="Prometheus metrics_config.base_url")
-            response = await self._http_client.get(url, params=params, headers={"Accept": "application/json"})
+            response = await self._http_client.get(url, params=params, headers=headers, follow_redirects=False)
         except OutboundUrlPolicyError as exc:
             raise StudioMetricsProviderError(str(exc)) from exc
         except httpx.HTTPError as exc:
             raise StudioMetricsProviderError(f"Prometheus query failed for service '{service.service_id}'.") from exc
 
         if response.status_code != 200:
+            if config.profile_id:
+                error_type = (
+                    StudioMetricsConfigError
+                    if _is_query_rejection(response.status_code)
+                    else StudioMetricsProviderError
+                )
+                raise error_type(f"Prometheus request returned HTTP {response.status_code}.")
             raise self._unexpected_status_error(
                 response=response,
                 service=service,

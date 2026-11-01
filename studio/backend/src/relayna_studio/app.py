@@ -15,6 +15,7 @@ from relayna.metrics import RelaynaMetrics, create_metrics_router
 from ._doctor import _create_doctor_router
 from ._incidents import _create_incident_router
 from ._migrations import _upgrade_database
+from ._observability_profiles import _create_profile_router, _ProfileStore
 from ._recovery import _create_recovery_router, _RecoveryService
 from ._reliability import _create_reliability_router
 from .auth import (
@@ -235,7 +236,9 @@ class _StudioLifespan:
                 allowed_hosts=self._capability_refresh_allowed_hosts,
                 allowed_networks=self._capability_refresh_allowed_networks,
             )
+            profile_store = _ProfileStore(database, outbound_policy)
             registry_service = ServiceRegistryService(
+                profile_store=profile_store,
                 store=registry_store,
                 capability_fetcher=self._capability_fetcher,
                 outbound_policy=outbound_policy,
@@ -319,14 +322,18 @@ class _StudioLifespan:
             loki_client, prometheus_client, tempo_client = (provider_client() for _ in range(3))
             log_query_service = StudioLogQueryService(
                 registry_service=registry_service,
-                providers={"loki": LokiLogProvider(http_client=loki_client, outbound_policy=outbound_policy)},
+                providers={
+                    "loki": LokiLogProvider(
+                        http_client=loki_client, outbound_policy=outbound_policy, profile_store=profile_store
+                    )
+                },
             )
             search_service.log_query_service = log_query_service
             metrics_query_service = StudioMetricsQueryService(
                 registry_service=registry_service,
                 providers={
                     "prometheus": PrometheusMetricsProvider(
-                        http_client=prometheus_client, outbound_policy=outbound_policy
+                        http_client=prometheus_client, outbound_policy=outbound_policy, profile_store=profile_store
                     )
                 },
                 federation_service=federation_service,
@@ -343,7 +350,11 @@ class _StudioLifespan:
             )
             trace_query_service = StudioTraceQueryService(
                 registry_service=registry_service,
-                providers={"tempo": TempoTraceProvider(http_client=tempo_client, outbound_policy=outbound_policy)},
+                providers={
+                    "tempo": TempoTraceProvider(
+                        http_client=tempo_client, outbound_policy=outbound_policy, profile_store=profile_store
+                    )
+                },
                 federation_service=federation_service,
                 log_query_service=log_query_service,
                 event_ingest_service=event_ingest_service,
@@ -718,6 +729,12 @@ def create_studio_app(
     app = FastAPI(title=title, lifespan=lifespan_factory)
     if runtime.auth_service is not None:
         app.include_router(create_studio_auth_router(runtime.auth_service))
+    app.include_router(
+        _create_profile_router(
+            _ProfileStore(runtime.database, runtime.outbound_policy),
+            dict(zip(("loki", "prometheus", "tempo"), runtime._provider_http_clients, strict=True)),
+        )
+    )
     app.include_router(create_studio_search_router(search_service=runtime.search_service))
     app.include_router(
         create_service_registry_router(service_registry=runtime.registry_service, health_service=runtime.health_service)

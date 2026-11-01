@@ -39,13 +39,13 @@ GitHub Releases are the canonical installation source for v1.
 Install the latest SDK wheel directly:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1-py3-none-any.whl
+pip install https://github.com/sarattha/relayna/releases/download/v1.14.0/relayna-1.14.0-py3-none-any.whl
 ```
 
 Or install from the source distribution:
 
 ```bash
-pip install https://github.com/sarattha/relayna/releases/download/v1.13.1/relayna-1.13.1.tar.gz
+pip install https://github.com/sarattha/relayna/releases/download/v1.14.0/relayna-1.14.0.tar.gz
 ```
 
 For local development in this repository:
@@ -252,7 +252,14 @@ Studio deployment is now packaged separately as `relayna-studio`. The SDK keeps
 the runtime and contract packages; the deployable Studio backend and frontend do
 not ship under the root `relayna` distribution. The SDK, Studio backend, and
 Studio frontend now share the same stable SemVer release line. The current
-release version is `1.13.1`, and the backend requires `relayna>=1.13.1`.
+release version is `1.14.0`, and the backend requires `relayna>=1.14.0`.
+
+Version 1.14.0 adds reusable, environment-scoped Loki, Prometheus, and Tempo
+profiles with encrypted credentials, connection tests, and service-registration
+selectors. Existing manual configuration remains supported. Authenticated profiles
+use the existing settings encryption key; no SQL migration is needed. See the
+[observability profile guide](docs/studio-observability-profiles.md) and
+[1.14.0 upgrade guide](docs/releases.md#upgrading-to-1140).
 
 Version 1.13.1 protects shared infrastructure during optional telemetry outages,
 pauses affected monitor queries with automatic recovery, and fixes PostgreSQL

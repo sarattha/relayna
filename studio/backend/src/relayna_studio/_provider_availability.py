@@ -24,7 +24,11 @@ def _is_query_rejection(status_code: int) -> bool:
 
 
 def _provider_key(service_id: str, config: BaseModel) -> _Key:
-    return service_id, config.model_dump_json()
+    configuration = config.model_dump_json()
+    revision = getattr(config, "_profile_revision", None)
+    if revision is not None:
+        configuration += f":profile_revision={revision}"
+    return service_id, configuration
 
 
 @dataclass(slots=True)

@@ -5,7 +5,7 @@ import binascii
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 from urllib.parse import quote
 
 import httpx
@@ -24,6 +24,9 @@ from .registry import (
     StudioOutboundUrlPolicy,
     TempoTraceConfig,
 )
+
+if TYPE_CHECKING:
+    from ._observability_profiles import _ProfileStore
 
 
 class StudioTraceSpan(BaseModel):
@@ -154,7 +157,9 @@ class TempoTraceProvider:
         *,
         http_client: httpx.AsyncClient,
         outbound_policy: StudioOutboundUrlPolicy | None = None,
+        profile_store: _ProfileStore | None = None,
     ) -> None:
+        self._profile_store = profile_store
         self._http_client = http_client
         self._outbound_policy = outbound_policy or StudioOutboundUrlPolicy()
 
@@ -167,15 +172,23 @@ class TempoTraceProvider:
     ) -> list[StudioTraceSpan]:
         if not _is_trace_id(trace_id):
             raise StudioTraceConfigError("trace_id must be 32 lowercase hexadecimal characters.")
+        if config.profile_id and self._profile_store is None:
+            raise StudioTraceProviderError("Observability profile resolution is unavailable.")
+        if self._profile_store:
+            try:
+                config, headers = await self._profile_store.resolve(config, service.environment)
+            except (HTTPException, OutboundUrlPolicyError) as exc:
+                raise StudioTraceProviderError("Tempo connection profile is unavailable.") from exc
+        else:
+            headers = {"Accept": "application/json"}
         path = config.query_path.replace("{trace_id}", quote(trace_id, safe=""))
         url = f"{config.base_url.rstrip('/')}{path}"
         backend_url = f"{(config.public_base_url or _browser_safe_base_url(config.base_url)).rstrip('/')}{path}"
-        headers = {"Accept": "application/json"}
         if config.tenant_id:
             headers["X-Scope-OrgID"] = config.tenant_id
         try:
             self._outbound_policy.validate_url(config.base_url, label="Tempo trace_config.base_url")
-            response = await self._http_client.get(url, headers=headers)
+            response = await self._http_client.get(url, headers=headers, follow_redirects=False)
         except OutboundUrlPolicyError as exc:
             raise StudioTraceProviderError(str(exc)) from exc
         except httpx.HTTPError as exc:
