@@ -73,7 +73,7 @@ test-spooltail: ## Test using the GitHub-hosted SDK and SPOOLTAIL_TEST_TARGET
 	: "$${SPOOLTAIL_TEST_TARGET:?Set SPOOLTAIL_TEST_TARGET to the local Spooltail gRPC address}"; \
 	sdk_dir=$$(mktemp -d); \
 	trap 'rm -rf "$$sdk_dir"' EXIT; \
-	gh release download python-sdk-v$(SPOOLTAIL_SDK_VERSION) --repo sarattha/relayna-spooltail \
+	gh release download v$(SPOOLTAIL_SDK_VERSION) --repo sarattha/relayna-spooltail \
 		--pattern "$(SPOOLTAIL_SDK_WHEEL)" --dir "$$sdk_dir"; \
 	$(UV) --isolated --locked --extra dev --with "$$sdk_dir/$(SPOOLTAIL_SDK_WHEEL)" \
 		pytest tests/test_spooltail.py

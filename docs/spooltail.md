@@ -8,17 +8,17 @@ Use `RelaynaRabbitClient` to publish and `TaskConsumer(rabbitmq=..., handler=...
 
 ## Install and start Spooltail
 
-Install Relayna normally. For Spooltail, authenticate the GitHub CLI with read access to the private Spooltail repository, then download the official [`relayna-spooltail` 0.0.1 release wheel](https://github.com/sarattha/relayna-spooltail/releases/tag/python-sdk-v0.0.1). Install it into the same active Python environment as Relayna.
+Install Relayna normally. For Spooltail, authenticate the GitHub CLI with read access to the private Spooltail repository, then download the official [`relayna-spooltail` 0.0.1 release wheel](https://github.com/sarattha/relayna-spooltail/releases/tag/v0.0.1). Install it into the same active Python environment as Relayna.
 
 ```bash
-gh release download python-sdk-v0.0.1 --repo sarattha/relayna-spooltail \
+gh release download v0.0.1 --repo sarattha/relayna-spooltail \
   --pattern relayna_spooltail-0.0.1-py3-none-any.whl
 uv pip install ./relayna_spooltail-0.0.1-py3-none-any.whl
 ```
 
 The wheel installs the native `relayna_spooltail` package without a source checkout or build step. For an automated download from another repository, supply `GH_TOKEN` with read access to the Spooltail repository's contents in the download step. The default token for that other repository is scoped to its own contents. Relayna's standard install continues to use public dependencies.
 
-Enable the broker's gRPC listener. The snippet below assumes the broker has been built with `cargo build --release --locked` from the Spooltail `python-sdk-v0.0.1` tag and runs on the same host as your application.
+Enable the broker's gRPC listener. The snippet below assumes the broker has been built with `cargo build --release --locked` from the Spooltail `v0.0.1` tag and runs on the same host as your application.
 
 ```bash
 SPOOLTAIL_DATA=./data \

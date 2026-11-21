@@ -18,7 +18,7 @@ A Relayna service can submit tasks, run workers, and retrieve status and results
 
 ## Surprises & Discoveries
 
-Spooltail's native gRPC client is `relayna-spooltail==0.0.1`. The wheel initially required a source checkout. It is now available in the private repository's [GitHub release](https://github.com/sarattha/relayna-spooltail/releases/tag/python-sdk-v0.0.1). The broker recognizes `completed` and `failed` as terminal and can atomically append either while acknowledging the lease. A retry advances the lease generation twice by the next claim. An expired lease advances it once when reclaimed.
+Spooltail's native gRPC client is `relayna-spooltail==0.0.1`. The wheel initially required a source checkout. It is now available in the private repository's [GitHub release](https://github.com/sarattha/relayna-spooltail/releases/tag/v0.0.1). The broker recognizes `completed` and `failed` as terminal and can atomically append either while acknowledging the lease. A retry advances the lease generation twice by the next claim. An expired lease advances it once when reclaimed.
 
 An isolated `uv lock --no-sources` with a named Spooltail extra failed because the package was absent from PyPI. Installing the pinned Git reference with repository access succeeded. The existing Relayna release tooling and CI can use the same public wheel dependency metadata and lockfile.
 
