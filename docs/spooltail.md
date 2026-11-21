@@ -8,11 +8,13 @@ Use `RelaynaRabbitClient` to publish and `TaskConsumer(rabbitmq=..., handler=...
 
 ## Install and start Spooltail
 
-Install Relayna normally and install the native SDK separately in the same environment. The verified SDK is `relayna-spooltail==0.0.1` from commit `4e59f51202de1a4f360378119a7f9f660bfa2379`. This preview is distributed through a private Git repository and has no PyPI release. With Git access, install it using the pinned revision below. You can also build a wheel with `uv build --project python` from that revision and install the wheel in your application's environment.
+Install Relayna normally. For Spooltail, use the official `relayna-spooltail==0.0.1` distribution from commit `4e59f51202de1a4f360378119a7f9f660bfa2379`. With access to the private Git repository, install the pinned revision in your application environment.
 
 ```bash
 uv pip install 'relayna-spooltail @ git+ssh://git@github.com/sarattha/relayna-spooltail.git@4e59f51202de1a4f360378119a7f9f660bfa2379#subdirectory=python'
 ```
+
+You can also build the official wheel with `uv build --project python` at that revision and install it with `uv pip install ./relayna_spooltail-0.0.1-py3-none-any.whl` from the directory containing the wheel. The preview has no PyPI release or public artifact. Relayna's `uv lock` resolves every extra even for default installs, so a private Git dependency would require repository access in ordinary development and CI. Use the Git reference or wheel in the application that selects Spooltail. [uv dependency resolution](https://docs.astral.sh/uv/concepts/resolution/#conflicting-dependencies)
 
 Enable the broker's gRPC listener. The snippet below assumes the broker has been built with `cargo build --release --locked` from the same revision and runs on the same host as your application.
 
@@ -35,7 +37,11 @@ import asyncio
 
 from relayna.consumer import RetryPolicy
 from relayna.contracts import TaskEnvelope
-from relayna.spooltail import SpooltailClient, SpooltailTaskConsumer, SpooltailTaskContext
+from relayna.spooltail import SpooltailTaskConsumer, SpooltailTaskContext, spooltail_task_event
+from relayna_spooltail import SpooltailClient
+
+TASK_TOPIC = "relayna.tasks"
+STATUS_TOPIC = "relayna.status"
 
 
 async def handle(task: TaskEnvelope, context: SpooltailTaskContext) -> None:
@@ -49,34 +55,49 @@ async def main() -> None:
         worker = SpooltailTaskConsumer(
             client=client,
             handler=handle,
+            task_topic=TASK_TOPIC,
+            status_topic=STATUS_TOPIC,
             retry_policy=RetryPolicy(max_retries=2, delay_ms=1_000),
         )
-        await client.publish_task(TaskEnvelope(task_id="example-1", payload={"number": 21}))
+        event = spooltail_task_event(TaskEnvelope(task_id="example-1", payload={"number": 21}))
+        await client.publish(TASK_TOPIC, event)
         await worker.run_once()  # Poll and process one available task.
-        print(await client.get_latest("example-1"))
+        record = await client.latest(STATUS_TOPIC, "example-1")
+        print(record.event if record else None)
 
 
 asyncio.run(main())
 ```
 
-In a worker service, await `worker.run_forever()` instead of `run_once()`. Call `worker.stop()` and await the loop before closing its client. Each loop handles one lease at a time. Run more workers in the same group for concurrency. In production, the publisher and worker can use independent connections.
+In a worker service, await `worker.run_forever()` instead of `run_once()`. Call `worker.stop()` and await the loop before exiting the native client's context. Each loop handles one lease at a time. Run more workers in the same group for concurrency. In production, the publisher and worker can use independent connections. Create each native client on the asyncio loop that uses it.
 
-Use a new task ID for each independent execution. Spooltail deduplicates by topic, task ID, and event ID. Relayna defaults the work event ID to `"task"`. If a publish response is lost, retry with the same event ID and the same serialized payload. Reusing the same `TaskEnvelope` preserves its creation timestamp. A caller using a mapping should supply and preserve that timestamp on retries. Do not use the same task ID for a changed payload.
+Use a new task ID for each independent execution. Spooltail deduplicates by topic, task ID, and event ID. `spooltail_task_event` defaults the work event ID to `"task"`. If a publish response is lost, pass the same serialized event to the native client again. Spooltail returns the original offset for a duplicate with identical content.
 
 ## Read status and results
 
-Use `client.get_latest(task_id)` for the latest retained event, including a terminal result. Use `client.get_history(task_id, after=event_id)` for a history page. The broker returns at most 64 records in chronological order. Pass the last event ID as the next page's exclusive cursor until a page is empty. An expired or unknown cursor raises the native SDK's `CursorGapError`.
+Use the native client's `latest(status_topic, task_id)` for the latest retained record, including a terminal result in `record.event`. Use `history(status_topic, task_id, after=event_id)` for a history page. The broker returns at most 64 records in chronological order. Pass the last event ID as the next page's exclusive cursor until a page is empty. An expired or unknown cursor raises the native SDK's `CursorGapError`. For Python subscriptions, use the native `subscribe(status_topic, task_id, after=event_id)` method.
 
-A FastAPI service can own the same client and install Relayna's latest-status and SSE routes.
+A FastAPI service can open the native client in its lifespan and install Relayna's latest-status and SSE routes. The router calls the supplied getter while serving requests.
 
 ```python
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-from relayna.spooltail import SpooltailClient
+from relayna.spooltail import create_spooltail_status_router
+from relayna_spooltail import SpooltailClient
 
-client = SpooltailClient("127.0.0.1:7443", tls=False)
-app = FastAPI(lifespan=client.lifespan)
-app.include_router(client.status_router())
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with SpooltailClient("127.0.0.1:7443", tls=False) as client:
+        await client.ping()
+        app.state.spooltail = client
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
+app.include_router(create_spooltail_status_router(get_client=lambda: app.state.spooltail))
 ```
 
 `GET /status/{task_id}` returns the latest event. `GET /events/{task_id}` streams events and accepts `Last-Event-ID` for exclusive replay. The stream ends when it delivers `completed` or `failed`. Clients should close their SSE connection after a terminal event or a `gap` event. For a gap, use the latest status or restart replay without the stale cursor. History pagination is available through the Python client with event IDs. The RabbitMQ stream-based `/history` route uses different cursor semantics.
