@@ -8,15 +8,13 @@ Use `RelaynaRabbitClient` to publish and `TaskConsumer(rabbitmq=..., handler=...
 
 ## Install and start Spooltail
 
-Install Relayna normally. For Spooltail, authenticate the GitHub CLI with read access to the private Spooltail repository, then download the official [`relayna-spooltail` 0.0.1 release wheel](https://github.com/sarattha/relayna-spooltail/releases/tag/v0.0.1). Install it into the same active Python environment as Relayna.
+Install Relayna into your application environment. With `uv` and an authenticated GitHub CLI on `PATH`, run Relayna's installer from that environment.
 
 ```bash
-gh release download v0.0.1 --repo sarattha/relayna-spooltail \
-  --pattern relayna_spooltail-0.0.1-py3-none-any.whl
-uv pip install ./relayna_spooltail-0.0.1-py3-none-any.whl
+relayna-install-spooltail
 ```
 
-The wheel installs the native `relayna_spooltail` package without a source checkout or build step. For an automated download from another repository, supply `GH_TOKEN` with read access to the Spooltail repository's contents in the download step. The default token for that other repository is scoped to its own contents. Relayna's standard install continues to use public dependencies.
+The command downloads the official `relayna-spooltail` 0.0.1 wheel, verifies its SHA-256 digest, and installs it into the Python environment that runs the command. For automated deployment, run it after your environment sync and supply `GH_TOKEN` with read access to the Spooltail repository's contents. [Spooltail SDK release](https://github.com/sarattha/relayna-spooltail/releases/tag/v0.0.1)
 
 Enable the broker's gRPC listener. The snippet below assumes the broker has been built with `cargo build --release --locked` from the Spooltail `v0.0.1` tag and runs on the same host as your application.
 
@@ -114,7 +112,7 @@ app.include_router(create_spooltail_status_router(get_client=lambda: app.state.s
 | Existing SDK features | The Spooltail adapter covers individual tasks, canonical status envelopes, latest, per-task history, and SSE. Batch publishing, priority, routing and sharding, workflows, aggregation, manual retry, Relayna DLQ inspection and replay, Redis repositories, and Studio integrations are outside this adapter's scope. Native dead-letter settlement marks a record dead for its group and has no re-drive API. |
 | Broker maturity | The verified broker is a single-node preview. It lacks replication, failover, and physical storage reclamation. |
 
-For local integration tests, run the broker on loopback with plaintext gRPC. From the Relayna root, run the following command with an authenticated GitHub CLI. It downloads the pinned release wheel and tests it in an isolated Relayna environment.
+For local integration tests, run the broker on loopback with plaintext gRPC. From the Relayna root, run the following command with an authenticated GitHub CLI. It invokes the same installer and tests the SDK in an isolated Relayna environment.
 
 ```bash
 SPOOLTAIL_TEST_TARGET=127.0.0.1:7443 make test-spooltail

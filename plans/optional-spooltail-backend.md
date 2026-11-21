@@ -15,20 +15,21 @@ A Relayna service can submit tasks, run workers, and retrieve status and results
 - [x] (2026-11-21) Replaced the draft client wrapper with direct use of the official SDK at the worker and FastAPI entry points.
 - [x] (2026-11-21) Verified the revision against both brokers and checked installation and metadata for both wheels.
 - [x] (2026-11-21) Updated deployment and integration testing to download the official wheel from the pinned GitHub release.
+- [x] (2026-11-21) Shipped an opt-in installer in the Relayna wheel and used it for live Spooltail verification on Python 3.13 and 3.14.
 
 ## Surprises & Discoveries
 
 Spooltail's native gRPC client is `relayna-spooltail==0.0.1`. The wheel initially required a source checkout. It is now available in the private repository's [GitHub release](https://github.com/sarattha/relayna-spooltail/releases/tag/v0.0.1). The broker recognizes `completed` and `failed` as terminal and can atomically append either while acknowledging the lease. A retry advances the lease generation twice by the next claim. An expired lease advances it once when reclaimed.
 
-An isolated `uv lock --no-sources` with a named Spooltail extra failed because the package was absent from PyPI. Installing the pinned Git reference with repository access succeeded. The existing Relayna release tooling and CI can use the same public wheel dependency metadata and lockfile.
+An isolated `uv lock --no-sources` with a named Spooltail extra failed because the package was absent from PyPI. The private browser download URL returned 404 for both Basic and Bearer auth. The GitHub asset API returned a binary redirect with the authenticated octet-stream request. The GitHub CLI handles that request and can download by release tag and wheel name.
 
 ## Decision Log
 
-Use a dedicated `relayna.spooltail` namespace for Relayna integration. Applications construct and own the official `relayna_spooltail.SpooltailClient`. They call it directly for publish, latest status, history, and subscriptions. Pass that client to the Relayna consumer, or supply a getter to the FastAPI router so the client can be created on the server's event loop. Download the pinned release wheel only for Spooltail deployments and integration tests so the public Relayna distribution and lockfile continue to resolve without private repository access. Reuse the task and status contracts, retry policy, and shared status-route implementation.
+Use a dedicated `relayna.spooltail` namespace for Relayna integration. Applications construct and own the official `relayna_spooltail.SpooltailClient`. They call it directly for publish, latest status, history, and subscriptions. Pass that client to the Relayna consumer, or supply a getter to the FastAPI router so the client can be created on the server's event loop. Package `relayna-install-spooltail` to download the pinned release wheel with the GitHub CLI, verify the digest, and install it into the interpreter running the command. Use that entry point for application setup and integration tests. The public dependency metadata and lockfile continue to resolve without private repository access. Reuse the task and status contracts, retry policy, and shared status-route implementation.
 
 ## Outcomes & Retrospective
 
-Both Spooltail integration cases passed with installed wheels on Python 3.13 and 3.14 while RabbitMQ and Redis were stopped. They verified delayed redelivery, renewed leases, atomic successful and failed completion, native results and history, and SSE with exclusive resume and a cursor gap. The default RabbitMQ and Redis smoke test passed on live services. SDK and Studio backend verification passed, and SDK coverage met the 98% gate on Python 3.13 and 3.14. The strict docs build, wheel metadata validation, and default installed-wheel import test also passed. After the official wheel was published, `make test-spooltail` downloaded it from GitHub and passed all 19 tests on each Python version. GitHub read access and differences in workflows, broker administration, and high availability remain deployment constraints.
+Both Spooltail integration cases passed with installed wheels on Python 3.13 and 3.14 while RabbitMQ and Redis were stopped. They verified delayed redelivery, renewed leases, atomic successful and failed completion, native results and history, and SSE with exclusive resume and a cursor gap. The default RabbitMQ and Redis smoke test passed on live services. SDK and Studio backend verification passed, and SDK coverage met the 98% gate on Python 3.13 and 3.14. The strict docs build and distribution checks passed. The built Relayna wheel installed in a clean environment with no preinstalled native SDK. Running `relayna-install-spooltail` there installed the official SDK from GitHub. `make test-spooltail` exercised the same installer and passed all 19 tests on each Python version. GitHub read access and differences in workflows, broker administration, and high availability remain deployment constraints.
 
 ## Context and Orientation
 
@@ -52,7 +53,7 @@ Run these commands from the repository root after installing development depende
     make coverage
     SPOOLTAIL_TEST_TARGET=127.0.0.1:<port> make test-spooltail
 
-The last command downloads the pinned wheel with the authenticated GitHub CLI. It requires a local plaintext loopback broker built from the release tag.
+The last command invokes `relayna-install-spooltail` with the authenticated GitHub CLI. It requires a local plaintext loopback broker built from the release tag.
 
 ## Validation and Acceptance
 
@@ -64,4 +65,4 @@ Use distinct topics per end-to-end test run. Keep the broker source, build, and 
 
 ## Interfaces and Dependencies
 
-The optional native client connects to a gRPC target with TLS by default. Applications share explicit topic and consumer group names. The native Python distribution is installed separately. Spooltail status cursors are event IDs.
+The optional native client connects to a gRPC target with TLS by default. Applications share explicit topic and consumer group names. The distribution installer requires `uv` and an authenticated GitHub CLI. Spooltail status cursors are event IDs.

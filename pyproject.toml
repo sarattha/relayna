@@ -38,6 +38,9 @@ dependencies = [
     "starlette>=1.3.1",
 ]
 
+[project.scripts]
+relayna-install-spooltail = "relayna.spooltail._install:main"
+
 [project.urls]
 Homepage = "https://github.com/sarattha/relayna"
 Documentation = "https://sarattha.github.io/relayna/"

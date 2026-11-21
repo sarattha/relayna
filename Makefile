@@ -11,8 +11,6 @@ COVERAGE        := $(UV) coverage
 PYTEST          := $(UV) pytest
 PIP_AUDIT       := $(UV) --with pip-audit pip-audit
 SDK_PY_PATHS     := src tests benchmarks
-SPOOLTAIL_SDK_VERSION := 0.0.1
-SPOOLTAIL_SDK_WHEEL   := relayna_spooltail-$(SPOOLTAIL_SDK_VERSION)-py3-none-any.whl
 
 #  Ruff & Black share the same default 88-char line length.                   #
 #  Set your project-wide preference *once* here and both the linter           #
@@ -69,14 +67,8 @@ test: ## Run the SDK test suite
 
 .PHONY: test-spooltail
 test-spooltail: ## Test using the GitHub-hosted SDK and SPOOLTAIL_TEST_TARGET
-	@set -eu; \
-	: "$${SPOOLTAIL_TEST_TARGET:?Set SPOOLTAIL_TEST_TARGET to the local Spooltail gRPC address}"; \
-	sdk_dir=$$(mktemp -d); \
-	trap 'rm -rf "$$sdk_dir"' EXIT; \
-	gh release download v$(SPOOLTAIL_SDK_VERSION) --repo sarattha/relayna-spooltail \
-		--pattern "$(SPOOLTAIL_SDK_WHEEL)" --dir "$$sdk_dir"; \
-	$(UV) --isolated --locked --extra dev --with "$$sdk_dir/$(SPOOLTAIL_SDK_WHEEL)" \
-		pytest tests/test_spooltail.py
+	@: "$${SPOOLTAIL_TEST_TARGET:?Set SPOOLTAIL_TEST_TARGET to the local Spooltail gRPC address}"
+	$(UV) --isolated --locked --extra dev sh -ec 'relayna-install-spooltail; python -m pytest tests/test_spooltail.py'
 
 .PHONY: coverage
 coverage: clean ## Run SDK tests with coverage (fail if <98 %)
