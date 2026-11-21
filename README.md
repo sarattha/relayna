@@ -56,6 +56,8 @@ uv sync --extra dev
 
 ## Quickstart
 
+RabbitMQ and Redis are the default SDK backend. For single-task workers and status backed by Spooltail, see the [Spooltail setup guide](docs/spooltail.md).
+
 ```python
 from fastapi import FastAPI
 

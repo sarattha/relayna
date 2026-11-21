@@ -34,6 +34,7 @@ theme:
 nav:
   - Overview: index.md
   - Getting Started: getting-started.md
+  - Spooltail Backend: spooltail.md
   - Studio Backend: studio-backend.md
   - Studio Persistence: studio-persistence.md
   - Studio Observability Profiles: studio-observability-profiles.md
