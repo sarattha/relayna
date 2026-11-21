@@ -8,15 +8,17 @@ Use `RelaynaRabbitClient` to publish and `TaskConsumer(rabbitmq=..., handler=...
 
 ## Install and start Spooltail
 
-Install Relayna normally. For Spooltail, use the official `relayna-spooltail==0.0.1` distribution from commit `4e59f51202de1a4f360378119a7f9f660bfa2379`. With access to the private Git repository, install the pinned revision in your application environment.
+Install Relayna normally. For Spooltail, authenticate the GitHub CLI with read access to the private Spooltail repository, then download the official [`relayna-spooltail` 0.0.1 release wheel](https://github.com/sarattha/relayna-spooltail/releases/tag/python-sdk-v0.0.1). Install it into the same active Python environment as Relayna.
 
 ```bash
-uv pip install 'relayna-spooltail @ git+ssh://git@github.com/sarattha/relayna-spooltail.git@4e59f51202de1a4f360378119a7f9f660bfa2379#subdirectory=python'
+gh release download python-sdk-v0.0.1 --repo sarattha/relayna-spooltail \
+  --pattern relayna_spooltail-0.0.1-py3-none-any.whl
+uv pip install ./relayna_spooltail-0.0.1-py3-none-any.whl
 ```
 
-You can also build the official wheel with `uv build --project python` at that revision and install it with `uv pip install ./relayna_spooltail-0.0.1-py3-none-any.whl` from the directory containing the wheel. The preview has no PyPI release or public artifact. Relayna's `uv lock` resolves every extra even for default installs, so a private Git dependency would require repository access in ordinary development and CI. Use the Git reference or wheel in the application that selects Spooltail. [uv dependency resolution](https://docs.astral.sh/uv/concepts/resolution/#conflicting-dependencies)
+The wheel installs the native `relayna_spooltail` package without a source checkout or build step. For an automated download from another repository, supply `GH_TOKEN` with read access to the Spooltail repository's contents in the download step. The default token for that other repository is scoped to its own contents. Relayna's standard install continues to use public dependencies.
 
-Enable the broker's gRPC listener. The snippet below assumes the broker has been built with `cargo build --release --locked` from the same revision and runs on the same host as your application.
+Enable the broker's gRPC listener. The snippet below assumes the broker has been built with `cargo build --release --locked` from the Spooltail `python-sdk-v0.0.1` tag and runs on the same host as your application.
 
 ```bash
 SPOOLTAIL_DATA=./data \
@@ -112,4 +114,8 @@ app.include_router(create_spooltail_status_router(get_client=lambda: app.state.s
 | Existing SDK features | The Spooltail adapter covers individual tasks, canonical status envelopes, latest, per-task history, and SSE. Batch publishing, priority, routing and sharding, workflows, aggregation, manual retry, Relayna DLQ inspection and replay, Redis repositories, and Studio integrations are outside this adapter's scope. Native dead-letter settlement marks a record dead for its group and has no re-drive API. |
 | Broker maturity | The verified broker is a single-node preview. It lacks replication, failover, and physical storage reclamation. |
 
-For local integration tests, run the broker on loopback with plaintext gRPC and install the pinned SDK into the test environment. From the Relayna root, run `SPOOLTAIL_TEST_TARGET=127.0.0.1:7443 uv run pytest tests/test_spooltail.py`. Use `uv run --with /path/to/relayna_spooltail-0.0.1-py3-none-any.whl pytest tests/test_spooltail.py` with the same target to install the optional SDK from a wheel for the test run.
+For local integration tests, run the broker on loopback with plaintext gRPC. From the Relayna root, run the following command with an authenticated GitHub CLI. It downloads the pinned release wheel and tests it in an isolated Relayna environment.
+
+```bash
+SPOOLTAIL_TEST_TARGET=127.0.0.1:7443 make test-spooltail
+```

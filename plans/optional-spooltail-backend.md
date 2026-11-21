@@ -14,20 +14,21 @@ A Relayna service can submit tasks, run workers, and retrieve status and results
 - [x] (2026-11-21) Ran Relayna's verification stack and tested both backend flows against local services.
 - [x] (2026-11-21) Replaced the draft client wrapper with direct use of the official SDK at the worker and FastAPI entry points.
 - [x] (2026-11-21) Verified the revision against both brokers and checked installation and metadata for both wheels.
+- [x] (2026-11-21) Updated deployment and integration testing to download the official wheel from the pinned GitHub release.
 
 ## Surprises & Discoveries
 
-Spooltail's native gRPC client is `relayna-spooltail==0.0.1` at commit `4e59f51202de1a4f360378119a7f9f660bfa2379`. Its private Git repository has no GitHub releases, and the distribution is unavailable on public PyPI. The pinned source builds a Python wheel. The broker recognizes `completed` and `failed` as terminal and can atomically append either while acknowledging the lease. A retry advances the lease generation twice by the next claim. An expired lease advances it once when reclaimed.
+Spooltail's native gRPC client is `relayna-spooltail==0.0.1`. The wheel initially required a source checkout. It is now available in the private repository's [GitHub release](https://github.com/sarattha/relayna-spooltail/releases/tag/python-sdk-v0.0.1). The broker recognizes `completed` and `failed` as terminal and can atomically append either while acknowledging the lease. A retry advances the lease generation twice by the next claim. An expired lease advances it once when reclaimed.
 
 An isolated `uv lock --no-sources` with a named Spooltail extra failed because the package was absent from PyPI. Installing the pinned Git reference with repository access succeeded. The existing Relayna release tooling and CI can use the same public wheel dependency metadata and lockfile.
 
 ## Decision Log
 
-Use a dedicated `relayna.spooltail` namespace for Relayna integration. Applications construct and own the official `relayna_spooltail.SpooltailClient`. They call it directly for publish, latest status, history, and subscriptions. Pass that client to the Relayna consumer, or supply a getter to the FastAPI router so the client can be created on the server's event loop. Keep the dependency separately installable from the pinned source or wheel so the public Relayna distribution and lockfile continue to resolve without private repository access. Reuse the task and status contracts, retry policy, and shared status-route implementation.
+Use a dedicated `relayna.spooltail` namespace for Relayna integration. Applications construct and own the official `relayna_spooltail.SpooltailClient`. They call it directly for publish, latest status, history, and subscriptions. Pass that client to the Relayna consumer, or supply a getter to the FastAPI router so the client can be created on the server's event loop. Download the pinned release wheel only for Spooltail deployments and integration tests so the public Relayna distribution and lockfile continue to resolve without private repository access. Reuse the task and status contracts, retry policy, and shared status-route implementation.
 
 ## Outcomes & Retrospective
 
-The native SDK wheel and local broker were built from a temporary Git archive of the merged ref. Both Spooltail integration cases passed with installed wheels on Python 3.13 and 3.14 while RabbitMQ and Redis were stopped. They verified delayed redelivery, renewed leases, atomic successful and failed completion, native results and history, and SSE with exclusive resume and a cursor gap. The default RabbitMQ and Redis smoke test passed on live services. SDK and Studio backend verification passed, and SDK coverage met the 98% gate on Python 3.13 and 3.14. The strict docs build, wheel metadata validation, and default installed-wheel import test also passed. Private source distribution and differences in workflows, broker administration, and high availability remain deployment constraints.
+Both Spooltail integration cases passed with installed wheels on Python 3.13 and 3.14 while RabbitMQ and Redis were stopped. They verified delayed redelivery, renewed leases, atomic successful and failed completion, native results and history, and SSE with exclusive resume and a cursor gap. The default RabbitMQ and Redis smoke test passed on live services. SDK and Studio backend verification passed, and SDK coverage met the 98% gate on Python 3.13 and 3.14. The strict docs build, wheel metadata validation, and default installed-wheel import test also passed. After the official wheel was published, `make test-spooltail` downloaded it from GitHub and passed all 19 tests on each Python version. GitHub read access and differences in workflows, broker administration, and high availability remain deployment constraints.
 
 ## Context and Orientation
 
@@ -49,9 +50,9 @@ Run these commands from the repository root after installing development depende
     make -C studio/backend sync
     bash .codex/skills/code-change-verification/scripts/run.sh
     make coverage
-    SPOOLTAIL_TEST_TARGET=127.0.0.1:<port> uv run pytest tests/test_spooltail.py
+    SPOOLTAIL_TEST_TARGET=127.0.0.1:<port> make test-spooltail
 
-The last command requires the pinned wheel installed in the SDK test environment and a local plaintext loopback broker built from the pinned revision.
+The last command downloads the pinned wheel with the authenticated GitHub CLI. It requires a local plaintext loopback broker built from the release tag.
 
 ## Validation and Acceptance
 
