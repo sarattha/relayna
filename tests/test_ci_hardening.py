@@ -50,14 +50,14 @@ def test_release_hardens_sdk_artifacts_and_studio_images() -> None:
     release = read_workflow("release.yml")
 
     sdk_snippets = [
-        "relayna-sdk-${{ github.ref_name }}.spdx.json",
+        "relayna-sdk-$RELEASE_TAG.spdx.json",
         "subject-path: dist/*",
         "dist/*.tar.gz",
         "dist/*.whl",
     ]
     image_snippets = [
-        "relayna-studio-backend-${{ github.ref_name }}.spdx.json",
-        "relayna-studio-frontend-${{ github.ref_name }}.spdx.json",
+        "relayna-studio-backend-$RELEASE_TAG.spdx.json",
+        "relayna-studio-frontend-$RELEASE_TAG.spdx.json",
         "Scan Studio backend image with Trivy",
         "Scan Studio frontend image with Trivy",
         "Sign Studio backend image",

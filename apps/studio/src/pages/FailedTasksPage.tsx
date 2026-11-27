@@ -165,6 +165,9 @@ export function FailedTasksPage() {
     await load(nextQuery);
   }
 
+  const recoveryFlags = selected && services.servicesById.get(selected.service_id)?.capabilities?.feature_flags;
+  const usesSpooltailRecovery = Array.isArray(recoveryFlags) && recoveryFlags.includes("spooltail.recovery.v1");
+
   function supports(action: string) {
     const routes = selected && services.servicesById.get(selected.service_id)?.capabilities?.supported_routes;
     return Array.isArray(routes) && routes.includes(`failed_tasks.${action}`);
@@ -460,15 +463,21 @@ export function FailedTasksPage() {
           </div>
 
           <div className="studio-form-grid studio-form-grid--triple">
-            <label className="studio-filter-field"><span>Target queue</span><input value={retryTargetQueue} onChange={(event) => setRetryTargetQueue(event.target.value)} placeholder="Target queue" style={inputStyle} /></label>
+            <label className="studio-filter-field"><span>Target queue</span><input readOnly={Boolean(usesSpooltailRecovery)} value={retryTargetQueue} onChange={(event) => setRetryTargetQueue(event.target.value)} placeholder="Target queue" style={inputStyle} /></label>
             <label className="studio-filter-field"><span>Retry note</span><input value={retryNote} onChange={(event) => setRetryNote(event.target.value)} placeholder="Retry note" style={inputStyle} /></label>
-            <button type="button" style={primaryButtonStyle} disabled={pending || !supports("retry") || !selected.payload_available || !["DLQ", "retry_exhausted", "terminal_failed"].includes(selected.status)} onClick={() => void mutate(retry)}>
+            <button type="button" style={primaryButtonStyle} disabled={pending || !supports("retry") || (usesSpooltailRecovery && selected.retry_status === "retried") || !selected.payload_available || !["DLQ", "retry_exhausted", "terminal_failed"].includes(selected.status)} onClick={() => void mutate(retry)}>
               <StudioIcon name="refresh" />
               Retry
             </button>
           </div>
           <label className="studio-filter-field"><span>Optional JSON payload override</span><textarea value={overridePayload} onChange={(event) => setOverridePayload(event.target.value)} placeholder="Optional JSON payload override" style={{ ...inputStyle, minHeight: 96, fontFamily: "var(--rn-font-family-mono)" }} /></label></> : null}
 
+          {selected.retried_task_id ? (
+            <p>
+              Recovery task{" "}
+              <TaskRefLink taskRef={{ service_id: selected.service_id, task_id: selected.retried_task_id }} />
+            </p>
+          ) : null}
           <div className="studio-detail-grid">
             <section><h3>Payload</h3><InlineCodeBox label="Payload" value={JSON.stringify(selected.input_preview ?? selected.body ?? null, null, 2)} minHeight={160} /></section>
             <section><h3>Error and traceback</h3><InlineCodeBox label="Error and traceback" value={selected.traceback || selected.error_message || ""} minHeight={160} /></section>

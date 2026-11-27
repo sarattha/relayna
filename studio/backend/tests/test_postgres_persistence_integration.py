@@ -19,6 +19,7 @@ from redis.asyncio import Redis
 from relayna_studio import app as studio_app_module
 from relayna_studio import backfill as backfill_module
 from relayna_studio._chamber_connection import _ConnectionStore, _ConnectionUpdate
+from relayna_studio._ecosystem_evidence import _SpooltailEvidence
 from relayna_studio._incident_groups import _dimensions, _group_id
 from relayna_studio._incident_store import _IncidentStore
 from relayna_studio._incidents import _create_incident_router
@@ -275,6 +276,37 @@ async def test_registry_constraints_soft_delete_projection_and_audit(database: S
     assert service_projection is not None and service_projection.health_status == "healthy"
     assert task_projection is not None
     assert (task_projection.service_name, task_projection.environment) == ("Payments v3", "staging")
+
+
+@pytest.mark.asyncio
+async def test_spooltail_evidence_survives_projection_restart(database: StudioDatabase, redis: Redis) -> None:
+    service = service_record()
+    await PostgresServiceRegistryStore(database).create(service)
+    event = {
+        "task_id": "task-1",
+        "event_id": "completed-event",
+        "status": "completed",
+        "timestamp": "2026-11-27T12:00:00Z",
+        "attempt_id": "attempt-1",
+        "meta": {"cell": {"cell_id": "cell-1"}},
+        "result": {"echo": {"value": 3}},
+    }
+    history: dict[str, Any] = {"task_id": "task-1", "count": 1, "events": [event]}
+    policy = StudioOutboundUrlPolicy(allowed_hosts=[".example.test"])
+    async with AsyncClient() as client:
+        projection = _SpooltailEvidence(PostgresStudioEventStore(database, redis), client, policy)
+        projected = await projection.enrich(service, "task-1", history, {"event": event}, broker_available=False)
+        await projection.enrich(service, "task-1", history, {"event": event}, broker_available=False)
+
+        store = PostgresStudioEventStore(database, redis)
+        restarted = _SpooltailEvidence(store, client, policy)
+        no_history = {"task_id": "task-1", "count": 0, "events": []}
+        retained = await restarted.enrich(service, "task-1", no_history, None, broker_available=False)
+        assert retained["component_events"] == projected["component_events"]
+        assert retained["component_events"][0]["payload"] == {"cell_id": "cell-1", "attempt_id": "attempt-1"}
+        saved = await store.list_task_events(service.service_id, "task-1", limit=10)
+        assert saved.count == 2
+        assert next(item for item in saved.items if item.component == "sdk").payload["result"] == event["result"]
 
 
 @pytest.mark.asyncio
@@ -604,18 +636,22 @@ async def test_search_health_members_settings_notifications_and_coordination(
 
     coordinator = PostgresAdvisoryCoordinator(database)
     entered = asyncio.Event()
+    checked = asyncio.Event()
 
     async def first() -> bool:
         async with coordinator.try_lock("same-job") as acquired:
             assert acquired
             entered.set()
-            await asyncio.sleep(0.1)
+            await checked.wait()
             return acquired
 
     async def second() -> bool:
         await entered.wait()
-        async with coordinator.try_lock("same-job") as acquired:
-            return acquired
+        try:
+            async with coordinator.try_lock("same-job") as acquired:
+                return acquired
+        finally:
+            checked.set()
 
     assert await asyncio.gather(first(), second()) == [True, False]
 
@@ -1723,7 +1759,7 @@ async def test_contention_retention_batches_preserve_live_and_non_expiring_tasks
     monkeypatch.setattr("relayna_studio.database._utcnow", lambda: cutoff)
     with _contention_queries(database) as queries:
         assert await search.prune_expired_task_documents() == 7
-    deletes = [count for sql, count in queries if sql.startswith("DELETE FROM studio_task_search_projections")]
+    deletes = [count for sql, count in queries if "DELETE FROM studio_task_search_projections" in sql]
     assert sum(deletes) == 7 and max(deletes) <= 3
     assert len(deletes) == 3
     assert sum(sql == "COMMIT" for sql, _ in queries) == 3

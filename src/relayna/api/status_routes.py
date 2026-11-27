@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections.abc import AsyncIterator
+from typing import Any, Protocol
 
 from fastapi import APIRouter, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -26,6 +27,43 @@ def create_status_router(
     sse_stream: SSEStatusStream,
     history_reader: StreamHistoryReader | None = None,
     latest_status_store: RedisStatusStore | None = None,
+    latest_output_adapter: EventAdapter | None = None,
+    events_path: str = "/events/{task_id}",
+    history_path: str = "/history",
+    status_path: str = "/status/{task_id}",
+    require_stream: bool = True,
+    alias_config: ContractAliasConfig | None = None,
+    latest_retry_attempts: int = 5,
+    latest_retry_delay_seconds: float = 0.05,
+) -> APIRouter:
+    return _create_status_router(
+        sse_stream=sse_stream,
+        history_reader=history_reader,
+        latest_status_store=latest_status_store,
+        latest_output_adapter=latest_output_adapter,
+        events_path=events_path,
+        history_path=history_path,
+        status_path=status_path,
+        require_stream=require_stream,
+        alias_config=alias_config,
+        latest_retry_attempts=latest_retry_attempts,
+        latest_retry_delay_seconds=latest_retry_delay_seconds,
+    )
+
+
+class _StatusStream(Protocol):
+    def stream(self, task_id: str, *, last_event_id: str | None = None) -> AsyncIterator[bytes]: ...
+
+
+class _LatestStatusStore(Protocol):
+    async def get_latest(self, task_id: str) -> dict[str, Any] | None: ...
+
+
+def _create_status_router(
+    *,
+    sse_stream: _StatusStream,
+    history_reader: StreamHistoryReader | None = None,
+    latest_status_store: _LatestStatusStore | None = None,
     latest_output_adapter: EventAdapter | None = None,
     events_path: str = "/events/{task_id}",
     history_path: str = "/history",

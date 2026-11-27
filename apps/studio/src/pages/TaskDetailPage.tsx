@@ -450,21 +450,23 @@ export function preferredTracePathNodeId(path: StudioTracePathResponse) {
 function TracePathExplorer({
   tracePath,
   selectedNode,
+  showTaskSpans,
   onSelectNode,
   onSelectSpan,
   onFilterLogs,
 }: {
   tracePath: StudioTracePathResponse;
   selectedNode: StudioTracePathNode | null;
+  showTaskSpans: boolean;
   onSelectNode: (node: StudioTracePathNode) => void;
   onSelectSpan: (span: StudioTraceSpan) => void;
   onFilterLogs: (traceId: string) => void;
 }) {
   const displayNodes = orderTracePathNodes(tracePath.nodes, tracePath.edges);
   const activeNode = selectedNode || displayNodes[0] || null;
-  const relatedSpans = activeNode
-    ? tracePath.spans.filter((span) => span.span_id === activeNode.span_id || span.trace_id === activeNode.trace_id)
-    : [];
+  const visibleSpans = showTaskSpans ? tracePath.spans : tracePath.spans.filter(
+    (span) => activeNode && (span.span_id === activeNode.span_id || span.trace_id === activeNode.trace_id),
+  );
 
   return (
     <div className="studio-stack-md">
@@ -557,10 +559,10 @@ function TracePathExplorer({
               </button>
             </div>
           ) : null}
-          {relatedSpans.length ? (
+          {visibleSpans.length ? (
             <div className="studio-stack-sm">
-              <strong style={{ fontSize: 13 }}>Related Spans</strong>
-              {relatedSpans.map((span) => (
+              <strong style={{ fontSize: 13 }}>{showTaskSpans ? "Recorded Spans" : "Related Spans"}</strong>
+              {visibleSpans.map((span) => (
                 <div
                   key={`${span.trace_id}-${span.span_id}`}
                   className="studio-subcard"
@@ -642,6 +644,9 @@ export function TaskDetailPage() {
   const [mermaidCopyState, setMermaidCopyState] = useState<"idle" | "copied" | "selected" | "failed">("idle");
   const [showGraph, setShowGraph] = useState(false);
   const [streamState, setStreamState] = useState("Connecting to live updates…");
+  const flags = taskDetail?.service.capabilities?.feature_flags;
+  const usesSpooltailHistory = Array.isArray(flags) && flags.includes("spooltail.task_history.v1");
+  const showExecutionPath = usesSpooltailHistory && !taskDetail?.execution_graph;
   const requestVersions = useRef<Record<string, number>>({});
   useEffect(() => () => { for (const key of Object.keys(requestVersions.current)) requestVersions.current[key]++; }, [serviceId, taskId]);
 
@@ -662,7 +667,7 @@ export function TaskDetailPage() {
     setTaskMetricManualFrom("");
     setTaskMetricManualTo("");
     setShowGraph(false);
-    if (!taskDetail) {
+    if (!taskDetail || taskDetail.service_id !== serviceId || taskDetail.task_id !== taskId) {
       setTaskTimeline(null);
       setTaskLogs(null);
       setTaskLogsError(null);
@@ -674,8 +679,12 @@ export function TaskDetailPage() {
       return;
     }
     setTaskTimeline(null);
-    void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id);
-  }, [taskDetail]);
+    if (!usesSpooltailHistory) {
+      void loadTaskTimeline(serviceId, taskId);
+    } else if (showExecutionPath) {
+      void loadTaskTracePath(serviceId, taskId);
+    }
+  }, [taskDetail, serviceId, taskId, usesSpooltailHistory, showExecutionPath]);
 
   const derivedTaskLogWindow = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, taskLogAutoNow) : null;
   const quickTaskLogWindow = resolveQuickTaskLogWindow(taskLogWindowMode);
@@ -747,7 +756,7 @@ export function TaskDetailPage() {
   }
 
   useEffect(() => {
-    if (typeof EventSource === "undefined" || !serviceId || !taskId) {
+    if (typeof EventSource === "undefined" || !serviceId || !taskId || usesSpooltailHistory) {
       return;
     }
     setStreamState("Connecting to live updates…");
@@ -768,7 +777,7 @@ export function TaskDetailPage() {
       }
     });
     return () => source.close();
-  }, [serviceId, taskId]);
+  }, [serviceId, taskId, usesSpooltailHistory]);
 
   async function loadTaskDetail(includeJoins = false) {
     setLoading(true);
@@ -882,7 +891,9 @@ export function TaskDetailPage() {
       const payload = await fetchTaskTracePath(targetServiceId, targetTaskId);
       if (requestVersions.current["loadTaskTracePath"] !== version) return;
       setTaskTracePath(payload);
-      setSelectedTracePathNodeId((current) => current || preferredTracePathNodeId(payload));
+      setSelectedTracePathNodeId((current) =>
+        payload.nodes.some((node) => node.id === current) ? current : preferredTracePathNodeId(payload),
+      );
     } catch (fetchError) {
       if (requestVersions.current["loadTaskTracePath"] !== version) return;
       setTaskTracePath(null);
@@ -948,6 +959,11 @@ export function TaskDetailPage() {
   const historyCount = taskDetail?.history?.count ?? 0;
   const dlqCount = taskDetail?.dlq_messages?.items.length ?? 0;
   const taskTimelineItems = taskTimeline?.items || [];
+  const brokerEvents = usesSpooltailHistory ? taskDetail?.history?.events || [] : [];
+  const componentEvents = taskDetail?.history?.component_events || [];
+  const brokerStats = taskDetail?.history?.broker_stats;
+  const gatewayUsage = taskDetail?.history?.gateway_usage;
+  const brokerHistoryGap = taskDetail?.errors.some((item) => item.code === "history_cursor_gap");
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
   const brokerDlqSupported = supportsCapability(taskDetail?.service.capabilities || null, "broker.dlq.messages");
   const resourceDelta = extractTaskResourceDelta(taskDetail);
@@ -963,9 +979,44 @@ export function TaskDetailPage() {
       statusEvent.error_message ||
       statusEvent.error ||
       statusEvent.detail ||
+      (usesSpooltailHistory ? statusEvent.message : undefined) ||
       "No failure reason was reported.",
   );
   const failedTask = TASK_FAILURE_STATUSES.has(latestStatusValue.toLowerCase()) || dlqCount > 0;
+
+  const traceCard = (
+    <SectionCard
+      title={showExecutionPath ? "Execution Path" : "Task Trace"}
+      subtitle={showExecutionPath ? "Task status, component activity, and recorded spans." : undefined}
+      action={
+        <button
+          type="button"
+          onClick={() => void loadTaskTracePath(serviceId, taskId)}
+          style={secondaryButtonStyle}
+        >
+          <StudioIcon name="refresh" />
+          Reload Trace
+        </button>
+      }
+    >
+      {taskTracePathLoading ? <p style={mutedTextStyle}>Loading task trace...</p> : null}
+      {taskTracePathError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTracePathError}</p> : null}
+      {taskTracePath?.warnings.length ? <p style={mutedTextStyle}>{taskTracePath.warnings.join(" ")}</p> : null}
+      {!taskTracePathLoading && !taskTracePathError && taskTracePath && !taskTracePath.nodes.length ? (
+        <p style={mutedTextStyle}>No task trace path evidence was found for this task.</p>
+      ) : null}
+      {taskTracePath?.nodes.length ? (
+        <TracePathExplorer
+          tracePath={taskTracePath}
+          selectedNode={selectedTracePathNode}
+          showTaskSpans={showExecutionPath}
+          onSelectNode={(node) => setSelectedTracePathNodeId(node.id)}
+          onSelectSpan={setSelectedTraceSpan}
+          onFilterLogs={applyTraceLogFilter}
+        />
+      ) : null}
+    </SectionCard>
+  );
 
   return (
     <>
@@ -993,7 +1044,7 @@ export function TaskDetailPage() {
           </div>
         }
       >
-        <p role="status" style={mutedTextStyle}>{streamState}</p>
+        <p role="status" style={mutedTextStyle}>{usesSpooltailHistory ? "Showing broker history. Reload to check for new events." : streamState}</p>
         <label className="studio-filter-field"><span>Shared telemetry window ({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><select style={inputStyle} defaultValue="" onChange={(event) => {
           const mode = event.target.value as TaskLogWindowMode;
           if (!mode || !taskDetail) return;
@@ -1026,9 +1077,16 @@ export function TaskDetailPage() {
             <div className="studio-metrics-grid">
               <MetricCard label="Status" value={latestStatusValue} />
               <MetricCard label="History Events" value={String(historyCount)} />
-              <MetricCard label="Timeline Events" value={String(taskTimelineItems.length)} />
+              <MetricCard label="Timeline Events" value={String(usesSpooltailHistory ? brokerEvents.length : taskTimelineItems.length)} />
               <MetricCard label="DLQ Messages" value={String(dlqCount)} />
-              <MetricCard label="Graph" value={graph ? `${graph.nodes.length} nodes` : "Unavailable"} />
+              {showExecutionPath ? (
+                <MetricCard
+                  label="Execution Path"
+                  value={taskTracePath ? `${taskTracePath.nodes.length} steps` : taskTracePathError ? "Unavailable" : "Loading"}
+                />
+              ) : (
+                <MetricCard label="Graph" value={graph ? `${graph.nodes.length} nodes` : "Unavailable"} />
+              )}
             </div>
 
             <div className={graph ? "studio-content-split studio-content-split--graph" : "studio-stack-lg"}>
@@ -1051,16 +1109,18 @@ export function TaskDetailPage() {
                       <p style={mutedTextStyle}>Open the graph when topology evidence is needed.</p>
                     )}
                   </SectionCard>
-                ) : (
+                ) : !usesSpooltailHistory ? (
                   <NoticeBanner tone="error">Studio loaded task detail, but the federated execution-graph read returned no graph for this task.</NoticeBanner>
-                )}
+                ) : null}
+
+                {showExecutionPath ? traceCard : null}
 
                 <SectionCard
                   title="Task Timeline"
                   action={
                     <button
                       type="button"
-                      onClick={() => void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id)}
+                      onClick={() => void (usesSpooltailHistory ? loadTaskDetail() : loadTaskTimeline(taskDetail.service_id, taskDetail.task_id))}
                       style={secondaryButtonStyle}
                     >
                       <StudioIcon name="refresh" />
@@ -1068,62 +1128,105 @@ export function TaskDetailPage() {
                     </button>
                   }
                 >
-                  {taskTimelineLoading ? <p style={mutedTextStyle}>Loading task timeline...</p> : null}
-                  {taskTimelineError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTimelineError}</p> : null}
-                  {!taskTimelineLoading && !taskTimelineItems.length ? (
-                    <p style={mutedTextStyle}>No Studio-ingested task events yet.</p>
-                  ) : null}
-                  {taskTimelineItems.length ? (
-                    <div className="studio-stack-sm studio-surface-scroll">
-                      {taskTimelineItems.map((item) => (
-                        <article
-                          key={item.dedupe_key}
-                          className="studio-subcard"
-                          style={{ borderRadius: 14, padding: 12 }}
-                        >
+                  {usesSpooltailHistory ? (
+                    brokerEvents.length ? (
+                      <div className="studio-stack-sm studio-surface-scroll">
+                        {brokerEvents.map((event, index) => (
+                          <article key={String(event.event_id || index)} className="studio-subcard" style={{ borderRadius: 14, padding: 12 }}>
+                            <div className="studio-list-card__top">
+                              <strong style={{ fontSize: 13 }}>{String(event.status || "unknown")}</strong>
+                              <span className="studio-inline-meta">{formatTimestamp(extractRecordTimestamp(event))}</span>
+                            </div>
+                            {typeof event.attempt_id === "string" ? <p style={mutedTextStyle}>Attempt {event.attempt_id}</p> : null}
+                          </article>
+                        ))}
+                      </div>
+                    ) : brokerHistoryGap ? (
+                      <NoticeBanner tone="error">Broker history changed during replay. Reload Timeline to try again.</NoticeBanner>
+                    ) : <p style={mutedTextStyle}>No retained broker status events yet.</p>
+                  ) : (
+                    <>
+                      {taskTimelineLoading ? <p style={mutedTextStyle}>Loading task timeline...</p> : null}
+                      {taskTimelineError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTimelineError}</p> : null}
+                      {!taskTimelineLoading && !taskTimelineItems.length ? (
+                        <p style={mutedTextStyle}>No Studio-ingested task events yet.</p>
+                      ) : null}
+                      {taskTimelineItems.length ? (
+                        <div className="studio-stack-sm studio-surface-scroll">
+                          {taskTimelineItems.map((item) => (
+                            <article
+                              key={item.dedupe_key}
+                              className="studio-subcard"
+                              style={{ borderRadius: 14, padding: 12 }}
+                            >
+                              <div className="studio-list-card__top">
+                                <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
+                                <span className="studio-inline-meta">{formatTimestamp(item.timestamp || item.ingested_at)}</span>
+                              </div>
+                              <p style={{ ...mutedTextStyle, marginTop: 8 }}>
+                                {item.source_kind} · {item.event_type} · {item.component || "unknown"}
+                                {item.out_of_order ? " · out-of-order" : ""}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                  {componentEvents.length ? (
+                    <div className="studio-stack-sm">
+                      <h3>Gateway and Cell activity</h3>
+                      {componentEvents.map((item) => (
+                        <article key={item.dedupe_key} className="studio-subcard" style={{ padding: 12 }}>
                           <div className="studio-list-card__top">
-                            <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
+                            <strong>{item.event_type}</strong>
                             <span className="studio-inline-meta">{formatTimestamp(item.timestamp || item.ingested_at)}</span>
                           </div>
-                          <p style={{ ...mutedTextStyle, marginTop: 8 }}>
-                            {item.source_kind} · {item.event_type} · {item.component || "unknown"}
-                            {item.out_of_order ? " · out-of-order" : ""}
-                          </p>
+                          {typeof item.payload.attempt_id === "string" ? <p style={mutedTextStyle}>Attempt {item.payload.attempt_id}</p> : null}
+                          {typeof item.payload.cell_id === "string" ? <p style={mutedTextStyle}>Cell {item.payload.cell_id}</p> : null}
+                          {item.payload.inference_truncated === true ? <p style={mutedTextStyle}>Additional inference events are retained in Cell.</p> : null}
                         </article>
                       ))}
                     </div>
                   ) : null}
                 </SectionCard>
+                {brokerStats ? (
+                  <SectionCard title="Broker counters" subtitle="Process-local counters across tasks">
+                    <dl>
+                      <MetadataRow label="Broker" value={[brokerStats.broker, brokerStats.version].filter(Boolean).join(" ")} />
+                      <MetadataRow label="Payload reads" value={String(brokerStats.payload_reads)} />
+                      <MetadataRow label="Recovered frames" value={String(brokerStats.recovered_frames)} />
+                    </dl>
+                  </SectionCard>
+                ) : null}
+                {gatewayUsage ? (
+                  <SectionCard title="Observed Gateway usage" subtitle="Based on retained request observations for this task">
+                    {!gatewayUsage.source_available ? <NoticeBanner>Gateway export is unavailable. Showing retained observations.</NoticeBanner> : null}
+                    <dl>
+                      <MetadataRow label="Requests" value={String(gatewayUsage.observations)} />
+                      <MetadataRow label="Input tokens" value={String(gatewayUsage.input_tokens)} />
+                      <MetadataRow label="Output tokens" value={String(gatewayUsage.output_tokens)} />
+                      <MetadataRow label="Total tokens" value={String(gatewayUsage.total_tokens)} />
+                      <MetadataRow label="Estimated cost" value={gatewayUsage.estimated_cost_usd == null ? "Unavailable" : `$${gatewayUsage.estimated_cost_usd.toFixed(6)}`} />
+                    </dl>
+                  </SectionCard>
+                ) : null}
+                {usesSpooltailHistory && statusEvent.result != null ? (
+                  <SectionCard title="Task Result">
+                    <InlineCodeBox label="Task result JSON" value={JSON.stringify(statusEvent.result, null, 2)} />
+                  </SectionCard>
+                ) : null}
 
-                <details onToggle={(event) => { if (event.currentTarget.open && !taskTracePath) void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id); }}><summary>Trace path</summary><SectionCard
-                  title="Task Trace"
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id)}
-                      style={secondaryButtonStyle}
-                    >
-                      <StudioIcon name="refresh" />
-                      Reload Trace
-                    </button>
-                  }
-                >
-                  {taskTracePathLoading ? <p style={mutedTextStyle}>Loading task trace...</p> : null}
-                  {taskTracePathError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTracePathError}</p> : null}
-                  {taskTracePath?.warnings.length ? <p style={mutedTextStyle}>{taskTracePath.warnings.join(" ")}</p> : null}
-                  {!taskTracePathLoading && !taskTracePathError && taskTracePath && !taskTracePath.nodes.length ? (
-                    <p style={mutedTextStyle}>No task trace path evidence was found for this task.</p>
-                  ) : null}
-                  {taskTracePath?.nodes.length ? (
-                    <TracePathExplorer
-                      tracePath={taskTracePath}
-                      selectedNode={selectedTracePathNode}
-                      onSelectNode={(node) => setSelectedTracePathNodeId(node.id)}
-                      onSelectSpan={setSelectedTraceSpan}
-                      onFilterLogs={applyTraceLogFilter}
-                    />
-                  ) : null}
-                </SectionCard></details>
+                {!showExecutionPath ? (
+                  <details
+                    onToggle={(event) => {
+                      if (event.currentTarget.open && !taskTracePath) void loadTaskTracePath(serviceId, taskId);
+                    }}
+                  >
+                    <summary>Trace path</summary>
+                    {traceCard}
+                  </details>
+                ) : null}
               </div>
 
               <aside className="studio-stack-md">

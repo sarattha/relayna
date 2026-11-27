@@ -65,6 +65,11 @@ typecheck: ## Static type analysis for the SDK package
 test: ## Run the SDK test suite
 	$(PYTEST) tests
 
+.PHONY: test-spooltail
+test-spooltail: ## Test using the GitHub-hosted SDK and SPOOLTAIL_TEST_TARGET
+	@: "$${SPOOLTAIL_TEST_TARGET:?Set SPOOLTAIL_TEST_TARGET to the local Spooltail gRPC address}"
+	$(UV) --isolated --locked --extra dev sh -ec 'relayna-install-spooltail; python -m pytest tests/test_spooltail.py tests/test_spooltail_profiles.py'
+
 .PHONY: coverage
 coverage: clean ## Run SDK tests with coverage (fail if <98 %)
 	$(COVERAGE) run -m pytest tests

@@ -7,7 +7,7 @@
 - Releases page: [github.com/sarattha/relayna/releases](https://github.com/sarattha/relayna/releases)
 - Source repository: [github.com/sarattha/relayna](https://github.com/sarattha/relayna)
 
-Each release publishes:
+SDK releases publish:
 
 - a wheel for direct installation
 - a source distribution for source-based installs
@@ -37,10 +37,37 @@ Expected artifacts:
 
 ## Versioning policy
 
-The SDK, Studio backend, and Studio frontend share one stable SemVer release
-line. The documented SDK API, documented Studio backend API, and
-frontend/backend Studio contract follow semantic versioning. Undocumented
-internals may change outside of SemVer guarantees.
+The SDK and Studio can release independently with stable SemVer tags. The
+Studio backend and frontend stay on the same version line. The documented SDK
+and Studio APIs and the Studio backend/frontend contract follow semantic
+versioning. Undocumented internals can change outside of SemVer guarantees.
+
+| Git tag | Published assets | Changelog heading |
+| --- | --- | --- |
+| `sdk-vX.Y.Z` | SDK wheel, source distribution, and SBOM | `## SDK X.Y.Z - YYYY-MM-DD` |
+| `studio-vX.Y.Z` | Studio backend wheel, backend and frontend images, and image SBOMs | `## Studio X.Y.Z - YYYY-MM-DD` |
+| `vX.Y.Z` | Existing combined SDK distributions and Studio images with their SBOMs | `## X.Y.Z - YYYY-MM-DD` |
+
+The component's package versions must match its tag. A combined tag also
+requires all three versions to match. Studio's explicit SDK compatibility floor
+is its `relayna>=X.Y.Z` dependency in `studio/backend/pyproject.toml`. Set it to
+the oldest SDK the Studio version supports and update Studio's lockfile when
+that floor changes. Studio images bundle the SDK built from the same checkout.
+To install the standalone Studio wheel, install a compatible SDK wheel from its
+tagged GitHub release alongside it.
+
+Before tagging, verify the component metadata and release notes locally.
+
+```bash
+python3 scripts/validate-release-metadata.py --component sdk
+python3 scripts/validate-release-metadata.py --component studio
+python3 scripts/validate-release-metadata.py <release-tag> --notes-out /tmp/relayna-release-notes.md
+```
+
+Component tags preserve the combined GitHub release as the default latest
+release. Open the tagged release directly for a component download. Studio
+container tags use the plain Studio version for both standalone and combined
+releases.
 
 ### Upgrading to 1.14.0
 

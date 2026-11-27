@@ -17,7 +17,13 @@ from relayna_studio import (
     create_studio_app,
     get_studio_runtime,
 )
-from relayna_studio.traces import StudioTraceResponse, StudioTraceSpan, _build_trace_path_response, _collect_trace_ids
+from relayna_studio.traces import (
+    StudioTraceResponse,
+    StudioTraceSpan,
+    _build_trace_path_response,
+    _collect_detail_trace_ids,
+    _collect_trace_ids,
+)
 from test_studio_logs import FakeRedis, TrackingAsyncClient
 
 
@@ -751,3 +757,57 @@ def test_task_trace_path_route_merges_graph_spans_logs_and_dlq_evidence(monkeypa
     assert any(item["source"] == "span" for item in attempt_node["evidence"])
     dlq_node = next(item for item in payload["nodes"] if item["id"] == "dlq:task-123:1")
     assert any(item["source"] == "dlq" and item["source_id"] == "dlq-1" for item in dlq_node["evidence"])
+
+
+def test_spooltail_path_uses_scoped_gateway_trace_ids_and_links_attempt_evidence() -> None:
+    trace_id = "1" * 32
+    detail = {
+        "task_id": "task-123",
+        "history": {
+            "events": [{"status": "completed", "attempt_id": "attempt-one", "result": {"trace_id": "2" * 32}}],
+            "component_events": [
+                {
+                    "component": "gateway",
+                    "task_id": "task-123",
+                    "event_id": "gateway-1",
+                    "event_type": "gateway.usage",
+                    "payload": {"trace_id": trace_id, "attempt_id": "attempt-one"},
+                },
+                {
+                    "component": "cell",
+                    "task_id": "task-123",
+                    "event_id": "cell-1",
+                    "event_type": "cell.launcher_report",
+                    "payload": {"attempt_id": "attempt-one"},
+                },
+                {
+                    "component": "gateway",
+                    "task_id": "other-task",
+                    "event_type": "gateway.usage",
+                    "payload": {"trace_id": "3" * 32},
+                },
+            ],
+        },
+    }
+    trace_ids: set[str] = set()
+    _collect_detail_trace_ids(detail, trace_ids)
+    assert trace_ids == {trace_id}
+    result = _build_trace_path_response(
+        service=make_record(trace_config=None),
+        task_id="task-123",
+        detail_payload=detail,
+        trace_response=StudioTraceResponse(
+            service_id="payments-api",
+            task_id="task-123",
+            trace_ids=[trace_id],
+            spans=[StudioTraceSpan(trace_id=trace_id, span_id="a" * 16, name="Gateway request")],
+        ),
+        event_items=[],
+        warnings=[],
+    )
+    assert {edge.target for edge in result.edges if edge.source == "status:task-123:1"} == {
+        "observation:gateway-1",
+        "observation:cell-1",
+    }
+    assert next(node for node in result.nodes if node.id == "observation:gateway-1").trace_id == trace_id
+    assert any(edge.source == "observation:gateway-1" and edge.kind == "observed_trace" for edge in result.edges)
