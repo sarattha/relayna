@@ -23,6 +23,7 @@ A Relayna service can submit tasks, run workers, and retrieve status and results
 - [x] (2026-11-27) Added the opt-in durable cancellation path and reusable local and Cell profiles.
 - [x] (2026-11-27) Projected broker history through Studio’s existing event store and displayed correlated component evidence and usage.
 - [x] (2026-11-27) Documented the SDK and Studio environment contract and verified the basic Protocol Compose and Helm configurations.
+- [x] (2026-11-27) Added separate SDK and Studio tag validation and release workflows alongside the existing combined tag.
 
 ## Surprises & Discoveries
 
@@ -61,6 +62,8 @@ Phase 6 is excluded. Applications opt in to a separate cancellation topic only w
 Reuse Studio’s existing event ingest and Postgres store for durable task evidence. Keep broker status ordered by the broker cursor. Associate Gateway and Cell observations by the registered service, task ID, and available attempt and cell IDs. Keep any additional read endpoints scoped to the existing Studio outbound and operator policies. Package SDK and Studio entry points for trusted local integration and simple Helm installs using deployment-supplied images and infrastructure.
 
 The released Spooltail Python wheel works with both broker versions. The older broker passed the single-task contract with cancellation disabled. The upgraded broker passed queued and active cancellation, cleanup, status, history, and SSE. The ecosystem coordinator exercised scoped inference through a real Cell/gVisor runtime and Gateway with a synthetic upstream. The broker stored Cell audit events, and Gateway attributed the synthetic tokens to the same task attempt. Studio applies the 64-event Cell audit bound and reads Gateway usage only for explicitly mapped services through the operator export. The production freeze authorization covers these additive profiles and features. Existing RabbitMQ and Redis callers and freeze manifests remain compatible.
+
+The release entry point selects SDK artifacts for `sdk-vX.Y.Z`, Studio artifacts for `studio-vX.Y.Z`, or both for the existing `vX.Y.Z` tag. Studio shares one backend/frontend version and validates its explicit minimum SDK against the SDK bundled in its container. Package versions and combined assets stay at their existing values. Local release fixtures exercise version divergence, changelog selection and asset selection without creating Git tags or publishing.
 
 ## Plan of Work
 

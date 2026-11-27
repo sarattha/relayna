@@ -636,18 +636,22 @@ async def test_search_health_members_settings_notifications_and_coordination(
 
     coordinator = PostgresAdvisoryCoordinator(database)
     entered = asyncio.Event()
+    checked = asyncio.Event()
 
     async def first() -> bool:
         async with coordinator.try_lock("same-job") as acquired:
             assert acquired
             entered.set()
-            await asyncio.sleep(0.1)
+            await checked.wait()
             return acquired
 
     async def second() -> bool:
         await entered.wait()
-        async with coordinator.try_lock("same-job") as acquired:
-            return acquired
+        try:
+            async with coordinator.try_lock("same-job") as acquired:
+                return acquired
+        finally:
+            checked.set()
 
     assert await asyncio.gather(first(), second()) == [True, False]
 

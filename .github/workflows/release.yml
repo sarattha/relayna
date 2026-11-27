@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*"
+      - "sdk-v*"
+      - "studio-v*"
 
 permissions:
   contents: write
@@ -13,6 +15,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  RELEASE_TAG: ${{ github.ref_name }}
 
 jobs:
   release:
@@ -26,43 +29,67 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Validate release metadata
-        run: python3 scripts/validate-release-metadata.py "${{ github.ref_name }}"
+      - name: Validate release metadata and notes
+        id: release
+        run: |
+          python3 scripts/validate-release-metadata.py "$RELEASE_TAG" \
+            --notes-out release-notes.md --github-output "$GITHUB_OUTPUT"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
       - name: Sync dependencies
+        if: steps.release.outputs.sdk == 'true'
         run: uv sync --extra dev
 
       - name: Run SDK tests
+        if: steps.release.outputs.sdk == 'true'
         run: uv run pytest tests -q
 
       - name: Sync Studio backend dependencies
+        if: steps.release.outputs.studio == 'true'
         run: make -C studio/backend sync
 
       - name: Run Studio backend tests
+        if: steps.release.outputs.studio == 'true'
         run: make -C studio/backend test
 
       - name: Build artifacts
+        if: steps.release.outputs.sdk == 'true'
         run: uv build
 
       - name: Validate built distributions
+        if: steps.release.outputs.sdk == 'true'
         run: uv run twine check dist/*
+
+      - name: Build and validate the standalone Studio backend wheel
+        if: steps.release.outputs.sdk == 'false'
+        run: |
+          uv build --wheel --out-dir studio-dist studio/backend
+          uvx twine@6.2.0 check studio-dist/*
+
+      - name: Attest Studio backend wheel provenance
+        if: steps.release.outputs.sdk == 'false'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: studio-dist/*.whl
 
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@v0
 
       - name: Generate SDK SBOM
+        if: steps.release.outputs.sdk == 'true'
         run: |
-          syft dist --output spdx-json=relayna-sdk-${{ github.ref_name }}.spdx.json
+          syft dist --output "spdx-json=relayna-sdk-$RELEASE_TAG.spdx.json"
 
       - name: Attest SDK provenance
+        if: steps.release.outputs.sdk == 'true'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/*
 
       - name: Log in to GitHub Container Registry
+        if: steps.release.outputs.studio == 'true'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -70,22 +97,26 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
+        if: steps.release.outputs.studio == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Set up Cosign
+        if: steps.release.outputs.studio == 'true'
         uses: sigstore/cosign-installer@v3
 
       - name: Extract Studio backend Docker metadata
+        if: steps.release.outputs.studio == 'true'
         id: studio-backend-meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.version }}
             type=raw,value=latest
 
       - name: Build and push Studio backend Docker image
+        if: steps.release.outputs.studio == 'true'
         id: studio-backend-build
         uses: docker/build-push-action@v6
         with:
@@ -98,11 +129,13 @@ jobs:
           sbom: false
 
       - name: Generate Studio backend image SBOM
+        if: steps.release.outputs.studio == 'true'
         run: |
           syft "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}" \
-            --output spdx-json=relayna-studio-backend-${{ github.ref_name }}.spdx.json
+            --output "spdx-json=relayna-studio-backend-$RELEASE_TAG.spdx.json"
 
       - name: Scan Studio backend image with Trivy
+        if: steps.release.outputs.studio == 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}
@@ -111,11 +144,13 @@ jobs:
           ignore-unfixed: true
 
       - name: Sign Studio backend image
+        if: steps.release.outputs.studio == 'true'
         env:
           COSIGN_YES: "true"
         run: cosign sign "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend@${{ steps.studio-backend-build.outputs.digest }}"
 
       - name: Attest Studio backend image provenance
+        if: steps.release.outputs.studio == 'true'
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-backend
@@ -123,16 +158,18 @@ jobs:
           push-to-registry: true
 
       - name: Extract Studio frontend Docker metadata
+        if: steps.release.outputs.studio == 'true'
         id: studio-frontend-meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.version }}
             type=raw,value=latest
 
       - name: Build and push Studio frontend Docker image
+        if: steps.release.outputs.studio == 'true'
         id: studio-frontend-build
         uses: docker/build-push-action@v6
         with:
@@ -145,11 +182,13 @@ jobs:
           sbom: false
 
       - name: Generate Studio frontend image SBOM
+        if: steps.release.outputs.studio == 'true'
         run: |
           syft "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}" \
-            --output spdx-json=relayna-studio-frontend-${{ github.ref_name }}.spdx.json
+            --output "spdx-json=relayna-studio-frontend-$RELEASE_TAG.spdx.json"
 
       - name: Scan Studio frontend image with Trivy
+        if: steps.release.outputs.studio == 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}
@@ -158,53 +197,42 @@ jobs:
           ignore-unfixed: true
 
       - name: Sign Studio frontend image
+        if: steps.release.outputs.studio == 'true'
         env:
           COSIGN_YES: "true"
         run: cosign sign "${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend@${{ steps.studio-frontend-build.outputs.digest }}"
 
       - name: Attest Studio frontend image provenance
+        if: steps.release.outputs.studio == 'true'
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/relayna-studio-frontend
           subject-digest: ${{ steps.studio-frontend-build.outputs.digest }}
           push-to-registry: true
 
-      - name: Extract release notes from changelog
+      - name: Select release assets
+        id: assets
         env:
-          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_SDK: ${{ steps.release.outputs.sdk }}
+          RELEASE_STUDIO: ${{ steps.release.outputs.studio }}
         run: |
-          python - <<'PY'
-          import os
-          import pathlib
-
-          version = os.environ["RELEASE_VERSION"].lstrip("v")
-          changelog = pathlib.Path("CHANGELOG.md").read_text().splitlines()
-          target = f"## {version} -"
-          capture = False
-          lines = []
-
-          for line in changelog:
-              if line.startswith("## "):
-                  if capture:
-                      break
-                  capture = line.startswith(target)
-                  continue
-              if capture:
-                  lines.append(line)
-
-          text = "\n".join(lines).strip()
-          if not text:
-              raise SystemExit(f"Unable to find CHANGELOG section for {version}")
-          pathlib.Path("release-notes.md").write_text(text + "\n")
-          PY
+          {
+            echo 'paths<<EOF'
+            if [ "$RELEASE_SDK" = true ]; then
+              printf '%s\n' 'dist/*.tar.gz' 'dist/*.whl' "relayna-sdk-$RELEASE_TAG.spdx.json"
+            else
+              echo 'studio-dist/*.whl'
+            fi
+            if [ "$RELEASE_STUDIO" = true ]; then
+              printf '%s\n' "relayna-studio-backend-$RELEASE_TAG.spdx.json" "relayna-studio-frontend-$RELEASE_TAG.spdx.json"
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: release-notes.md
-          files: |
-            dist/*.tar.gz
-            dist/*.whl
-            relayna-sdk-${{ github.ref_name }}.spdx.json
-            relayna-studio-backend-${{ github.ref_name }}.spdx.json
-            relayna-studio-frontend-${{ github.ref_name }}.spdx.json
+          files: ${{ steps.assets.outputs.paths }}
+          fail_on_unmatched_files: true
+          make_latest: ${{ steps.release.outputs.sdk == 'true' && steps.release.outputs.studio == 'true' && 'true' || 'false' }}
