@@ -1759,7 +1759,7 @@ async def test_contention_retention_batches_preserve_live_and_non_expiring_tasks
     monkeypatch.setattr("relayna_studio.database._utcnow", lambda: cutoff)
     with _contention_queries(database) as queries:
         assert await search.prune_expired_task_documents() == 7
-    deletes = [count for sql, count in queries if sql.startswith("DELETE FROM studio_task_search_projections")]
+    deletes = [count for sql, count in queries if "DELETE FROM studio_task_search_projections" in sql]
     assert sum(deletes) == 7 and max(deletes) <= 3
     assert len(deletes) == 3
     assert sum(sql == "COMMIT" for sql, _ in queries) == 3

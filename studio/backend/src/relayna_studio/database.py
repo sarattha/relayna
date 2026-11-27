@@ -1265,18 +1265,23 @@ class PostgresStudioSearchStore:
         while True:
             # Lock only a bounded set of expired rows. Concurrent ingestion or
             # metadata edits can finish; their locked rows are retried next pass.
+            # Materialize the candidates so DELETE uses one fixed batch.
             expired = (
                 select(task_projections.c.service_id, task_projections.c.task_id)
                 .where(task_projections.c.expires_at <= cutoff)
                 .order_by(task_projections.c.expires_at)
                 .limit(self._retention_batch_size)
                 .with_for_update(skip_locked=True)
+                .cte("expired_tasks")
+                .prefix_with("MATERIALIZED", dialect="postgresql")
             )
             async with self.database.transaction() as session:
                 result = await session.execute(
                     delete(task_projections).where(
                         task_projections.c.expires_at <= cutoff,
-                        tuple_(task_projections.c.service_id, task_projections.c.task_id).in_(expired),
+                        tuple_(task_projections.c.service_id, task_projections.c.task_id).in_(
+                            select(expired.c.service_id, expired.c.task_id)
+                        ),
                     )
                 )
                 deleted = int(getattr(result, "rowcount", 0) or 0)
