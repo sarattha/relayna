@@ -34,6 +34,10 @@ class _StaleLease(Exception):
     pass
 
 
+class _Conflict(Exception):
+    pass
+
+
 class _RpcError(Exception):
     def code(self) -> str:
         return self.args[0]
@@ -48,10 +52,11 @@ def mock_connection(monkeypatch: pytest.MonkeyPatch):
         CursorGapError=_CursorGap,
         SubscriptionError=_SubscriptionFailed,
         StaleLeaseError=_StaleLease,
+        ConflictError=_Conflict,
     )
     grpc = SimpleNamespace(
         aio=SimpleNamespace(AioRpcError=_RpcError),
-        StatusCode=SimpleNamespace(UNAVAILABLE="unavailable", DEADLINE_EXCEEDED="deadline"),
+        StatusCode=SimpleNamespace(UNAVAILABLE="unavailable", DEADLINE_EXCEEDED="deadline", INVALID_ARGUMENT="invalid"),
     )
     monkeypatch.setitem(sys.modules, "relayna_spooltail", sdk)
     monkeypatch.setitem(sys.modules, "grpc", grpc)
@@ -100,6 +105,87 @@ async def test_status_route_reads_from_the_caller_owned_client(mock_connection: 
     assert response.json() == {"task_id": "t", "event": status}
     assert mock_connection.latest.await_args.args == ("status-topic", "t")
     mock_connection.close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_spooltail_http_submit_compares_the_committed_work_event(mock_connection: AsyncMock) -> None:
+    app = FastAPI()
+    app.include_router(
+        create_spooltail_status_router(get_client=lambda: mock_connection, task_topic="work", service="reference")
+    )
+    task = {"task_id": "task-a", "payload": {"value": 1}, "created_at": "2026-11-27T07:00:00+07:00"}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        response = await http.post("/tasks", json=task)
+        assert response.status_code == 202 and response.json() == {"task_id": "task-a"}
+        topic, committed = mock_connection.publish.await_args.args
+        assert topic == "work"
+        assert committed["service"] == "reference"
+        assert committed["created_at"] == "2026-11-27T00:00:00Z"
+        assert committed["event_id"] == "task"
+        mock_connection.publish.side_effect = _Conflict()
+        mock_connection.latest.return_value = SimpleNamespace(event=committed)
+        assert (await http.post("/tasks", json=task | {"service": "reference"})).status_code == 202
+        without_timestamp = {key: value for key, value in task.items() if key != "created_at"}
+        assert (await http.post("/tasks", json=without_timestamp)).status_code == 202
+        assert (await http.post("/tasks", json=task | {"created_at": "2026-11-27T01:00:00Z"})).status_code == 409
+        response = await http.post("/tasks", json=without_timestamp | {"payload": {"value": True}})
+        assert response.status_code == 409 and response.json() == {
+            "detail": "Task ID already has a different submission"
+        }
+        mock_connection.latest.assert_awaited_with("work", "task-a")
+        mock_connection.latest.return_value = None
+        assert (await http.post("/tasks", json=without_timestamp)).status_code == 409
+
+
+def test_submission_requires_a_distinct_work_topic_and_service() -> None:
+    with pytest.raises(ValueError, match="configured service"):
+        create_spooltail_status_router(get_client=Mock(), task_topic="work")
+    with pytest.raises(ValueError, match="distinct task topic"):
+        create_spooltail_status_router(get_client=Mock(), task_topic="relayna.status", service="reference")
+
+
+@pytest.mark.asyncio
+async def test_spooltail_submit_validation_and_uncertain_broker_outcome(mock_connection: AsyncMock) -> None:
+    app = FastAPI()
+    app.include_router(
+        create_spooltail_status_router(get_client=lambda: mock_connection, task_topic="work", service="reference")
+    )
+    valid = {"task_id": "task-a", "payload": {}}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        for bad in (
+            {"payload": {}},
+            {"task_id": "task-a"},
+            valid | {"task_id": "path/segment"},
+            valid | {"event_id": "collision"},
+            valid | {"service": "different"},
+            valid | {"created_at": None},
+            valid | {"created_at": 1764192000},
+            valid | {"created_at": "2026-11-27T00:00:00"},
+            valid | {"spec_version": "2.0"},
+        ):
+            assert (await http.post("/tasks", json=bad)).status_code == 422
+        mock_connection.publish.assert_not_awaited()
+        for error, code in ((_RpcError("invalid"), 422), (_RpcError("deadline"), 503), (ValueError(), 422)):
+            mock_connection.publish.side_effect = error
+            assert (await http.post("/tasks", json=valid)).status_code == code
+
+
+@pytest.mark.asyncio
+async def test_spooltail_history_exposes_broker_cursor_and_capability(mock_connection: AsyncMock) -> None:
+    app = FastAPI()
+    app.include_router(create_spooltail_status_router(get_client=lambda: mock_connection))
+    event = {"task_id": "t", "event_id": "completed", "status": "completed"}
+    mock_connection.history.side_effect = [[SimpleNamespace(event=event)], [], _CursorGap()]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        assert (await http.get("/history/t")).json() == {"task_id": "t", "count": 1, "events": [event]}
+        assert (await http.get("/history/t?after=completed")).json() == {"task_id": "t", "count": 0, "events": []}
+        mock_connection.history.assert_awaited_with("relayna.status", "t", after="completed")
+        gap = await http.get("/history/t?after=pruned")
+        assert gap.status_code == 410 and gap.json() == {"detail": {"earliest_event_id": "earliest"}}
+        capabilities = (await http.get("/relayna/capabilities")).json()
+        assert capabilities["feature_flags"] == ["spooltail.task_history.v1"]
+        assert "status.history" in capabilities["supported_routes"]
+        assert (await http.post("/tasks", json={"task_id": "t", "payload": {}})).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -280,7 +366,12 @@ async def test_native_broker_task_retry_result_history_and_status_routes() -> No
 
     app = FastAPI(lifespan=lifespan)
     app.include_router(
-        create_spooltail_status_router(get_client=lambda: app.state.spooltail, status_topic=status_topic)
+        create_spooltail_status_router(
+            get_client=lambda: app.state.spooltail,
+            status_topic=status_topic,
+            task_topic=task_topic,
+            service="reference",
+        )
     )
     async with (
         asyncio.timeout(8),
@@ -295,11 +386,34 @@ async def test_native_broker_task_retry_result_history_and_status_routes() -> No
             status_topic=status_topic,
             retry_policy=RetryPolicy(max_retries=1, delay_ms=300),
         )
-        task = TaskEnvelope(task_id="task-1", correlation_id="request", payload={"number": 21})
-        assert await api_client.latest(status_topic, task.task_id) is None
-        event = spooltail_task_event(task)
-        offset = await api_client.publish(task_topic, event)
-        assert await api_client.publish(task_topic, event) == offset
+        task_id = "task-1"
+        request = {"task_id": task_id, "correlation_id": "request", "payload": {"number": 21}}
+        assert await api_client.latest(status_topic, task_id) is None
+        second_app = FastAPI()
+        second_app.include_router(
+            create_spooltail_status_router(
+                get_client=lambda: worker_client, status_topic=status_topic, task_topic=task_topic, service="reference"
+            )
+        )
+        async with (
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as first,
+            AsyncClient(transport=ASGITransport(app=second_app), base_url="http://test") as second,
+        ):
+            retries = await asyncio.gather(
+                *(http.post("/tasks", json=request) for http in (first, second, first, second))
+            )
+            assert all(item.status_code == 202 and item.json() == {"task_id": task_id} for item in retries)
+            changed = await second.post("/tasks", json=request | {"payload": {"number": 22}})
+            assert changed.status_code == 409
+            assert (await first.get(f"/history/{task_id}")).json()["events"] == []
+
+        work = await api_client.history(task_topic, task_id)
+        assert len(work) == 1 and work[0].event["service"] == "reference"
+        assert work[0].event["created_at"].endswith("Z")
+        abandoned = await api_client.claim(task_topic, "relayna.workers", lease_ms=150)
+        assert abandoned is not None and abandoned.record == work[0]
+        assert not await consumer.run_once()
+        await asyncio.sleep(0.2)
         assert await consumer.run_once()
         assert not await consumer.run_once()
         await asyncio.sleep(0.35)
@@ -307,23 +421,27 @@ async def test_native_broker_task_retry_result_history_and_status_routes() -> No
         assert not await consumer.run_once()
         assert attempts == [0, 1]
 
-        history = [record.event for record in await api_client.history(status_topic, task.task_id)]
+        history = [record.event for record in await api_client.history(status_topic, task_id)]
         assert [event["status"] for event in history] == ["processing", "processing", "completed"]
+        assert history[0]["attempt_id"] != history[1]["attempt_id"] == history[2]["attempt_id"]
         cursor = history[0]["event_id"]
-        assert [
-            record.event for record in await api_client.history(status_topic, task.task_id, after=cursor)
-        ] == history[1:]
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
-            response = await http.get(f"/status/{task.task_id}")
+            response = await http.get(f"/status/{task_id}")
             assert response.status_code == 200
-            assert response.json() == {"task_id": task.task_id, "event": history[-1]}
+            assert response.json() == {"task_id": task_id, "event": history[-1]}
             assert response.json()["event"]["result"] == {"answer": 42}
-            response = await http.get(f"/events/{task.task_id}", headers={"Last-Event-ID": cursor}, timeout=3)
+            replay = await http.get(f"/history/{task_id}", params={"after": cursor})
+            assert replay.json() == {"task_id": task_id, "count": 2, "events": history[1:]}
+            gap = await http.get(f"/history/{task_id}?after=absent")
+            assert gap.status_code == 410 and gap.json() == {"detail": {"earliest_event_id": cursor}}
+            assert (await http.post("/tasks", json=request)).status_code == 202
+            assert (await api_client.history(task_topic, task_id)) == work
+            response = await http.get(f"/events/{task_id}", headers={"Last-Event-ID": cursor}, timeout=3)
             assert response.text.count("event: status") == 2
             assert f"id: {cursor}" not in response.text
             assert f"id: {history[-1]['event_id']}" in response.text
-            response = await http.get(f"/events/{task.task_id}", headers={"Last-Event-ID": "absent"}, timeout=3)
+            response = await http.get(f"/events/{task_id}", headers={"Last-Event-ID": "absent"}, timeout=3)
             assert "event: gap" in response.text
             assert cursor in response.text
 

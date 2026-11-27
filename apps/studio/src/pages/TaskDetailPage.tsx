@@ -642,6 +642,8 @@ export function TaskDetailPage() {
   const [mermaidCopyState, setMermaidCopyState] = useState<"idle" | "copied" | "selected" | "failed">("idle");
   const [showGraph, setShowGraph] = useState(false);
   const [streamState, setStreamState] = useState("Connecting to live updates…");
+  const flags = taskDetail?.service.capabilities?.feature_flags;
+  const usesSpooltailHistory = Array.isArray(flags) && flags.includes("spooltail.task_history.v1");
   const requestVersions = useRef<Record<string, number>>({});
   useEffect(() => () => { for (const key of Object.keys(requestVersions.current)) requestVersions.current[key]++; }, [serviceId, taskId]);
 
@@ -674,8 +676,8 @@ export function TaskDetailPage() {
       return;
     }
     setTaskTimeline(null);
-    void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id);
-  }, [taskDetail]);
+    if (!usesSpooltailHistory) void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id);
+  }, [taskDetail, usesSpooltailHistory]);
 
   const derivedTaskLogWindow = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, taskLogAutoNow) : null;
   const quickTaskLogWindow = resolveQuickTaskLogWindow(taskLogWindowMode);
@@ -747,7 +749,7 @@ export function TaskDetailPage() {
   }
 
   useEffect(() => {
-    if (typeof EventSource === "undefined" || !serviceId || !taskId) {
+    if (typeof EventSource === "undefined" || !serviceId || !taskId || usesSpooltailHistory) {
       return;
     }
     setStreamState("Connecting to live updates…");
@@ -768,7 +770,7 @@ export function TaskDetailPage() {
       }
     });
     return () => source.close();
-  }, [serviceId, taskId]);
+  }, [serviceId, taskId, usesSpooltailHistory]);
 
   async function loadTaskDetail(includeJoins = false) {
     setLoading(true);
@@ -948,6 +950,8 @@ export function TaskDetailPage() {
   const historyCount = taskDetail?.history?.count ?? 0;
   const dlqCount = taskDetail?.dlq_messages?.items.length ?? 0;
   const taskTimelineItems = taskTimeline?.items || [];
+  const brokerEvents = usesSpooltailHistory ? taskDetail?.history?.events || [] : [];
+  const brokerHistoryGap = taskDetail?.errors.some((item) => item.code === "history_cursor_gap");
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
   const brokerDlqSupported = supportsCapability(taskDetail?.service.capabilities || null, "broker.dlq.messages");
   const resourceDelta = extractTaskResourceDelta(taskDetail);
@@ -963,6 +967,7 @@ export function TaskDetailPage() {
       statusEvent.error_message ||
       statusEvent.error ||
       statusEvent.detail ||
+      (usesSpooltailHistory ? statusEvent.message : undefined) ||
       "No failure reason was reported.",
   );
   const failedTask = TASK_FAILURE_STATUSES.has(latestStatusValue.toLowerCase()) || dlqCount > 0;
@@ -993,7 +998,7 @@ export function TaskDetailPage() {
           </div>
         }
       >
-        <p role="status" style={mutedTextStyle}>{streamState}</p>
+        <p role="status" style={mutedTextStyle}>{usesSpooltailHistory ? "Showing broker history. Reload to check for new events." : streamState}</p>
         <label className="studio-filter-field"><span>Shared telemetry window ({Intl.DateTimeFormat().resolvedOptions().timeZone})</span><select style={inputStyle} defaultValue="" onChange={(event) => {
           const mode = event.target.value as TaskLogWindowMode;
           if (!mode || !taskDetail) return;
@@ -1026,7 +1031,7 @@ export function TaskDetailPage() {
             <div className="studio-metrics-grid">
               <MetricCard label="Status" value={latestStatusValue} />
               <MetricCard label="History Events" value={String(historyCount)} />
-              <MetricCard label="Timeline Events" value={String(taskTimelineItems.length)} />
+              <MetricCard label="Timeline Events" value={String(usesSpooltailHistory ? brokerEvents.length : taskTimelineItems.length)} />
               <MetricCard label="DLQ Messages" value={String(dlqCount)} />
               <MetricCard label="Graph" value={graph ? `${graph.nodes.length} nodes` : "Unavailable"} />
             </div>
@@ -1051,16 +1056,16 @@ export function TaskDetailPage() {
                       <p style={mutedTextStyle}>Open the graph when topology evidence is needed.</p>
                     )}
                   </SectionCard>
-                ) : (
+                ) : !usesSpooltailHistory ? (
                   <NoticeBanner tone="error">Studio loaded task detail, but the federated execution-graph read returned no graph for this task.</NoticeBanner>
-                )}
+                ) : null}
 
                 <SectionCard
                   title="Task Timeline"
                   action={
                     <button
                       type="button"
-                      onClick={() => void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id)}
+                      onClick={() => void (usesSpooltailHistory ? loadTaskDetail() : loadTaskTimeline(taskDetail.service_id, taskDetail.task_id))}
                       style={secondaryButtonStyle}
                     >
                       <StudioIcon name="refresh" />
@@ -1068,32 +1073,57 @@ export function TaskDetailPage() {
                     </button>
                   }
                 >
-                  {taskTimelineLoading ? <p style={mutedTextStyle}>Loading task timeline...</p> : null}
-                  {taskTimelineError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTimelineError}</p> : null}
-                  {!taskTimelineLoading && !taskTimelineItems.length ? (
-                    <p style={mutedTextStyle}>No Studio-ingested task events yet.</p>
-                  ) : null}
-                  {taskTimelineItems.length ? (
-                    <div className="studio-stack-sm studio-surface-scroll">
-                      {taskTimelineItems.map((item) => (
-                        <article
-                          key={item.dedupe_key}
-                          className="studio-subcard"
-                          style={{ borderRadius: 14, padding: 12 }}
-                        >
-                          <div className="studio-list-card__top">
-                            <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
-                            <span className="studio-inline-meta">{formatTimestamp(item.timestamp || item.ingested_at)}</span>
-                          </div>
-                          <p style={{ ...mutedTextStyle, marginTop: 8 }}>
-                            {item.source_kind} · {item.event_type} · {item.component || "unknown"}
-                            {item.out_of_order ? " · out-of-order" : ""}
-                          </p>
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
+                  {usesSpooltailHistory ? (
+                    brokerEvents.length ? (
+                      <div className="studio-stack-sm studio-surface-scroll">
+                        {brokerEvents.map((event, index) => (
+                          <article key={String(event.event_id || index)} className="studio-subcard" style={{ borderRadius: 14, padding: 12 }}>
+                            <div className="studio-list-card__top">
+                              <strong style={{ fontSize: 13 }}>{String(event.status || "unknown")}</strong>
+                              <span className="studio-inline-meta">{formatTimestamp(extractRecordTimestamp(event))}</span>
+                            </div>
+                            {typeof event.attempt_id === "string" ? <p style={mutedTextStyle}>Attempt {event.attempt_id}</p> : null}
+                          </article>
+                        ))}
+                      </div>
+                    ) : brokerHistoryGap ? (
+                      <NoticeBanner tone="error">Broker history changed during replay. Reload Timeline to try again.</NoticeBanner>
+                    ) : <p style={mutedTextStyle}>No retained broker status events yet.</p>
+                  ) : (
+                    <>
+                      {taskTimelineLoading ? <p style={mutedTextStyle}>Loading task timeline...</p> : null}
+                      {taskTimelineError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTimelineError}</p> : null}
+                      {!taskTimelineLoading && !taskTimelineItems.length ? (
+                        <p style={mutedTextStyle}>No Studio-ingested task events yet.</p>
+                      ) : null}
+                      {taskTimelineItems.length ? (
+                        <div className="studio-stack-sm studio-surface-scroll">
+                          {taskTimelineItems.map((item) => (
+                            <article
+                              key={item.dedupe_key}
+                              className="studio-subcard"
+                              style={{ borderRadius: 14, padding: 12 }}
+                            >
+                              <div className="studio-list-card__top">
+                                <strong style={{ fontSize: 13 }}>{formatEventSummary(item)}</strong>
+                                <span className="studio-inline-meta">{formatTimestamp(item.timestamp || item.ingested_at)}</span>
+                              </div>
+                              <p style={{ ...mutedTextStyle, marginTop: 8 }}>
+                                {item.source_kind} · {item.event_type} · {item.component || "unknown"}
+                                {item.out_of_order ? " · out-of-order" : ""}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                 </SectionCard>
+                {usesSpooltailHistory && statusEvent.result != null ? (
+                  <SectionCard title="Task Result">
+                    <InlineCodeBox label="Task result JSON" value={JSON.stringify(statusEvent.result, null, 2)} />
+                  </SectionCard>
+                ) : null}
 
                 <details onToggle={(event) => { if (event.currentTarget.open && !taskTracePath) void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id); }}><summary>Trace path</summary><SectionCard
                   title="Task Trace"

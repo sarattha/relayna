@@ -53,6 +53,9 @@ from .registry import (
 
 SERVICE_STATUS_PATH = "/status/{task_id}"
 SERVICE_HISTORY_PATH = "/history"
+_SPOOLTAIL_HISTORY_FEATURE = "spooltail.task_history.v1"
+_TASK_HISTORY_PATH = "/history/{task_id}"
+_TASK_HISTORY_LIMIT = 200
 SERVICE_WORKFLOW_TOPOLOGY_PATH = "/workflow/topology"
 SERVICE_DLQ_MESSAGES_PATH = "/dlq/messages"
 SERVICE_FAILED_TASKS_PATH = "/failed-tasks"
@@ -621,7 +624,7 @@ class StudioFederationService:
         normalized_task_id = task_id.strip()
         latest_task = asyncio.create_task(self._capture(self._fetch_status(service, normalized_task_id)))
         history_task = asyncio.create_task(
-            self._capture(self._fetch_history(service, task_id=normalized_task_id, max_scan=200))
+            self._capture(self._fetch_history(service, task_id=normalized_task_id, max_scan=_TASK_HISTORY_LIMIT))
         )
         dlq_task = asyncio.create_task(
             self._capture(self._fetch_dlq_messages(service, task_id=normalized_task_id, limit=50))
@@ -658,8 +661,10 @@ class StudioFederationService:
         elif latest_error is not None:
             errors.append(latest_error.to_model())
 
-        for payload, error in ((history, history_error), (dlq_messages, dlq_error), (execution_graph, graph_error)):
-            if payload is None and error is not None:
+        if history_error is not None:
+            errors.append(history_error.to_model())
+        for error in (dlq_error, graph_error):
+            if error is not None and not (error.code == "unsupported_route" and self._has_spooltail_history(service)):
                 errors.append(error.to_model())
 
         task_ref = self._build_primary_task_ref(
@@ -853,6 +858,17 @@ class StudioFederationService:
         max_seconds: float | None = None,
         max_scan: int | None = None,
     ) -> dict[str, Any]:
+        if self._has_spooltail_history(service):
+            if not task_id or start_offset != "first":
+                raise StudioFederationError(
+                    status_code=422,
+                    detail="Spooltail history requires a task ID and starts at the first retained event.",
+                    code="invalid_history_query",
+                    service_id=service.service_id,
+                )
+            payload = await self._fetch_spooltail_history(service, task_id, max_scan=max_scan, max_seconds=max_seconds)
+            return self._normalize_history_payload(service, payload, requested_task_id=task_id)
+
         payload = await self._request_json(
             service,
             capability_id=STATUS_HISTORY_ROUTE_ID,
@@ -866,6 +882,49 @@ class StudioFederationService:
             missing_route_404=True,
         )
         return self._normalize_history_payload(service, payload, requested_task_id=task_id)
+
+    async def _fetch_spooltail_history(
+        self, service: ServiceRecord, task_id: str, *, max_scan: int | None, max_seconds: float | None
+    ) -> dict[str, Any]:
+        path = _TASK_HISTORY_PATH.format(task_id=_quote_path_segment(task_id))
+        limit = _TASK_HISTORY_LIMIT if max_scan is None else min(max_scan, _TASK_HISTORY_LIMIT)
+        events: list[dict[str, Any]] = []
+        after: str | None = None
+        try:
+            async with asyncio.timeout(max_seconds):
+                while len(events) < limit:
+                    page = await self._request_json(
+                        service, capability_id=STATUS_HISTORY_ROUTE_ID, path=path, params={"after": after}
+                    )
+                    items = page.get("events")
+                    if items == []:
+                        break
+                    if isinstance(items, list) and all(isinstance(item, dict) for item in items):
+                        events.extend(items[: limit - len(events)])
+                        cursor = items[-1].get("event_id")
+                        if isinstance(cursor, str) and cursor and cursor != after:
+                            after = cursor
+                            continue
+                    raise StudioFederationError(
+                        status_code=502,
+                        detail="Relayna service returned a history page without a usable event cursor.",
+                        code="invalid_response_shape",
+                        service_id=service.service_id,
+                    )
+        except TimeoutError:
+            pass
+        except StudioFederationError as exc:
+            if exc.upstream_status != 410:
+                raise
+            raise StudioFederationError(
+                status_code=502,
+                detail="The broker history changed during replay. Reload to read the retained timeline.",
+                code="history_cursor_gap",
+                service_id=service.service_id,
+                upstream_status=410,
+                retryable=True,
+            ) from exc
+        return {"task_id": task_id, "count": len(events), "events": events}
 
     async def _fetch_workflow_topology(self, service: ServiceRecord) -> dict[str, Any]:
         return await self._request_json(
@@ -1397,6 +1456,10 @@ class StudioFederationService:
         if capability_document.service_metadata.compatibility != "capabilities_v1":
             return None
         return capability_id in capability_document.supported_routes
+
+    def _has_spooltail_history(self, service: ServiceRecord) -> bool:
+        document = self._capability_document(service)
+        return document is not None and _SPOOLTAIL_HISTORY_FEATURE in document.feature_flags
 
     def _missing_route_404_enabled(self, service: ServiceRecord) -> bool:
         capability_document = self._capability_document(service)

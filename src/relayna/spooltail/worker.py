@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from ..consumer import RetryPolicy
 from ..contracts import StatusEventEnvelope, TaskEnvelope
@@ -12,6 +13,10 @@ if TYPE_CHECKING:
     from relayna_spooltail import Lease, SpooltailClient  # ty: ignore[unresolved-import]
 
 logger = logging.getLogger(__name__)
+
+
+class _SpooltailStatusEvent(StatusEventEnvelope):
+    attempt_id: str
 
 
 class SpooltailTaskContext:
@@ -25,6 +30,7 @@ class SpooltailTaskContext:
         self._task_id = task.task_id
         self._service = task.service
         self._terminal: StatusEventEnvelope | None = None
+        self.attempt_id = uuid4().hex
         self.correlation_id = task.correlation_id or task.task_id
         self.redelivered = generation > 1
         # Explicit retries advance the generation twice, while lease expiry advances it once.
@@ -46,7 +52,7 @@ class SpooltailTaskContext:
             raise ValueError("Pass either a StatusEventEnvelope or status keyword fields")
         if event is None:
             assert status is not None
-            event = StatusEventEnvelope(
+            event = _SpooltailStatusEvent(
                 task_id=self._task_id,
                 status=status,
                 message=message,
@@ -55,10 +61,15 @@ class SpooltailTaskContext:
                 event_id=event_id,
                 service=service if service is not None else self._service,
                 correlation_id=self.correlation_id,
+                attempt_id=self.attempt_id,
             )
         else:
             event = event.model_copy(
-                update={"task_id": self._task_id, "correlation_id": event.correlation_id or self.correlation_id}
+                update={
+                    "task_id": self._task_id,
+                    "correlation_id": event.correlation_id or self.correlation_id,
+                    "attempt_id": self.attempt_id,
+                }
             )
         if self._terminal is not None:
             raise ValueError("The Spooltail task already has a pending terminal status")
@@ -68,12 +79,13 @@ class SpooltailTaskContext:
             await self._client.publish(self._status_topic, event.as_transport_dict())
 
     def _default_status(self, status: str, message: str | None = None) -> StatusEventEnvelope:
-        return StatusEventEnvelope(
+        return _SpooltailStatusEvent(
             task_id=self._task_id,
             status=status,
             correlation_id=self.correlation_id,
             service=self._service,
             message=message,
+            attempt_id=self.attempt_id,
         )
 
 

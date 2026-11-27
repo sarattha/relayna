@@ -926,6 +926,68 @@ def test_task_detail_tolerates_partial_failures_and_derives_latest_from_history(
         ]
 
 
+def test_spooltail_task_detail_reads_registered_service_history_pages(monkeypatch) -> None:
+    monkeypatch.setattr(studio_app, "Redis", FakeRedis)
+    running = {"task_id": "task-123", "event_id": "first", "status": "processing", "attempt_id": "attempt-a"}
+    terminal = running | {"event_id": "second", "status": "completed", "result": {"echo": {"x": 1}}}
+    cursors: list[str | None] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/status/task-123":
+            return httpx.Response(200, json={"task_id": "task-123", "event": terminal})
+        if request.url.path == "/history/task-123":
+            after = request.url.params.get("after")
+            cursors.append(after)
+            events = {None: [running], "first": [terminal], "second": []}[after]
+            return httpx.Response(200, json={"task_id": "task-123", "count": len(events), "events": events})
+        if request.url.path == "/history/invalid":
+            return httpx.Response(200, json={"events": [{"status": "processing"}]})
+        if request.url.path == "/history/gap":
+            if request.url.params.get("after") == "first":
+                return httpx.Response(410, json={"detail": {"earliest_event_id": "second"}})
+            return httpx.Response(200, json={"events": [running | {"task_id": "gap"}]})
+        if request.url.path == "/history/slow":
+            await asyncio.sleep(1)
+            return httpx.Response(200, json={"events": []})
+        raise AssertionError(f"Unhandled upstream request {request.method} {request.url}")
+
+    app = create_studio_app(
+        redis_url="redis://studio-test/0",
+        federation_client_factory=lambda timeout: TrackingAsyncClient(
+            transport=httpx.MockTransport(handler), timeout=timeout
+        ),
+    )
+    with TestClient(app) as client:
+        install_service(
+            app,
+            make_record(
+                service_id="reference",
+                base_url="https://reference.example.test",
+                capabilities=make_capability_document(
+                    supported_routes=["status.latest", "status.history", "status.events"]
+                )
+                | {"feature_flags": ["spooltail.task_history.v1"]},
+            ),
+        )
+        response = client.get("/studio/tasks/reference/task-123")
+        assert response.status_code == 200
+        detail = response.json()
+        assert detail["latest_status"]["event"]["result"] == terminal["result"]
+        assert [event["event_id"] for event in detail["history"]["events"]] == ["first", "second"]
+        assert detail["history"]["events"][0]["attempt_id"] == "attempt-a"
+        assert detail["history"]["count"] == 2 and detail["errors"] == []
+        assert cursors == [None, "first", "second"]
+
+        history = "/studio/services/reference/history"
+        assert client.get(history, params={"max_scan": 1}).status_code == 422
+        assert client.get(history, params={"task_id": "task-123", "start_offset": "last"}).status_code == 422
+        assert client.get(history, params={"task_id": "task-123", "max_scan": 1}).json()["count"] == 1
+        assert client.get(history, params={"task_id": "invalid"}).json()["code"] == "invalid_response_shape"
+        gap = client.get(history, params={"task_id": "gap"}).json()
+        assert gap["code"] == "history_cursor_gap" and gap["retryable"] is True
+        assert client.get(history, params={"task_id": "slow", "max_seconds": 0.01}).json()["events"] == []
+
+
 def test_task_detail_join_all_adds_cross_service_identity_refs(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
 

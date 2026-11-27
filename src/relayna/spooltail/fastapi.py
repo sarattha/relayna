@@ -1,26 +1,132 @@
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
-from typing import TYPE_CHECKING, Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
+from ..api.capabilities_routes import STATUS_CAPABILITY_ROUTE_IDS, relayna_version
+from ..api.schemas import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
 from ..api.status_routes import _create_status_router
 from ..status.stream import _sse_event
+from .contracts import spooltail_task_event
 
 if TYPE_CHECKING:
     from relayna_spooltail import SpooltailClient  # ty: ignore[unresolved-import]
+
+_CAPABILITY_PATH = "/relayna/capabilities"
+_HISTORY_FEATURE = "spooltail.task_history.v1"
+_RFC3339 = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})"
+)
+
+
+class _TaskSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$")
+    payload: dict[str, Any]
+    created_at: AwareDatetime = Field(default_factory=lambda: datetime.now(UTC))
+    service: str | None = None
+    task_type: str | None = None
+    correlation_id: str | None = None
+    spec_version: Literal["1.0"] = "1.0"
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def parse_created_at(cls, value: Any) -> datetime:
+        if not isinstance(value, str) or _RFC3339.fullmatch(value) is None:
+            raise ValueError("created_at must be an RFC 3339 timestamp with a timezone")
+        return datetime.fromisoformat(value.upper())
 
 
 def create_spooltail_status_router(
     *,
     get_client: Callable[[], SpooltailClient],
     status_topic: str = "relayna.status",
+    task_topic: str | None = None,
+    service: str | None = None,
 ) -> APIRouter:
-    """Serve Relayna's latest-status and SSE routes with an application-owned native client."""
+    """Serve broker-backed status and optionally accept tasks for a configured service."""
     source = _SpooltailStatusSource(get_client, status_topic)
-    return _create_status_router(sse_stream=source, latest_status_store=source)
+    router = _create_status_router(sse_stream=source, latest_status_store=source)
+
+    @router.get("/history/{task_id}")
+    async def task_history(task_id: str, after: str | None = None) -> dict[str, Any]:
+        from relayna_spooltail import CursorGapError  # ty: ignore[unresolved-import]
+
+        try:
+            records = await get_client().history(status_topic, task_id, after=after)
+        except CursorGapError as exc:
+            raise HTTPException(status_code=410, detail={"earliest_event_id": exc.earliest_event_id}) from exc
+        return {"task_id": task_id, "count": len(records), "events": [record.event for record in records]}
+
+    @router.get(_CAPABILITY_PATH, response_model=CapabilityDocument)
+    async def capabilities() -> CapabilityDocument:
+        return CapabilityDocument(
+            relayna_version=relayna_version(),
+            topology_kind="spooltail",
+            alias_config_summary=AliasConfigSummary(),
+            supported_routes=list(STATUS_CAPABILITY_ROUTE_IDS),
+            feature_flags=[_HISTORY_FEATURE],
+            service_metadata=CapabilityServiceMetadata(
+                service_title=service,
+                capability_path=_CAPABILITY_PATH,
+                discovery_source="live",
+                compatibility="capabilities_v1",
+            ),
+        )
+
+    if task_topic is not None:
+        if not task_topic or task_topic == status_topic or not service:
+            raise ValueError("Spooltail submission requires a distinct task topic and a configured service")
+
+        @router.post("/tasks", status_code=202)
+        async def submit_task(task: _TaskSubmission) -> dict[str, str]:
+            if task.service is not None and task.service != service:
+                raise HTTPException(status_code=422, detail="Task service does not match this endpoint")
+            event = spooltail_task_event(
+                task.model_dump(exclude_none=True) | {"service": service, "created_at": task.created_at.astimezone(UTC)}
+            )
+            await _publish_submission(
+                get_client(), task_topic, event, timestamp_supplied="created_at" in task.model_fields_set
+            )
+            return {"task_id": task.task_id}
+
+    return router
+
+
+async def _publish_submission(
+    client: SpooltailClient, topic: str, event: dict[str, Any], *, timestamp_supplied: bool
+) -> None:
+    from grpc import StatusCode  # ty: ignore[unresolved-import]
+    from grpc.aio import AioRpcError  # ty: ignore[unresolved-import]
+    from relayna_spooltail import ConflictError  # ty: ignore[unresolved-import]
+
+    try:
+        try:
+            await client.publish(topic, event)
+            return
+        except ConflictError:
+            # The broker atomically chooses the first work event, including across API processes.
+            committed = await client.latest(topic, event["task_id"])
+            if committed is not None:
+                candidate = event if timestamp_supplied else event | {"created_at": committed.event.get("created_at")}
+                if json.dumps(candidate, sort_keys=True) == json.dumps(committed.event, sort_keys=True):
+                    return
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Task payload must be valid JSON") from exc
+    except AioRpcError as exc:
+        if exc.code() == StatusCode.INVALID_ARGUMENT:
+            raise HTTPException(status_code=422, detail="Spooltail rejected the task envelope") from exc
+        raise HTTPException(status_code=503, detail="Spooltail could not confirm task submission") from exc
+
+    raise HTTPException(status_code=409, detail="Task ID already has a different submission")
 
 
 class _SpooltailStatusSource:

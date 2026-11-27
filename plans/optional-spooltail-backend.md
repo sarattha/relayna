@@ -16,6 +16,10 @@ A Relayna service can submit tasks, run workers, and retrieve status and results
 - [x] (2026-11-21) Verified the revision against both brokers and checked installation and metadata for both wheels.
 - [x] (2026-11-21) Updated deployment and integration testing to download the official wheel from the pinned GitHub release.
 - [x] (2026-11-21) Shipped an opt-in installer in the Relayna wheel and used it for live Spooltail verification on Python 3.13 and 3.14.
+- [x] (2026-11-27) Coordinated the single-task HTTP contract with Gateway, Protocol, and Cell.
+- [x] (2026-11-27) Implemented idempotent HTTP submission, broker history, and attempt correlation.
+- [x] (2026-11-27) Wired broker history into the registered-service task detail and added the native and Cell reference handlers.
+- [x] (2026-11-27) Verified the SDK with the released Spooltail wheel, the Studio registry and task detail against the running reference service, and the optional handler against real Cell/gVisor.
 
 ## Surprises & Discoveries
 
@@ -38,6 +42,14 @@ Work from the Relayna repository root. `src/relayna/consumer` owns worker lifecy
 ## Compatibility Boundary
 
 The contributor guide specifies the v1.4.30 production freeze and the latest repository release is v1.14.0. Replace the unreleased client wrapper directly. Preserve released public signatures, RabbitMQ/Redis settings, envelopes, and route responses. Leave the freeze manifests as recorded.
+
+The core milestone extends the unreleased Spooltail router. Existing Studio task-detail routes and response models carry Spooltail history through the existing `history` field. A capability flag selects the task-scoped broker endpoint. Released RabbitMQ and Redis paths continue to use their existing history route and stream-offset semantics.
+
+## Core task milestone
+
+Spooltail owns one canonical work event with event ID `task` per task ID and work topic. The HTTP submitter binds submissions to its configured service. It publishes first and reads the committed record when the broker reports a conflict. An omitted creation timestamp adopts the first record's timestamp for duplicate comparison. An explicit timestamp must match the stored instant. Broker append is the only write in submission. SDK status events carry a per-claim opaque attempt ID. The reference service uses the native handler by default and can invoke a deployment-configured Cell launcher with a fixed image for one trusted task at a time.
+
+Equivalent concurrent HTTP requests returned 202 and produced one work record against Spooltail v0.0.1. Differing inputs returned 409, and HTTP history and SSE replay resumed exclusively after the same event ID. The SDK reclaimed an abandoned lease and reported the result with an opaque attempt ID. A running reference service registered in Studio returned the same status, result, and history. The optional handler ran in real Cell/gVisor with the launcher from Cell commit `c36918cd`. The broker recorded the cell and execution identifiers, and the guest container was confirmed deleted.
 
 ## Plan of Work
 

@@ -3300,6 +3300,55 @@ describe("App", () => {
     expect(screen.queryByText("Failure summary")).not.toBeInTheDocument();
   });
 
+  it("replays Spooltail status and shows the broker result on the existing task detail", async () => {
+    window.history.replaceState({}, "", "/tasks/payments-api/task-123");
+    const baseImpl = fetchMock.getMockImplementation();
+    const detail = taskDetailResponse({ dlqItems: [] });
+    const processing = {
+      task_id: "task-123",
+      event_id: "first",
+      status: "processing",
+      attempt_id: "attempt-a",
+      timestamp: "2026-11-27T08:00:00Z",
+    };
+    const completed = { ...processing, event_id: "second", status: "completed", result: { echo: { number: 21 } } };
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/studio/tasks/payments-api/task-123?join=none") {
+        return jsonResponse({
+          ...detail,
+          service: { ...detail.service, capabilities: { feature_flags: ["spooltail.task_history.v1"] } },
+          latest_status: { ...detail.latest_status, event: completed },
+          history: { ...detail.history, events: [processing, completed] },
+          execution_graph: null,
+        });
+      }
+      return await baseImpl!(input, init);
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Showing broker history. Reload to check for new events.")).toBeInTheDocument();
+    expect(screen.getByText("processing", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getAllByText("Attempt attempt-a")).toHaveLength(2);
+    expect(screen.getByLabelText("Task result JSON")).toHaveValue(JSON.stringify(completed.result, null, 2));
+    expect(screen.queryByText(/execution-graph read returned no graph/)).not.toBeInTheDocument();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/studio/tasks/payments-api/task-123?join=none") {
+        return jsonResponse({
+          ...detail,
+          service: { ...detail.service, capabilities: { feature_flags: ["spooltail.task_history.v1"] } },
+          history: null,
+          execution_graph: null,
+          errors: [{ code: "history_cursor_gap", detail: "Retained cursor expired" }],
+        });
+      }
+      return await baseImpl!(input, init);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Timeline" }));
+    expect(await screen.findByText("Broker history changed during replay. Reload Timeline to try again.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/task-123/events?"))).toBe(false);
+  });
+
   it("shows stable fallback messages for non-Error task telemetry failures and malformed SSE", async () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
     services[0] = {
