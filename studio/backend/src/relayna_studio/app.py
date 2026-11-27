@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 from relayna.metrics import RelaynaMetrics, create_metrics_router
 
 from ._doctor import _create_doctor_router
+from ._ecosystem_evidence import _GatewayUsage, _SpooltailEvidence
 from ._incidents import _create_incident_router
 from ._migrations import _upgrade_database
 from ._observability_profiles import _create_profile_router, _ProfileStore
@@ -294,6 +295,9 @@ class _StudioLifespan:
                 registry_service=registry_service,
                 http_client=http_client,
                 outbound_policy=outbound_policy,
+            )
+            federation_service._spooltail_evidence = _SpooltailEvidence(
+                event_store, http_client, outbound_policy, _GatewayUsage.from_environment()
             )
             health_service = StudioHealthRefreshService(
                 registry_service=registry_service,

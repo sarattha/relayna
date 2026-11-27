@@ -3312,13 +3312,29 @@ describe("App", () => {
       timestamp: "2026-11-27T08:00:00Z",
     };
     const completed = { ...processing, event_id: "second", status: "completed", result: { echo: { number: 21 } } };
+    const gatewayActivity = {
+      dedupe_key: "gateway-1", event_type: "gateway.usage", timestamp: processing.timestamp, payload: { attempt_id: "attempt-a" },
+    };
+    const cellActivity = {
+      dedupe_key: "cell-1", event_type: "cell.inference.result", timestamp: processing.timestamp,
+      payload: { cell_id: "cell-a", inference_truncated: true },
+    };
+    const gatewayUsage = {
+      source_available: true, observations: 1, input_tokens: 3, output_tokens: 2, total_tokens: 5, estimated_cost_usd: 0.001,
+    };
     fetchMock.mockImplementation(async (input, init) => {
       if (String(input) === "/studio/tasks/payments-api/task-123?join=none") {
         return jsonResponse({
           ...detail,
           service: { ...detail.service, capabilities: { feature_flags: ["spooltail.task_history.v1"] } },
           latest_status: { ...detail.latest_status, event: completed },
-          history: { ...detail.history, events: [processing, completed] },
+          history: {
+            ...detail.history,
+            events: [processing, completed],
+            component_events: [gatewayActivity, cellActivity],
+            broker_stats: { broker: "spooltail", version: "0.0.6", payload_reads: 9, recovered_frames: 0 },
+            gateway_usage: gatewayUsage,
+          },
           execution_graph: null,
         });
       }
@@ -3329,7 +3345,11 @@ describe("App", () => {
 
     expect(await screen.findByText("Showing broker history. Reload to check for new events.")).toBeInTheDocument();
     expect(screen.getByText("processing", { selector: "strong" })).toBeInTheDocument();
-    expect(screen.getAllByText("Attempt attempt-a")).toHaveLength(2);
+    expect(screen.getAllByText("Attempt attempt-a")).toHaveLength(3);
+    expect(screen.getByText("Cell cell-a")).toBeInTheDocument();
+    expect(screen.getByText("Additional inference events are retained in Cell.")).toBeInTheDocument();
+    expect(screen.getByText("Broker counters")).toBeInTheDocument();
+    expect(screen.getByText("$0.001000")).toBeInTheDocument();
     expect(screen.getByLabelText("Task result JSON")).toHaveValue(JSON.stringify(completed.result, null, 2));
     expect(screen.queryByText(/execution-graph read returned no graph/)).not.toBeInTheDocument();
     fetchMock.mockImplementation(async (input, init) => {
@@ -3337,7 +3357,7 @@ describe("App", () => {
         return jsonResponse({
           ...detail,
           service: { ...detail.service, capabilities: { feature_flags: ["spooltail.task_history.v1"] } },
-          history: null,
+          history: { ...detail.history, events: [], gateway_usage: { ...gatewayUsage, source_available: false, estimated_cost_usd: null } },
           execution_graph: null,
           errors: [{ code: "history_cursor_gap", detail: "Retained cursor expired" }],
         });
@@ -3346,6 +3366,7 @@ describe("App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Reload Timeline" }));
     expect(await screen.findByText("Broker history changed during replay. Reload Timeline to try again.")).toBeInTheDocument();
+    expect(screen.getByText("Gateway export is unavailable. Showing retained observations.")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/task-123/events?"))).toBe(false);
   });
 

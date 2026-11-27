@@ -289,6 +289,21 @@ export type HistoryPayload = {
   task_ref?: StudioTaskRef | null;
   count: number;
   events: Array<Record<string, unknown>>;
+  component_events?: StudioControlPlaneEvent[];
+  broker_stats?: {
+    broker: string;
+    payload_reads: number;
+    recovered_frames: number;
+    version?: string;
+  } | null;
+  gateway_usage?: {
+    source_available: boolean;
+    observations: number;
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+    estimated_cost_usd: number | null;
+  } | null;
 };
 
 export type ServiceEventSourceKind = "status" | "observation";

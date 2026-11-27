@@ -20,6 +20,9 @@ A Relayna service can submit tasks, run workers, and retrieve status and results
 - [x] (2026-11-27) Implemented idempotent HTTP submission, broker history, and attempt correlation.
 - [x] (2026-11-27) Wired broker history into the registered-service task detail and added the native and Cell reference handlers.
 - [x] (2026-11-27) Verified the SDK with the released Spooltail wheel, the Studio registry and task detail against the running reference service, and the optional handler against real Cell/gVisor.
+- [x] (2026-11-27) Added the opt-in durable cancellation path and reusable local and Cell profiles.
+- [x] (2026-11-27) Projected broker history through Studio’s existing event store and displayed correlated component evidence and usage.
+- [x] (2026-11-27) Documented the SDK and Studio environment contract and verified the basic Protocol Compose and Helm configurations.
 
 ## Surprises & Discoveries
 
@@ -50,6 +53,14 @@ The core milestone extends the unreleased Spooltail router. Existing Studio task
 Spooltail owns one canonical work event with event ID `task` per task ID and work topic. The HTTP submitter binds submissions to its configured service. It publishes first and reads the committed record when the broker reports a conflict. An omitted creation timestamp adopts the first record's timestamp for duplicate comparison. An explicit timestamp must match the stored instant. Broker append is the only write in submission. SDK status events carry a per-claim opaque attempt ID. The reference service uses the native handler by default and can invoke a deployment-configured Cell launcher with a fixed image for one trusted task at a time.
 
 Equivalent concurrent HTTP requests returned 202 and produced one work record against Spooltail v0.0.1. Differing inputs returned 409, and HTTP history and SSE replay resumed exclusively after the same event ID. The SDK reclaimed an abandoned lease and reported the result with an opaque attempt ID. A running reference service registered in Studio returned the same status, result, and history. The optional handler ran in real Cell/gVisor with the launcher from Cell commit `c36918cd`. The broker recorded the cell and execution identifiers, and the guest container was confirmed deleted.
+
+## Expanded milestone
+
+Phase 6 is excluded. Applications opt in to a separate cancellation topic only with a broker that accepts atomic completion as `cancelled`. A stable control record represents intent, and a worker checks the record before starting a task and while waiting for its handler. The lease renews through cooperative cancellation and cleanup. The broker remains the authority for the terminal result. Existing handlers and transports continue to use their current APIs.
+
+Reuse Studio’s existing event ingest and Postgres store for durable task evidence. Keep broker status ordered by the broker cursor. Associate Gateway and Cell observations by the registered service, task ID, and available attempt and cell IDs. Keep any additional read endpoints scoped to the existing Studio outbound and operator policies. Package SDK and Studio entry points for trusted local integration and simple Helm installs using deployment-supplied images and infrastructure.
+
+The released Spooltail Python wheel works with both broker versions. The older broker passed the single-task contract with cancellation disabled. The upgraded broker passed queued and active cancellation, cleanup, status, history, and SSE. The ecosystem coordinator exercised scoped inference through a real Cell/gVisor runtime and Gateway with a synthetic upstream. The broker stored Cell audit events, and Gateway attributed the synthetic tokens to the same task attempt. Studio applies the 64-event Cell audit bound and reads Gateway usage only for explicitly mapped services through the operator export. The production freeze authorization covers these additive profiles and features. Existing RabbitMQ and Redis callers and freeze manifests remain compatible.
 
 ## Plan of Work
 

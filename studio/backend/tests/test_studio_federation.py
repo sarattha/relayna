@@ -928,13 +928,81 @@ def test_task_detail_tolerates_partial_failures_and_derives_latest_from_history(
 
 def test_spooltail_task_detail_reads_registered_service_history_pages(monkeypatch) -> None:
     monkeypatch.setattr(studio_app, "Redis", FakeRedis)
-    running = {"task_id": "task-123", "event_id": "first", "status": "processing", "attempt_id": "attempt-a"}
-    terminal = running | {"event_id": "second", "status": "completed", "result": {"echo": {"x": 1}}}
+    monkeypatch.setenv("RELAYNA_STUDIO_GATEWAY_URL", "https://gateway.example.test/")
+    monkeypatch.setenv("RELAYNA_STUDIO_GATEWAY_USAGE_TOKEN", "operator-usage-test")
+    monkeypatch.setenv("RELAYNA_STUDIO_GATEWAY_SERVICE_MAP", '{"reference":"registered-reference"}')
+    running = {
+        "task_id": "task-123",
+        "event_id": "first",
+        "status": "processing",
+        "attempt_id": "attempt-a",
+        "timestamp": "2026-11-27T00:00:01Z",
+    }
+    valid_audit = {"event_id": "allow-event", "timestamp": "2026-11-27T00:00:02Z", "decision": "allow"}
+    terminal = running | {
+        "event_id": "second",
+        "status": "completed",
+        "result": {"echo": {"x": 1}},
+        "timestamp": "2026-11-27T00:00:04Z",
+        "meta": {
+            "cell": {
+                "cell_id": "cell-a",
+                "execution_id": "execution-a",
+                "inference": {
+                    "truncated": True,
+                    "events": [
+                        valid_audit,
+                        valid_audit | {"decision": "invalid"},
+                        valid_audit | {"event_id": "raw", "reason": "raw request content"},
+                    ],
+                },
+            }
+        },
+    }
+    usage = {
+        "request_id": "gateway-1",
+        "service_name": "registered-reference",
+        "task_id": "task-123",
+        "run_id": "attempt-a",
+        "created_at": "2026-11-27T00:00:03Z",
+        "provider": "inference",
+        "model": "reference-model",
+        "status_code": 200,
+        "input_tokens": 3,
+        "output_tokens": 2,
+        "total_tokens": 5,
+        "estimated_cost_usd": 0.001,
+    }
+    gateway_available = True
     cursors: list[str | None] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/status/task-123":
             return httpx.Response(200, json={"task_id": "task-123", "event": terminal})
+        if request.url.path == "/relayna/broker":
+            assert "authorization" not in request.headers
+            return httpx.Response(200, json={"broker": "spooltail", "payload_reads": 8, "recovered_frames": 2})
+        if request.url.path == "/admin-ui/admin/usage/events":
+            assert request.url.host == "gateway.example.test"
+            assert request.headers["Authorization"] == "Bearer operator-usage-test"
+            assert dict(request.url.params) == {
+                "task_id": "task-123",
+                "service": "registered-reference",
+                "limit": "100",
+            }
+            if not gateway_available:
+                return httpx.Response(503)
+            return httpx.Response(
+                200,
+                json={
+                    "rows": [
+                        usage,
+                        usage | {"request_id": "wrong", "service_name": "unmapped"},
+                        usage | {"request_id": "different", "task_id": "another"},
+                        {"bad": "row"},
+                    ]
+                },
+            )
         if request.url.path == "/history/task-123":
             after = request.url.params.get("after")
             cursors.append(after)
@@ -966,7 +1034,7 @@ def test_spooltail_task_detail_reads_registered_service_history_pages(monkeypatc
                 capabilities=make_capability_document(
                     supported_routes=["status.latest", "status.history", "status.events"]
                 )
-                | {"feature_flags": ["spooltail.task_history.v1"]},
+                | {"feature_flags": ["spooltail.task_history.v1", "spooltail.broker.v1"]},
             ),
         )
         response = client.get("/studio/tasks/reference/task-123")
@@ -977,6 +1045,29 @@ def test_spooltail_task_detail_reads_registered_service_history_pages(monkeypatc
         assert detail["history"]["events"][0]["attempt_id"] == "attempt-a"
         assert detail["history"]["count"] == 2 and detail["errors"] == []
         assert cursors == [None, "first", "second"]
+        assert detail["history"]["broker_stats"]["payload_reads"] == 8
+        assert detail["history"]["gateway_usage"] == {
+            "source_available": True,
+            "observations": 1,
+            "input_tokens": 3,
+            "output_tokens": 2,
+            "total_tokens": 5,
+            "estimated_cost_usd": 0.001,
+        }
+        component_events = detail["history"]["component_events"]
+        assert [event["event_type"] for event in component_events] == [
+            "cell.inference.allow",
+            "gateway.usage",
+            "cell.launcher_report",
+        ]
+        assert all(event["payload"]["attempt_id"] == "attempt-a" for event in component_events)
+        assert component_events[-1]["payload"]["inference_truncated"] is True
+        gateway_available = False
+        retained = client.get("/studio/tasks/reference/task-123").json()["history"]
+        assert retained["component_events"] == component_events
+        assert retained["gateway_usage"] == detail["history"]["gateway_usage"] | {"source_available": False}
+        stored = client.get("/studio/tasks/reference/task-123/events").json()["items"]
+        assert sorted(event["component"] for event in stored) == ["cell", "cell", "gateway", "sdk", "sdk"]
 
         history = "/studio/services/reference/history"
         assert client.get(history, params={"max_scan": 1}).status_code == 422

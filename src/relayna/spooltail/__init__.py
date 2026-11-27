@@ -2,6 +2,14 @@
 
 from .contracts import spooltail_task_event
 from .fastapi import create_spooltail_status_router
+from .profiles import SpooltailCellProfile, SpooltailLocalProfile
 from .worker import SpooltailTaskConsumer, SpooltailTaskContext
 
-__all__ = ["SpooltailTaskConsumer", "SpooltailTaskContext", "create_spooltail_status_router", "spooltail_task_event"]
+__all__ = [
+    "SpooltailCellProfile",
+    "SpooltailLocalProfile",
+    "SpooltailTaskConsumer",
+    "SpooltailTaskContext",
+    "create_spooltail_status_router",
+    "spooltail_task_event",
+]

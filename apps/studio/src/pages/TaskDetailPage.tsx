@@ -951,6 +951,9 @@ export function TaskDetailPage() {
   const dlqCount = taskDetail?.dlq_messages?.items.length ?? 0;
   const taskTimelineItems = taskTimeline?.items || [];
   const brokerEvents = usesSpooltailHistory ? taskDetail?.history?.events || [] : [];
+  const componentEvents = taskDetail?.history?.component_events || [];
+  const brokerStats = taskDetail?.history?.broker_stats;
+  const gatewayUsage = taskDetail?.history?.gateway_usage;
   const brokerHistoryGap = taskDetail?.errors.some((item) => item.code === "history_cursor_gap");
   const identityRef = taskDetail?.task_ref || graph?.task_ref || null;
   const brokerDlqSupported = supportsCapability(taskDetail?.service.capabilities || null, "broker.dlq.messages");
@@ -1118,7 +1121,44 @@ export function TaskDetailPage() {
                       ) : null}
                     </>
                   )}
+                  {componentEvents.length ? (
+                    <div className="studio-stack-sm">
+                      <h3>Gateway and Cell activity</h3>
+                      {componentEvents.map((item) => (
+                        <article key={item.dedupe_key} className="studio-subcard" style={{ padding: 12 }}>
+                          <div className="studio-list-card__top">
+                            <strong>{item.event_type}</strong>
+                            <span className="studio-inline-meta">{formatTimestamp(item.timestamp || item.ingested_at)}</span>
+                          </div>
+                          {typeof item.payload.attempt_id === "string" ? <p style={mutedTextStyle}>Attempt {item.payload.attempt_id}</p> : null}
+                          {typeof item.payload.cell_id === "string" ? <p style={mutedTextStyle}>Cell {item.payload.cell_id}</p> : null}
+                          {item.payload.inference_truncated === true ? <p style={mutedTextStyle}>Additional inference events are retained in Cell.</p> : null}
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
                 </SectionCard>
+                {brokerStats ? (
+                  <SectionCard title="Broker counters" subtitle="Process-local counters across tasks">
+                    <dl>
+                      <MetadataRow label="Broker" value={[brokerStats.broker, brokerStats.version].filter(Boolean).join(" ")} />
+                      <MetadataRow label="Payload reads" value={String(brokerStats.payload_reads)} />
+                      <MetadataRow label="Recovered frames" value={String(brokerStats.recovered_frames)} />
+                    </dl>
+                  </SectionCard>
+                ) : null}
+                {gatewayUsage ? (
+                  <SectionCard title="Observed Gateway usage" subtitle="Based on retained request observations for this task">
+                    {!gatewayUsage.source_available ? <NoticeBanner>Gateway export is unavailable. Showing retained observations.</NoticeBanner> : null}
+                    <dl>
+                      <MetadataRow label="Requests" value={String(gatewayUsage.observations)} />
+                      <MetadataRow label="Input tokens" value={String(gatewayUsage.input_tokens)} />
+                      <MetadataRow label="Output tokens" value={String(gatewayUsage.output_tokens)} />
+                      <MetadataRow label="Total tokens" value={String(gatewayUsage.total_tokens)} />
+                      <MetadataRow label="Estimated cost" value={gatewayUsage.estimated_cost_usd == null ? "Unavailable" : `$${gatewayUsage.estimated_cost_usd.toFixed(6)}`} />
+                    </dl>
+                  </SectionCard>
+                ) : null}
                 {usesSpooltailHistory && statusEvent.result != null ? (
                   <SectionCard title="Task Result">
                     <InlineCodeBox label="Task result JSON" value={JSON.stringify(statusEvent.result, null, 2)} />

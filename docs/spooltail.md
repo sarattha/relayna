@@ -104,6 +104,8 @@ app.include_router(create_spooltail_status_router(get_client=lambda: app.state.s
 
 `GET /events/{task_id}` accepts `Last-Event-ID` for exclusive SSE replay. The stream ends when it delivers `completed` or `failed`. Close the SSE connection after a terminal event or a `gap` event. After a gap, read latest status or restart replay with no cursor. The SDK assigns each worker claim an opaque `attempt_id` and includes it in that attempt's progress and terminal events.
 
+`GET /relayna/broker` reports the broker's process-local `payload_reads` and `recovered_frames` counters. A configured `SPOOLTAIL_BROKER_VERSION` supplies an optional display label. The native API does not identify its broker version.
+
 ## Submit tasks over HTTP
 
 Pass `task_topic` and `service` to `create_spooltail_status_router` to enable `POST /tasks`. Use a distinct task topic and status topic for each service and keep both available for the desired retry and replay windows. The service and topics are deployment settings.
@@ -112,6 +114,12 @@ Pass `task_topic` and `service` to `create_spooltail_status_router` to enable `P
 - Optional fields are `service`, `task_type`, `correlation_id`, `created_at`, and `spec_version`. Supply an RFC 3339 timestamp with a timezone when setting `created_at`. `spec_version` defaults to `"1.0"`.
 - A supplied service must match the configured service. An omitted or null service resolves to that configured value. The server chooses the work event ID.
 - The endpoint returns HTTP 202 with `{"task_id": "..."}` after the broker accepts the task. Equivalent retries return the same response and preserve the first event and its timestamp. A different submission for the same ID returns HTTP 409 with a `detail` message. To repeat work deliberately, submit with a new ID. When retrying with an explicit timestamp, use the original timestamp.
+
+### Cancel a task
+
+With a broker that supports terminal `cancelled` completion, such as Spooltail 0.0.6, configure a separate `cancel_topic` on both the SDK router and every worker. The reference service reads it from `RELAYNA_CANCEL_TOPIC`. Keep it distinct from the work and status topics. The official Python client 0.0.1 can use the upgraded broker with its existing native API.
+
+`POST /tasks/{task_id}/cancel` accepts an empty request body and returns HTTP 202 with `{"task_id": "..."}` after durable acceptance of the cancellation intent. It returns 404 for an unknown task and 409 if terminal status was observed before acceptance. Equivalent requests before settlement share one intent. The worker checks for intent before and during a handler, lets the handler clean up, and completes its lease with terminal `cancelled`. Read latest status to see the winning result when cancellation races normal completion. SSE also terminates on delivery of `cancelled`. Async local handlers should yield during long-running work and use `finally` for cleanup.
 
 ### Run the reference service
 
@@ -130,6 +138,8 @@ curl -fsS http://127.0.0.1:8000/history/example-1
 
 Register the same service URL in Gateway and Studio according to their existing policies. For Studio on the same machine, allow the specific loopback target with `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_NETWORKS=127.0.0.1/32`. Refresh the registered service's capabilities, then open `/tasks/<service-id>/example-1` in Studio. The task detail displays up to 200 retained broker events in order and the latest result. Use **Reload Timeline** to refresh from the service.
 
+Configure `RELAYNA_STUDIO_DATABASE_URL` to retain observed task events in the existing PostgreSQL Studio event store. Studio projects events during a task-detail read and deduplicates them by service, task, and source event. To include Gateway usage, configure `RELAYNA_STUDIO_GATEWAY_URL`, a server-side operator token with `usage:read` in `RELAYNA_STUDIO_GATEWAY_USAGE_TOKEN`, and `RELAYNA_STUDIO_GATEWAY_SERVICE_MAP` as a JSON object mapping Studio service IDs to Gateway registrations. Include both the SDK and the Gateway hosts in `RELAYNA_STUDIO_CAPABILITY_REFRESH_ALLOWED_HOSTS`. Usage totals reflect retained observations, and the task detail labels broker counters as broker-wide.
+
 ### Run the reference handler in Cell
 
 On a host with Cell's OCI runtime and its operator socket available, build the Cell project's `cell-task` launcher and its fixed-policy reference OCI image. Supply the trusted binary, image, socket, and workload timeout through deployment settings when starting the same reference service. [Cell launcher and image setup](https://github.com/sarattha/relayna-cell/blob/c36918cd2e710a30baea674266cc9b796a8426cd/examples/relayna-sdk-task/README.md)
@@ -143,6 +153,8 @@ RELAYNA_CELL_TIMEOUT=60 \
 ```
 
 The worker sends `task_id`, `attempt_id`, and the JSON payload to the launcher. The launcher runs the configured image, cleans up the Cell, and reports the JSON result and the Cell ID. The worker publishes the result and records `meta.cell.cell_id` and `meta.cell.execution_id` when available. The launcher receives an empty inherited environment. Client submissions select the payload only.
+
+Reusable SDK users can pass `profile=SpooltailLocalProfile(handler)` or `profile=SpooltailCellProfile(launcher, image, ...)` to `SpooltailTaskConsumer`. For scoped inference, use the compatible Cell launcher and daemon with server-owned inference configuration and set `RELAYNA_CELL_INFERENCE=1` for the reference service or `inference=True` on the Cell profile. The SDK passes the fixed flag to the launcher and attaches up to 64 validated observations in Cell journal order to `meta.cell.inference`. `truncated: true` means Cell recorded more matching events. Studio correlates them with Gateway request observations using the task and attempt IDs.
 
 ## Capability differences
 
@@ -159,3 +171,5 @@ For local integration tests, run the broker on loopback with plaintext gRPC. Fro
 ```bash
 SPOOLTAIL_TEST_TARGET=127.0.0.1:7443 make test-spooltail
 ```
+
+Set `SPOOLTAIL_TEST_CANCEL=1` as well when running against a cancellation-capable broker.

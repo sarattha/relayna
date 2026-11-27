@@ -5,8 +5,8 @@ import base64
 import binascii
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import httpx
@@ -50,6 +50,9 @@ from .registry import (
     ServiceStatus,
     StudioOutboundUrlPolicy,
 )
+
+if TYPE_CHECKING:
+    from ._ecosystem_evidence import _SpooltailEvidence
 
 SERVICE_STATUS_PATH = "/status/{task_id}"
 SERVICE_HISTORY_PATH = "/history"
@@ -203,6 +206,7 @@ class StudioFederationService:
     http_client: httpx.AsyncClient
     outbound_policy: StudioOutboundUrlPolicy | None = None
     search_max_concurrency: int = 8
+    _spooltail_evidence: _SpooltailEvidence | None = field(default=None, init=False, repr=False)
 
     async def get_service_status(self, service_id: str, task_id: str) -> dict[str, Any]:
         service = await self._get_proxyable_service(service_id)
@@ -524,6 +528,20 @@ class StudioFederationService:
         normalized_task_id = task_id.strip()
         service = await self._get_proxyable_service(service_id)
         bundle = await self._build_task_detail_bundle(service, normalized_task_id)
+        document = self._capability_document(service)
+        if (
+            self._spooltail_evidence is not None
+            and document is not None
+            and _SPOOLTAIL_HISTORY_FEATURE in document.feature_flags
+        ):
+            history = bundle.history or {"task_id": normalized_task_id, "count": 0, "events": []}
+            bundle.history = await self._spooltail_evidence.enrich(
+                service,
+                normalized_task_id,
+                history,
+                bundle.latest_status,
+                broker_available="spooltail.broker.v1" in document.feature_flags,
+            )
         joined_refs: list[StudioTaskJoin] = []
         join_warnings: list[StudioJoinWarning] = []
         if join != JoinMode.NONE:

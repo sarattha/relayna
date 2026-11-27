@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 from relayna.consumer import RetryPolicy
 from relayna.contracts import StatusEventEnvelope, TaskEnvelope
 from relayna.spooltail import (
+    SpooltailLocalProfile,
     SpooltailTaskConsumer,
     SpooltailTaskContext,
     create_spooltail_status_router,
@@ -183,9 +184,97 @@ async def test_spooltail_history_exposes_broker_cursor_and_capability(mock_conne
         gap = await http.get("/history/t?after=pruned")
         assert gap.status_code == 410 and gap.json() == {"detail": {"earliest_event_id": "earliest"}}
         capabilities = (await http.get("/relayna/capabilities")).json()
-        assert capabilities["feature_flags"] == ["spooltail.task_history.v1"]
+        assert capabilities["feature_flags"] == ["spooltail.task_history.v1", "spooltail.broker.v1"]
         assert "status.history" in capabilities["supported_routes"]
         assert (await http.post("/tasks", json={"task_id": "t", "payload": {}})).status_code == 404
+        assert (await http.post("/tasks/t/cancel")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_spooltail_cancellation_is_opt_in_and_writes_one_stable_intent(mock_connection: AsyncMock) -> None:
+    for options in ({"cancel_topic": "control"}, {"task_topic": "work", "cancel_topic": "work"}):
+        with pytest.raises(ValueError, match="distinct cancellation topic"):
+            create_spooltail_status_router(get_client=lambda: mock_connection, **options)
+    app = FastAPI()
+    app.include_router(
+        create_spooltail_status_router(
+            get_client=lambda: mock_connection,
+            task_topic="work",
+            cancel_topic="control",
+            service="reference",
+            broker_version="0.0.6",
+        )
+    )
+    mock_connection.stats.return_value = SimpleNamespace(payload_reads=2, recovered_frames=3)
+    work = SimpleNamespace(event={"task_id": "task"})
+    finished = SimpleNamespace(event={"status": "cancelled"})
+    mock_connection.latest.side_effect = [None, None, finished, None, work, None, work, _RpcError("unavailable")]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        stats = await http.get("/relayna/broker")
+        assert stats.json() == {"broker": "spooltail", "payload_reads": 2, "recovered_frames": 3, "version": "0.0.6"}
+        assert "spooltail.cancel.v1" in (await http.get("/relayna/capabilities")).json()["feature_flags"]
+        assert (await http.post("/tasks/task/cancel")).status_code == 404
+        assert (await http.post("/tasks/task/cancel")).status_code == 409
+        for _ in range(2):
+            accepted = await http.post("/tasks/task/cancel")
+            assert accepted.status_code == 202 and accepted.json() == {"task_id": "task"}
+        assert (await http.post("/tasks/task/cancel")).status_code == 503
+        assert mock_connection.publish.await_count == 2
+        first, second = mock_connection.publish.await_args_list
+        assert first == second and first.args == ("control", {"task_id": "task", "event_id": "cancel"})
+
+
+@pytest.mark.asyncio
+async def test_spooltail_cancellation_preempts_work_and_lets_active_profile_clean_up(
+    mock_connection: AsyncMock,
+) -> None:
+    cleaned = asyncio.Event()
+
+    async def handle(task, context):
+        try:
+            await asyncio.Future()
+        finally:
+            await asyncio.sleep(0.025)
+            cleaned.set()
+
+    lease = SimpleNamespace(generation=1, record=SimpleNamespace(event={"task_id": "t"}))
+    intent = SimpleNamespace(event={"task_id": "t", "event_id": "cancel"})
+    mock_connection.claim.return_value = lease
+    worker = SpooltailTaskConsumer(
+        client=mock_connection,
+        profile=SpooltailLocalProfile(handle),
+        cancel_topic="control",
+        lease_ms=30,
+        cancel_check_seconds=0.001,
+    )
+    mock_connection.latest.return_value = intent
+    assert await worker.run_once()
+    assert not cleaned.is_set()
+    event = mock_connection.complete.await_args.args[2]
+    assert event["status"] == "cancelled" and event["attempt_id"]
+
+    async def complete(*args):
+        assert cleaned.is_set()
+        assert args[2]["status"] == "cancelled"
+        return 1
+
+    mock_connection.complete.side_effect = complete
+    mock_connection.latest.side_effect = [None, None, intent]
+    assert await asyncio.wait_for(worker.run_once(), timeout=1)
+    mock_connection.settle.assert_awaited_with(lease, "renew", delay_ms=30)
+
+
+def test_spooltail_worker_profile_and_cancellation_configuration() -> None:
+    client = AsyncMock()
+    profile = SpooltailLocalProfile(AsyncMock())
+    for kwargs in (
+        {},
+        {"handler": AsyncMock(), "profile": profile},
+        {"profile": profile, "cancel_topic": "relayna.tasks"},
+        {"profile": profile, "cancel_check_seconds": 0},
+    ):
+        with pytest.raises(ValueError):
+            SpooltailTaskConsumer(client=client, **kwargs)
 
 
 @pytest.mark.asyncio
@@ -496,3 +585,70 @@ async def test_native_broker_renews_lease_and_streams_live_status() -> None:
             finally:
                 release.set()
                 await delivery
+
+
+@real_broker
+@pytest.mark.skipif(os.environ.get("SPOOLTAIL_TEST_CANCEL") != "1", reason="requires a cancellation-capable broker")
+@pytest.mark.asyncio
+async def test_native_cancellation_interrupts_worker_and_replays_terminal_status() -> None:
+    from relayna_spooltail import SpooltailClient
+
+    assert spooltail_target
+    key = uuid4().hex
+    task_topic, status_topic, cancel_topic = (f"{key}.{kind}" for kind in ("task", "status", "cancel"))
+    started = asyncio.Event()
+    cleaned = asyncio.Event()
+
+    async def handler(task: TaskEnvelope, context: SpooltailTaskContext) -> None:
+        await context.publish_status(status="processing")
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cleaned.set()
+
+    async with SpooltailClient(spooltail_target, tls=False) as native:
+        worker = SpooltailTaskConsumer(
+            client=native,
+            handler=handler,
+            task_topic=task_topic,
+            status_topic=status_topic,
+            cancel_topic=cancel_topic,
+            cancel_check_seconds=0.01,
+        )
+        app = FastAPI()
+        app.include_router(
+            create_spooltail_status_router(
+                get_client=lambda: native,
+                task_topic=task_topic,
+                status_topic=status_topic,
+                cancel_topic=cancel_topic,
+                service="reference",
+            )
+        )
+        async with (
+            asyncio.timeout(8),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http,
+        ):
+            assert (await http.post("/tasks/not-found/cancel")).status_code == 404
+            assert (await http.post("/tasks", json={"task_id": "running", "payload": {}})).status_code == 202
+            execution = asyncio.create_task(worker.run_once())
+            try:
+                await started.wait()
+                assert (await http.post("/tasks/running/cancel")).status_code == 202
+                assert await execution
+            finally:
+                if not execution.done():
+                    execution.cancel()
+                    await asyncio.gather(execution, return_exceptions=True)
+            assert cleaned.is_set()
+            history = (await http.get("/history/running")).json()["events"]
+            assert [event["status"] for event in history] == ["processing", "cancelled"]
+            assert history[0]["attempt_id"] == history[1]["attempt_id"]
+            assert (await http.get("/status/running")).json()["event"] == history[1]
+            replay = await http.get("/events/running", headers={"Last-Event-ID": history[0]["event_id"]})
+            assert replay.text.count("event: status") == 1 and "cancelled" in replay.text
+            assert (await http.post("/tasks/running/cancel")).status_code == 409
+            assert len(await native.history(cancel_topic, "running")) == 1
+            assert (await http.get("/relayna/broker")).json()["broker"] == "spooltail"
+            assert not await worker.run_once()

@@ -51,10 +51,26 @@ def create_spooltail_status_router(
     status_topic: str = "relayna.status",
     task_topic: str | None = None,
     service: str | None = None,
+    cancel_topic: str | None = None,
+    broker_version: str | None = None,
 ) -> APIRouter:
     """Serve broker-backed status and optionally accept tasks for a configured service."""
+    if cancel_topic is not None and (not cancel_topic or not task_topic or cancel_topic in {task_topic, status_topic}):
+        raise ValueError("Spooltail cancellation requires submission and a distinct cancellation topic")
     source = _SpooltailStatusSource(get_client, status_topic)
     router = _create_status_router(sse_stream=source, latest_status_store=source)
+
+    @router.get("/relayna/broker")
+    async def broker_stats() -> dict[str, Any]:
+        stats = await get_client().stats()
+        snapshot = {
+            "broker": "spooltail",
+            "payload_reads": stats.payload_reads,
+            "recovered_frames": stats.recovered_frames,
+        }
+        if broker_version:
+            snapshot["version"] = broker_version
+        return snapshot
 
     @router.get("/history/{task_id}")
     async def task_history(task_id: str, after: str | None = None) -> dict[str, Any]:
@@ -73,7 +89,8 @@ def create_spooltail_status_router(
             topology_kind="spooltail",
             alias_config_summary=AliasConfigSummary(),
             supported_routes=list(STATUS_CAPABILITY_ROUTE_IDS),
-            feature_flags=[_HISTORY_FEATURE],
+            feature_flags=[_HISTORY_FEATURE, "spooltail.broker.v1"]
+            + (["spooltail.cancel.v1"] if cancel_topic is not None else []),
             service_metadata=CapabilityServiceMetadata(
                 service_title=service,
                 capability_path=_CAPABILITY_PATH,
@@ -97,6 +114,24 @@ def create_spooltail_status_router(
                 get_client(), task_topic, event, timestamp_supplied="created_at" in task.model_fields_set
             )
             return {"task_id": task.task_id}
+
+        if cancel_topic is not None:
+
+            @router.post("/tasks/{task_id}/cancel", status_code=202)
+            async def cancel_task(task_id: str) -> dict[str, str]:
+                from grpc.aio import AioRpcError  # ty: ignore[unresolved-import]
+
+                client = get_client()
+                try:
+                    status = await source.get_latest(task_id)
+                    if status is not None and str(status.get("status")).lower() in {"completed", "failed", "cancelled"}:
+                        raise HTTPException(status_code=409, detail="Task is already terminal")
+                    if await client.latest(task_topic, task_id) is None:
+                        raise HTTPException(status_code=404, detail="Task was not found")
+                    await client.publish(cancel_topic, {"task_id": task_id, "event_id": "cancel"})
+                except AioRpcError as exc:
+                    raise HTTPException(status_code=503, detail="Spooltail could not confirm cancellation") from exc
+                return {"task_id": task_id}
 
     return router
 
