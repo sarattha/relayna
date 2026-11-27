@@ -14,7 +14,7 @@ uv run --no-project --with-requirements requirements-docs.txt mkdocs serve
 ```
 
 Open the address printed by MkDocs. Check the modified pages, navigation, and
-redirects. For a quickstart change, run the commands against the exact Protocol
+redirects. For a quickstart change, run the commands against the exact Deploy
 revision being documented and confirm the task appears in Studio.
 
 GitHub Actions builds the docs on pull requests and publishes GitHub Pages

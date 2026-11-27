@@ -4,7 +4,7 @@ Use [Relayna SDK](https://github.com/Relayna/relayna-sdk) for Python runtime and
 
 - [SDK installation and release channels](https://github.com/Relayna/relayna-sdk/blob/main/docs/releases.md) use `sdk-vX.Y.Z` tags.
 - [Studio installation and release channels](https://github.com/Relayna/relayna-studio/blob/main/docs/releases.md) use `studio-vX.Y.Z` tags. Use the paired backend and frontend artifacts.
-- [Protocol's compatibility lock](https://github.com/Relayna/relayna-protocol/blob/main/deploy/sources.json) pins a tested set of component sources for the reference stack.
+- [Deploy's source lock](https://github.com/Relayna/relayna-deploy/blob/main/sources.json) pins a tested set of component sources for the reference stack.
 
 If an application installed the SDK from GitHub `relayna` **main**, point it to a reviewed SDK revision in `https://github.com/Relayna/relayna-sdk.git`. Studio source builds resolve the SDK version from the Studio backend lockfile.
 

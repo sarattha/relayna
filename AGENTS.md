@@ -6,7 +6,7 @@ implementation and component-specific guides in their owning repositories.
 
 Update the README and MkDocs navigation when adding an ecosystem guide. Link
 to the owning repository for current commands and contracts. Keep the
-reference stack pinned to a verified Protocol revision and document legacy
+reference stack pinned to a verified Deploy revision and document legacy
 redirects when moving published documentation URLs.
 
 Run the strict documentation build before opening a change.

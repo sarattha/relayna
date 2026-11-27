@@ -23,6 +23,6 @@ Follow the [local quickstart](quickstart.md) to exercise the full task route. Ga
 
 ## Profile 4 · Isolate execution
 
-Install [Cell](https://github.com/Relayna/relayna-cell) on a compatible Linux host or VM with its supported runtime. Use [Protocol's Cell instructions](https://github.com/Relayna/relayna-protocol/blob/main/docs/quickstart.md#opt-in-to-standalone-cell) to connect the SDK launcher to Cell's operator socket. The supervisor owns the broker credentials. The workload receives only its task input and the execution capabilities granted by its profile.
+Install [Cell](https://github.com/Relayna/relayna-cell) on a compatible Linux host or VM with its supported runtime. Use [Deploy's Cell instructions](https://github.com/Relayna/relayna-deploy#run-the-sdk-supervisor-with-cell) to connect the SDK launcher to Cell's operator socket. The supervisor owns the broker credentials. The workload receives only its task input and the execution capabilities granted by its profile.
 
-Use the [Protocol Helm guide](https://github.com/Relayna/relayna-protocol/blob/main/docs/quickstart.md#install-the-helm-chart-locally) to evaluate the reference deployment on a local cluster. Capacity planning, isolation review, and operational hardening are part of the [production roadmap](roadmap.md).
+Use the [Deploy Helm guide](https://github.com/Relayna/relayna-deploy#install-the-helm-chart-locally) to evaluate the reference deployment on a local cluster. Capacity planning, isolation review, and operational hardening are part of the [production roadmap](roadmap.md).
