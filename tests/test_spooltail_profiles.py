@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -165,3 +166,27 @@ async def test_cell_profile_bounds_payload_and_subprocess_deadline(monkeypatch):
     with pytest.raises(TimeoutError):
         await profile(TaskEnvelope(task_id="t"), context)
     assert stopped.is_set()
+
+
+@pytest.mark.parametrize(
+    ("status", "manifest", "accepted"),
+    [
+        ("completed", "attempt-" + "a" * 32 + "/manifest.json", True),
+        ("failed", "attempt-" + "a" * 32 + "/manifest.json", False),
+        ("completed", "../../private/manifest.json", False),
+    ],
+)
+def test_cell_artifact_evidence_only_records_valid_completed_manifests(status, manifest, accepted):
+    context = SimpleNamespace(attempt_id="a", _execution_meta={})
+    response = {
+        "task_id": "t",
+        "attempt_id": "a",
+        "cell_id": "c",
+        "profile": "reports",
+        "status": status,
+        "artifact_manifest": manifest,
+    }
+    profiles_module._cell_response(json.dumps(response).encode(), "t", context)
+    evidence = context._execution_meta["cell"]
+    assert evidence["profile"] == "reports"
+    assert evidence.get("artifact_manifest") == (manifest if accepted else None)

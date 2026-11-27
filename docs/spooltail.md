@@ -154,6 +154,14 @@ RELAYNA_CELL_TIMEOUT=60 \
 
 The worker sends `task_id`, `attempt_id`, and the JSON payload to the launcher. The launcher runs the configured image, cleans up the Cell, and reports the JSON result and the Cell ID. The worker publishes the result and records `meta.cell.cell_id` and `meta.cell.execution_id` when available. The launcher receives an empty inherited environment. Client submissions select the payload only.
 
+A trusted launcher wrapper can select a named Cell profile with `--profiles` and
+`--profile`, and pass through the image, timeout, socket and inference flags that
+the SDK already supplies. The launcher rejects flags that disagree with the
+profile. When Cell exports task artifacts, the SDK records the profile and
+relative manifest reference in `meta.cell.profile` and
+`meta.cell.artifact_manifest`. The manifest and artifact bytes remain on the
+launcher host under its configured private artifact directory.
+
 Reusable SDK users can pass `profile=SpooltailLocalProfile(handler)` or `profile=SpooltailCellProfile(launcher, image, ...)` to `SpooltailTaskConsumer`. For scoped inference, use the compatible Cell launcher and daemon with server-owned inference configuration and set `RELAYNA_CELL_INFERENCE=1` for the reference service or `inference=True` on the Cell profile. The SDK passes the fixed flag to the launcher and attaches up to 64 validated observations in Cell journal order to `meta.cell.inference`. `truncated: true` means Cell recorded more matching events. Studio correlates them with Gateway request observations using the task and attempt IDs.
 
 ## Capability differences

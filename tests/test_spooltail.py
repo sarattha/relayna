@@ -659,6 +659,9 @@ async def test_native_cancellation_interrupts_worker_and_replays_terminal_status
 async def test_native_operator_recovery_replays_failed_work_exactly_once() -> None:
     from relayna_spooltail import SpooltailClient
 
+    if not hasattr(SpooltailClient, "read_after_batch"):
+        pytest.skip("topic replay requires the portable native client from the broker source")
+
     assert spooltail_target
     scope = uuid4().hex
     task_topic, status_topic = f"{scope}.tasks", f"{scope}.status"
@@ -727,3 +730,82 @@ async def test_native_operator_recovery_replays_failed_work_exactly_once() -> No
             assert (await http.get("/dlq/messages/dead-letter")).json()["state"] == "replayed"
             assert await worker.run_once()
             assert not await worker.run_once()
+
+
+@pytest.mark.asyncio
+async def test_operator_recovery_http_contract_without_broker(mock_connection):
+    snapshots = {}
+    journal = []
+    timestamp = "2026-11-27T00:00:00Z"
+
+    async def publish(topic, event):
+        key = (topic, event["task_id"])
+        if key in snapshots:
+            raise _Conflict
+        snapshots[key] = SimpleNamespace(event=event, offset=len(journal) + 1)
+        if topic == "status":
+            journal.append(snapshots[key])
+
+    async def replay(topic, *, after, limit):
+        assert topic == "status"
+        return SimpleNamespace(records=[row for row in journal if row.offset > (after or 0)][:limit])
+
+    mock_connection.publish.side_effect = publish
+    mock_connection.latest.side_effect = lambda topic, task_id: snapshots.get((topic, task_id))
+    mock_connection.read_after_batch.side_effect = replay
+    app = FastAPI()
+    app.include_router(
+        create_spooltail_status_router(
+            get_client=lambda: mock_connection,
+            task_topic="tasks",
+            status_topic="status",
+            service="reports",
+            recovery_enabled=True,
+        )
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+        for task_id in ("broken", "dead"):
+            assert (
+                await http.post("/tasks", json={"task_id": task_id, "payload": {"original": True}})
+            ).status_code == 202
+            await publish("status", {"task_id": task_id, "status": "failed", "timestamp": timestamp})
+        await publish("status", {"task_id": "invalid-time", "status": "failed", "timestamp": "invalid"})
+        await publish("status", {"task_id": "finished", "status": "completed", "timestamp": timestamp})
+
+        routes = (await http.get("/relayna/capabilities")).json()["supported_routes"]
+        assert "failed_tasks.retry" in routes
+        assert (await http.get("/failed-tasks/missing")).status_code == 404
+        assert (await http.get("/failed-tasks/finished")).status_code == 404
+        first = (await http.get("/failed-tasks", params={"limit": 1})).json()
+        assert first["items"][0]["failure_id"] == "broken"
+        second = (await http.get("/failed-tasks", params={"cursor": first["next_cursor"]})).json()
+        assert [entry["failure_id"] for entry in second["items"]] == ["dead"]
+        empty = (await http.get("/failed-tasks", params={"service_name": "other"})).json()
+        assert empty["items"] == []
+        assert (await http.get("/failed-tasks/broken")).json()["body"] == {"original": True}
+        assert (await http.get("/dlq/messages/broken")).json()["state"] == "dead_lettered"
+        assert len((await http.get("/dlq/messages", params={"state": "dead_lettered"})).json()["items"]) == 2
+        assert (await http.get("/dlq/messages", params={"queue_name": "wrong"})).json()["items"] == []
+
+        retry = "/failed-tasks/broken/retry"
+        assert (await http.post(retry, json={"target_queue": "other"})).status_code == 422
+        assert (await http.post(retry, json={"override_payload": []})).status_code == 422
+        request = {"override_payload": {"corrected": True}, "retried_by": "operator"}
+        result = (await http.post(retry, json=request)).json()
+        assert (await http.post(retry, json=request)).json() == result
+        assert (await http.post(retry, json={"override_payload": {"different": True}})).status_code == 409
+        assert snapshots["tasks", result["retried_task_id"]].event["payload"] == {"corrected": True}
+        assert (
+            await http.post("/tasks", json={"task_id": result["retried_task_id"], "payload": {}})
+        ).status_code == 422
+        assert (await http.get("/dlq/messages/broken")).json()["state"] == "replayed"
+        assert (await http.get("/failed-tasks/broken")).json()["retried_task_id"] == result["retried_task_id"]
+
+        redrive = "/dlq/messages/dead/replay"
+        assert (await http.post(redrive, params={"force": True})).status_code == 409
+        recovered = (await http.post(redrive)).json()
+        assert recovered["state"] == "replayed"
+        assert (await http.post(redrive)).json() == recovered
+
+        del snapshots["tasks", "broken"]
+        assert (await http.post(retry, json={})).status_code == 409

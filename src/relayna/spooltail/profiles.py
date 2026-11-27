@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
 _CELL_REQUEST_LIMIT = 256 * 1024
 _CELL_CLEANUP_SECONDS = 35
 _CELL_STARTUP_SECONDS = 5
+_CELL_PROFILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_CELL_ARTIFACT_MANIFEST = re.compile(r"attempt-[0-9a-f]{32}/manifest\.json")
 
 
 class _CellInferenceEvent(BaseModel):
@@ -137,6 +140,16 @@ def _cell_response(output: bytes, task_id: str, context: SpooltailTaskContext) -
         key: value for key in ("cell_id", "execution_id") if isinstance(value := response.get(key), str) and value
     }
     if cell:
+        profile = response.get("profile")
+        if isinstance(profile, str) and _CELL_PROFILE_NAME.fullmatch(profile):
+            cell["profile"] = profile
+            manifest = response.get("artifact_manifest")
+            if (
+                response.get("status") == "completed"
+                and isinstance(manifest, str)
+                and _CELL_ARTIFACT_MANIFEST.fullmatch(manifest)
+            ):
+                cell["artifact_manifest"] = manifest
         if response.get("inference") is not None:
             try:
                 summary = _CellInferenceSummary.model_validate(response["inference"])
