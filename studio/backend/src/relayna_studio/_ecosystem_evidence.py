@@ -65,6 +65,7 @@ class _UsageRow(BaseModel):
     task_id: str
     service_name: str
     run_id: str | None = None
+    trace_id: str | None = None
     model: str | None = None
     provider: str
     status_code: int
@@ -186,13 +187,14 @@ class _SpooltailEvidence:
                 )
             )
             evidence.extend(_cell_observations(status))
+        current_gateway_events = {}
         for row in usage_rows or []:
             usage = row.model_dump(mode="json", exclude_none=True)
             if row.run_id:
                 usage["attempt_id"] = row.run_id
-            evidence.append(
-                _observation(task_id, "gateway", "usage", row.request_id, row.created_at.isoformat(), usage)
-            )
+            event = _observation(task_id, "gateway", "usage", row.request_id, row.created_at.isoformat(), usage)
+            current_gateway_events[event.event_id] = event.payload
+            evidence.append(event)
         for event in evidence:
             await self.event_store.insert_event(
                 StudioEventEnvelope(
@@ -203,6 +205,10 @@ class _SpooltailEvidence:
         components = [
             event.model_dump(mode="json") for event in reversed(saved.items) if event.component in {"gateway", "cell"}
         ]
+        for item in components:
+            if item["event_id"] in current_gateway_events:
+                # Older persisted observations used the same ID but omitted the trace ID.
+                item["payload"] = current_gateway_events[item["event_id"]]
         return history | {
             "broker_stats": broker,
             "component_events": components,

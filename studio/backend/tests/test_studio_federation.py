@@ -964,6 +964,7 @@ def test_spooltail_task_detail_reads_registered_service_history_pages(monkeypatc
         "service_name": "registered-reference",
         "task_id": "task-123",
         "run_id": "attempt-a",
+        "trace_id": "a" * 32,
         "created_at": "2026-11-27T00:00:03Z",
         "provider": "inference",
         "model": "reference-model",
@@ -1061,6 +1062,7 @@ def test_spooltail_task_detail_reads_registered_service_history_pages(monkeypatc
             "cell.launcher_report",
         ]
         assert all(event["payload"]["attempt_id"] == "attempt-a" for event in component_events)
+        assert component_events[1]["payload"]["trace_id"] == "a" * 32
         assert component_events[-1]["payload"]["inference_truncated"] is True
         gateway_available = False
         retained = client.get("/studio/tasks/reference/task-123").json()["history"]

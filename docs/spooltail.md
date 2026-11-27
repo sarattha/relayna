@@ -163,7 +163,7 @@ Reusable SDK users can pass `profile=SpooltailLocalProfile(handler)` or `profile
 | Work and status storage | One Spooltail broker owns leased work and status history. RabbitMQ and Redis services are unnecessary. Broker records, including results, fit within a 1 MiB journal frame. Retention is broker-managed, with no Relayna per-task Redis TTL or history length setting. |
 | Acknowledgement and results | A successful handler return acknowledges its lease and writes `completed` atomically. A handler can supply one terminal `completed` or `failed` event and a result through its context. Relayna commits that event after the handler returns. Progress events publish immediately. Have workers publish terminal status through their context so it is coupled to acknowledgement. |
 | Retry and lease recovery | Handler exceptions use native delayed retry when a retry budget is configured. Exhaustion writes `failed` atomically, and invalid work is marked dead in the group. The worker renews its lease while the handler runs. Lease expiry can redeliver work even without an explicit retry policy. The broker exposes a generation counter, so Relayna counts one retry per explicit requeue or per two expired claims. External handler side effects need their own idempotency. |
-| Existing SDK features | The Spooltail adapter covers individual task submission, status, result, history, SSE, and the Studio registered-service task detail. Batch publishing, priority, routing and sharding, workflows, aggregation, manual retry, Relayna DLQ inspection and replay, and Redis repositories are outside this adapter's scope. Native dead-letter settlement marks a record dead for its group and has no re-drive API. |
+| Existing SDK features | The Spooltail adapter covers individual task submission, status, result, history, SSE, and the Studio registered-service task detail. Opt-in operator retry and replay use retained SDK failures. Batch publishing, priority, routing and sharding, workflows, aggregation, and Redis repositories are outside this adapter's scope. Native dead-letter settlement still quarantines invalid work for its group. |
 | Broker maturity | The verified broker is a single-node preview. It lacks replication, failover, and physical storage reclamation. |
 
 For local integration tests, run the broker on loopback with plaintext gRPC. From the Relayna root, run the following command with an authenticated GitHub CLI. It invokes the same installer and tests the SDK in an isolated Relayna environment.
@@ -173,3 +173,39 @@ SPOOLTAIL_TEST_TARGET=127.0.0.1:7443 make test-spooltail
 ```
 
 Set `SPOOLTAIL_TEST_CANCEL=1` as well when running against a cancellation-capable broker.
+
+## Retry a failed task or replay a dead letter
+
+Enable recovery on a private SDK operator service with `recovery_enabled=True` or set
+`RELAYNA_SPOOLTAIL_RECOVERY=on` for the reference service. Use the portable native
+Spooltail Python client from the cancellation-capable broker source, which
+implements topic replay. For the current candidate, install it from the
+Spooltail source checkout used to build the broker.
+
+```bash
+uv pip install /path/to/relayna-spooltail/python
+```
+
+The original 0.0.1 release wheel can run workers and perform task-specific reads.
+Topic-wide failure enumeration requires the newer client.
+
+Studio's **Failed Tasks** page can read the retained failure, submit a retry,
+and open the resulting task. SDK services advertise the existing failed-task
+and dead-letter route IDs when recovery is enabled. Keep the SDK operator
+routes private and use Studio's operator authorization for mutations.
+
+The failed status is the durable dead-letter record. The broker settles the
+original work and records its terminal failure atomically. The SDK uses the
+original retained work record to replay it. One recovery can be accepted per
+failed task. Equivalent retries share one recovery task ID, and conflicting
+inputs return 409. The original remains failed and its history can still be
+read. The replacement runs on the same topic with a fresh task ID and the
+original correlation ID. If it fails, it has its own recovery action. An
+operator can supply a JSON-object payload override using the retry endpoint.
+
+Call `GET /failed-tasks` or `GET /dlq/messages` for bounded pages of retained
+failures. Keep following `next_cursor` on empty pages until it is absent.
+An expired journal cursor returns 410. A task ID filter reads the latest status
+directly. Replay requires the original work record and terminal failure to
+remain available. Invalid native work records that cannot become valid SDK
+tasks are quarantined by the broker and are outside the SDK recovery routes.

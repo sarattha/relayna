@@ -652,3 +652,78 @@ async def test_native_cancellation_interrupts_worker_and_replays_terminal_status
             assert len(await native.history(cancel_topic, "running")) == 1
             assert (await http.get("/relayna/broker")).json()["broker"] == "spooltail"
             assert not await worker.run_once()
+
+
+@real_broker
+@pytest.mark.asyncio
+async def test_native_operator_recovery_replays_failed_work_exactly_once() -> None:
+    from relayna_spooltail import SpooltailClient
+
+    assert spooltail_target
+    scope = uuid4().hex
+    task_topic, status_topic = f"{scope}.tasks", f"{scope}.status"
+
+    async def handler(task: TaskEnvelope, context: SpooltailTaskContext) -> None:
+        if not task.payload.get("valid"):
+            raise ValueError("Bad argument")
+        await context.publish_status(status="completed", result={"correlation": context.correlation_id})
+
+    async with SpooltailClient(spooltail_target, tls=False) as native:
+        worker = SpooltailTaskConsumer(client=native, handler=handler, task_topic=task_topic, status_topic=status_topic)
+        app = FastAPI()
+        app.include_router(
+            create_spooltail_status_router(
+                get_client=lambda: native,
+                task_topic=task_topic,
+                status_topic=status_topic,
+                service="reference",
+                recovery_enabled=True,
+            )
+        )
+        async with (
+            asyncio.timeout(12),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http,
+        ):
+            for task_id in ("failed-task", "dead-letter"):
+                response = await http.post("/tasks", json={"task_id": task_id, "payload": {"valid": False}})
+                assert response.status_code == 202
+                assert await worker.run_once()
+
+            capabilities = (await http.get("/relayna/capabilities")).json()
+            assert "spooltail.recovery.v1" in capabilities["feature_flags"]
+            assert "failed_tasks.retry" in capabilities["supported_routes"]
+            page = (await http.get("/failed-tasks", params={"limit": 1})).json()
+            assert page["items"][0]["failure_id"] == "failed-task"
+            next_page = (await http.get("/failed-tasks", params={"cursor": page["next_cursor"]})).json()
+            assert next_page["items"][0]["failure_id"] == "dead-letter"
+            assert (await http.get("/dlq/messages/dead-letter")).json()["state"] == "dead_lettered"
+
+            retry_url = "/failed-tasks/failed-task/retry"
+            request = {"override_payload": {"valid": True}, "retried_by": "operator"}
+            first, duplicate = await asyncio.gather(
+                http.post(retry_url, json=request), http.post(retry_url, json=request)
+            )
+            assert first.status_code == duplicate.status_code == 200
+            assert first.json() == duplicate.json()
+            child_id = first.json()["retried_task_id"]
+            assert child_id != "failed-task"
+            assert (await http.post(retry_url, json={"override_payload": {"valid": False}})).status_code == 409
+            assert (await http.post(retry_url, json={"target_queue": "elsewhere"})).status_code == 422
+            assert (await http.post("/tasks", json={"task_id": child_id, "payload": {}})).status_code == 422
+            assert len(await native.history(task_topic, child_id)) == 1
+            assert await worker.run_once()
+            assert not await worker.run_once()
+            child = (await http.get(f"/status/{child_id}")).json()["event"]
+            assert child["status"] == "completed"
+            assert child["result"] == {"correlation": "failed-task"}
+            assert (await http.get("/status/failed-task")).json()["event"]["status"] == "failed"
+            assert (await http.get("/failed-tasks/failed-task")).json()["retried_task_id"] == child_id
+
+            replay_url = "/dlq/messages/dead-letter/replay"
+            replay = await http.post(replay_url)
+            assert replay.status_code == 200
+            assert (await http.post(replay_url)).json() == replay.json()
+            assert (await http.post(replay_url, params={"force": True})).status_code == 409
+            assert (await http.get("/dlq/messages/dead-letter")).json()["state"] == "replayed"
+            assert await worker.run_once()
+            assert not await worker.run_once()

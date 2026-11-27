@@ -3300,7 +3300,7 @@ describe("App", () => {
     expect(screen.queryByText("Failure summary")).not.toBeInTheDocument();
   });
 
-  it("replays Spooltail status and shows the broker result on the existing task detail", async () => {
+  it("shows the Spooltail execution path, spans, and broker result on task detail", async () => {
     window.history.replaceState({}, "", "/tasks/payments-api/task-123");
     const baseImpl = fetchMock.getMockImplementation();
     const detail = taskDetailResponse({ dlqItems: [] });
@@ -3351,6 +3351,10 @@ describe("App", () => {
     expect(screen.getByText("Broker counters")).toBeInTheDocument();
     expect(screen.getByText("$0.001000")).toBeInTheDocument();
     expect(screen.getByLabelText("Task result JSON")).toHaveValue(JSON.stringify(completed.result, null, 2));
+    expect(await screen.findByRole("heading", { name: "Execution Path" })).toBeVisible();
+    expect(await screen.findByText("3 steps")).toBeVisible();
+    expect(await screen.findByText("payments.process_payment", { selector: "strong" })).toBeVisible();
+    expect(screen.queryByText("Unavailable")).not.toBeInTheDocument();
     expect(screen.queryByText(/execution-graph read returned no graph/)).not.toBeInTheDocument();
     fetchMock.mockImplementation(async (input, init) => {
       if (String(input) === "/studio/tasks/payments-api/task-123?join=none") {

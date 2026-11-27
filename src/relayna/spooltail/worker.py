@@ -202,6 +202,10 @@ class SpooltailTaskConsumer:
             await self._client.settle(lease, SettlementAction.RETRY, delay_ms=self._retry_delay_ms)
         else:
             payload = terminal.as_transport_dict()
+            if terminal.status.lower() == "failed":
+                payload["meta"] = terminal.meta | {
+                    "spooltail_retry": {"attempt": context.retry_attempt, "max_retries": context.max_retries}
+                }
             try:
                 await self._client.complete(lease, self._status_topic, payload)
             except Exception as exc:

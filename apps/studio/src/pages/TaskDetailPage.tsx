@@ -450,21 +450,23 @@ export function preferredTracePathNodeId(path: StudioTracePathResponse) {
 function TracePathExplorer({
   tracePath,
   selectedNode,
+  showTaskSpans,
   onSelectNode,
   onSelectSpan,
   onFilterLogs,
 }: {
   tracePath: StudioTracePathResponse;
   selectedNode: StudioTracePathNode | null;
+  showTaskSpans: boolean;
   onSelectNode: (node: StudioTracePathNode) => void;
   onSelectSpan: (span: StudioTraceSpan) => void;
   onFilterLogs: (traceId: string) => void;
 }) {
   const displayNodes = orderTracePathNodes(tracePath.nodes, tracePath.edges);
   const activeNode = selectedNode || displayNodes[0] || null;
-  const relatedSpans = activeNode
-    ? tracePath.spans.filter((span) => span.span_id === activeNode.span_id || span.trace_id === activeNode.trace_id)
-    : [];
+  const visibleSpans = showTaskSpans ? tracePath.spans : tracePath.spans.filter(
+    (span) => activeNode && (span.span_id === activeNode.span_id || span.trace_id === activeNode.trace_id),
+  );
 
   return (
     <div className="studio-stack-md">
@@ -557,10 +559,10 @@ function TracePathExplorer({
               </button>
             </div>
           ) : null}
-          {relatedSpans.length ? (
+          {visibleSpans.length ? (
             <div className="studio-stack-sm">
-              <strong style={{ fontSize: 13 }}>Related Spans</strong>
-              {relatedSpans.map((span) => (
+              <strong style={{ fontSize: 13 }}>{showTaskSpans ? "Recorded Spans" : "Related Spans"}</strong>
+              {visibleSpans.map((span) => (
                 <div
                   key={`${span.trace_id}-${span.span_id}`}
                   className="studio-subcard"
@@ -644,6 +646,7 @@ export function TaskDetailPage() {
   const [streamState, setStreamState] = useState("Connecting to live updates…");
   const flags = taskDetail?.service.capabilities?.feature_flags;
   const usesSpooltailHistory = Array.isArray(flags) && flags.includes("spooltail.task_history.v1");
+  const showExecutionPath = usesSpooltailHistory && !taskDetail?.execution_graph;
   const requestVersions = useRef<Record<string, number>>({});
   useEffect(() => () => { for (const key of Object.keys(requestVersions.current)) requestVersions.current[key]++; }, [serviceId, taskId]);
 
@@ -664,7 +667,7 @@ export function TaskDetailPage() {
     setTaskMetricManualFrom("");
     setTaskMetricManualTo("");
     setShowGraph(false);
-    if (!taskDetail) {
+    if (!taskDetail || taskDetail.service_id !== serviceId || taskDetail.task_id !== taskId) {
       setTaskTimeline(null);
       setTaskLogs(null);
       setTaskLogsError(null);
@@ -676,8 +679,12 @@ export function TaskDetailPage() {
       return;
     }
     setTaskTimeline(null);
-    if (!usesSpooltailHistory) void loadTaskTimeline(taskDetail.service_id, taskDetail.task_id);
-  }, [taskDetail, usesSpooltailHistory]);
+    if (!usesSpooltailHistory) {
+      void loadTaskTimeline(serviceId, taskId);
+    } else if (showExecutionPath) {
+      void loadTaskTracePath(serviceId, taskId);
+    }
+  }, [taskDetail, serviceId, taskId, usesSpooltailHistory, showExecutionPath]);
 
   const derivedTaskLogWindow = taskDetail ? deriveTaskLogWindow(taskDetail, taskTimeline, taskLogAutoNow) : null;
   const quickTaskLogWindow = resolveQuickTaskLogWindow(taskLogWindowMode);
@@ -884,7 +891,9 @@ export function TaskDetailPage() {
       const payload = await fetchTaskTracePath(targetServiceId, targetTaskId);
       if (requestVersions.current["loadTaskTracePath"] !== version) return;
       setTaskTracePath(payload);
-      setSelectedTracePathNodeId((current) => current || preferredTracePathNodeId(payload));
+      setSelectedTracePathNodeId((current) =>
+        payload.nodes.some((node) => node.id === current) ? current : preferredTracePathNodeId(payload),
+      );
     } catch (fetchError) {
       if (requestVersions.current["loadTaskTracePath"] !== version) return;
       setTaskTracePath(null);
@@ -975,6 +984,40 @@ export function TaskDetailPage() {
   );
   const failedTask = TASK_FAILURE_STATUSES.has(latestStatusValue.toLowerCase()) || dlqCount > 0;
 
+  const traceCard = (
+    <SectionCard
+      title={showExecutionPath ? "Execution Path" : "Task Trace"}
+      subtitle={showExecutionPath ? "Task status, component activity, and recorded spans." : undefined}
+      action={
+        <button
+          type="button"
+          onClick={() => void loadTaskTracePath(serviceId, taskId)}
+          style={secondaryButtonStyle}
+        >
+          <StudioIcon name="refresh" />
+          Reload Trace
+        </button>
+      }
+    >
+      {taskTracePathLoading ? <p style={mutedTextStyle}>Loading task trace...</p> : null}
+      {taskTracePathError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTracePathError}</p> : null}
+      {taskTracePath?.warnings.length ? <p style={mutedTextStyle}>{taskTracePath.warnings.join(" ")}</p> : null}
+      {!taskTracePathLoading && !taskTracePathError && taskTracePath && !taskTracePath.nodes.length ? (
+        <p style={mutedTextStyle}>No task trace path evidence was found for this task.</p>
+      ) : null}
+      {taskTracePath?.nodes.length ? (
+        <TracePathExplorer
+          tracePath={taskTracePath}
+          selectedNode={selectedTracePathNode}
+          showTaskSpans={showExecutionPath}
+          onSelectNode={(node) => setSelectedTracePathNodeId(node.id)}
+          onSelectSpan={setSelectedTraceSpan}
+          onFilterLogs={applyTraceLogFilter}
+        />
+      ) : null}
+    </SectionCard>
+  );
+
   return (
     <>
       <div className="studio-stack-lg">
@@ -1036,7 +1079,14 @@ export function TaskDetailPage() {
               <MetricCard label="History Events" value={String(historyCount)} />
               <MetricCard label="Timeline Events" value={String(usesSpooltailHistory ? brokerEvents.length : taskTimelineItems.length)} />
               <MetricCard label="DLQ Messages" value={String(dlqCount)} />
-              <MetricCard label="Graph" value={graph ? `${graph.nodes.length} nodes` : "Unavailable"} />
+              {showExecutionPath ? (
+                <MetricCard
+                  label="Execution Path"
+                  value={taskTracePath ? `${taskTracePath.nodes.length} steps` : taskTracePathError ? "Unavailable" : "Loading"}
+                />
+              ) : (
+                <MetricCard label="Graph" value={graph ? `${graph.nodes.length} nodes` : "Unavailable"} />
+              )}
             </div>
 
             <div className={graph ? "studio-content-split studio-content-split--graph" : "studio-stack-lg"}>
@@ -1062,6 +1112,8 @@ export function TaskDetailPage() {
                 ) : !usesSpooltailHistory ? (
                   <NoticeBanner tone="error">Studio loaded task detail, but the federated execution-graph read returned no graph for this task.</NoticeBanner>
                 ) : null}
+
+                {showExecutionPath ? traceCard : null}
 
                 <SectionCard
                   title="Task Timeline"
@@ -1165,35 +1217,16 @@ export function TaskDetailPage() {
                   </SectionCard>
                 ) : null}
 
-                <details onToggle={(event) => { if (event.currentTarget.open && !taskTracePath) void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id); }}><summary>Trace path</summary><SectionCard
-                  title="Task Trace"
-                  action={
-                    <button
-                      type="button"
-                      onClick={() => void loadTaskTracePath(taskDetail.service_id, taskDetail.task_id)}
-                      style={secondaryButtonStyle}
-                    >
-                      <StudioIcon name="refresh" />
-                      Reload Trace
-                    </button>
-                  }
-                >
-                  {taskTracePathLoading ? <p style={mutedTextStyle}>Loading task trace...</p> : null}
-                  {taskTracePathError ? <p style={{ ...mutedTextStyle, color: "var(--studio-danger)" }}>{taskTracePathError}</p> : null}
-                  {taskTracePath?.warnings.length ? <p style={mutedTextStyle}>{taskTracePath.warnings.join(" ")}</p> : null}
-                  {!taskTracePathLoading && !taskTracePathError && taskTracePath && !taskTracePath.nodes.length ? (
-                    <p style={mutedTextStyle}>No task trace path evidence was found for this task.</p>
-                  ) : null}
-                  {taskTracePath?.nodes.length ? (
-                    <TracePathExplorer
-                      tracePath={taskTracePath}
-                      selectedNode={selectedTracePathNode}
-                      onSelectNode={(node) => setSelectedTracePathNodeId(node.id)}
-                      onSelectSpan={setSelectedTraceSpan}
-                      onFilterLogs={applyTraceLogFilter}
-                    />
-                  ) : null}
-                </SectionCard></details>
+                {!showExecutionPath ? (
+                  <details
+                    onToggle={(event) => {
+                      if (event.currentTarget.open && !taskTracePath) void loadTaskTracePath(serviceId, taskId);
+                    }}
+                  >
+                    <summary>Trace path</summary>
+                    {traceCard}
+                  </details>
+                ) : null}
               </div>
 
               <aside className="studio-stack-md">

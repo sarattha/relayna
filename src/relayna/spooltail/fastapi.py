@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import aclosing
@@ -14,6 +13,8 @@ from ..api.capabilities_routes import STATUS_CAPABILITY_ROUTE_IDS, relayna_versi
 from ..api.schemas import AliasConfigSummary, CapabilityDocument, CapabilityServiceMetadata
 from ..api.status_routes import _create_status_router
 from ..status.stream import _sse_event
+from ._recovery import _RECOVERY_ROUTES, _RECOVERY_TASK_ID, _register_recovery_routes
+from ._submission import _publish_submission
 from .contracts import spooltail_task_event
 
 if TYPE_CHECKING:
@@ -53,10 +54,13 @@ def create_spooltail_status_router(
     service: str | None = None,
     cancel_topic: str | None = None,
     broker_version: str | None = None,
+    recovery_enabled: bool = False,
 ) -> APIRouter:
     """Serve broker-backed status and optionally accept tasks for a configured service."""
     if cancel_topic is not None and (not cancel_topic or not task_topic or cancel_topic in {task_topic, status_topic}):
         raise ValueError("Spooltail cancellation requires submission and a distinct cancellation topic")
+    if recovery_enabled and task_topic is None:
+        raise ValueError("Spooltail recovery requires task submission")
     source = _SpooltailStatusSource(get_client, status_topic)
     router = _create_status_router(sse_stream=source, latest_status_store=source)
 
@@ -88,9 +92,10 @@ def create_spooltail_status_router(
             relayna_version=relayna_version(),
             topology_kind="spooltail",
             alias_config_summary=AliasConfigSummary(),
-            supported_routes=list(STATUS_CAPABILITY_ROUTE_IDS),
+            supported_routes=list(STATUS_CAPABILITY_ROUTE_IDS) + (list(_RECOVERY_ROUTES) if recovery_enabled else []),
             feature_flags=[_HISTORY_FEATURE, "spooltail.broker.v1"]
-            + (["spooltail.cancel.v1"] if cancel_topic is not None else []),
+            + (["spooltail.cancel.v1"] if cancel_topic is not None else [])
+            + (["spooltail.recovery.v1"] if recovery_enabled else []),
             service_metadata=CapabilityServiceMetadata(
                 service_title=service,
                 capability_path=_CAPABILITY_PATH,
@@ -105,6 +110,8 @@ def create_spooltail_status_router(
 
         @router.post("/tasks", status_code=202)
         async def submit_task(task: _TaskSubmission) -> dict[str, str]:
+            if recovery_enabled and _RECOVERY_TASK_ID.fullmatch(task.task_id):
+                raise HTTPException(status_code=422, detail="Task ID is reserved for recovery")
             if task.service is not None and task.service != service:
                 raise HTTPException(status_code=422, detail="Task service does not match this endpoint")
             event = spooltail_task_event(
@@ -114,6 +121,9 @@ def create_spooltail_status_router(
                 get_client(), task_topic, event, timestamp_supplied="created_at" in task.model_fields_set
             )
             return {"task_id": task.task_id}
+
+        if recovery_enabled:
+            _register_recovery_routes(router, get_client, task_topic, status_topic, service)
 
         if cancel_topic is not None:
 
@@ -134,34 +144,6 @@ def create_spooltail_status_router(
                 return {"task_id": task_id}
 
     return router
-
-
-async def _publish_submission(
-    client: SpooltailClient, topic: str, event: dict[str, Any], *, timestamp_supplied: bool
-) -> None:
-    from grpc import StatusCode  # ty: ignore[unresolved-import]
-    from grpc.aio import AioRpcError  # ty: ignore[unresolved-import]
-    from relayna_spooltail import ConflictError  # ty: ignore[unresolved-import]
-
-    try:
-        try:
-            await client.publish(topic, event)
-            return
-        except ConflictError:
-            # The broker atomically chooses the first work event, including across API processes.
-            committed = await client.latest(topic, event["task_id"])
-            if committed is not None:
-                candidate = event if timestamp_supplied else event | {"created_at": committed.event.get("created_at")}
-                if json.dumps(candidate, sort_keys=True) == json.dumps(committed.event, sort_keys=True):
-                    return
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="Task payload must be valid JSON") from exc
-    except AioRpcError as exc:
-        if exc.code() == StatusCode.INVALID_ARGUMENT:
-            raise HTTPException(status_code=422, detail="Spooltail rejected the task envelope") from exc
-        raise HTTPException(status_code=503, detail="Spooltail could not confirm task submission") from exc
-
-    raise HTTPException(status_code=409, detail="Task ID already has a different submission")
 
 
 class _SpooltailStatusSource:

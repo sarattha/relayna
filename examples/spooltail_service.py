@@ -74,5 +74,6 @@ app.include_router(
         service=_SERVICE,
         cancel_topic=_CANCEL_TOPIC,
         broker_version=os.environ.get("SPOOLTAIL_BROKER_VERSION"),
+        recovery_enabled=os.environ.get("RELAYNA_SPOOLTAIL_RECOVERY") in {"1", "on"},
     )
 )

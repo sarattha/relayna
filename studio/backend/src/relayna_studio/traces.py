@@ -335,7 +335,7 @@ class StudioTraceQueryService:
             warnings.extend(trace_response.warnings)
         except (StudioTraceConfigError, StudioTraceProviderError) as exc:
             fallback_trace_ids: set[str] = set()
-            _collect_trace_ids(detail_payload, fallback_trace_ids)
+            _collect_detail_trace_ids(detail_payload, fallback_trace_ids)
             trace_response = StudioTraceResponse(
                 service_id=service.service_id,
                 task_id=normalized_task_id,
@@ -376,11 +376,11 @@ class StudioTraceQueryService:
         warnings: list[str] = []
         trace_ids: set[str] = set()
         if detail_payload is not None:
-            _collect_trace_ids(detail_payload, trace_ids)
+            _collect_detail_trace_ids(detail_payload, trace_ids)
         elif self._federation_service is not None:
             try:
                 detail = await self._federation_service.get_task_detail(service.service_id, task_id)
-                _collect_trace_ids(detail.model_dump(mode="json"), trace_ids)
+                _collect_detail_trace_ids(detail.model_dump(mode="json"), trace_ids)
             except StudioFederationError as exc:
                 warnings.append(f"Studio could not inspect task detail for trace identifiers: {exc.detail}")
         if self._log_query_service is not None and service.log_config is not None:
@@ -438,6 +438,7 @@ def _build_trace_path_response(
 
     _attach_dlq_messages(nodes=nodes, edges=edges, nodes_by_id=nodes_by_id, dlq_messages=dlq_messages, task_id=task_id)
     _attach_events(nodes=nodes, event_items=event_items, fallback_task_id=task_id)
+    _append_component_observations(nodes, edges, detail_payload, task_id=task_id)
     _attach_spans(nodes=nodes, edges=edges, nodes_by_id=nodes_by_id, spans=trace_response.spans, task_id=task_id)
 
     nodes = sorted(nodes, key=lambda item: (_timestamp_sort_key(item.started_at), item.id))
@@ -588,6 +589,62 @@ def _append_history_status_nodes(
         previous_id = node_id
 
 
+def _append_component_observations(
+    nodes: list[StudioTracePathNode],
+    edges: list[StudioTracePathEdge],
+    detail: Mapping[str, Any],
+    *,
+    task_id: str,
+) -> None:
+    attempt_nodes: dict[str, str] = {}
+    for node in nodes:
+        for evidence in node.evidence:
+            attempt = _string(evidence.payload.get("attempt_id"))
+            if evidence.source == "status_history" and attempt is not None:
+                attempt_nodes.setdefault(attempt, node.id)
+
+    for observation in _component_observations(detail):
+        if observation.get("task_id") != task_id or not (event_id := _string(observation.get("event_id"))):
+            continue
+        payload = _mapping_or_empty(observation.get("payload"))
+        component = observation["component"]
+        label = _string(observation.get("event_type")) or component
+        timestamp = _string(observation.get("timestamp"))
+        trace_id = _string(payload.get("trace_id")) if component == "gateway" else None
+        trace_id = trace_id if trace_id and _is_trace_id(trace_id) else None
+        node_id = f"observation:{event_id}"
+        nodes.append(
+            StudioTracePathNode(
+                id=node_id,
+                kind="observation",
+                label=label,
+                task_id=task_id,
+                trace_id=trace_id,
+                started_at=timestamp,
+                evidence=[
+                    StudioTracePathEvidence(
+                        source="studio_event",
+                        source_id=event_id,
+                        label=label,
+                        timestamp=timestamp,
+                        payload=dict(observation),
+                    )
+                ],
+            )
+        )
+        attempt_id = _string(payload.get("attempt_id"))
+        if attempt_id is not None and (source := attempt_nodes.get(attempt_id)):
+            edges.append(
+                StudioTracePathEdge(
+                    id=f"{source}->{node_id}",
+                    source=source,
+                    target=node_id,
+                    kind="observed_activity",
+                    timestamp=timestamp,
+                )
+            )
+
+
 def _attach_events(
     *,
     nodes: list[StudioTracePathNode],
@@ -676,7 +733,7 @@ def _attach_spans(
     spans: list[StudioTraceSpan],
     task_id: str,
 ) -> None:
-    span_node_ids: dict[str, str] = {}
+    span_node_ids: dict[tuple[str, str], str] = {}
     for span in spans:
         evidence = StudioTracePathEvidence(
             source="span",
@@ -687,7 +744,7 @@ def _attach_spans(
         )
         target = _best_node_for_span(nodes, span, fallback_task_id=task_id)
         if target is None:
-            node_id = f"span:{span.span_id}"
+            node_id = f"span:{span.trace_id}:{span.span_id}"
             target = StudioTracePathNode(
                 id=node_id,
                 kind="span",
@@ -711,17 +768,23 @@ def _attach_spans(
         target.started_at = _earliest_timestamp(target.started_at, span.start_time)
         target.ended_at = _latest_timestamp(target.ended_at, span.end_time)
         target.duration_ms = _duration_ms(target.started_at, target.ended_at) or target.duration_ms or span.duration_ms
-        span_node_ids[span.span_id] = target.id
+        span_node_ids[span.trace_id, span.span_id] = target.id
 
     existing_edge_keys = {(edge.source, edge.target, edge.kind) for edge in edges}
+    observations_by_trace: dict[str, str] = {}
+    for node in nodes:
+        if node.kind == "observation" and node.trace_id is not None:
+            observations_by_trace.setdefault(node.trace_id, node.id)
     for span in spans:
-        if not span.parent_span_id:
-            continue
-        source = span_node_ids.get(span.parent_span_id)
-        target = span_node_ids.get(span.span_id)
+        source = span_node_ids.get((span.trace_id, span.parent_span_id)) if span.parent_span_id else None
+        kind = "span_child"
+        if source is None:
+            source = observations_by_trace.get(span.trace_id)
+            kind = "observed_trace"
+        target = span_node_ids.get((span.trace_id, span.span_id))
         if source is None or target is None or source == target:
             continue
-        key = (source, target, "span_child")
+        key = (source, target, kind)
         if key in existing_edge_keys:
             continue
         existing_edge_keys.add(key)
@@ -730,7 +793,7 @@ def _attach_spans(
                 id=f"{source}->{target}:span:{span.span_id}",
                 source=source,
                 target=target,
-                kind="span_child",
+                kind=kind,
                 timestamp=span.start_time,
                 state="traversed",
             )
@@ -883,6 +946,28 @@ def _dlq_messages_from_detail(detail_payload: Mapping[str, Any]) -> list[dict[st
     return [dict(item) for item in _list_of_mappings(dlq_payload.get("items"))]
 
 
+def _component_observations(detail: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    history = _mapping_or_empty(detail.get("history"))
+    return [
+        item
+        for item in _list_of_mappings(history.get("component_events"))
+        if item.get("component") in ("gateway", "cell")
+    ]
+
+
+def _collect_detail_trace_ids(detail: Mapping[str, Any], output: set[str]) -> None:
+    history = _mapping_or_empty(detail.get("history"))
+    if "component_events" not in history:
+        _collect_trace_ids(detail, output)
+        return
+    # Spooltail status results can contain user data. Use scoped Gateway observations.
+    for item in _component_observations(detail):
+        if item.get("event_type") == "gateway.usage" and item.get("task_id") == detail.get("task_id"):
+            trace_id = _string(_mapping_or_empty(item.get("payload")).get("trace_id"))
+            if trace_id and _is_trace_id(trace_id):
+                output.add(trace_id)
+
+
 def _collect_trace_ids(value: Any, output: set[str]) -> None:
     if isinstance(value, Mapping):
         raw = value.get("trace_id")
@@ -902,7 +987,7 @@ def _collect_trace_ids(value: Any, output: set[str]) -> None:
 
 
 def _is_trace_id(value: str) -> bool:
-    return len(value) == 32 and all(char in "0123456789abcdef" for char in value)
+    return len(value) == 32 and value != "0" * 32 and all(char in "0123456789abcdef" for char in value)
 
 
 def _browser_safe_base_url(value: str) -> str:
