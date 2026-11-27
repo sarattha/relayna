@@ -1,36 +1,21 @@
-# Contributing
+# Contributing to Relayna's ecosystem docs
 
-## Local setup
+Open a pull request here for cross-component architecture, deployment
+profiles, the quickstart, or the component directory. Use each component's
+repository for its implementation and operating guides.
 
-Use Python 3.13 or newer and install the development environment with `uv`:
+## Build and preview
 
-```bash
-uv sync --extra dev
+Use Python 3.12 or later and uv.
+
+```sh
+uv run --no-project --with-requirements requirements-docs.txt mkdocs build --strict
+uv run --no-project --with-requirements requirements-docs.txt mkdocs serve
 ```
 
-## Common commands
+Open the address printed by MkDocs. Check the modified pages, navigation, and
+redirects. For a quickstart change, run the commands against the exact Protocol
+revision being documented and confirm the task appears in Studio.
 
-Run the test suite:
-
-```bash
-uv run --extra dev pytest -q
-```
-
-Build the distribution artifacts:
-
-```bash
-uv build
-```
-
-Build the docs locally:
-
-```bash
-uv run --extra dev mkdocs serve
-```
-
-## Pull requests
-
-- Keep changes focused and update docs when the public behavior changes.
-- Preserve the documented submodule imports as the public API surface.
-- Add or update tests when behavior or packaging guarantees change.
-- Ensure `uv run --extra dev pytest -q` and `uv build` both pass before opening a PR.
+GitHub Actions builds the docs on pull requests and publishes GitHub Pages
+after a successful build on `main`.

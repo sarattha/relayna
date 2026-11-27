@@ -1,8 +1,8 @@
-site_name: relayna
-site_description: Public documentation for relayna
-site_url: https://sarattha.github.io/relayna/
-repo_url: https://github.com/sarattha/relayna
-repo_name: sarattha/relayna
+site_name: Relayna Ecosystem
+site_description: Architecture, quickstart, and deployment profiles for Relayna
+site_url: https://relayna.github.io/relayna/
+repo_url: https://github.com/Relayna/relayna
+repo_name: Relayna/relayna
 theme:
   name: material
   custom_dir: docs/overrides
@@ -33,35 +33,43 @@ theme:
   font: false
 nav:
   - Overview: index.md
-  - Getting Started: getting-started.md
-  - Spooltail Backend: spooltail.md
-  - Studio Backend: studio-backend.md
-  - Studio Persistence: studio-persistence.md
-  - Studio Observability Profiles: studio-observability-profiles.md
-  - Studio Frontend: studio-frontend.md
-  - Studio Recovery Center: studio-recovery-center.md
-  - Studio Reliability Goals: studio-reliability.md
-  - Studio Load Testing: studio-load-testing.md
-  - Studio Entra Authentication: studio-entra-auth.md
-  - Studio Entra Deployment Checklist: studio-entra-deployment-checklist.md
-  - Redis Topologies: redis-topologies.md
-  - Redis Keys: redis-keys.md
-  - Migration v1 to v2: migration-v1-to-v2.md
-  - JSON Transport Migration: json-transport-migration.md
-  - Components: components.md
-  - Runtime Controls: runtime-controls.md
-  - Observability: observability.md
-  - AKS Observability: aks-observability.md
-  - Execution Graphs: execution-graphs.md
-  - Workflow Topology: workflow-topology-plan.md
-  - Releases: releases.md
-  - Development: development.md
+  - Quickstart: quickstart.md
+  - Architecture: architecture.md
+  - Deployment profiles: deployment-profiles.md
+  - Component directory: components.md
+  - Releases and migration: releases.md
+  - Roadmap: roadmap.md
+plugins:
+  - search
+  - redirects:
+      redirect_maps:
+        getting-started.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/getting-started.md
+        spooltail.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/spooltail.md
+        studio-backend.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-backend.md
+        studio-persistence.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-persistence.md
+        studio-observability-profiles.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-observability-profiles.md
+        studio-frontend.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-frontend.md
+        studio-recovery-center.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-recovery-center.md
+        studio-reliability.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-reliability.md
+        studio-load-testing.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-load-testing.md
+        studio-entra-auth.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-entra-auth.md
+        studio-entra-deployment-checklist.md: https://github.com/Relayna/relayna-studio/blob/main/docs/studio-entra-deployment-checklist.md
+        redis-topologies.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/redis-topologies.md
+        redis-keys.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/redis-keys.md
+        migration-v1-to-v2.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/migration-v1-to-v2.md
+        json-transport-migration.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/json-transport-migration.md
+        runtime-controls.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/runtime-controls.md
+        observability.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/observability.md
+        aks-observability.md: https://github.com/Relayna/relayna-studio/blob/main/docs/aks-observability.md
+        execution-graphs.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/execution-graphs.md
+        workflow-topology-plan.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/workflow-topology-plan.md
+        development.md: https://github.com/Relayna/relayna-sdk/blob/main/docs/development.md
 markdown_extensions:
   - admonition
   - toc:
       permalink: true
 extra_javascript:
-  - https://unpkg.com/mermaid@11/dist/mermaid.min.js
+  - https://cdn.jsdelivr.net/npm/mermaid@11.12.3/dist/mermaid.min.js
   - assets/mermaid-init.js
 extra_css:
   - assets/stylesheets/extra.css
