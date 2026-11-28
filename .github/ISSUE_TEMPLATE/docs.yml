@@ -1,0 +1,17 @@
+name: Documentation issue
+description: Report an issue with the ecosystem docs
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Affected page
+      description: Link to the page or give its path
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What needs to change?
+      description: Include the command, example, or section involved
+    validations:
+      required: true
