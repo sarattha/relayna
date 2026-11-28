@@ -8,4 +8,6 @@ Use [Relayna SDK](https://github.com/Relayna/relayna-sdk) for Python runtime and
 
 If an application installed the SDK from GitHub `relayna` **main**, point it to a reviewed SDK revision in `https://github.com/Relayna/relayna-sdk.git`. Studio source builds resolve the SDK version from the Studio backend lockfile.
 
-The [combined release archive](https://github.com/Relayna/relayna/releases) contains the historical wheels and release notes, including [v1.14.0](https://github.com/Relayna/relayna/releases/tag/v1.14.0). The [last monorepo revision](https://github.com/Relayna/relayna/tree/c3023be4a97b96d3e2449a7485179dbea8e33035) is available for source inspection and earlier documentation.
+Version 1.14.0 is available from the component repositories. Download the Python wheel and source distribution from [Relayna SDK 1.14.0](https://github.com/Relayna/relayna-sdk/releases/tag/sdk-v1.14.0). Get the backend wheel and the paired backend and frontend image references from [Relayna Studio 1.14.0](https://github.com/Relayna/relayna-studio/releases/tag/studio-v1.14.0).
+
+The [combined release archive](https://github.com/Relayna/relayna/releases) contains earlier wheels and release notes. The [original 1.14.0 source tag](https://github.com/Relayna/relayna/tree/v1.14.0) and the [last monorepo revision](https://github.com/Relayna/relayna/tree/c3023be4a97b96d3e2449a7485179dbea8e33035) remain available for source inspection.
